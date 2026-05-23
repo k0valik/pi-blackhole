@@ -1,0 +1,115 @@
+{
+  "_comment": "blackhole unified configuration — ~/.pi/agent/pi-blackhole-config.json",
+  "_all_settings_in_one_file": true,
+
+  "overrideDefaultCompaction": false,
+  "noAutoCompact": false,
+  "debug": false,
+
+  "model": {
+    "_comment": "Base model (last fallback before session model).",
+    "provider": "openrouter",
+    "id": "google/gemma-4-31b-it:free",
+    "thinking": "low",
+    "cooldownHours": 6
+  },
+
+  "observerModel": {
+    "_comment": "Observer primary: Qwen3 Next 80B via OpenRouter free (strong extraction with reasoning).",
+    "provider": "openrouter",
+    "id": "qwen/qwen3-next-80b-a3b-instruct:free",
+    "thinking": "low",
+    "cooldownHours": 12
+  },
+  "observerFallbackModels": [
+    {
+      "_comment": "Observer fallback 1: Gemma 4 31B via Ollama Cloud.",
+      "provider": "ollama",
+      "id": "gemma4:31b-cloud",
+      "thinking": "off",
+      "cooldownHours": 6
+    },
+    {
+      "_comment": "Observer fallback 2: Gemma 4 31B via OpenRouter free tier.",
+      "provider": "openrouter",
+      "id": "google/gemma-4-31b-it:free",
+      "thinking": "off",
+      "cooldownHours": 6
+    }
+  ],
+
+  "reflectorModel": {
+    "_comment": "Reflector primary: GPT OSS 120B via Cerebras (strong reasoning for synthesis).",
+    "provider": "cerebras",
+    "id": "gpt-oss-120b",
+    "thinking": "low",
+    "cooldownHours": 12
+  },
+  "reflectorFallbackModels": [
+    {
+      "_comment": "Reflector fallback 1: GLM-4.7 via z.ai with thinking enabled.",
+      "provider": "zai",
+      "id": "glm-4.7",
+      "thinking": "low",
+      "cooldownHours": 6
+    },
+    {
+      "_comment": "Reflector fallback 2: GPT OSS 120B via OpenRouter free tier.",
+      "provider": "openrouter",
+      "id": "openai/gpt-oss-120b:free",
+      "thinking": "low",
+      "cooldownHours": 6
+    }
+  ],
+
+  "dropperModel": {
+    "_comment": "Dropper primary: GPT OSS 120B via Cerebras (judgment/prioritization).",
+    "provider": "cerebras",
+    "id": "gpt-oss-120b",
+    "thinking": "off",
+    "cooldownHours": 12
+  },
+  "dropperFallbackModels": [
+    {
+      "_comment": "Dropper fallback 1: GLM-4.7 via z.ai.",
+      "provider": "zai",
+      "id": "glm-4.7",
+      "thinking": "low",
+      "cooldownHours": 6
+    },
+    {
+      "_comment": "Dropper fallback 2: GPT OSS 120B via OpenRouter free tier.",
+      "provider": "openrouter",
+      "id": "openai/gpt-oss-120b:free",
+      "thinking": "low",
+      "cooldownHours": 6
+    }
+  ],
+
+  "observeAfterTokens": 10000,
+  "reflectAfterTokens": 20000,
+  "compactAfterTokens": 81000,
+  "observationsPoolMaxTokens": 20000,
+  "reflectorInputMaxTokens": 80000,
+  "dropperInputMaxTokens": 80000,
+  "observerChunkMaxTokens": 40000,
+  "agentMaxTurns": 16,
+
+  "passive": false,
+  "noAutoCompact": false,
+  "debugLog": false,
+
+  "_notes": [
+    "Model fallback chains per worker:",
+    "  Observer: qwen3-next-80b → gemma4:31b-cloud → google/gemma-4-31b-it:free → base model → session",
+    "  Reflector: gpt-oss-120b (cerebras) → glm-4.7 (z.ai) → openai/gpt-oss-120b:free → base model → session",
+    "  Dropper:  gpt-oss-120b (cerebras) → glm-4.7 (z.ai) → openai/gpt-oss-120b:free → base model → session",
+    "",
+    "On retryable error (429, 5xx, timeout), the model is cooled down for cooldownHours.",
+    "Cooled-down models are skipped on subsequent consolidation attempts until cooldown expires.",
+    "After all candidates exhausted, the stage aborts. 30s retry gate prevents spam.",
+    "Cooldowns persist in ~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json (survives pi restarts).",
+    "Valid thinking values: off, minimal, low, medium, high, xhigh.",
+    "Env override for passive mode: PI_BLACKHOLE_PASSIVE=true."
+  ]
+}

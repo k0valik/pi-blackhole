@@ -1,0 +1,47 @@
+{
+  "name": "pi-blackhole",
+  "version": "0.1.0",
+  "description": "Unified compaction + observational memory extension for Pi — compresses conversation context while preserving durable observations and reflections",
+  "license": "MIT",
+  "main": "index.ts",
+  "files": [
+    "*.ts",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!tests/",
+    "LICENSE",
+    "README.md",
+    "example-config.json"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "blackhole",
+    "compact",
+    "compaction",
+    "observational-memory",
+    "recall"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/k0valik/pi-blackhole.git"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.75.4",
+    "@earendil-works/pi-ai": "0.75.4",
+    "@earendil-works/pi-coding-agent": "0.75.4",
+    "@earendil-works/pi-tui": "0.75.4",
+    "typebox": "^1.1.38"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "devDependencies": {
+    "vitest": "^4.1.7"
+  }
+}

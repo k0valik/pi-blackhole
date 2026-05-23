@@ -1,0 +1,33 @@
+/**
+ * Token estimation for serialized entries.
+ *
+ * Upstream: https://github.com/elpapi42/pi-observational-memory (src/tokens.ts)
+ * Unmodified.
+ */
+import { estimateTokens as estimateMessageTokens } from "@earendil-works/pi-coding-agent";
+
+export function estimateStringTokens(text: string): number {
+	return Math.ceil(text.length / 4);
+}
+
+export function estimateEntryTokens(entry: { type: string; message?: unknown; content?: unknown; summary?: unknown }): number {
+	if (entry.type === "message" && entry.message) {
+		return estimateMessageTokens(entry.message as Parameters<typeof estimateMessageTokens>[0]);
+	}
+	if (entry.type === "custom_message" && entry.content) {
+		const content = entry.content;
+		if (typeof content === "string") return estimateStringTokens(content);
+		if (Array.isArray(content)) {
+			let total = 0;
+			for (const block of content) {
+				if (block.type === "text" && block.text) total += estimateStringTokens(block.text);
+			}
+			return total;
+		}
+	}
+	if (entry.type === "branch_summary" && typeof entry.summary === "string") {
+		return estimateStringTokens(entry.summary);
+	}
+	return 0;
+}
+
