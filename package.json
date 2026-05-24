@@ -30,7 +30,7 @@
     "url": "git+https://github.com/k0valik/pi-blackhole.git"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.75.4",
+    "@earendil-works/pi-agent-core": "0.75.5",
     "@earendil-works/pi-ai": "0.75.4",
     "@earendil-works/pi-coding-agent": "0.75.4",
     "@earendil-works/pi-tui": "0.75.4",
