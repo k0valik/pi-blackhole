@@ -15,9 +15,13 @@ export const loadAllMessages = (
 ): LoadedMessages => {
   const content = readFileSync(sessionFile, "utf-8");
   const entries: any[] = [];
+  let parseErrors = 0;
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
-    try { entries.push(JSON.parse(line)); } catch {}
+    try { entries.push(JSON.parse(line)); } catch { parseErrors++; }
+  }
+  if (parseErrors > 0) {
+    console.warn(`blackhole: ${parseErrors} malformed JSONL line(s) in ${sessionFile}`);
   }
   const rendered: RenderedEntry[] = [];
   const rawMessages: Message[] = [];

@@ -8,7 +8,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
-import { getLastCompactionStats, PI_VCC_COMPACT_INSTRUCTION } from "../hooks/before-compact";
+import { PI_VCC_COMPACT_INSTRUCTION } from "../hooks/before-compact";
 import { saveUnifiedConfig } from "../core/unified-config.js";
 import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
 import {
@@ -71,7 +71,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 			ctx.compact({
 				customInstructions: PI_VCC_COMPACT_INSTRUCTION,
 				onComplete: () => {
-					const stats = getLastCompactionStats();
+					const stats = runtime.compactionStats;
 					if (stats) {
 						ctx.ui.notify(
 							`blackhole: ${stats.summarized} source entries processed; tail kept ${stats.kept} (~${formatTokens(stats.keptTokensEst)} tok).`,

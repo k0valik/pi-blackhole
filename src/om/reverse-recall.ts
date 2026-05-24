@@ -58,11 +58,10 @@ export function findReflectionsForEntryIds(
 	targetEntryIds: string[],
 ): RelatedReflection[] {
 	if (targetEntryIds.length === 0) return [];
-	const { reflections } = indexLedger(entries);
+	const { reflections, observations } = indexLedger(entries);
 	// Reflections don't directly reference entry IDs — they reference observation IDs.
 	// So we only match indirectly: first find observations for these entry IDs,
 	// then find reflections that support those observations.
-	const { observations } = indexLedger(entries);
 	const targetSet = new Set(targetEntryIds);
 	const matchingObsIds = new Set<string>();
 	for (const indexed of observations) {

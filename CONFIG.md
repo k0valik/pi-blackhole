@@ -1,8 +1,8 @@
 # Configuration Guide
 
-All settings live in a single JSON file: **`~/.pi/agent/pi-blackhole-config.json`**
+All settings live in a single JSON file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
 
-The file is auto-created with defaults on first startup. This guide explains every setting in detail so you know exactly what to change and why.
+The file is auto-created with defaults on first startup. See [`example-config.json`](example-config.json) for an annotated example with inline explanations. This guide explains every setting in detail so you know exactly what to change and why.
 
 ---
 
@@ -167,6 +167,14 @@ When `true`, observations and reflections are saved to disk (`~/.pi/agent/pi-bla
 Run `/blackhole` manually to flush pending entries to the branch and compact. The `/memory` command shows pending counts when data is waiting.
 
 Use this if you don't want OM markers cluttering your conversation and prefer to compact on your own schedule.
+
+### `memory`
+
+**Default:** `true`
+
+When `false`, disables the observational memory layer entirely — no background workers (observer, reflector, dropper), no memory injection into compactions. The extension becomes a pure compaction engine (pi-vcc only). Re-enable at runtime with `/blackhole om-on`.
+
+This is a lighter alternative to `passive`: workers are off but auto-compaction still runs. Set `passive: true` if you want both workers and auto-compaction disabled.
 
 ### `passive`
 

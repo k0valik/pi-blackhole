@@ -279,7 +279,7 @@ export function scaffoldConfig(): void {
 			}
 		}
 		if (changed) writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
-	} catch {
-		// best-effort
+	} catch (e) {
+		console.error("blackhole: config scaffold failed", e);
 	}
 }

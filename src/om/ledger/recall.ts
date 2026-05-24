@@ -188,7 +188,7 @@ export function recallMemorySources(entries: Entry[], memoryId: string): RecallR
 	}
 
 	const recalledByKey = new Map<string, RecalledObservation>();
-	const missingSupportingObservationIds: string[] = [];
+	const rawMissingSupportingObservationIds: string[] = [];
 
 	function addObservation(indexed: IndexedObservation): void {
 		const key = `${indexed.entryId}:${indexed.recordIndex}`;
@@ -204,7 +204,7 @@ export function recallMemorySources(entries: Entry[], memoryId: string): RecallR
 		for (const observationId of uniqueStrings(reflection.supportingObservationIds)) {
 			const indexed = observationsById.get(observationId);
 			if (!indexed) {
-				missingSupportingObservationIds.push(observationId);
+				rawMissingSupportingObservationIds.push(observationId);
 				continue;
 			}
 			addObservation(indexed);
@@ -220,7 +220,7 @@ export function recallMemorySources(entries: Entry[], memoryId: string): RecallR
 	const sourceEntries = uniqueById(recalledObservations.flatMap((match) => match.sourceEntries));
 	const missingSourceEntryIds = uniqueStrings(recalledObservations.flatMap((match) => match.missingSourceEntryIds));
 	const nonSourceEntryIds = uniqueStrings(recalledObservations.flatMap((match) => match.nonSourceEntryIds));
-	const uniqueMissingSupportingObservationIds = uniqueStrings(missingSupportingObservationIds);
+	const uniqueMissingSupportingObservationIds = uniqueStrings(rawMissingSupportingObservationIds);
 	const matchCount = directObservationMatches.length + reflectionMatches.length;
 
 	return {

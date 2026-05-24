@@ -71,7 +71,7 @@ Read these files to understand what the user already has:
   with context windows, costs, APIs. This tells you what models are available
   for workers.
 - **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — existing config
-  if present (may be at legacy `~/.pi/agent/pi-vcc-om-config.json` too)
+  if present (may also be merged from legacy `~/.pi/agent/pi-vcc-config.json` or `settings.json["observational-memory"]`)
 - **`~/.pi/agent/guardrails.json`** — optional, check if present
 
 DO NOT read `auth.json` — it contains API keys and credentials.
@@ -328,10 +328,10 @@ if they ask about internals, but don't read the full codebase.
 
 | File | What it does |
 |---|---|
-| `src/core/unified-config.ts` | Config loading, scaffolding, defaults |
-| `src/core/settings.ts` | Settings resolution, env vars |
-| `src/core/consolidation.ts` | Worker orchestration (observer → reflector → dropper) |
-| `src/types.ts` | OM data types: Observation, Reflection, LedgerEntry |
+| `src/core/unified-config.ts` | Config loading, scaffolding, defaults, env var overrides (`PI_BLACKHOLE_PASSIVE`), legacy fallback merge |
+| `src/core/settings.ts` | Pi-vcc settings loading (overrideDefaultCompaction, debug) |
+| `src/om/consolidation.ts` | Worker orchestration (observer → reflector → dropper) |
+| `src/om/ledger/types.ts` | OM data types: Observation, Reflection, coverage-marker entry schemas |
 | `src/om/ledger/recall.ts` | Ledger index for reverse recall lookup |
 | `src/om/cooldown.ts` | Cooldown management |
 | `src/om/pending.ts` | Pending observations (manual mode) |
