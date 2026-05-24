@@ -23,6 +23,13 @@ The two upstream projects solve different halves of this:
 
 ---
 
+# Demo
+
+- /blackhole collapses a 94k context-size conversation into a ~7.8k (for my settings) next input, shows the current stats for /blackhole-memory and /blackhole-recall (can be called by agent as well) augmenting the relevant neighbour observations and exact conversations so the agent can expand when it needs to remember previous conversation
+
+https://github.com/user-attachments/assets/ab7c5787-1bbd-466f-a231-0818e68e9f39
+
+
 ## Feature Comparison
 
 | | pi-blackhole | pi-vcc | pi-obs-memory | Pi default |
