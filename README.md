@@ -6,6 +6,14 @@ Combines [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memor
 
 > This is a frankenmerge. I liked both extensions but they were not compatible - observational memory hooked into Pi's default compaction and prevented pi-vcc from working. So I merged them, made them share the same hook and output, and added the things both were missing: fallback chains, cooldowns, and a toggle between them.
 
+#### For easy setup pass the [`llms.txt`](llms.txt) llms.txt to your agent and it will guide you through the config without needing to read all the docs if you're as lazy as me
+
+# Demo
+
+- /blackhole collapses a 94k context-size conversation into a ~7.8k (for my settings) next input, shows the current stats for /blackhole-memory and /blackhole-recall (can be called by agent as well) augmenting the relevant neighbour observations and exact conversations so the agent can expand when it needs to remember previous conversation
+
+https://github.com/user-attachments/assets/ab7c5787-1bbd-466f-a231-0818e68e9f39
+
 ---
 
 ## The problem
@@ -22,13 +30,6 @@ The two upstream projects solve different halves of this:
 **pi-blackhole** puts vcc in the compaction slot and OM in the memory layer, where each does what it's designed for.
 
 ---
-
-# Demo
-
-- /blackhole collapses a 94k context-size conversation into a ~7.8k (for my settings) next input, shows the current stats for /blackhole-memory and /blackhole-recall (can be called by agent as well) augmenting the relevant neighbour observations and exact conversations so the agent can expand when it needs to remember previous conversation
-
-https://github.com/user-attachments/assets/ab7c5787-1bbd-466f-a231-0818e68e9f39
-
 
 ## Feature Comparison
 
