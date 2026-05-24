@@ -170,7 +170,7 @@ Set `memory: false` or run `/blackhole om-off` for pure pi-vcc compaction — no
 
 ## Configuration
 
-All settings in **`~/.pi/agent/pi-blackhole-config.json`** — auto-created with defaults on first startup. See [`CONFIG.md`](CONFIG.md) for the full reference and tuning guidance.
+All settings in **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — auto-created with defaults on first startup. See [`CONFIG.md`](CONFIG.md) for the full reference and tuning guidance. An annotated example config with explanations is at [`example-config.json`](example-config.json).
 
 Quick start with custom models:
 
@@ -354,7 +354,7 @@ pnpm add pi-blackhole
 
 ```bash
 pi uninstall git:github.com/k0valik/pi-blackhole
-rm -rf ~/.pi/agent/pi-blackhole ~/.pi/agent/pi-blackhole-config.json
+rm -rf ~/.pi/agent/pi-blackhole
 ```
 
 ---
