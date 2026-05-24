@@ -112,22 +112,29 @@ Sections appear only when relevant — a session with no git commits won't have 
 
 ## Compaction modes
 
-### Manual mode (`noAutoCompact: true` - recommended)
+Two modes, one shared goal: keep your agent's context sharp without manual housekeeping.
 
-Workers still run, but output is saved to disk (`~/.pi/agent/pi-blackhole/<sessionId>-pending.json`) instead of being appended inline. Auto-compaction is disabled. Run `/blackhole` when you want to flush and compact. Clean conversation, manual schedule.
+- **Auto mode (default):** install and forget. Workers run, observations are appended as invisible conversation markers, compaction fires automatically when tokens exceed threshold.
+- **Manual mode (`noAutoCompact: true` — the maintainer's setup):** same workers, same pipeline. But observations go to a disk buffer and compaction only happens when you run `/blackhole`. Cleaner conversation, manual schedule.
+
+The tradeoff is simplicity vs cleanliness:
 
 | | Auto (default) | Manual (`noAutoCompact: true`) |
 |---|---|---|
 | Workers run? | Yes | Yes |
-| Observations go to | Conversation markers | Disk |
+| Observations go to | Conversation markers (invisible in TUI) | Disk (`pending.json`) |
 | Auto-compact on `agent_end` | Yes | No |
-| `/blackhole` | Optional | Required to flush + compact (not the built-in one) |
-| Conversation clutter | OM markers | Clean |
+| `/blackhole` | Optional — use it whenever you want | Required to flush + compact |
+| Conversation history | OM marker entries between turns (they exist but do not clutter the display) | Clean — nothing between turns |
+| Use case | "I don't want to think about it" | "I want to control when context gets compressed" |
 
-### Auto mode (default)
+**Does `/blackhole` work like a single `/compact` that Just Works?**
 
-Workers run in the background and append observations to the conversation as markers. Auto-compaction triggers on `agent_end` when accumulated tokens exceed `compactAfterTokens`. Set-and-forget — your conversation will contain OM markers between turns.
+Yes, that's exactly the idea, especially in manual mode. When you feel context is getting full or accuracy is slipping, type `/blackhole`. It flushes any accumulated observations from disk, runs algorithmic vcc compaction (zero LLM cost), and injects your durable reflections into the replacement block. One command, everything gets compressed while keeping your long-term memory alive.
 
+The difference from Pi's built-in `/compact`:
+- `/compact` calls an LLM to write a free-form summary — costly, lossy, no memory layer.
+- `/blackhole` uses algorithmic section extraction (goals, files, commits, preferences...) plus injects observations/reflections from the session ledger. No LLM involved in the compaction itself. Fast, deterministic, memory-preserving.
 
 ### Without observational memory
 
@@ -169,7 +176,7 @@ Quick start with custom models:
 
 ### Settings at a glance
 
-| Setting | Default | What it controls |
+| Setting | Default (medium) | What it controls |
 |---|---|---|
 | `overrideDefaultCompaction` | `false` | Route all Pi compactions through blackhole, not just explicit `/blackhole` |
 | `noAutoCompact` | `false` | Manual mode: save to disk, disable auto-compaction |
@@ -191,6 +198,57 @@ Quick start with custom models:
 | `debugLog` | `false` | Continuous JSONL log to `~/.pi/agent/pi-blackhole/debug.ndjson` |
 
 Env override: `PI_BLACKHOLE_PASSIVE=true` disables all workers without touching the config file.
+
+### Configuration presets
+
+The defaults above target a **medium-context** setup (~128k context window, e.g. GPT-4o, Claude Sonnet).
+Paste the appropriate block into your config to match your model's context size.
+
+#### Low context (~32k-64k — older models, fast budget models)
+
+```json
+{
+  "observeAfterTokens": 5000,
+  "reflectAfterTokens": 10000,
+  "compactAfterTokens": 30000,
+  "observerChunkMaxTokens": 15000,
+  "observationsPoolMaxTokens": 8000,
+  "reflectorInputMaxTokens": 30000,
+  "dropperInputMaxTokens": 30000
+}
+```
+
+#### Medium context (~128k — GPT-4o, Claude Sonnet, Gemini Pro; this is the default)
+
+Our built-in defaults already target this tier. If you reset your config, these are what you get:
+
+```json
+{
+  "observeAfterTokens": 10000,
+  "reflectAfterTokens": 20000,
+  "compactAfterTokens": 81000,
+  "observerChunkMaxTokens": 40000,
+  "observationsPoolMaxTokens": 20000,
+  "reflectorInputMaxTokens": 80000,
+  "dropperInputMaxTokens": 80000
+}
+```
+
+#### High context (~200k+ — Claude Opus, Gemini Ultra, large local models)
+
+```json
+{
+  "observeAfterTokens": 20000,
+  "reflectAfterTokens": 40000,
+  "compactAfterTokens": 180000,
+  "observerChunkMaxTokens": 80000,
+  "observationsPoolMaxTokens": 40000,
+  "reflectorInputMaxTokens": 160000,
+  "dropperInputMaxTokens": 160000
+}
+```
+
+**What to tune first:** `compactAfterTokens` should be significantly below your model's total context window — aim for ~60-70%. If you find the agent loses context before compaction fires, lower it. If compaction fires too often and breaks flow, raise it. The other thresholds scale proportionally with this value.
 
 ---
 

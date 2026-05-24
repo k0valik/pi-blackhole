@@ -10,9 +10,33 @@ import { searchEntries } from "../core/search-entries.js";
 import { formatRecallOutput } from "../core/format-recall.js";
 import { getActiveLineageEntryIds } from "../core/lineage.js";
 import { parseRecallScope } from "../core/recall-scope.js";
+import {
+	findObservationsForEntryIds,
+	findReflectionsForEntryIds,
+	formatRelatedObservations,
+} from "../om/reverse-recall.js";
+import type { Entry } from "../om/ledger/recall.js";
 
 const PAGE_SIZE = 5;
 const DEFAULT_RECENT = 25;
+
+async function augmentWithObservations(
+	output: string,
+	rendered: { id: string }[],
+	ctx: any,
+): Promise<string> {
+	const ids = rendered.map((e) => e.id).filter(Boolean);
+	if (ids.length === 0) return output;
+	try {
+		const branchEntries = ctx.sessionManager.getBranch() as Entry[];
+		const obs = findObservationsForEntryIds(branchEntries, ids);
+		const refs = findReflectionsForEntryIds(branchEntries, ids);
+		if (obs.length > 0 || refs.length > 0) {
+			return output + "\n\n" + formatRelatedObservations(obs, refs);
+		}
+	} catch { /* branch may not be available */ }
+	return output;
+}
 
 export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 	pi.registerCommand("blackhole-recall", {
@@ -36,7 +60,8 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 				// No query: show recent entries
 				const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
 				const recent = rendered.slice(-DEFAULT_RECENT);
-				const output = (parsed.scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(recent);
+				const base = (parsed.scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(recent);
+				const output = await augmentWithObservations(base, recent, ctx);
 				pi.sendMessage(
 					{ customType: "blackhole-recall", content: output, display: true },
 					{ triggerTurn: true },
@@ -52,7 +77,8 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 			if (!query) {
 				const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
 				const recent = rendered.slice(-DEFAULT_RECENT);
-				const output = (parsed.scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(recent);
+				const base = (parsed.scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(recent);
+				const output = await augmentWithObservations(base, recent, ctx);
 				pi.sendMessage(
 					{ customType: "blackhole-recall", content: output, display: true },
 					{ triggerTurn: true },
@@ -75,7 +101,8 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 				page < totalPages
 					? `\n--- /blackhole-recall ${query}${parsed.scope === "all" ? " scope:all" : ""} page:${page + 1} ---`
 					: "";
-			const output = formatRecallOutput(pageResults, query, header) + footer;
+			const base = formatRecallOutput(pageResults, query, header) + footer;
+			const output = await augmentWithObservations(base, pageResults, ctx);
 			pi.sendMessage(
 				{ customType: "blackhole-recall", content: output, display: true },
 				{ triggerTurn: true },
