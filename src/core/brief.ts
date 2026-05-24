@@ -20,15 +20,27 @@ const isNoiseUser = (text: string): boolean => {
 // ── truncation ──
 
 // Unicode-aware word segmentation via Intl.Segmenter with lazy init & fallback
-let _segmenter: Intl.Segmenter | null = null;
+let _segmenter: Intl.Segmenter | null | undefined = undefined;
 const wordSegments = (text: string): Array<{ segment: string; index: number; isWordLike?: boolean }> => {
+  // Available: fast path
   if (_segmenter) return Array.from(_segmenter.segment(text));
+  // Fallback already established: don't retry the constructor
+  if (_segmenter === null) {
+    const parts: Array<{ segment: string; index: number; isWordLike?: boolean }> = [];
+    let idx = 0;
+    for (const part of text.split(/(\s+)/)) {
+      if (!part) continue;
+      parts.push({ segment: part, index: idx, isWordLike: /\S/.test(part) });
+      idx += part.length;
+    }
+    return parts;
+  }
+  // _segmenter === undefined: first call — attempt construction
   try {
     _segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
     return Array.from(_segmenter.segment(text));
   } catch {
-    // Fallback for older Node.js (pre-ES2023): whitespace-split
-    _segmenter = null as unknown as Intl.Segmenter; // flag: fallback active
+    _segmenter = null; // permanently fallback
     const parts: Array<{ segment: string; index: number; isWordLike?: boolean }> = [];
     let idx = 0;
     for (const part of text.split(/(\s+)/)) {
