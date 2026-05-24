@@ -16,6 +16,13 @@ import {
 	type Entry,
 } from "../om/ledger/recall.js";
 import { renderRecallSourceEntries } from "../om/serialize.js";
+import {
+	findObservationsForEntryIds,
+	findReflectionsForEntryIds,
+	formatRelatedObservations,
+	buildIndexMap,
+	formatEntryIndexAnnotation,
+} from "../om/reverse-recall.js";
 
 // ── Pi-vcc recall logic ──────────────────────────────────────────────────
 
@@ -44,7 +51,21 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 			return { content: [{ type: "text" as const, text: `Cannot expand indices outside ${scope === "all" ? "session history" : "active lineage"}: ${invalid.join(", ")}` }], details: undefined };
 		}
 		const expanded = requested.map((i) => byIndex.get(i)).filter((m): m is NonNullable<typeof m> => Boolean(m));
-		const output = (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(expanded);
+		let output = (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(expanded);
+
+		// Coupling: look up related OM observations
+		const expandedIds = expanded.map((e) => e.id).filter(Boolean);
+		if (expandedIds.length > 0) {
+			try {
+				const branchEntries = ctx.sessionManager.getBranch() as Entry[];
+				const obs = findObservationsForEntryIds(branchEntries, expandedIds);
+				const refs = findReflectionsForEntryIds(branchEntries, expandedIds);
+				if (obs.length > 0 || refs.length > 0) {
+					output += "\n\n" + formatRelatedObservations(obs, refs);
+				}
+			} catch { /* branch may not be available */ }
+		}
+
 		return { content: [{ type: "text" as const, text: output }], details: undefined };
 	}
 
@@ -65,7 +86,21 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 		const footer = page < totalPages
 			? `\n--- Use page:${page + 1}${scope === "all" ? " with scope:'all'" : ""} for more results ---`
 			: "";
-		const output = formatRecallOutput(pageResults, params.query, header) + footer;
+		let output = formatRecallOutput(pageResults, params.query, header) + footer;
+
+		// Coupling: augment search results with related observations
+		const pageResultIds = pageResults.map((r) => r.id).filter(Boolean);
+		if (pageResultIds.length > 0) {
+			try {
+				const branchEntries = ctx.sessionManager.getBranch() as Entry[];
+				const obs = findObservationsForEntryIds(branchEntries, pageResultIds);
+				const refs = findReflectionsForEntryIds(branchEntries, pageResultIds);
+				if (obs.length > 0 || refs.length > 0) {
+					output += "\n\n" + formatRelatedObservations(obs, refs);
+				}
+			} catch { /* branch may not be available */ }
+		}
+
 		return { content: [{ type: "text" as const, text: output }], details: undefined };
 	}
 
@@ -99,6 +134,19 @@ async function omRecall(memoryId: string, ctx: any) {
 	if (result.sourceEntries.length > 0) {
 		lines.push("");
 		lines.push("Sources:");
+		// Cross-format nav: annotate source entries with #N indices
+		try {
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			if (sessionFile) {
+				const { rendered } = await Promise.resolve(loadAllMessages(sessionFile, false));
+				const idToIndex = buildIndexMap(rendered);
+				const indexAnnotation = formatEntryIndexAnnotation(
+					result.observations.flatMap((o) => o.sourceEntryIds),
+					idToIndex,
+				);
+				if (indexAnnotation) lines.push(indexAnnotation);
+			}
+		} catch { /* ignore errors from index mapping */ }
 		lines.push(renderRecallSourceEntries(result.sourceEntries));
 	}
 	const text = lines.join("\n") || `Memory ${memoryId} found, but no evidence rendered.`;
@@ -147,7 +195,12 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 			const q = params.query?.trim();
 			// Dispatch by format
 			if (q && VCC_ENTRY_PATTERN.test(q)) {
-				return vccRecall({ ...params, query: q }, ctx);
+				// #N → expand entry indices
+				const match = q.match(VCC_ENTRY_PATTERN);
+				const index = match ? parseInt(match[1], 10) : NaN;
+				if (!Number.isNaN(index)) {
+					return vccRecall({ query: "", expand: [index] }, ctx);
+				}
 			}
 			if (q && MEMORY_ID_PATTERN.test(q)) {
 				return omRecall(q, ctx);
