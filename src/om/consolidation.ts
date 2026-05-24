@@ -18,6 +18,7 @@ import { type ResolveResult, type Runtime } from "./runtime.js";
 import { isRetryableError } from "./cooldown.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
 import {
+	readPendingState,
 	savePendingObservation,
 	savePendingReflection,
 	savePendingDropped,
@@ -33,6 +34,7 @@ import {
 	buildObservationsRecordedData,
 	buildReflectionsRecordedData,
 	earlierCoverageMarkerId,
+	entryIndexForId,
 	foldLedger,
 	findLastCompactionIndex,
 	fullProjection,
@@ -41,6 +43,7 @@ import {
 	latestCoverageMarkerId,
 	observationsCreatedAfterIndex,
 	observationToSummaryLine,
+	rawTokensAfterIndex,
 	rawTokensSinceDropCoverage,
 	rawTokensSinceObservationCoverage,
 	rawTokensSinceReflectionCoverage,
@@ -284,8 +287,17 @@ async function runObserverStage(
 		const resolved = await resolveModel("observer");
 		if (!resolved) return "abort";
 
-		if (ctx.hasUI) ctx.ui?.notify(
-			`Observational memory: observer running on ~${chunkTokens.toLocaleString()}-token chunk (of ${tokens.toLocaleString()} accumulated)`,
+		// Adjust accumulated for pending coverage in noAutoCompact mode
+	let effectiveTokens = tokens;
+	if (runtime.config.noAutoCompact) {
+		const pending = readPendingState(sessionId);
+		if (pending.observation?.coversUpToId) {
+			const idx = entryIndexForId(entries, pending.observation.coversUpToId);
+			if (idx >= 0) effectiveTokens = rawTokensAfterIndex(entries, idx);
+		}
+	}
+	if (ctx.hasUI) ctx.ui?.notify(
+			`Observational memory: observer running on ~${chunkTokens.toLocaleString()}-token chunk (of ${effectiveTokens.toLocaleString()} accumulated)`,
 			"info",
 		);
 		debugLog("observer.start", { tokens, coversUpToId, sourceEntryIds, sourceEntryCount: sourceEntryIds.length, priorReflections: priorReflections.length, priorObservations: priorObservations.length });
@@ -386,7 +398,16 @@ async function runReflectorStage(
 		);
 		const summaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
 		const reflectorInputTokens = Math.min(newItemsTokens + summaryBudget, runtime.config.reflectorInputMaxTokens);
-		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: reflector running (~${reflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`, "info");
+		// Adjust accumulated for pending coverage in noAutoCompact mode
+		let effectiveReflectionTokens = reflectionTokens;
+		if (runtime.config.noAutoCompact) {
+			const pending = readPendingState(sessionId);
+			if (pending.reflection?.coversUpToId) {
+				const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
+				if (idx >= 0) effectiveReflectionTokens = rawTokensAfterIndex(entries, idx);
+			}
+		}
+		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`, "info");
 
 		try {
 			// Existing memory summaries for context (capped)
@@ -468,7 +489,16 @@ async function runDropperStage(
 		);
 		const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
 		const dropperInputTokens = Math.min(dropperNewObsTokens + dropperSummaryBudget, runtime.config.dropperInputMaxTokens);
-		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: dropper running (~${dropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`, "info");
+		// Adjust accumulated for pending coverage in noAutoCompact mode
+		let effectiveDropTokens = dropTokens;
+		if (runtime.config.noAutoCompact) {
+			const pending = readPendingState(sessionId);
+			if (pending.dropped?.coversUpToId) {
+				const idx = entryIndexForId(entries, pending.dropped.coversUpToId);
+				if (idx >= 0) effectiveDropTokens = rawTokensAfterIndex(entries, idx);
+			}
+		}
+		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: dropper running (~${effectiveDropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`, "info");
 
 		try {
 			// Existing active observations summary for context (capped)

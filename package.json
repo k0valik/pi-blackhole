@@ -36,12 +36,12 @@
     "type": "git",
     "url": "git+https://github.com/k0valik/pi-blackhole.git"
   },
-  "dependencies": {
-    "@earendil-works/pi-agent-core": "0.75.5",
-    "@earendil-works/pi-ai": "0.75.4",
-    "@earendil-works/pi-coding-agent": "0.75.4",
-    "@earendil-works/pi-tui": "0.75.5",
-    "typebox": "^1.1.38"
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": ">=0.75.5 <1.0.0",
+    "@earendil-works/pi-ai": ">=0.75.4 <1.0.0",
+    "@earendil-works/pi-coding-agent": ">=0.75.4 <1.0.0",
+    "@earendil-works/pi-tui": ">=0.75.5 <1.0.0"
   },
   "pi": {
     "extensions": [
@@ -49,6 +49,11 @@
     ]
   },
   "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.75.5",
+    "@earendil-works/pi-ai": "0.75.4",
+    "@earendil-works/pi-coding-agent": "0.75.4",
+    "@earendil-works/pi-tui": "0.75.5",
+    "typebox": "^1.1.38",
     "typescript": "^5.7.3",
     "vitest": "^4.1.7"
   }

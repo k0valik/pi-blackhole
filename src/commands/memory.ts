@@ -9,9 +9,11 @@ import { copyTextToClipboard } from "../om/clipboard.js";
 import type { Runtime } from "../om/runtime.js";
 import {
 	diffProjection,
+	entryIndexForId,
 	foldLedger,
 	fullProjection,
 	observationToSummaryLine,
+	rawTokensAfterIndex,
 	rawTokensSinceDropCoverage,
 	rawTokensSinceLastCompaction,
 	rawTokensSinceObservationCoverage,
@@ -125,10 +127,28 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 				`Reflections:  ${folded.reflections.length} recorded / ${visible.reflections.length} visible`,
 				[addedSuffix(drift.reflectionsOnlyInFull.length)],
 			);
-			const obsProgress = rawTokensSinceObservationCoverage(entries);
-			const reflectionProgress = rawTokensSinceReflectionCoverage(entries);
-			const dropProgress = rawTokensSinceDropCoverage(entries);
+			let obsProgress = rawTokensSinceObservationCoverage(entries);
+			let reflectionProgress = rawTokensSinceReflectionCoverage(entries);
+			let dropProgress = rawTokensSinceDropCoverage(entries);
 			const compactionProgress = rawTokensSinceLastCompaction(entries);
+
+			// In noAutoCompact mode, pending coversUpToId entries act as virtual coverage markers
+			// that aren't reflected in the branch. Adjust accumulated counts accordingly.
+			if (runtime.config.noAutoCompact) {
+				const pending = readPendingState(sessionId);
+				if (pending.observation?.coversUpToId) {
+					const idx = entryIndexForId(entries, pending.observation.coversUpToId);
+					if (idx >= 0) obsProgress = rawTokensAfterIndex(entries, idx);
+				}
+				if (pending.reflection?.coversUpToId) {
+					const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
+					if (idx >= 0) reflectionProgress = rawTokensAfterIndex(entries, idx);
+				}
+				if (pending.dropped?.coversUpToId) {
+					const idx = entryIndexForId(entries, pending.dropped.coversUpToId);
+					if (idx >= 0) dropProgress = rawTokensAfterIndex(entries, idx);
+				}
+			}
 
 			const passiveLines = runtime.config.passive === true
 				? [
