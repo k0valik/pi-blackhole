@@ -75,6 +75,8 @@ export interface UnifiedConfig {
 	noAutoCompact: boolean;
 	/** Disables background workers and auto-compaction entirely. */
 	passive: boolean;
+	/** Enables observational memory (workers + content injection). Set to false for pi-vcc only. */
+	memory: boolean;
 	/** Writes debug JSONL to agent directory. */
 	debugLog: boolean;
 }
@@ -96,6 +98,7 @@ export const DEFAULTS: UnifiedConfig = {
 
 	noAutoCompact: false,
 	passive: false,
+	memory: true,
 	debugLog: false,
 };
 
@@ -147,6 +150,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	// Booleans — om
 	if (typeof raw.noAutoCompact === "boolean") c.noAutoCompact = raw.noAutoCompact;
 	if (typeof raw.passive === "boolean") c.passive = raw.passive;
+	if (typeof raw.memory === "boolean") c.memory = raw.memory;
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
 	// Positive integers

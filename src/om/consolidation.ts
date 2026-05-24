@@ -180,6 +180,7 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime)
 function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): void {
 	runtime.ensureConfig(ctx.cwd);
 	if (runtime.config.passive === true) return;
+	if (runtime.config.memory === false) return;
 	if (runtime.consolidationInFlight) return;
 	if (runtime.isConsolidationRetryGated()) return;
 

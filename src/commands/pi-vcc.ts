@@ -9,6 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
 import { getLastCompactionStats, PI_VCC_COMPACT_INSTRUCTION } from "../hooks/before-compact";
+import { saveUnifiedConfig } from "../core/unified-config.js";
 import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
 import {
 	OM_OBSERVATIONS_DROPPED,
@@ -23,11 +24,35 @@ const formatTokens = (n: number): string => {
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 	pi.registerCommand("blackhole", {
-		description: "Compact conversation — structured summary with observational memory",
-		handler: async (_args, ctx) => {
+		description:
+			"Compact conversation — structured summary (with observational memory when enabled). " +
+			"Subcommands: /blackhole om-off (disable memory), /blackhole om-on (re-enable memory).",
+		handler: async (args, ctx) => {
+			const sessionId = ctx.sessionManager.getSessionId();
+
+			// Handle om-off / om-on subcommands
+			const trimmed = (typeof args === "string" ? args : "").trim();
+			if (trimmed === "om-off") {
+				const saved = saveUnifiedConfig({ memory: false });
+				runtime.config.memory = false;
+				ctx.ui.notify(
+					saved ? "Observational memory disabled. Use /blackhole om-on to re-enable." : "Failed to save config.",
+					"info",
+				);
+				return;
+			}
+			if (trimmed === "om-on") {
+				const saved = saveUnifiedConfig({ memory: true });
+				runtime.config.memory = true;
+				ctx.ui.notify(
+					saved ? "Observational memory enabled." : "Failed to save config.",
+					"info",
+				);
+				return;
+			}
+
 			// If noAutoCompact: flush pending OM entries into the branch
 			// before compacting so the summary includes accumulated memory.
-			const sessionId = ctx.sessionManager.getSessionId();
 			if (runtime.config.noAutoCompact && hasPendingData(sessionId)) {
 				const pending = readPendingState(sessionId);
 				if (pending.observation) {

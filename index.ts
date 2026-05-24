@@ -11,6 +11,7 @@ import { scaffoldSettings } from "./src/core/settings";
 import { registerBeforeCompactHook } from "./src/hooks/before-compact";
 import { registerPiVccCommand } from "./src/commands/pi-vcc";
 import { registerMemoryCommand } from "./src/commands/memory";
+import { registerVccRecallCommand } from "./src/commands/vcc-recall";
 import { registerConsolidationTrigger } from "./src/om/consolidation.js";
 import { registerCompactionTrigger } from "./src/om/compaction-trigger.js";
 import { registerRecallTool } from "./src/tools/recall";
@@ -30,7 +31,8 @@ export default (pi: ExtensionAPI) => {
 
 	// Commands
 	registerPiVccCommand(pi, omRuntime);               // /pi-vcc (needs runtime for noAutoCompact flush)
-	registerMemoryCommand(pi, omRuntime);              // /memory [status|view|full]
+	registerMemoryCommand(pi, omRuntime);              // /blackhole-memory [status|view|full]
+	registerVccRecallCommand(pi);                        // /blackhole-recall <query>
 
 	// Tools
 	registerRecallTool(pi);                            // unified recall (#N + [12char])

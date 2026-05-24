@@ -14,6 +14,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 	pi.on("agent_end", (event: any, ctx: any) => {
 		runtime.ensureConfig(ctx.cwd);
 		if (runtime.config.passive === true) return;
+		if (runtime.config.memory === false) return;
 		if (runtime.config.noAutoCompact === true) return;
 		if (runtime.compactInFlight) return;
 

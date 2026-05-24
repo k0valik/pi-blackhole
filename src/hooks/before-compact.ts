@@ -304,13 +304,17 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
 
     // ── Inject observational-memory content ───────────────────────────
     omRuntime.ensureConfig(ctx.cwd ?? process.cwd());
-    const projection = buildCompactionProjection(
+    let omContent = "";
+    let omDetails: Record<string, unknown> | undefined;
+    if (omRuntime.config.memory !== false) {
+      const projection = buildCompactionProjection(
       branchEntries as any[],
       firstKeptEntryId,
       { observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens },
     );
-    const omContent = renderSummary(projection.reflections, projection.observations);
-    const omDetails = projection.details;
+      omContent = renderSummary(projection.reflections, projection.observations);
+      omDetails = projection.details;
+    }
 
     return {
       compaction: {
