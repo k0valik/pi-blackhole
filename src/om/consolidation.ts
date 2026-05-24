@@ -142,8 +142,8 @@ function stageFallbackModels(runtime: Runtime, stage: "observer" | "reflector" |
 	return runtime.config.dropperFallbackModels ?? [];
 }
 
-function stageThinkingLevel(runtime: Runtime, stage: "observer" | "reflector" | "dropper"): ModelThinkingLevel {
-	const stageModel = stageModelConfig(runtime, stage);
+function stageThinkingLevel(runtime: Runtime, stage: "observer" | "reflector" | "dropper", modelConfig?: ConfiguredModel): ModelThinkingLevel {
+	const stageModel = modelConfig ?? stageModelConfig(runtime, stage);
 	return stageModel?.thinking ?? runtime.config.model?.thinking ?? "low";
 }
 
@@ -288,20 +288,22 @@ async function runObserverStage(
 		if (!resolved) return "abort";
 
 		// Adjust accumulated for pending coverage in noAutoCompact mode
-	let effectiveTokens = tokens;
-	if (runtime.config.noAutoCompact) {
-		const pending = readPendingState(sessionId);
-		if (pending.observation?.coversUpToId) {
-			const idx = entryIndexForId(entries, pending.observation.coversUpToId);
-			if (idx >= 0) effectiveTokens = rawTokensAfterIndex(entries, idx);
+		let effectiveTokens = tokens;
+		if (runtime.config.noAutoCompact) {
+			const pending = readPendingState(sessionId);
+			if (pending.observation?.coversUpToId) {
+				const idx = entryIndexForId(entries, pending.observation.coversUpToId);
+				if (idx >= 0) effectiveTokens = rawTokensAfterIndex(entries, idx);
+			}
 		}
-	}
-	if (ctx.hasUI) ctx.ui?.notify(
+		if (ctx.hasUI) ctx.ui?.notify(
 			`Observational memory: observer running on ~${chunkTokens.toLocaleString()}-token chunk (of ${effectiveTokens.toLocaleString()} accumulated)`,
 			"info",
 		);
 		debugLog("observer.start", { tokens, coversUpToId, sourceEntryIds, sourceEntryCount: sourceEntryIds.length, priorReflections: priorReflections.length, priorObservations: priorObservations.length });
 
+		// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
+		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "observer"), stageFallbacks: stageFallbackModels(runtime, "observer") });
 		try {
 			const result = await runObserver({
 				model: resolved.model as any,
@@ -312,7 +314,7 @@ async function runObserverStage(
 				chunk,
 				allowedSourceEntryIds: sourceEntryIds,
 				maxTurns: runtime.config.agentMaxTurns,
-				thinkingLevel: stageThinkingLevel(runtime, "observer"),
+				thinkingLevel: stageThinkingLevel(runtime, "observer", stageModelForThinking),
 			});
 
 			if (result.observations && result.observations.length > 0) {
@@ -409,6 +411,8 @@ async function runReflectorStage(
 		}
 		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`, "info");
 
+		// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
+		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "reflector"), stageFallbacks: stageFallbackModels(runtime, "reflector") });
 		try {
 			// Existing memory summaries for context (capped)
 			const existingReflectionsSummary = buildExistingReflectionsSummary(
@@ -429,7 +433,7 @@ async function runReflectorStage(
 				existingReflectionsSummary: existingReflectionsSummary || undefined,
 				existingObservationsSummary: existingObservationsSummary || undefined,
 				maxTurns: runtime.config.agentMaxTurns,
-				thinkingLevel: stageThinkingLevel(runtime, "reflector"),
+				thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForThinking),
 			});
 
 			if (!reflections || reflections.length === 0) return { outcome: "continue", sameRunReflections: [] };
@@ -508,6 +512,8 @@ async function runDropperStage(
 			);
 			const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections);
 
+			// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
+			const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "dropper"), stageFallbacks: stageFallbackModels(runtime, "dropper") });
 			const droppedIds = await runDropper({
 				model: resolved.model as any,
 				apiKey: resolved.apiKey,
@@ -517,7 +523,7 @@ async function runDropperStage(
 				existingObservationsSummary: existingObservationsSummary || undefined,
 				budgetTokens: runtime.config.observationsPoolMaxTokens,
 				maxTurns: runtime.config.agentMaxTurns,
-				thinkingLevel: stageThinkingLevel(runtime, "dropper"),
+				thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
 			});
 			const latestReflectionCoverageId = latestCoverageMarkerId(entries, OM_REFLECTIONS_RECORDED);
 			const effectiveReflectionCoverageId = sameRunReflectionCoverageId ?? latestReflectionCoverageId;
