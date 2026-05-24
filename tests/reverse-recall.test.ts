@@ -283,23 +283,23 @@ describe("buildIndexMap / formatEntryIndexAnnotation", () => {
 describe("renderMessage id passthrough", () => {
 	it("includes id in rendered entry", async () => {
 		const { renderMessage } = await import("../src/core/render-entries.js");
-		const msg = { role: "user" as const, content: "Hello" };
-		const result = renderMessage(msg, 5, "entry-id-01");
+		const msg = { role: "user" as const, content: "Hello", timestamp: 0 };
+		const result = renderMessage(msg as any, 5, "entry-id-01");
 		expect(result.id).toBe("entry-id-01");
 		expect(result.index).toBe(5);
 	});
 
 	it("passes id through for assistant messages", async () => {
 		const { renderMessage } = await import("../src/core/render-entries.js");
-		const msg = { role: "assistant" as const, content: [{ type: "text" as const, text: "Response" }] };
-		const result = renderMessage(msg, 3, "entry-assist");
+		const msg = { role: "assistant" as const, content: [{ type: "text" as const, text: "Response" }], api: "", provider: "", model: "", usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, stopReason: "stop" as const, timestamp: 0 };
+		const result = renderMessage(msg as any, 3, "entry-assist");
 		expect(result.id).toBe("entry-assist");
 	});
 
 	it("passes id through for tool results", async () => {
 		const { renderMessage } = await import("../src/core/render-entries.js");
-		const msg = { role: "toolResult" as const, toolCallId: "call-1", toolName: "bash", content: [{ type: "text" as const, text: "output" }], isError: false };
-		const result = renderMessage(msg, 7, "entry-tool");
+		const msg = { role: "toolResult" as const, toolCallId: "call-1", toolName: "bash", content: [{ type: "text" as const, text: "output" }], isError: false, timestamp: 0 };
+		const result = renderMessage(msg as any, 7, "entry-tool");
 		expect(result.id).toBe("entry-tool");
 	});
 });
@@ -308,9 +308,7 @@ describe("renderMessage id passthrough", () => {
 
 describe("VCC_ENTRY_PATTERN dispatch", () => {
 	it("matches #N pattern", async () => {
-		// The pattern is /^#(\d+)$/ — test at the import level
-		const { default: patternModule } = await import("../src/tools/recall.js");
-		// Just validate the pattern via source-code check
+		// The pattern is /^#(\d+)$/ — validate directly
 		const pattern = /^#(\d+)$/;
 		expect(pattern.test("#13")).toBe(true);
 		expect(pattern.test("#0")).toBe(true);

@@ -96,7 +96,7 @@ const countBlocks = (messages: Message[]): BlockCounts => {
 
 const inputCharsOf = (messages: Message[]): number =>
   messages
-    .map((msg, index) => renderMessage(msg, index, true).summary.length)
+    .map((msg, index) => renderMessage(msg, index, "", true).summary.length)
     .reduce((sum, len) => sum + len, 0);
 
 const topFilesOf = (messages: Message[]): string[] => {
@@ -113,7 +113,7 @@ const topFilesOf = (messages: Message[]): string[] => {
 };
 
 const previewOf = (messages: Message[], edgeCount = 3): string => {
-  const rendered = messages.map((msg, index) => renderMessage(msg, index));
+  const rendered = messages.map((msg, index) => renderMessage(msg, index, ""));
   if (rendered.length === 0) return "(empty)";
   if (rendered.length <= edgeCount * 2) {
     return rendered
@@ -180,7 +180,7 @@ const probesOf = (messages: Message[], summary: string): RecallProbe[] => {
     { label: "problem", text: data.outstandingContext[0] ?? "" },
   ];
 
-  const rendered = messages.map((msg, index) => renderMessage(msg, index));
+  const rendered = messages.map((msg, index) => renderMessage(msg, index, ""));
 
   return rawProbes
     .map(({ label, text }) => {
