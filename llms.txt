@@ -1,0 +1,368 @@
+# pi-blackhole: Agent Setup Guide (llms.txt)
+
+This document guides an AI assistant through configuring pi-blackhole for a user.
+Read it before starting the setup conversation. Follow the steps in order.
+
+---
+
+## 0. Objective
+
+Create a working `pi-blackhole-config.json` tailored to the user's environment,
+session model, preferred provider(s), and context size. The config file is at:
+
+    ~/.pi/agent/pi-blackhole/pi-blackhole-config.json
+
+Auto-created with defaults on first load, but you will tune it.
+
+---
+
+## 1. Read the source documentation first
+
+You MUST read these files before asking the user anything. They contain all
+the concepts, parameters, and defaults you need:
+
+- **README.md** — overview, compaction modes, feature comparison, commands,
+  tools, settings at a glance, configuration presets (low/medium/high context)
+- **CONFIG.md** — detailed explanation of every setting: worker models, token
+  thresholds, rolling window caps, behavior flags, full example config
+- **example-config.json** — the annotated example with comments explaining
+  each model choice, fallback chain rationale, and thinking levels
+
+Key things to understand from reading:
+
+- Three workers: **Observer** (extracts facts — most frequent, needs speed),
+  **Reflector** (synthesizes durable reflections — needs reasoning),
+  **Dropper** (prunes observations — needs judgment)
+- Four behavior flags: `noAutoCompact`, `passive`, `memory`, `overrideDefaultCompaction`
+- Token thresholds vs budget caps: thresholds trigger *when* a worker runs,
+  budget caps limit *how much* data is sent
+- Three presets: low (32-64k), medium/128k default, high (200k+)
+- Fallback chains: primary model -> fallbacks -> base model -> session model
+- Cooldowns: models are skipped for `cooldownHours` after errors, persisted to disk
+
+---
+
+## 2. Check the user's environment
+
+Run these commands and inspect the results before proposing anything.
+
+```bash
+# OS and pi location
+uname -s                  # Linux / Darwin / MINGW*
+which pi                  # pi binary path
+pi --version              # pi version
+
+# Pi agent directory structure
+ls ~/.pi/agent/           # settings.json, models.json, auth.json, etc.
+ls ~/.pi/agent/pi-blackhole/  # config, cooldown, pending files (if exists)
+
+# Is it a git install?
+ls ~/.pi/agent/extensions/pi-blackhole/.git/HEAD 2>/dev/null && echo "git install"
+# OR npm install?
+ls ~/.pi/agent/node_modules/pi-blackhole/package.json 2>/dev/null && echo "npm install"
+```
+
+Read these files to understand what the user already has:
+
+- **`~/.pi/agent/settings.json`** — Pi's main config: defaultProvider,
+  defaultModel, enabledModels, compaction settings, existing `observational-memory`
+  block (legacy OM settings that may need migration)
+- **`~/.pi/agent/models.json`** — All configured providers and their models
+  with context windows, costs, APIs. This tells you what models are available
+  for workers.
+- **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — existing config
+  if present (may be at legacy `~/.pi/agent/pi-vcc-om-config.json` too)
+- **`~/.pi/agent/guardrails.json`** — optional, check if present
+
+DO NOT read `auth.json` — it contains API keys and credentials.
+
+---
+
+## 3. Inventory available models
+
+From `models.json`, note these per-provider (example, use the user's own config:
+
+| Provider | Models available | Context windows | Free tiers? |
+|---|---|---|---|
+| `openrouter` | Several free models: qwen3-next-80b, gemma-4-31b-it, gpt-oss-120b, etc. | 121k-256k | Yes (free) |
+| `cerebras` | gpt-oss-120b, zai-glm-4.7 | 128k | Yes (free) |
+| `ollama` | Models via Ollama Cloud: deepseek-v4-pro, gemma4:31b-cloud | 192k-256k | Yes |
+| `zai` | glm-4.7 | 128k | Yes (free) |
+| `opencode` | gemini-3.5-flash, deepseek-v4-flash-free, qwen3.6-plus-free | 128k-456k | Yes (free) |
+| `local` | User's local endpoint | varies | Free |
+| Others | nvidia, modal, llama-cpp | varies | Depends |
+
+The user's **session model** (from `settings.json`: `defaultModel`) is what
+they use for their main conversation. Workers should preferably use different (cheaper/
+free) models — the session model is the last-resort fallback.
+
+---
+
+## 4. Ask the user — structured interview
+
+Ask these questions, one round. Explain *why* each choice matters so the
+user can make an informed decision.
+
+### 4a. Compaction mode
+
+```text
+Three modes:
+- **Auto** (noAutoCompact: false) — workers append observations as invisible
+  markers, compaction fires automatically at token threshold. Install and
+  forget.
+- **Manual** (noAutoCompact: true) — observations go to disk, compaction only
+  on `/blackhole`. Cleaner conversation, you control when to compact.
+  This is the maintainer's setup.
+- **Passive** (passive: true) — all workers off, no auto-compact. Only
+  explicit `/blackhole` compaction works. Pure pi-vcc, no memory layer.
+```
+
+Ask: "Which mode fits how you work? Manual gives you control and a clean
+conversation. Auto is zero-thought. Passive is for debugging or if you only
+want compaction."
+
+### 4b. Model selection per worker
+
+```text
+Three workers, each with a different job:
+
+- **Observer** — runs most frequently (every observeAfterTokens tokens).
+  Reads the newest chunk of conversation and extracts timestamped facts.
+  Needs: speed, structured extraction. A fast model with thinking capability
+  is ideal. Does NOT need the session model's capability.
+
+- **Reflector** — runs less often. Distills observations into durable
+  reflections (stable facts, patterns, constraints). Needs: strong reasoning,
+  synthesis. Benefits from thinking.
+
+- **Dropper** — prunes observations when the pool grows too large. Needs:
+  good judgment, prioritization. Similar capability level to reflector.
+```
+
+Ask: "Do you want to set specific models for each worker, or use the base
+model for all of them? I can check your models.json to suggest which models
+are available. I recommend free/cheap models for workers since they don't
+need your session model's capability."
+
+### 4c. Context size
+
+Ask: "What is your session model's context window?" Then match one of:
+
+- **Low (32k-64k):** `compactAfterTokens` ~20k-40k, smaller budgets
+- **Medium (128k):** Defaults — `compactAfterTokens` 81k
+- **High (200k+):** `compactAfterTokens` ~180k, larger budgets
+
+Rule of thumb: `compactAfterTokens` should be ~60-70% of the model's total
+context window.
+
+### 4d. Fallback chains
+
+Ask: "If the primary worker model fails (rate limit, timeout, API error),
+would you like to add fallback models? I can suggest free alternatives."
+Explain the chain: primary -> fallbacks -> base model -> session model
+(last resort, never cooled down).
+
+### 4e. Override default compaction
+
+Explain: `overrideDefaultCompaction: true` makes blackhole handle ALL
+compactions (including Pi's auto-compaction), not just `/blackhole`. Only
+set this if you want the algorithmic summary format everywhere.
+
+---
+
+## 5. Generate the config
+
+Based on the interview answers, build the config object.
+
+### Structural rules
+
+- If `noAutoCompact: true`, use manual mode config. This is the recommended
+  setup if the user wants control.
+- Set `observerModel` to the fastest capable model from the user's available
+  providers.
+- Set `reflectorModel` to a stronger reasoning model if available.
+- Set `dropperModel` to the same tier as reflector (or simpler since
+  dropping is mostly prioritization).
+- Add fallback models from *different providers* to avoid correlated
+  failures. E.g., if primary is cerebras, use openrouter or ollama as
+  fallback.
+- Match token thresholds to the context preset.
+- Set `thinking` levels: observer can use `off` or `low` (speed), reflector
+  benefits from `low`-`medium`, dropper can use `off`-`low`.
+
+### Calculation: compactAfterTokens - Discuss their preferences, average session length with the user first in the question turn!
+
+```text
+target = model_context_window * 0.65  (approx)
+Round down to a clean number.
+```
+
+Then scale proportionally from the medium defaults:
+- `observeAfterTokens` = `compactAfterTokens / 8` (approx)
+- `reflectAfterTokens` = `compactAfterTokens / 4` (approx)
+- `observerChunkMaxTokens` = `compactAfterTokens / 2` (approx)
+- `observationsPoolMaxTokens` = `compactAfterTokens / 4` (approx)
+- `reflectorInputMaxTokens` = `compactAfterTokens` (approx)
+- `dropperInputMaxTokens` = `compactAfterTokens` (approx)
+
+### Example calculation for 128k model
+
+```text
+compactAfterTokens = 128000 * 0.65 = ~83200 → 81000 (medium default)
+observeAfterTokens = 81000 / 8 ≈ 10125 → 10000 (medium default)
+reflectAfterTokens = 81000 / 4 ≈ 20250 → 20000 (medium default)
+observerChunkMaxTokens = 81000 / 2 ≈ 40500 → 40000 (medium default)
+observationsPoolMaxTokens = 81000 / 4 ≈ 20250 → 20000 (medium default)
+reflectorInputMaxTokens = 81000 → 80000 (slightly under)
+dropperInputMaxTokens = 81000 → 80000 (slightly under)
+```
+
+### Example calculation for 64k model
+
+```text
+compactAfterTokens = 64000 * 0.65 = ~41600 → 30000 (low preset)
+observeAfterTokens = 30000 / 8 ≈ 3750 → 5000 (low preset)
+reflectAfterTokens = 30000 / 4 ≈ 7500 → 10000 (low preset)
+...
+```
+
+### Example calculation for 200k model
+
+```text
+compactAfterTokens = 200000 * 0.65 = ~130000 → 180000 (high preset is
+  more conservative, adjust to taste)
+```
+
+---
+
+## 6. Present the config to the user
+
+Write the complete config as JSON to a temp file and show it. Explain:
+
+- Why each model was chosen for each worker
+- What the fallback chain looks like
+- Why token thresholds are set where they are
+- What behavior flags do
+
+Let the user review and ask for adjustments. Most users will want one
+round of tweaks (different model, different threshold).
+
+---
+
+## 7. Write the config
+
+Once approved, write to:
+
+    ~/.pi/agent/pi-blackhole/pi-blackhole-config.json
+
+The config is auto-loaded on next `/reload` or Pi restart. No manual
+reload needed beyond that.
+
+### Verification commands
+
+After writing, verify the config is valid JSON:
+
+```bash
+cat ~/.pi/agent/pi-blackhole/pi-blackhole-config.json | python3 -m json.tool > /dev/null && echo "valid"
+```
+
+If the extension is running, the user can run `/blackhole-memory` to
+confirm the pipeline initializes with their settings.
+
+---
+
+## 8. Edge cases and gotchas
+
+### Config path mismatch
+
+The config lives at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`,
+NOT `~/.pi/agent/pi-blackhole-config.json`. The `scaffoldConfig()` function
+writes to the subdirectory. Check both locations.
+
+### Legacy migration
+
+If the user has `~/.pi/agent/pi-vcc-config.json` or OM settings in
+`settings.json["observational-memory"]`, `loadUnifiedConfig()` merges them
+as fallback. After writing the new config, the old locations are unused.
+You can recommend deleting them, but don't force it.
+
+### Cooldown files
+
+`~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` persists model
+cool-downs across restarts. If the user switches models, this file may
+still have stale cooldowns for old models — harmless but can be cleaned up.
+
+### Models that don't exist in models.json
+
+If the user specifies a model in the config that isn't in `models.json`,
+the pipeline will fail when trying to use it. Always verify model IDs
+against the `models.json` file. If the model is missing, the user needs to
+add it to `models.json` first (see Pi's model configuration docs).
+
+### New providers need Pi registration
+
+If the user wants to use a provider not in their `models.json`, they need
+to add it there with proper `api`, `baseUrl`, `apiKey`, and models. The
+pi-blackhole extension doesn't manage providers — it only uses what Pi has
+registered.
+
+### Thinking level support
+
+Not all models support thinking (reasoning effort). Check the model entry
+in `models.json` for `reasoning: true` and the provider's `compat` field.
+Setting `thinking` on a model that doesn't support it will fail silently
+(the provider ignores it).
+
+### The _notes field
+
+The config file supports `_notes` and `_comment` fields — these are
+preserved by `saveUnifiedConfig()` and ignored by the parser. Use them to
+document the user's choices inline.
+
+---
+
+## 9. Reference: key source files
+
+These are the files that matter for config behavior. Point the user here
+if they ask about internals, but don't read the full codebase.
+
+| File | What it does |
+|---|---|
+| `src/core/unified-config.ts` | Config loading, scaffolding, defaults |
+| `src/core/settings.ts` | Settings resolution, env vars |
+| `src/core/consolidation.ts` | Worker orchestration (observer → reflector → dropper) |
+| `src/types.ts` | OM data types: Observation, Reflection, LedgerEntry |
+| `src/om/ledger/recall.ts` | Ledger index for reverse recall lookup |
+| `src/om/cooldown.ts` | Cooldown management |
+| `src/om/pending.ts` | Pending observations (manual mode) |
+| `src/om/reverse-recall.ts` | Coupling between recall and OM |
+| `src/core/render-entries.ts` | Entry rendering for recall output |
+
+---
+
+## 10. Reference: token threshold quick reference
+
+From `DEFAULTS` in `unified-config.ts`:
+
+| Setting | Value | Purpose |
+|---|---|---|
+| `observeAfterTokens` | 10,000 | Observer cadence |
+| `reflectAfterTokens` | 20,000 | Reflector + dropper cadence |
+| `compactAfterTokens` | 81,000 | Auto-compaction trigger |
+| `observationsPoolMaxTokens` | 20,000 | Max active observations before pruning |
+| `reflectorInputMaxTokens` | 80,000 | Max reflector prompt budget |
+| `dropperInputMaxTokens` | 80,000 | Max dropper prompt budget |
+| `observerChunkMaxTokens` | 40,000 | Max observer chunk size (newest-first) |
+| `agentMaxTurns` | 16 | Max agent-loop turns per worker |
+
+Scaling formula for custom context sizes:
+
+```
+compactAfterTokens:        model_context * 0.65
+observeAfterTokens:        compactAfterTokens / 8
+reflectAfterTokens:        compactAfterTokens / 4
+observerChunkMaxTokens:    compactAfterTokens / 2
+observationsPoolMaxTokens: compactAfterTokens / 4
+reflectorInputMaxTokens:   compactAfterTokens * 1.0
+dropperInputMaxTokens:     compactAfterTokens * 1.0
+```
