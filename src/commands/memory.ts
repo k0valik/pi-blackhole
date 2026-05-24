@@ -69,8 +69,8 @@ function renderContentOnlyProjection(projection: Projection, emptyScope: "visibl
 }
 
 export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void {
-	pi.registerCommand("blackhole-recall", {
-		description: "Show memory pipeline status & token counters. /blackhole-recall for overview, /blackhole-recall view for visible observations & reflections, /blackhole-recall full for complete recorded memory (copies to clipboard).",
+	pi.registerCommand("blackhole-memory", {
+		description: "Show memory pipeline status & token counters. /blackhole-memory for overview, /blackhole-memory view for visible observations & reflections, /blackhole-memory full for complete recorded memory (copies to clipboard).",
 		handler: async (args, ctx) => {
 			runtime.ensureConfig(ctx.cwd);
 			const entries = ctx.sessionManager.getBranch() as Entry[];
@@ -103,7 +103,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 
 			// /memory (no args) — show status
 			if (mode && mode !== "status") {
-				ctx.ui.notify("Usage: /blackhole-recall [status|view|full]", "info");
+				ctx.ui.notify("Usage: /blackhole-memory [status|view|full]", "info");
 				return;
 			}
 

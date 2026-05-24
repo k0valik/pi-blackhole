@@ -96,7 +96,7 @@ function uniqueStrings(values: string[]): string[] {
 	return Array.from(new Set(values));
 }
 
-function indexLedger(entries: Entry[]): {
+export function indexLedger(entries: Entry[]): {
 	observations: IndexedObservation[];
 	reflections: IndexedReflection[];
 	droppedIds: Set<string>;

@@ -30,7 +30,7 @@ export default (pi: ExtensionAPI) => {
 
 	// Commands
 	registerPiVccCommand(pi, omRuntime);               // /pi-vcc (needs runtime for noAutoCompact flush)
-	registerMemoryCommand(pi, omRuntime);              // /memory [status|view|full]
+	registerMemoryCommand(pi, omRuntime);              // /blackhole-memory [status|view|full]
 
 	// Tools
 	registerRecallTool(pi);                            // unified recall (#N + [12char])
