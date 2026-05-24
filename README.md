@@ -1,11 +1,10 @@
 # pi-blackhole
 
-Algorithmic compaction + persistent observational memory for [Pi](https://github.com/badlogic/pi-mono), in one extension.
+Algorithmic compaction + session-aware observational memory for [Pi](https://github.com/badlogic/pi-mono), in one extension.
 
 Combines [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memory](https://github.com/elpapi42/pi-observational-memory) with unified configuration, per-worker model fallback chains, persisted cooldowns, and a manual flush mode.
 
 > This is a frankenmerge. I liked both extensions but they were not compatible - observational memory hooked into Pi's default compaction and prevented pi-vcc from working. So I merged them, made them share the same hook and output, and added the things both were missing: fallback chains, cooldowns, and a toggle between them.
-Everything below is fully AI-generated slopfest, but it works for me after a few sessions, no bugs have been noticed so far.
 
 ---
 
