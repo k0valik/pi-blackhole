@@ -326,6 +326,10 @@ Results are shown as a collapsible message and auto-fed to the agent as context.
 ## Install
 
 ```bash
+# From npm (recommended)
+pi install npm:pi-blackhole
+
+# Or directly from GitHub
 pi install git:github.com/k0valik/pi-blackhole
 ```
 
@@ -337,6 +341,14 @@ pi uninstall https://github.com/elpapi42/pi-observational-memory
 ```
 
 Then `/reload` or restart Pi.
+
+### Standalone install (without Pi)
+
+```bash
+npm install pi-blackhole
+# or
+pnpm add pi-blackhole
+```
 
 ## Uninstall
 
