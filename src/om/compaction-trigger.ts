@@ -37,10 +37,11 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		const tokens = rawTokensSinceLastCompaction(entries);
 		if (tokens < runtime.config.compactAfterTokens) return;
 
-		// Capture ctx properties synchronously — the setTimeout + async work below
+		// Capture ctx properties synchronously — the deferred callback below
 		// may outlive the extension ctx (stale after session replacement/reload).
 		const hasUI = ctx.hasUI;
 		const ui = ctx.ui;
+		const sessionId = ctx.sessionManager.getSessionId();
 
 		if (hasUI) ui?.notify(
 			`Observational memory: compaction threshold reached (~${tokens.toLocaleString()} tokens); triggering compaction`,
@@ -48,8 +49,19 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		);
 
 		runtime.compactInFlight = true;
-		setTimeout(() => {
+		queueMicrotask(() => {
 			try {
+				// Validate session identity — bail if the session was replaced/reloaded.
+				const currentSessionId = ctx.sessionManager.getSessionId();
+				if (currentSessionId !== sessionId) {
+					runtime.compactInFlight = false;
+					if (hasUI) ui?.notify(
+						"Observational memory: compaction cancelled — session changed before compaction",
+						"info",
+					);
+					return;
+				}
+
 				if (!ctx.isIdle()) {
 					runtime.compactInFlight = false;
 					if (hasUI) ui?.notify(
@@ -87,6 +99,6 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 				const msg = error instanceof Error ? error.message : String(error);
 				if (hasUI) ui?.notify(`Observational memory: compact threw: ${msg}`, "error");
 			}
-		}, 0);
+		});
 	});
 }

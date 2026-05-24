@@ -11,30 +11,19 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { writeFileSync } from "fs";
 import { compile } from "../core/summarize";
-import { loadSettings, type PiVccSettings } from "../core/settings";
 import type { PiVccCompactionDetails } from "../details";
 import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
-export interface CompactionStats {
-  summarized: number;
-  kept: number;
-  keptTokensEst: number;
-}
-
-let lastStats: CompactionStats | null = null;
-let lastCompactWasPiVcc = false;
-export const getLastCompactionStats = () => lastStats;
-
 const formatTokens = (n: number): string => {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
 };
 
-const dbg = (settings: PiVccSettings, data: Record<string, unknown>) => {
-  if (!settings.debug) return;
+const dbg = (debug: boolean, data: Record<string, unknown>) => {
+  if (!debug) return;
   try { writeFileSync("/tmp/pi-blackhole-debug.json", JSON.stringify(data, null, 2)); } catch {}
 };
 
@@ -151,16 +140,15 @@ const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
   pi.on("session_before_compact", (event, ctx) => {
     const { preparation, branchEntries, customInstructions } = event;
-    const settings = loadSettings();
+    omRuntime.ensureConfig(ctx.cwd ?? process.cwd());
 
     // Always handle explicit /blackhole marker.
     // Otherwise, only handle when user opted in via settings.
     const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
-    if (!isPiVcc && !settings.overrideDefaultCompaction) return;
+    if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) return;
 
     // When noAutoCompact is active, only /blackhole can trigger compaction
-    const unifiedSettings = omRuntime.config;
-    if (unifiedSettings.noAutoCompact && !isPiVcc) {
+    if (omRuntime.config.noAutoCompact && !isPiVcc) {
       return { cancel: true };
     }
 
@@ -192,7 +180,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       }
       const userIndices = liveRoles.reduce<number[]>((acc, r, i) => (r === "user" ? (acc.push(i), acc) : acc), []);
 
-      dbg(settings, {
+      dbg(omRuntime.config.debug, {
         cancelled: true,
         reason: ownCut.reason,
         isPiVcc,
@@ -250,13 +238,11 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       }, 0);
       return sum;
     }, 0);
-    lastStats = {
+    omRuntime.compactionStats = {
       summarized: agentMessages.length,
       kept: keptEntries.length,
       keptTokensEst: Math.round(keptChars / 4),
     };
-
-    const config = settings;
 
     const summary = compile({
       messages,
@@ -278,7 +264,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         }))
       : [];
 
-    dbg(config, {
+    dbg(omRuntime.config.debug, {
       usedOwnCut: true,
       messagesToSummarize: agentMessages.length,
       messagesPreviewHead: agentMessages.slice(0, 3).map((m: any) => ({ role: m.role, preview: previewContent(m.content) })),
@@ -300,10 +286,9 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       previousSummaryUsed: Boolean(preparation.previousSummary),
     };
 
-    lastCompactWasPiVcc = isPiVcc;
+    omRuntime.compactWasPiVcc = isPiVcc;
 
     // ── Inject observational-memory content ───────────────────────────
-    omRuntime.ensureConfig(ctx.cwd ?? process.cwd());
     let omContent = "";
     let omDetails: Record<string, unknown> | undefined;
     if (omRuntime.config.memory !== false) {
@@ -330,8 +315,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
   // /blackhole path uses its own onComplete callback in the command handler.
   pi.on("session_compact", (event, ctx) => {
     if (!event.fromExtension) return;
-    if (lastCompactWasPiVcc) return; // /blackhole handles its own toast via onComplete
-    const stats = lastStats;
+    if (omRuntime.compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
+    const stats = omRuntime.compactionStats;
     if (!stats) return;
     setTimeout(() => {
       try {

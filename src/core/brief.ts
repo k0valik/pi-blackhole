@@ -19,8 +19,26 @@ const isNoiseUser = (text: string): boolean => {
 
 // ── truncation ──
 
-// Unicode-aware word segmentation via Intl.Segmenter (built-in, zero dependency)
-const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+// Unicode-aware word segmentation via Intl.Segmenter with lazy init & fallback
+let _segmenter: Intl.Segmenter | null = null;
+const wordSegments = (text: string): Array<{ segment: string; index: number; isWordLike?: boolean }> => {
+  if (_segmenter) return Array.from(_segmenter.segment(text));
+  try {
+    _segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+    return Array.from(_segmenter.segment(text));
+  } catch {
+    // Fallback for older Node.js (pre-ES2023): whitespace-split
+    _segmenter = null as unknown as Intl.Segmenter; // flag: fallback active
+    const parts: Array<{ segment: string; index: number; isWordLike?: boolean }> = [];
+    let idx = 0;
+    for (const part of text.split(/(\s+)/)) {
+      if (!part) continue;
+      parts.push({ segment: part, index: idx, isWordLike: /\S/.test(part) });
+      idx += part.length;
+    }
+    return parts;
+  }
+};
 
 /** Check if segment is a word (Bun's isWordLike is unreliable for alphanumeric tokens) */
 const isWord = (seg: { segment: string; isWordLike?: boolean }): boolean =>
@@ -47,7 +65,7 @@ const truncateTokens = (text: string, limit: number): string => {
   const flat = text.replace(/\s+/g, " ").trim();
   let count = 0;
   let lastEnd = 0;
-  for (const seg of segmenter.segment(flat)) {
+  for (const seg of wordSegments(flat)) {
     if (isWord(seg)) {
       if (!STOP_WORDS.has(seg.segment.toLowerCase())) {
         count++;

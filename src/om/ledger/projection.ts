@@ -157,7 +157,10 @@ export function fullProjection(entries: Entry[], upToEntryId?: string): Projecti
 export function visibleProjection(entries: Entry[], upToEntryId?: string): Projection {
 	if (!upToEntryId) {
 		const details = latestV3CompactionDetails(entries);
-		return details ? projectionFromMemoryDetails(details) : { observations: [], reflections: [] };
+		if (details) return projectionFromMemoryDetails(details);
+		// No compaction has run yet — show everything so the user sees
+		// recorded data until first /blackhole creates a proper snapshot.
+		return fullProjection(entries);
 	}
 
 	return buildCompactionProjection(entries, upToEntryId, { observationsPoolMaxTokens: Number.POSITIVE_INFINITY });

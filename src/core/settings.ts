@@ -13,11 +13,6 @@ export interface PiVccSettings {
 	debug: boolean;
 }
 
-export const DEFAULT_SETTINGS: PiVccSettings = {
-	overrideDefaultCompaction: false,
-	debug: false,
-};
-
 export function loadSettings(): PiVccSettings {
 	const config = loadUnifiedConfig(process.cwd());
 	return {
@@ -30,5 +25,4 @@ export function scaffoldSettings(): void {
 	scaffoldConfig();
 }
 
-// For compatibility with code that imports saveSettings
-export { loadUnifiedConfig as loadConfig } from "./unified-config.js";
+
