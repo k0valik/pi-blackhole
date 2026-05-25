@@ -390,8 +390,12 @@ async function runReflectorStage(
 			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
 			const refIdx = entryIndexForId(entries, pending.reflection.coversUpToId);
 			if (obsIdx >= 0 && refIdx >= 0 && obsIdx <= refIdx) return { outcome: "continue", sameRunReflections: [] };
-			reflectionTokens = rawTokensAfterIndex(entries, refIdx);
-			if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
+			if (refIdx >= 0) {
+				reflectionTokens = rawTokensAfterIndex(entries, refIdx);
+				if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
+			} else {
+				reflectionTokens = rawTokensSinceObservationCoverage(entries);
+			}
 		} else {
 			reflectionTokens = rawTokensSinceObservationCoverage(entries);
 		}
@@ -567,7 +571,9 @@ async function runDropperStage(
 				maxTurns: runtime.config.agentMaxTurns,
 				thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
 			});
-			const latestReflectionCoverageId = latestCoverageMarkerId(entries, OM_REFLECTIONS_RECORDED);
+			const latestReflectionCoverageId = runtime.config.noAutoCompact
+				? pending?.reflection?.coversUpToId
+				: latestCoverageMarkerId(entries, OM_REFLECTIONS_RECORDED);
 			const effectiveReflectionCoverageId = sameRunReflectionCoverageId ?? latestReflectionCoverageId;
 			const coversUpToId = earlierCoverageMarkerId(entries, observationCoverageId, effectiveReflectionCoverageId);
 			const data = coversUpToId && droppedIds ? buildObservationsDroppedData(droppedIds, coversUpToId) : undefined;
