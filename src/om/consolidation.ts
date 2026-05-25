@@ -379,11 +379,28 @@ async function runReflectorStage(
 ): Promise<ReflectorStageResult> {
 	const sessionId = ctx.sessionManager.getSessionId();
 	const entries = ctx.sessionManager.getBranch() as Entry[];
-	const reflectionTokens = rawTokensSinceReflectionCoverage(entries);
-	if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
-
-	const observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
-	if (!observationCoverageId) return { outcome: "continue", sameRunReflections: [] };
+	let reflectionTokens: number;
+	let observationCoverageId: string | undefined;
+	if (runtime.config.noAutoCompact) {
+		const pending = readPendingState(sessionId);
+		const pendingObs = (pending.observation?.data as any)?.observations;
+		if (!pendingObs?.length) return { outcome: "continue", sameRunReflections: [] };
+		observationCoverageId = pending.observation?.coversUpToId;
+		if (pending.reflection?.coversUpToId) {
+			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
+			const refIdx = entryIndexForId(entries, pending.reflection.coversUpToId);
+			if (obsIdx >= 0 && refIdx >= 0 && obsIdx <= refIdx) return { outcome: "continue", sameRunReflections: [] };
+			reflectionTokens = rawTokensAfterIndex(entries, refIdx);
+			if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
+		} else {
+			reflectionTokens = rawTokensSinceObservationCoverage(entries);
+		}
+	} else {
+		reflectionTokens = rawTokensSinceReflectionCoverage(entries);
+		if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
+		observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
+		if (!observationCoverageId) return { outcome: "continue", sameRunReflections: [] };
+	}
 
 	for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
 		const resolved = await resolveModel("reflector");
@@ -391,12 +408,13 @@ async function runReflectorStage(
 
 		// Compute ahead for an accurate notification
 		const folded = foldLedger(entries);
-		const lastReflectionIdx = latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
-		const newObservations = observationsCreatedAfterIndex(entries, lastReflectionIdx);
-		const newReflections = reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
+		const pending = runtime.config.noAutoCompact ? readPendingState(sessionId) : undefined;
+		const lastReflectionIdx = pending ? -1 : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
+		const newObservations = pending ? ((pending.observation?.data as any)?.observations ?? []) : observationsCreatedAfterIndex(entries, lastReflectionIdx);
+		const newReflections = pending ? ((pending.reflection?.data as any)?.reflections ?? []) : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
 		const newItemsTokens = Math.ceil(
-			(newObservations.reduce((s, o) => s + o.content.length, 0) +
-				newReflections.reduce((s, r) => s + r.content.length, 0)) / 4
+			(newObservations.reduce((s: number, o: any) => s + o.content.length, 0) +
+				newReflections.reduce((s: number, r: any) => s + r.content.length, 0)) / 4
 		);
 		const summaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
 		const reflectorInputTokens = Math.min(newItemsTokens + summaryBudget, runtime.config.reflectorInputMaxTokens);
@@ -420,7 +438,7 @@ async function runReflectorStage(
 				Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
 			);
 			const existingObservationsSummary = buildExistingObservationsSummary(
-				folded.activeObservations.filter(o => !newObservations.some(no => no.id === o.id)),
+				folded.activeObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
 				Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
 			);
 
@@ -437,6 +455,7 @@ async function runReflectorStage(
 			});
 
 			if (!reflections || reflections.length === 0) return { outcome: "continue", sameRunReflections: [] };
+			if (!observationCoverageId) return { outcome: "continue", sameRunReflections: [] };
 
 			const data = buildReflectionsRecordedData(reflections, observationCoverageId);
 			if (!data) return { outcome: "continue", sameRunReflections: [] };
@@ -474,11 +493,30 @@ async function runDropperStage(
 ): Promise<StageOutcome> {
 	const sessionId = ctx.sessionManager.getSessionId();
 	const entries = ctx.sessionManager.getBranch() as Entry[];
-	const dropTokens = rawTokensSinceDropCoverage(entries);
-	if (dropTokens < runtime.config.reflectAfterTokens) return "continue";
-
-	const observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
-	if (!observationCoverageId) return "continue";
+	let dropTokens: number;
+	let observationCoverageId: string | undefined;
+	if (runtime.config.noAutoCompact) {
+		const pending = readPendingState(sessionId);
+		const pendingObs = (pending.observation?.data as any)?.observations;
+		if (!pendingObs?.length) return "continue";
+		observationCoverageId = pending.observation?.coversUpToId;
+		if (pending.dropped?.coversUpToId) {
+			const dropIdx = entryIndexForId(entries, pending.dropped.coversUpToId);
+			if (dropIdx >= 0) {
+				dropTokens = rawTokensAfterIndex(entries, dropIdx);
+				if (dropTokens < runtime.config.reflectAfterTokens) return "continue";
+			} else {
+				dropTokens = rawTokensSinceDropCoverage(entries);
+			}
+		} else {
+			dropTokens = rawTokensSinceDropCoverage(entries);
+		}
+	} else {
+		dropTokens = rawTokensSinceDropCoverage(entries);
+		if (dropTokens < runtime.config.reflectAfterTokens) return "continue";
+		observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
+		if (!observationCoverageId) return "continue";
+	}
 
 	for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
 		const resolved = await resolveModel("dropper");
@@ -486,10 +524,11 @@ async function runDropperStage(
 
 		// Compute ahead for an accurate notification
 		const folded = foldLedger(entries);
-		const lastDropIdx = latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED);
-		const newObservations = observationsCreatedAfterIndex(entries, lastDropIdx);
+		const pending = runtime.config.noAutoCompact ? readPendingState(sessionId) : undefined;
+		const lastDropIdx = pending ? -1 : latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED);
+		const newObservations = pending ? ((pending.observation?.data as any)?.observations ?? []) : observationsCreatedAfterIndex(entries, lastDropIdx);
 		const dropperNewObsTokens = Math.ceil(
-			newObservations.reduce((s, o) => s + o.content.length, 0) / 4
+			newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4
 		);
 		const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
 		const dropperInputTokens = Math.min(dropperNewObsTokens + dropperSummaryBudget, runtime.config.dropperInputMaxTokens);
@@ -507,7 +546,7 @@ async function runDropperStage(
 		try {
 			// Existing active observations summary for context (capped)
 			const existingObservationsSummary = buildExistingObservationsSummary(
-				folded.activeObservations.filter(o => !newObservations.some(no => no.id === o.id)),
+				folded.activeObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
 				Math.floor(runtime.config.dropperInputMaxTokens * 0.2),
 			);
 			const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections);
