@@ -142,38 +142,63 @@ function scoreObservation(obs: Observation, index: number, total: number): numbe
  *
  *  Reflections are never trimmed — they are inherently rare and always stay. */
 function selectPriorObservations(observations: Observation[], maxTokens: number): Observation[] {
-	const high: Observation[] = [];
-	const rest: Observation[] = [];
-	for (const obs of observations) {
-		if (obs.relevance === "high" || obs.relevance === "critical") {
-			high.push(obs);
-		} else {
-			rest.push(obs);
-		}
-	}
+	// Track original indices so we can restore chronological order after scoring
+	const indexed = observations.map((obs, i) => ({ obs, originalIndex: i }));
+	const high = indexed.filter(item => item.obs.relevance === "high" || item.obs.relevance === "critical");
+	const rest = indexed.filter(item => item.obs.relevance !== "high" && item.obs.relevance !== "critical");
 
 	// High always kept — consume budget first
 	let budget = maxTokens;
-	const kept: Observation[] = [];
-	for (const obs of high) {
-		const lineTokens = Math.ceil(observationToSummaryLine(obs).length / 4);
-		kept.push(obs);
+	const selected = new Set<{ obs: Observation; originalIndex: number }>();
+	for (const item of high) {
+		const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
+		selected.add(item);
 		budget -= lineTokens;
 	}
 
 	// Score medium + low and select best within remaining budget
 	if (rest.length > 0 && budget > 0) {
-		const scored = rest.map((obs, i) => ({ obs, score: scoreObservation(obs, i, rest.length) }));
+		const scored = rest.map((item, i) => ({ item, score: scoreObservation(item.obs, i, rest.length) }));
 		scored.sort((a, b) => b.score - a.score); // highest score first
-		for (const { obs } of scored) {
-			const lineTokens = Math.ceil(observationToSummaryLine(obs).length / 4);
+		for (const { item } of scored) {
+			const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
 			if (budget - lineTokens < 0) break;
-			kept.push(obs);
+			selected.add(item);
 			budget -= lineTokens;
 		}
 	}
 
-	return kept;
+	// Restore original chronological order before returning
+	return Array.from(selected)
+		.sort((a, b) => a.originalIndex - b.originalIndex)
+		.map(item => item.obs);
+}
+
+/**
+ * Extract all pending observations from accumulated batches that were recorded
+ * after a given coverage ID (e.g., the last reflection or drop coverage ID).
+ * This is needed in noAutoCompact mode because the reflector/dropper may skip
+ * a pipeline cycle, leaving unprocessed batches in observationBatches that
+ * should still be served as "new" on subsequent runs.
+ */
+function pendingObservationsCreatedAfter(
+	pending: any,
+	entries: Entry[],
+	afterCoversUpToId: string | undefined,
+): Observation[] {
+	const batches = pending.observationBatches ?? [];
+	if (!afterCoversUpToId || entryIndexForId(entries, afterCoversUpToId) < 0) {
+		return batches.flatMap((b: any) => (b.data as any)?.observations ?? []);
+	}
+	const afterIdx = entryIndexForId(entries, afterCoversUpToId);
+	const newObs: Observation[] = [];
+	for (const batch of batches) {
+		const batchIdx = entryIndexForId(entries, batch.coversUpToId);
+		if (batchIdx >= 0 && batchIdx > afterIdx) {
+			newObs.push(...((batch.data as any)?.observations ?? []));
+		}
+	}
+	return newObs;
 }
 
 function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
@@ -463,8 +488,9 @@ async function runReflectorStage(
 	let observationCoverageId: string | undefined;
 	if (runtime.config.noAutoCompact) {
 		const pending = readPendingState(sessionId);
-		const pendingObs = (pending.observation?.data as any)?.observations;
-		if (!pendingObs?.length) return { outcome: "continue", sameRunReflections: [] };
+		// Check any accumulated batch for unprocessed observations, not just the latest
+		const hasPendingObs = (pending.observationBatches ?? []).some((b: any) => (b.data as any)?.observations?.length);
+		if (!hasPendingObs) return { outcome: "continue", sameRunReflections: [] };
 		observationCoverageId = pending.observation?.coversUpToId;
 		if (pending.reflection?.coversUpToId) {
 			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
@@ -494,7 +520,9 @@ async function runReflectorStage(
 		const folded = foldLedger(entries);
 		const pending = runtime.config.noAutoCompact ? readPendingState(sessionId) : undefined;
 		const lastReflectionIdx = pending ? -1 : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
-		const newObservations = pending ? ((pending.observation?.data as any)?.observations ?? []) : observationsCreatedAfterIndex(entries, lastReflectionIdx);
+		const newObservations = pending
+			? pendingObservationsCreatedAfter(pending, entries, pending.reflection?.coversUpToId)
+			: observationsCreatedAfterIndex(entries, lastReflectionIdx);
 		const newReflections = pending ? [] : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
 		const newItemsTokens = Math.ceil(
 			(newObservations.reduce((s: number, o: any) => s + o.content.length, 0) +
@@ -589,8 +617,9 @@ async function runDropperStage(
 	let observationCoverageId: string | undefined;
 	if (runtime.config.noAutoCompact) {
 		const pending = readPendingState(sessionId);
-		const pendingObs = (pending.observation?.data as any)?.observations;
-		if (!pendingObs?.length) return "continue";
+		// Check any accumulated batch for unprocessed observations, not just the latest
+		const hasPendingObs = (pending.observationBatches ?? []).some((b: any) => (b.data as any)?.observations?.length);
+		if (!hasPendingObs) return "continue";
 		observationCoverageId = pending.observation?.coversUpToId;
 		if (pending.dropped?.coversUpToId) {
 			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
@@ -620,7 +649,9 @@ async function runDropperStage(
 		const folded = foldLedger(entries);
 		const pending = runtime.config.noAutoCompact ? readPendingState(sessionId) : undefined;
 		const lastDropIdx = pending ? -1 : latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED);
-		const newObservations = pending ? ((pending.observation?.data as any)?.observations ?? []) : observationsCreatedAfterIndex(entries, lastDropIdx);
+		const newObservations = pending
+			? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
+			: observationsCreatedAfterIndex(entries, lastDropIdx);
 		const dropperNewObsTokens = Math.ceil(
 			newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4
 		);
