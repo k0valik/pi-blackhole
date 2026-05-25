@@ -272,12 +272,32 @@ async function runObserverStage(
 	if (!chunk.trim() || sourceEntryIds.length === 0) return "continue";
 	const chunkTokens = Math.ceil(chunk.length / 4);
 
+	const sessionId = ctx.sessionManager.getSessionId();
+
 	const memory = fullProjection(entries);
-	const priorReflections = memory.reflections.map(reflectionToSummaryLine);
-	const priorObservations = memory.observations.map(observationToSummaryLine);
+	let priorReflections = memory.reflections.map(reflectionToSummaryLine);
+	let priorObservations = memory.observations.map(observationToSummaryLine);
+
+	// In noAutoCompact, append accumulated batch history to whatever
+	// fullProjection found in the branch (preserving pre-switch markers
+	// when transitioning from autoCompact to noAutoCompact mid-session).
+	if (runtime.config.noAutoCompact) {
+		const pendingCtx = readPendingState(sessionId);
+		const accumulatedReflections = (pendingCtx.reflectionBatches ?? [])
+			.flatMap(b => (b.data as any).reflections ?? []);
+		const accumulatedObservations = (pendingCtx.observationBatches ?? [])
+			.flatMap(b => (b.data as any).observations ?? []);
+		priorReflections = [
+			...priorReflections,
+			...accumulatedReflections.map(reflectionToSummaryLine),
+		];
+		priorObservations = [
+			...priorObservations,
+			...accumulatedObservations.map(observationToSummaryLine),
+		];
+	}
 
 	// If noAutoCompact: skip if this exact chunk was already processed
-	const sessionId = ctx.sessionManager.getSessionId();
 	if (runtime.config.noAutoCompact && isObservationChunkPending(sessionId, coversUpToId)) {
 		debugLog("observer.pending_skip", { coversUpToId, sessionId });
 		return "continue";
@@ -436,13 +456,21 @@ async function runReflectorStage(
 		// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
 		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "reflector"), stageFallbacks: stageFallbackModels(runtime, "reflector") });
 		try {
-			// Existing memory summaries for context (capped)
+			// Existing memory summaries for context (capped).
+			// In noAutoCompact, merge accumulated pending batches with
+			// branch data (preserving pre-switch markers).
+			const sourceReflections = pending
+				? [...folded.reflections, ...(pending.reflectionBatches ?? []).flatMap((b: any) => (b.data as any)?.reflections ?? [])]
+				: folded.reflections;
+			const sourceObservations = pending
+				? [...folded.activeObservations, ...(pending.observationBatches ?? []).flatMap((b: any) => (b.data as any)?.observations ?? [])]
+				: folded.activeObservations;
 			const existingReflectionsSummary = buildExistingReflectionsSummary(
-				folded.reflections,
+				sourceReflections,
 				Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
 			);
 			const existingObservationsSummary = buildExistingObservationsSummary(
-				folded.activeObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
+				sourceObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
 				Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
 			);
 
@@ -550,12 +578,22 @@ async function runDropperStage(
 		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: dropper running (~${effectiveDropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`, "info");
 
 		try {
-			// Existing active observations summary for context (capped)
+			// Existing active observations summary for context (capped).
+			// In noAutoCompact, merge accumulated pending batches with
+			// branch data (preserving pre-switch markers).
+			const sourceObsForDropper = pending
+				? [...folded.activeObservations, ...(pending.observationBatches ?? []).flatMap((b: any) => (b.data as any)?.observations ?? [])]
+				: folded.activeObservations;
 			const existingObservationsSummary = buildExistingObservationsSummary(
-				folded.activeObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
+				sourceObsForDropper.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
 				Math.floor(runtime.config.dropperInputMaxTokens * 0.2),
 			);
-			const pendingReflections = pending ? ((pending.reflection?.data as any)?.reflections ?? []) : folded.reflections;
+			// In noAutoCompact, merge accumulated reflection batches with
+			// branch data (preserving pre-switch markers), matching the
+			// dropper's full autoCompact context.
+			const pendingReflections = pending
+				? [...folded.reflections, ...(pending.reflectionBatches ?? []).flatMap((b: any) => (b.data as any)?.reflections ?? [])]
+				: folded.reflections;
 			const reflectionsForDropper = mergeReflections(pendingReflections, sameRunReflections);
 
 			// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
