@@ -93,6 +93,7 @@
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000,
   "observerChunkMaxTokens": 40000,
+  "observerPreambleMaxTokens": 0,
   "agentMaxTurns": 16,
 
   "passive": false,
@@ -110,6 +111,16 @@
     "After all candidates exhausted, the stage aborts. 30s retry gate prevents spam.",
     "Cooldowns persist in ~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json (survives pi restarts).",
     "Valid thinking values: off, minimal, low, medium, high, xhigh.",
-    "Env override for passive mode: PI_BLACKHOLE_PASSIVE=true."
+    "Env override for passive mode: PI_BLACKHOLE_PASSIVE=true.",
+    "",
+    "noAutoCompact mode accumulates observationBatches/reflectionBatches in",
+    "pending.json across pipeline runs. The observer preamble (CURRENT OBSERVATIONS)",
+    "is capped to observerPreambleMaxTokens (default 0 = auto 30% of observerChunkMaxTokens).",
+    "This is a soft safety valve — it only trims when accumulated observations exceed",
+    "the budget. High-relevance observations are always kept. Reflections are never trimmed.",
+    "",
+    "agentMaxTurns controls how many agent-loop turns each worker gets per chunk.",
+    "Lower-context models can reduce this (e.g., 8) so the observer doesn't waste",
+    "turns trying to extract more than it can reliably handle per run."
   ]
 }

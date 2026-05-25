@@ -124,6 +124,18 @@ The maximum chunk of conversation history sent to the observer model in a single
 
 Increase this if you have a model with very large context and want the observer to see more history per run. Decrease it if you're hitting token limits on your observer model.
 
+### `observerPreambleMaxTokens`
+
+**Default:** `0` (auto-compute 30% of `observerChunkMaxTokens`)
+
+Only applies in `noAutoCompact` mode. This is a **soft safety valve** — it caps the `CURRENT OBSERVATIONS` preamble in the observer prompt, preventing unbounded growth from accumulated pending batches. It only trims when accumulated observations exceed the budget; below that threshold everything passes through. High-relevance observations are always kept regardless of budget. Reflections are never trimmed.
+
+Medium and low observations are scored by relevance tier + relative recency (array position, not wall-clock time), with the best-scoring kept first.
+
+When `0` (default), the budget is auto-computed as 30% of `observerChunkMaxTokens`. The preamble and the chunk are added together in the total prompt — the preamble provides prior context so the observer avoids duplicating existing facts, but the conversation chunk being analyzed always takes priority and is capped separately by `observerChunkMaxTokens`. Set to an explicit value to override (e.g., `8000` for a tighter or larger budget).
+
+See also: `agentMaxTurns` controls how many extraction turns the observer gets per chunk — useful for tuning on smaller context models.
+
 ### `reflectorInputMaxTokens`
 
 **Default:** `80000`
@@ -164,6 +176,8 @@ When `true`, the blackhole compaction pipeline (algorithmic summary + observatio
 
 When `true`, observations and reflections are saved to disk (`~/.pi/agent/pi-blackhole/<sessionId>-pending.json`) instead of being appended to the conversation as markers. Auto-compaction on `agent_end` is disabled.
 
+Each pipeline run appends its output to `pending.json`'s accumulated batch arrays (`observationBatches`/`reflectionBatches`), so the observer, reflector, and dropper always see the full historical context — matching autoCompact behavior without writing markers to the visible branch. The observer's preamble (`CURRENT OBSERVATIONS`) is automatically capped via `observerPreambleMaxTokens` to prevent unbounded prompt growth; high-relevance observations are always kept.
+
 Run `/blackhole` manually to flush pending entries to the branch and compact. The `/memory` command shows pending counts when data is waiting.
 
 Use this if you don't want OM markers cluttering your conversation and prefer to compact on your own schedule.
@@ -201,6 +215,8 @@ When `true`, writes a continuous debug log (JSONL format) to `~/.pi/agent/pi-bla
 **Default:** `16`
 
 The maximum number of agent-loop turns for each background worker. Workers use an agent loop (tool calls, model responses) to perform their task. Higher values allow more complex extraction but cost more and take longer. Lower values cap cost but may result in incomplete work.
+
+For lower-context or less capable models, reducing this (e.g., `8`) prevents the observer from wasting turns trying to extract more observations than it can reliably handle per run. Each turn can submit a batch of observations via `record_observations`.
 
 ---
 
@@ -259,8 +275,10 @@ The maximum number of agent-loop turns for each background worker. Workers use a
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000,
   "observerChunkMaxTokens": 40000,
+  "observerPreambleMaxTokens": 0,
   "agentMaxTurns": 16,
 
+  "noAutoCompact": false,
   "passive": false,
   "debugLog": false
 }

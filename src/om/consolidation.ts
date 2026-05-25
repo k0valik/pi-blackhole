@@ -50,6 +50,7 @@ import {
 	reflectionToSummaryLine,
 	reflectionsCreatedAfterIndex,
 	type Entry,
+	type Observation,
 	type Reflection,
 } from "./ledger/index.js";
 
@@ -122,6 +123,57 @@ function mergeReflections(existing: Reflection[], additional: Reflection[]): Ref
 		merged.push(reflection);
 	}
 	return merged;
+}
+
+/** Score an observation for preamble cap selection.
+ *  Relevance tier dominates: medium (5+) always outranks low (max 2).
+ *  Recency is based on position in the flat-mapped array (0 = oldest, N-1 = newest),
+ *  avoiding wall-clock dependency that punishes sessions spanning days or weeks. */
+function scoreObservation(obs: Observation, index: number, total: number): number {
+	const base = obs.relevance === "high" || obs.relevance === "critical" ? 10
+		: obs.relevance === "medium" ? 5 : 1;
+	const recency = total > 1 ? index / (total - 1) : 1;
+	return base + recency;
+}
+
+/** Select observations for the observer preamble, keeping all high-relevance items
+ *  unconditionally and filling the remaining token budget with the best-scoring
+ *  medium and low observations (relevance-tiered + recency).
+ *
+ *  Reflections are never trimmed — they are inherently rare and always stay. */
+function selectPriorObservations(observations: Observation[], maxTokens: number): Observation[] {
+	const high: Observation[] = [];
+	const rest: Observation[] = [];
+	for (const obs of observations) {
+		if (obs.relevance === "high" || obs.relevance === "critical") {
+			high.push(obs);
+		} else {
+			rest.push(obs);
+		}
+	}
+
+	// High always kept — consume budget first
+	let budget = maxTokens;
+	const kept: Observation[] = [];
+	for (const obs of high) {
+		const lineTokens = Math.ceil(observationToSummaryLine(obs).length / 4);
+		kept.push(obs);
+		budget -= lineTokens;
+	}
+
+	// Score medium + low and select best within remaining budget
+	if (rest.length > 0 && budget > 0) {
+		const scored = rest.map((obs, i) => ({ obs, score: scoreObservation(obs, i, rest.length) }));
+		scored.sort((a, b) => b.score - a.score); // highest score first
+		for (const { obs } of scored) {
+			const lineTokens = Math.ceil(observationToSummaryLine(obs).length / 4);
+			if (budget - lineTokens < 0) break;
+			kept.push(obs);
+			budget -= lineTokens;
+		}
+	}
+
+	return kept;
 }
 
 function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
@@ -281,19 +333,27 @@ async function runObserverStage(
 	// In noAutoCompact, append accumulated batch history to whatever
 	// fullProjection found in the branch (preserving pre-switch markers
 	// when transitioning from autoCompact to noAutoCompact mid-session).
+	// The preamble is capped via observerPreambleMaxTokens so accumulated
+	// observations don't grow unbounded across turns.
 	if (runtime.config.noAutoCompact) {
 		const pendingCtx = readPendingState(sessionId);
 		const accumulatedReflections = (pendingCtx.reflectionBatches ?? [])
 			.flatMap(b => (b.data as any).reflections ?? []);
 		const accumulatedObservations = (pendingCtx.observationBatches ?? [])
 			.flatMap(b => (b.data as any).observations ?? []);
+
+		// Capped preamble: high always kept, medium/low scored by relevance + recency
+		const preambleMaxTokens = runtime.config.observerPreambleMaxTokens > 0
+			? runtime.config.observerPreambleMaxTokens
+			: Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+		const allObservations = [...memory.observations, ...accumulatedObservations];
+		priorObservations = selectPriorObservations(allObservations, preambleMaxTokens)
+			.map(observationToSummaryLine);
+
+		// Reflections are never trimmed — rare and always kept
 		priorReflections = [
 			...priorReflections,
 			...accumulatedReflections.map(reflectionToSummaryLine),
-		];
-		priorObservations = [
-			...priorObservations,
-			...accumulatedObservations.map(observationToSummaryLine),
 		];
 	}
 

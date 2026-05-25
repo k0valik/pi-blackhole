@@ -131,6 +131,7 @@ The tradeoff is simplicity vs cleanliness:
 |---|---|---|
 | Workers run? | Yes | Yes |
 | Observations go to | Conversation markers (invisible in TUI) | Disk (`pending.json`) |
+| Observations accumulate across runs | Branch markers (replaced each cycle) | Pending batches — `/memory` shows pending counts |
 | Auto-compact on `agent_end` | Yes | No |
 | `/blackhole` | Optional — use it whenever you want | Required to flush + compact |
 | Conversation history | OM marker entries between turns (they exist but do not clutter the display) | Clean — nothing between turns |
@@ -198,6 +199,7 @@ Quick start with custom models:
 | `reflectAfterTokens` | `20000` | Token cadence for reflector and dropper |
 | `compactAfterTokens` | `81000` | Auto-compaction threshold |
 | `observerChunkMaxTokens` | `40000` | Max observer input per run (newest-first) |
+| `observerPreambleMaxTokens` | `0` (auto) | Max preamble tokens in observer prompt for `noAutoCompact` mode (auto = 30% of chunk) |
 | `observationsPoolMaxTokens` | `20000` | Max active observation pool before dropper prunes |
 | `reflectorInputMaxTokens` | `80000` | Max reflector input budget |
 | `dropperInputMaxTokens` | `80000` | Max dropper input budget |
@@ -220,6 +222,7 @@ Paste the appropriate block into your config to match your model's context size.
   "reflectAfterTokens": 10000,
   "compactAfterTokens": 30000,
   "observerChunkMaxTokens": 15000,
+  "observerPreambleMaxTokens": 0,
   "observationsPoolMaxTokens": 8000,
   "reflectorInputMaxTokens": 30000,
   "dropperInputMaxTokens": 30000
@@ -236,6 +239,7 @@ Our built-in defaults already target this tier. If you reset your config, these 
   "reflectAfterTokens": 20000,
   "compactAfterTokens": 81000,
   "observerChunkMaxTokens": 40000,
+  "observerPreambleMaxTokens": 0,
   "observationsPoolMaxTokens": 20000,
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000
@@ -250,6 +254,7 @@ Our built-in defaults already target this tier. If you reset your config, these 
   "reflectAfterTokens": 40000,
   "compactAfterTokens": 180000,
   "observerChunkMaxTokens": 80000,
+  "observerPreambleMaxTokens": 0,
   "observationsPoolMaxTokens": 40000,
   "reflectorInputMaxTokens": 160000,
   "dropperInputMaxTokens": 160000

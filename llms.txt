@@ -353,7 +353,8 @@ From `DEFAULTS` in `unified-config.ts`:
 | `reflectorInputMaxTokens` | 80,000 | Max reflector prompt budget |
 | `dropperInputMaxTokens` | 80,000 | Max dropper prompt budget |
 | `observerChunkMaxTokens` | 40,000 | Max observer chunk size (newest-first) |
-| `agentMaxTurns` | 16 | Max agent-loop turns per worker |
+| `observerPreambleMaxTokens` | 0 (auto) | Soft safety valve: caps `noAutoCompact` observer preamble (30% of chunk). Only trims when exceeded; high-relevance observations always kept. |
+| `agentMaxTurns` | 16 | Max agent-loop turns per worker. Lower for small models (e.g., 8) to prevent wasteful extraction turns. |
 
 Scaling formula for custom context sizes:
 
@@ -362,6 +363,7 @@ compactAfterTokens:        model_context * 0.65
 observeAfterTokens:        compactAfterTokens / 8
 reflectAfterTokens:        compactAfterTokens / 4
 observerChunkMaxTokens:    compactAfterTokens / 2
+observerPreambleMaxTokens:  0 (auto-compute 30% of observerChunkMaxTokens)
 observationsPoolMaxTokens: compactAfterTokens / 4
 reflectorInputMaxTokens:   compactAfterTokens * 1.0
 dropperInputMaxTokens:     compactAfterTokens * 1.0
