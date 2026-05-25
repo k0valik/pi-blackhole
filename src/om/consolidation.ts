@@ -435,7 +435,7 @@ async function runReflectorStage(
 		const pending = runtime.config.noAutoCompact ? readPendingState(sessionId) : undefined;
 		const lastReflectionIdx = pending ? -1 : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
 		const newObservations = pending ? ((pending.observation?.data as any)?.observations ?? []) : observationsCreatedAfterIndex(entries, lastReflectionIdx);
-		const newReflections = pending ? ((pending.reflection?.data as any)?.reflections ?? []) : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
+		const newReflections = pending ? [] : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
 		const newItemsTokens = Math.ceil(
 			(newObservations.reduce((s: number, o: any) => s + o.content.length, 0) +
 				newReflections.reduce((s: number, r: any) => s + r.content.length, 0)) / 4
