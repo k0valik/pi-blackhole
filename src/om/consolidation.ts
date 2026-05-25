@@ -501,7 +501,9 @@ async function runDropperStage(
 		if (!pendingObs?.length) return "continue";
 		observationCoverageId = pending.observation?.coversUpToId;
 		if (pending.dropped?.coversUpToId) {
+			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
 			const dropIdx = entryIndexForId(entries, pending.dropped.coversUpToId);
+			if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx) return "continue";
 			if (dropIdx >= 0) {
 				dropTokens = rawTokensAfterIndex(entries, dropIdx);
 				if (dropTokens < runtime.config.reflectAfterTokens) return "continue";
@@ -549,7 +551,8 @@ async function runDropperStage(
 				folded.activeObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
 				Math.floor(runtime.config.dropperInputMaxTokens * 0.2),
 			);
-			const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections);
+			const pendingReflections = pending ? ((pending.reflection?.data as any)?.reflections ?? []) : folded.reflections;
+			const reflectionsForDropper = mergeReflections(pendingReflections, sameRunReflections);
 
 			// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
 			const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "dropper"), stageFallbacks: stageFallbackModels(runtime, "dropper") });
