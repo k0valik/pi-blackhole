@@ -164,11 +164,12 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 				observationLine,
 				reflectionLine,
 				"",
-				"── Activity ──",
-				`Observer:       ~${obsProgress.toLocaleString()} / ${runtime.config.observeAfterTokens.toLocaleString()} tokens (${pct(obsProgress, runtime.config.observeAfterTokens)}%)`,
-				`Reflector:      ~${reflectionProgress.toLocaleString()} / ${runtime.config.reflectAfterTokens.toLocaleString()} tokens (${pct(reflectionProgress, runtime.config.reflectAfterTokens)}%)`,
-				`Dropper:        ~${dropProgress.toLocaleString()} / ${runtime.config.reflectAfterTokens.toLocaleString()} tokens (${pct(dropProgress, runtime.config.reflectAfterTokens)}%)`,
-				`Compaction:     ~${compactionProgress.toLocaleString()} / ${runtime.config.compactAfterTokens.toLocaleString()} tokens (${pct(compactionProgress, runtime.config.compactAfterTokens)}%)`,
+				"── Pipeline ──",
+				"Transcript accumulated since last run. Triggers when exceeding threshold.",
+				`Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
+				`Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
+				`Dropper:        ~${dropProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
+				`Compaction:     ~${compactionProgress.toLocaleString()} tokens` + (runtime.config.noAutoCompact ? " [auto-disabled]" : ` (triggers at ${runtime.config.compactAfterTokens.toLocaleString()})`),
 				`Obs pool:       ~${visibleObservationTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(visibleObservationTokens, runtime.config.observationsPoolMaxTokens)}%)`,
 				`Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
 			];
@@ -184,6 +185,13 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 					if (hasObs) lines.push("Observation:  waiting in pending.json");
 					if (hasRef) lines.push("Reflection:   waiting in pending.json");
 					if (hasDrop) lines.push("Dropper:      waiting in pending.json");
+					const preambleCap = runtime.config.observerPreambleMaxTokens > 0
+						? runtime.config.observerPreambleMaxTokens
+						: Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+					const pctNote = runtime.config.observerPreambleMaxTokens > 0
+						? ""
+						: ` (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`;
+					lines.push(`Preamble cap: ${preambleCap.toLocaleString()} tokens for observations${pctNote}`);
 					lines.push("Run /blackhole to flush and compact.");
 				}
 			}

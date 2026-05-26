@@ -92,8 +92,8 @@ export const DEFAULTS: UnifiedConfig = {
 	overrideDefaultCompaction: false,
 	debug: false,
 
-	observeAfterTokens: 10_000,
-	reflectAfterTokens: 20_000,
+	observeAfterTokens: 15_000,
+	reflectAfterTokens: 25_000,
 	compactAfterTokens: 81_000,
 	observationsPoolMaxTokens: 20_000,
 	reflectorInputMaxTokens: 80_000,

@@ -197,9 +197,9 @@ target = model_context_window * 0.65  (approx)
 Round down to a clean number.
 ```
 
-Then scale proportionally from the medium defaults:
-- `observeAfterTokens` = `compactAfterTokens / 8` (approx)
-- `reflectAfterTokens` = `compactAfterTokens / 4` (approx)
+Then scale proportionally from the medium defaults (actual defaults are hand-tuned slightly higher for cost-efficiency; these ratios are minimum guidelines):
+- `observeAfterTokens` = `compactAfterTokens / 8` (approx; default 15,000)
+- `reflectAfterTokens` = `compactAfterTokens / 4` (approx; default 25,000)
 - `observerChunkMaxTokens` = `compactAfterTokens / 2` (approx)
 - `observationsPoolMaxTokens` = `compactAfterTokens / 4` (approx)
 - `reflectorInputMaxTokens` = `compactAfterTokens` (approx)
@@ -209,8 +209,8 @@ Then scale proportionally from the medium defaults:
 
 ```text
 compactAfterTokens = 128000 * 0.65 = ~83200 → 81000 (medium default)
-observeAfterTokens = 81000 / 8 ≈ 10125 → 10000 (medium default)
-reflectAfterTokens = 81000 / 4 ≈ 20250 → 20000 (medium default)
+observeAfterTokens = 81000 / 8 ≈ 10125 → 15000 (medium default, tuned for cost-efficiency)
+reflectAfterTokens = 81000 / 4 ≈ 20250 → 25000 (medium default, tuned for cost-efficiency)
 observerChunkMaxTokens = 81000 / 2 ≈ 40500 → 40000 (medium default)
 observationsPoolMaxTokens = 81000 / 4 ≈ 20250 → 20000 (medium default)
 reflectorInputMaxTokens = 81000 → 80000 (slightly under)
@@ -346,8 +346,8 @@ From `DEFAULTS` in `unified-config.ts`:
 
 | Setting | Value | Purpose |
 |---|---|---|
-| `observeAfterTokens` | 10,000 | Observer cadence |
-| `reflectAfterTokens` | 20,000 | Reflector + dropper cadence |
+| `observeAfterTokens` | 15,000 | Observer cadence |
+| `reflectAfterTokens` | 25,000 | Reflector + dropper cadence |
 | `compactAfterTokens` | 81,000 | Auto-compaction trigger |
 | `observationsPoolMaxTokens` | 20,000 | Max active observations before pruning |
 | `reflectorInputMaxTokens` | 80,000 | Max reflector prompt budget |
@@ -356,7 +356,7 @@ From `DEFAULTS` in `unified-config.ts`:
 | `observerPreambleMaxTokens` | 0 (auto) | Soft safety valve: caps `noAutoCompact` observer preamble (30% of chunk). Only trims when exceeded; high-relevance observations always kept. |
 | `agentMaxTurns` | 16 | Max agent-loop turns per worker. Lower for small models (e.g., 8) to prevent wasteful extraction turns. |
 
-Scaling formula for custom context sizes:
+Scaling formula for custom context sizes (actual defaults are hand-tuned; use formulas as approximate minimums):
 
 ```
 compactAfterTokens:        model_context * 0.65

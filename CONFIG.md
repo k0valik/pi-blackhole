@@ -92,7 +92,7 @@ These control _when_ each worker runs. Workers trigger when accumulated conversa
 
 ### `observeAfterTokens`
 
-**Default:** `10000`
+**Default:** `15000`
 
 Minimum accumulated tokens before the observer runs again. Lower values = more frequent observations but more API calls and overhead. Higher values = fewer runs, but you might miss details between runs.
 
@@ -100,7 +100,7 @@ The observer only processes a chunk of up to `observerChunkMaxTokens` tokens at 
 
 ### `reflectAfterTokens`
 
-**Default:** `20000`
+**Default:** `25000`
 
 Accumulated tokens required before the reflector (and then the dropper) run. Since the reflector depends on having new observations to work with, it makes sense to set this higher than `observeAfterTokens` so you batch up enough observations first.
 
@@ -268,8 +268,8 @@ For lower-context or less capable models, reducing this (e.g., `8`) prevents the
     { "provider": "openrouter", "id": "openai/gpt-oss-120b:free", "thinking": "low", "cooldownHours": 6 }
   ],
 
-  "observeAfterTokens": 10000,
-  "reflectAfterTokens": 20000,
+  "observeAfterTokens": 15000,
+  "reflectAfterTokens": 25000,
   "compactAfterTokens": 81000,
   "observationsPoolMaxTokens": 20000,
   "reflectorInputMaxTokens": 80000,

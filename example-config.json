@@ -86,8 +86,8 @@
     }
   ],
 
-  "observeAfterTokens": 10000,
-  "reflectAfterTokens": 20000,
+  "observeAfterTokens": 15000,
+  "reflectAfterTokens": 25000,
   "compactAfterTokens": 81000,
   "observationsPoolMaxTokens": 20000,
   "reflectorInputMaxTokens": 80000,
