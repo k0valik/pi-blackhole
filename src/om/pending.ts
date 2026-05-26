@@ -16,6 +16,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { Observation, Reflection } from "./ledger/types.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,25 @@ export interface PendingOMState {
 	reflection?: PendingReflection;
 	/** Latest dropper run (replaced each time, not accumulated). */
 	dropped?: PendingDropped;
+	/**
+	 * All observation batches accumulated across noAutoCompact pipeline runs.
+	 * Each batch preserves per-run coverage (coversUpToId) matching the normal
+	 * branch-marker pattern. Used for LLM context and /blackhole flush.
+	 */
+	observationBatches?: PendingObservation[];
+	/**
+	 * All reflection batches accumulated across noAutoCompact pipeline runs.
+	 * Preserves per-run coverage for LLM context and /blackhole flush.
+	 */
+	reflectionBatches?: PendingReflection[];
+	/**
+	 * All dropper batches accumulated across noAutoCompact pipeline runs.
+	 * Each batch preserves which observations were dropped in that run.
+	 * Without accumulation, earlier drops are lost when the next dropper
+	 * run overwrites pending.dropped, causing them to be "un-dropped" on
+	 * /blackhole flush.
+	 */
+	droppedBatches?: PendingDropped[];
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────
@@ -70,7 +90,10 @@ function defaultState(): PendingOMState {
 }
 
 function isEmptyState(s: PendingOMState): boolean {
-	return !s.observation && !s.reflection && !s.dropped;
+	return !s.observation && !s.reflection && !s.dropped
+		&& (!s.observationBatches || s.observationBatches.length === 0)
+		&& (!s.reflectionBatches || s.reflectionBatches.length === 0)
+		&& (!s.droppedBatches || s.droppedBatches.length === 0);
 }
 
 // ── Per-session file read/write ─────────────────────────────────────────────
@@ -145,6 +168,10 @@ function isPendingOMState(value: unknown): value is PendingOMState {
 export function savePendingObservation(sessionId: string, entry: PendingObservation): void {
 	const state = readSessionState(sessionId);
 	state.observation = entry;
+	// Append to accumulated batches for LLM context and /blackhole flush.
+	// Each batch preserves per-run coverage (coversUpToId) matching the
+	// normal branch-marker pattern.
+	state.observationBatches = [...(state.observationBatches ?? []), entry];
 	writeSessionState(sessionId, state);
 }
 
@@ -154,15 +181,20 @@ export function savePendingObservation(sessionId: string, entry: PendingObservat
 export function savePendingReflection(sessionId: string, entry: PendingReflection): void {
 	const state = readSessionState(sessionId);
 	state.reflection = entry;
+	// Append to accumulated batches for LLM context and /blackhole flush.
+	state.reflectionBatches = [...(state.reflectionBatches ?? []), entry];
 	writeSessionState(sessionId, state);
 }
 
 /**
- * Save (replace) the latest dropper result for a session.
+ * Save (replace) the latest dropper result for a session and
+ * append to droppedBatches so no drops are lost across cycles
+ * before /blackhole flush.
  */
 export function savePendingDropped(sessionId: string, entry: PendingDropped): void {
 	const state = readSessionState(sessionId);
 	state.dropped = entry;
+	state.droppedBatches = [...(state.droppedBatches ?? []), entry];
 	writeSessionState(sessionId, state);
 }
 

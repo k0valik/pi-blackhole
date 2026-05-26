@@ -55,14 +55,29 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 			// before compacting so the summary includes accumulated memory.
 			if (runtime.config.noAutoCompact && hasPendingData(sessionId)) {
 				const pending = readPendingState(sessionId);
-				if (pending.observation) {
-					pi.appendEntry(OM_OBSERVATIONS_RECORDED, pending.observation.data);
+				// Write all accumulated observation batches (or latest single batch
+				// as fallback for legacy pending.json without batch arrays).
+				const obsBatches = pending.observationBatches?.length
+					? pending.observationBatches
+					: (pending.observation ? [pending.observation] : []);
+				for (const batch of obsBatches) {
+					pi.appendEntry(OM_OBSERVATIONS_RECORDED, batch.data);
 				}
-				if (pending.reflection) {
-					pi.appendEntry(OM_REFLECTIONS_RECORDED, pending.reflection.data);
+				// Write all accumulated reflection batches (or latest single batch
+				// as fallback for legacy pending.json without batch arrays).
+				const reflBatches = pending.reflectionBatches?.length
+					? pending.reflectionBatches
+					: (pending.reflection ? [pending.reflection] : []);
+				for (const batch of reflBatches) {
+					pi.appendEntry(OM_REFLECTIONS_RECORDED, batch.data);
 				}
-				if (pending.dropped) {
-					pi.appendEntry(OM_OBSERVATIONS_DROPPED, pending.dropped.data);
+				// Write all accumulated dropper batches (or latest single batch
+				// as fallback for legacy pending.json without batch arrays).
+				const dropBatches = pending.droppedBatches?.length
+					? pending.droppedBatches
+					: (pending.dropped ? [pending.dropped] : []);
+				for (const batch of dropBatches) {
+					pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
 				}
 				clearPendingState(sessionId);
 				ctx.ui.notify("Observational memory: pending entries flushed", "info");

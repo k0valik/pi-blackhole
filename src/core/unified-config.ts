@@ -50,6 +50,11 @@ export interface UnifiedConfig {
 	dropperInputMaxTokens: number;
 	/** Max source entries tokens sent to observer per chunk. */
 	observerChunkMaxTokens: number;
+	/** Max preamble tokens (CURRENT REFLECTIONS / OBSERVATIONS) in the observer prompt.
+	 *  Default 0 means auto-compute from observerChunkMaxTokens (30%). Only applied in
+	 *  noAutoCompact mode where accumulated batch history can grow unbounded.
+	 *  Set to an explicit value to override the auto-computed budget. */
+	observerPreambleMaxTokens: number;
 	/** Shared turn cap for background memory agents. */
 	agentMaxTurns: number;
 
@@ -87,13 +92,14 @@ export const DEFAULTS: UnifiedConfig = {
 	overrideDefaultCompaction: false,
 	debug: false,
 
-	observeAfterTokens: 10_000,
-	reflectAfterTokens: 20_000,
+	observeAfterTokens: 15_000,
+	reflectAfterTokens: 25_000,
 	compactAfterTokens: 81_000,
 	observationsPoolMaxTokens: 20_000,
 	reflectorInputMaxTokens: 80_000,
 	dropperInputMaxTokens: 80_000,
 	observerChunkMaxTokens: 40_000,
+	observerPreambleMaxTokens: 0,
 	agentMaxTurns: 16,
 
 	noAutoCompact: false,
@@ -154,7 +160,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
 	// Positive integers
-	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "agentMaxTurns"] as const;
+	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
 	for (const k of numKeys) {
 		const v = positiveInt(raw[k]);
 		if (v !== undefined) (c as Record<string, unknown>)[k] = v;
