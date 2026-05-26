@@ -5,8 +5,10 @@ Algorithmic compaction + session-aware observational memory for [Pi](https://git
 Combines [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memory](https://github.com/elpapi42/pi-observational-memory) with unified configuration, per-worker model fallback chains, persisted cooldowns, and a manual flush mode.
 
 > This is a frankenmerge. I liked both extensions but they were not compatible - observational memory hooked into Pi's default compaction and prevented pi-vcc from working. So I merged them, made them share the same hook and output, and added the things both were missing: fallback chains, cooldowns, and a toggle between them.
+> Please also see the [`CHANGELOG.md`](CHANGELOG.md)
 
-#### For easy setup pass the [`llms.txt`](llms.txt) llms.txt to your agent and it will guide you through the config without needing to read all the docs if you're as lazy as me
+#### For easy setup pass the [`llms.txt`](llms.txt) llms.txt to your agent and it will guide you through the config without needing to read all the docs if you're as lazy as me.
+
 
 # Demo
 
