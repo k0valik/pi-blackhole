@@ -1,14 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.2] - 2026-05-26
 
 ### Added
 
 - `/blackhole-memory` pipeline display reworked: renamed "Coverage" to "Pipeline", replaced percentage-based metrics with `X tokens (triggers at Y)` format to eliminate false-alarm 100% readings, added `[auto-disabled]` annotation for compaction in noAutoCompact mode, and show preamble cap in Pending section ([#7](https://github.com/k0valik/pi-blackhole/pull/7))
 - Default `observeAfterTokens` increased from 10,000 to 15,000 and `reflectAfterTokens` from 20,000 to 25,000 for better cost-efficiency on mid/high context sessions ([#7](https://github.com/k0valik/pi-blackhole/pull/7))
-
 - Observer preamble cap in noAutoCompact mode: the observer stage's `CURRENT OBSERVATIONS` preamble is now capped to prevent unbounded prompt growth from accumulated observation batches. High-relevance observations are always kept; medium and low observations are scored by relevance tier and relative recency (array position, not wall-clock time), with the best-scoring kept within the token budget. Reflections are never trimmed. The cap is governed by the new `observerPreambleMaxTokens` config setting (default `0` = auto-compute 30% of `observerChunkMaxTokens`). Only applies in `noAutoCompact` mode — the auto-compact path is unchanged. ([#7](https://github.com/k0valik/pi-blackhole/pull/7))
-
 - Accumulated batch history for noAutoCompact mode: the observer, reflector, and dropper stages now feed accumulated pending.json batches (observationBatches/reflectionBatches) to the LLM instead of reading from the (empty) branch. This restores the same historical context the pipeline receives in autoCompact mode — prior observations/reflections, existing summaries — but without writing markers to the visible branch. Each pipeline run appends its output batch to the pending store; on /blackhole flush, all accumulated batches are written as separate branch markers, preserving per-run coverage. ([#7](https://github.com/k0valik/pi-blackhole/pull/7))
 - Accumulated dropper batches (`droppedBatches`) in pending.json so that earlier dropper runs are not lost when a subsequent cycle overwrites `pending.dropped` before a /blackhole flush. The flush now writes all accumulated dropper batches to the branch, preventing observations dropped in earlier cycles from being "un-dropped" on compaction. ([#7](https://github.com/k0valik/pi-blackhole/pull/7))
 
