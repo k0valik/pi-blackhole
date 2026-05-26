@@ -53,6 +53,14 @@ export interface PendingOMState {
 	 * Preserves per-run coverage for LLM context and /blackhole flush.
 	 */
 	reflectionBatches?: PendingReflection[];
+	/**
+	 * All dropper batches accumulated across noAutoCompact pipeline runs.
+	 * Each batch preserves which observations were dropped in that run.
+	 * Without accumulation, earlier drops are lost when the next dropper
+	 * run overwrites pending.dropped, causing them to be "un-dropped" on
+	 * /blackhole flush.
+	 */
+	droppedBatches?: PendingDropped[];
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────
@@ -84,7 +92,8 @@ function defaultState(): PendingOMState {
 function isEmptyState(s: PendingOMState): boolean {
 	return !s.observation && !s.reflection && !s.dropped
 		&& (!s.observationBatches || s.observationBatches.length === 0)
-		&& (!s.reflectionBatches || s.reflectionBatches.length === 0);
+		&& (!s.reflectionBatches || s.reflectionBatches.length === 0)
+		&& (!s.droppedBatches || s.droppedBatches.length === 0);
 }
 
 // ── Per-session file read/write ─────────────────────────────────────────────
@@ -178,11 +187,14 @@ export function savePendingReflection(sessionId: string, entry: PendingReflectio
 }
 
 /**
- * Save (replace) the latest dropper result for a session.
+ * Save (replace) the latest dropper result for a session and
+ * append to droppedBatches so no drops are lost across cycles
+ * before /blackhole flush.
  */
 export function savePendingDropped(sessionId: string, entry: PendingDropped): void {
 	const state = readSessionState(sessionId);
 	state.dropped = entry;
+	state.droppedBatches = [...(state.droppedBatches ?? []), entry];
 	writeSessionState(sessionId, state);
 }
 

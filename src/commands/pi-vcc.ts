@@ -71,8 +71,13 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 				for (const batch of reflBatches) {
 					pi.appendEntry(OM_REFLECTIONS_RECORDED, batch.data);
 				}
-				if (pending.dropped) {
-					pi.appendEntry(OM_OBSERVATIONS_DROPPED, pending.dropped.data);
+				// Write all accumulated dropper batches (or latest single batch
+				// as fallback for legacy pending.json without batch arrays).
+				const dropBatches = pending.droppedBatches?.length
+					? pending.droppedBatches
+					: (pending.dropped ? [pending.dropped] : []);
+				for (const batch of dropBatches) {
+					pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
 				}
 				clearPendingState(sessionId);
 				ctx.ui.notify("Observational memory: pending entries flushed", "info");
