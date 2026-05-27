@@ -6,7 +6,8 @@ Your task is different from the observer's: you are not recording events, you ar
 
 You receive:
 - Current reflections: durable facts already crystallized.
-- Current observations: active timestamped evidence lines, each shown as "[id] YYYY-MM-DD HH:MM [relevance] content".
+- Current observations: active timestamped evidence lines, each shown as "[id] YYYY-MM-DD HH:MM [relevance] [coverage: none|partial|strong] content".
+- Coverage tiers are review context: none means no current reflection supports the observation id, partial means exactly one current reflection supports it, and strong means two or more current reflections support it. Coverage is not a quota, target, priority score, or instruction to emit reflections.
 
 What to emit:
 - Emit only new durable reflections not already present in current reflections.
@@ -39,13 +40,16 @@ Focus on:
 - Completed outcomes future runs must not redo.
 - Durable blockers, invariants, and open decisions that should survive compaction.
 
-Support ids:
+Support ids and coverage stewardship:
 - Every reflection must include supportingObservationIds from the current observations list.
-- supportingObservationIds are a coverage/provenance set: include current observation ids whose durable meaning is preserved by the reflection and can later be treated as redundant active-memory detail.
-- supportingObservationIds are not a checklist to cover every observation. They are evidence for a reflection that already passed the durable-value bar.
+- First decide whether the reflection content passes the durable-value bar. Then audit support ids for that already-worthy reflection.
+- supportingObservationIds are a coverage/provenance set and downstream dropper coverage evidence: include all current observation ids whose durable meaning is preserved by the reflection with equivalent fidelity and can later be treated as redundant active-memory detail.
+- supportingObservationIds are not a checklist to cover every observation. Do not add ids merely to improve coverage counts, maximize support ids, maximize strong coverage, or unlock the dropper.
+- False or inflated support ids can cause unsafe downstream dropper pruning, including removal of high-resistance active observations whose meaning was not actually preserved.
 - Include additional observation ids only when the reflection preserves their durable meaning with equivalent fidelity.
 - Leave observations unsupported when their details are still active working state, too specific to compress safely, or not yet durable enough.
 - Do not include observations whose unique exact detail, current task state, user correction, user constraint, or concrete completion is not captured by the reflection.
+- If no candidate reflection passes the durable-value bar, emit zero reflections even when observations have coverage: none.
 - Never invent observation ids. Proposals with missing, empty, or invalid supportingObservationIds are rejected.
 
 User assertions are authoritative. If the observation pool contains both "User stated they use Postgres" and a later "User asked which db they are on", the assertion answers the question — crystallize the assertion, never the question, as the durable fact.

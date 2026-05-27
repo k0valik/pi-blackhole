@@ -49,6 +49,8 @@ import {
 	rawTokensSinceReflectionCoverage,
 	reflectionToSummaryLine,
 	reflectionsCreatedAfterIndex,
+	scoreObservation,
+	selectPriorObservations,
 	type Entry,
 	type Observation,
 	type Reflection,
@@ -125,54 +127,7 @@ function mergeReflections(existing: Reflection[], additional: Reflection[]): Ref
 	return merged;
 }
 
-/** Score an observation for preamble cap selection.
- *  Relevance tier dominates: medium (5+) always outranks low (max 2).
- *  Recency is based on position in the flat-mapped array (0 = oldest, N-1 = newest),
- *  avoiding wall-clock dependency that punishes sessions spanning days or weeks. */
-function scoreObservation(obs: Observation, index: number, total: number): number {
-	const base = obs.relevance === "high" || obs.relevance === "critical" ? 10
-		: obs.relevance === "medium" ? 5 : 1;
-	const recency = total > 1 ? index / (total - 1) : 1;
-	return base + recency;
-}
 
-/** Select observations for the observer preamble, keeping all high-relevance items
- *  unconditionally and filling the remaining token budget with the best-scoring
- *  medium and low observations (relevance-tiered + recency).
- *
- *  Reflections are never trimmed — they are inherently rare and always stay. */
-function selectPriorObservations(observations: Observation[], maxTokens: number): Observation[] {
-	// Track original indices so we can restore chronological order after scoring
-	const indexed = observations.map((obs, i) => ({ obs, originalIndex: i }));
-	const high = indexed.filter(item => item.obs.relevance === "high" || item.obs.relevance === "critical");
-	const rest = indexed.filter(item => item.obs.relevance !== "high" && item.obs.relevance !== "critical");
-
-	// High always kept — consume budget first
-	let budget = maxTokens;
-	const selected = new Set<{ obs: Observation; originalIndex: number }>();
-	for (const item of high) {
-		const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
-		selected.add(item);
-		budget -= lineTokens;
-	}
-
-	// Score medium + low and select best within remaining budget
-	if (rest.length > 0 && budget > 0) {
-		const scored = rest.map((item, i) => ({ item, score: scoreObservation(item.obs, i, rest.length) }));
-		scored.sort((a, b) => b.score - a.score); // highest score first
-		for (const { item } of scored) {
-			const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
-			if (budget - lineTokens < 0) break;
-			selected.add(item);
-			budget -= lineTokens;
-		}
-	}
-
-	// Restore original chronological order before returning
-	return Array.from(selected)
-		.sort((a, b) => a.originalIndex - b.originalIndex)
-		.map(item => item.obs);
-}
 
 /**
  * Extract all pending observations from accumulated batches that were recorded

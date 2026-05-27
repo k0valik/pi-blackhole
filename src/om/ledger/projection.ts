@@ -4,6 +4,7 @@
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/projection.ts)
  * Unmodified.
  */
+import { selectPriorObservations } from "./render-summary.js";
 import {
 	OM_FOLDED,
 	isMemoryDetails,
@@ -207,9 +208,20 @@ export function buildCompactionProjection(
 		0,
 	);
 	const fullFold = observationTokens >= config.observationsPoolMaxTokens;
-	const projection = fullFold
+	let projection = fullFold
 		? fullProjection(entries, firstKeptEntryId)
 		: normalProjection;
+
+	// Cap observations to budget using relevance-tiered + recency scoring.
+	// Even if the dropper determined some old observations are worth keeping,
+	// this safety valve ensures the compaction output never exceeds the pool
+	// token budget. Observations survive in the branch regardless.
+	if (config.observationsPoolMaxTokens > 0 && observationTokens >= config.observationsPoolMaxTokens) {
+		projection = {
+			observations: selectPriorObservations(projection.observations, config.observationsPoolMaxTokens),
+			reflections: projection.reflections,
+		};
+	}
 
 	const details: MemoryDetails = {
 		type: OM_FOLDED,
