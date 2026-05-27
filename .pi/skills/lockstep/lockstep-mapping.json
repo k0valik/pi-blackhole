@@ -42,7 +42,8 @@
       "upstream": "pi-vcc",
       "path": "src/commands/vcc-recall.ts",
       "ours": "src/commands/vcc-recall.ts",
-      "status": "UNCHANGED"
+      "status": "MODIFIED",
+      "_note": "Added .js import extensions, OM reverse-recall augmentation (findObservationsForEntryIds, findReflectionsForEntryIds), command renamed to /blackhole-recall."
     },
     {
       "upstream": "pi-vcc",
@@ -62,7 +63,8 @@
       "upstream": "pi-vcc",
       "path": "src/core/summarize.ts",
       "ours": "src/core/summarize.ts",
-      "status": "UNCHANGED"
+      "status": "MODIFIED",
+      "_note": "Added OM content stripping (stripOMContent) to remove Reflections/Observations sections from previous summaries before merging."
     },
     {
       "upstream": "pi-vcc",
@@ -135,8 +137,7 @@
       "upstream": "pi-vcc",
       "path": "src/core/search-entries.ts",
       "ours": "src/core/search-entries.ts",
-      "status": "MODIFIED",
-      "_note": "Minor modifications for unified recall format."
+      "status": "UNCHANGED"
     },
     {
       "upstream": "pi-vcc",
@@ -378,7 +379,8 @@
       "upstream": "pi-observational-memory",
       "path": "src/debug-log.ts",
       "ours": "src/om/debug-log.ts",
-      "status": "UNCHANGED"
+      "status": "MODIFIED",
+      "_note": "Changed log path from observational-memory/ to pi-blackhole/. Removed sessionId/sessionFile from interface, removed safeDebugLogSessionId and debugLogRelativePath functions."
     },
     {
       "upstream": "pi-observational-memory",
@@ -396,8 +398,7 @@
       "upstream": "pi-observational-memory",
       "path": "src/serialize.ts",
       "ours": "src/om/serialize.ts",
-      "status": "MODIFIED",
-      "_note": "Extended truncateRecordContent."
+      "status": "UNCHANGED"
     },
     {
       "upstream": "pi-observational-memory",
