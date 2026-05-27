@@ -1,18 +1,29 @@
 ---
 name: lockstep
-description: Audit upstream changes from pi-vcc (sting8k/pi-vcc) and pi-observational-memory (elpapi42/pi-observational-memory) against our heavily diverged frankenmerge. Use when user says &quot;check upstream&quot;, &quot;lockstep&quot;, &quot;what changed upstream&quot;, &quot;sync upstream&quot;, or when making any change that touches files derived from those repos. Never use for design discussions or new features unrelated to upstream tracking.
+description: Audit upstream changes from pi-vcc (sting8k/pi-vcc) and pi-observational-memory (elpapi42/pi-observational-memory) against our heavily diverged frankenmerge. Use when user says "check upstream", "lockstep", "what changed upstream", "sync upstream", or when making any change that touches files derived from those repos. Never use for design discussions or new features unrelated to upstream tracking.
 ---
 
 # Lockstep — upstream change audit for pi-blackhole
 
 Blackhole is a **file-copied** (not git-forked) merge of two upstream repos. No shared git ancestry. All tracking is via stored SHA markers in `.pi/skills/lockstep/`.
 
+## Branch strategy
+
+Lockstep always operates on a **dedicated branch based on `main`** (the canonical npm-published branch). Ported changes are submitted as a **PR against `main`** for review before merging.
+
+```
+main ──→ lockstep/YYYY-MM-DD ──(PR)──→ main
+```
+
+This keeps lockstep work isolated from feature branches (`feat/*`) and ensures the review trail is visible.
+
 ## Setup prerequisites
 
-The lockstep scripts must be run from the **pi-blackhole repo root** (the extension directory):
+The lockstep scripts must be run from the **pi-blackhole repo root** (the extension directory).
+The agent's CWD is set automatically — for manual runs:
 
 ```bash
-cd /home/kovalik/.pi/agent/extensions/pi-blackhole
+cd <pi-blackhole-repo-root>
 git fetch upstream-pi-vcc                     # one-time setup
 git fetch upstream-pi-observational-memory    # one-time setup
 ```
@@ -38,26 +49,44 @@ Even after I approve porting a specific fix or feature, you must then:
 
 | Script | Purpose |
 |---|---|
-| `scripts/lockstep.js` | Fetch upstreams, show new commits since last mark, classify each changed file against our mapping table |
-| `scripts/upstream-diff.js` | Compare our files against upstream HEAD — shows what truly differs (stripping comment headers). Use `--summary` for counts, `--only-different` to skip identical files |
+| `scripts/lockstep.js` | Create lockstep branch, fetch upstreams, show new commits since last mark, classify each changed file against our mapping table. Use `--create-branch` to auto-setup the branch. Add `--save` to also write the full report to `docs/lockstep-report-<date>.md` (gitignored) for local viewing. |
+| `scripts/upstream-diff.js` | Compare our files against upstream HEAD — shows what truly differs (stripping comment headers). Use `--summary` for counts, `--only-different` to skip identical files. |
 
 ## Workflow
 
-### Step 1: Run the audit
+### Step 1: Create a lockstep branch
+
+Automate the branch setup:
 
 ```bash
-node .pi/skills/lockstep/scripts/lockstep.js
+node .pi/skills/lockstep/scripts/lockstep.js --create-branch
 ```
 
-This reads CHANGELOG.md, shows current branch/HEAD, fetches upstreams, and prints every new commit since our last review mark. Each changed file is classified as SAFE, MODIFIED, REWRITTEN, etc. against the mapping table.
+This will:
+1. Check for a dirty working tree and stash if needed
+2. `git checkout main && git pull`
+3. `git checkout -b lockstep/YYYY-MM-DD` (auto-named with today's date)
+4. Fetch upstreams and run the full audit report
 
 Options:
 - `--vcc` — check pi-vcc only
-- `--om` — check observational-memory only
+- `--om` — check pi-observational-memory only
+- `--branch <name>` — use a custom branch name instead of auto-generating
 
-### Step 2: Inspect actual differences
+### Step 2: Inspect audit output
 
-For any commit the audit flagged, drill into the actual file differences:
+The audit prints every new upstream commit since the last marker. Each changed file is classified against `lockstep-mapping.json` as:
+
+```
+SAFE       — can port directly (UNCHANGED or MOVED)
+MODIFIED   — we changed this file; review upstream diff carefully
+REWRITTEN  — fundamentally different; likely skip
+ELIMINATED — file doesn't exist in our repo; skip
+DELETED    — upstream deleted it but we still have it; decide
+ORPHAN     — no mapping entry; may need mapping update
+```
+
+For any commit flagged, drill into the actual differences:
 
 ```bash
 # Show the upstream diff for a specific commit
@@ -125,6 +154,12 @@ For SAFE and compatible MODIFIED changes:
 2. Apply equivalent change to our file (use `edit` tool)
 3. Verify: `npx tsc --noEmit`
 4. Run tests if they exist: `npx vitest run tests/<relevant-file>`
+5. Commit each ported change with a descriptive message:
+
+```bash
+git add src/...
+git commit -m "lockstep: port <upstream-hash> — <brief description>"
+```
 
 ### Step 6: Advance markers after review
 
@@ -134,16 +169,75 @@ Once all decisions are made (port, skip, or defer), advance the marker so future
 node .pi/skills/lockstep/scripts/lockstep.js --update-markers
 ```
 
-This writes the current upstream HEAD SHA to `.upstream-vcc-head` / `.upstream-om-head`.
+This writes the current upstream HEAD SHA to `.upstream-vcc-head` / `.upstream-om-head` on the lockstep branch.
+
+### Step 7: Update CHANGELOG and commit
+
+Add an entry to `CHANGELOG.md` summarizing what was ported:
+
+```markdown
+## [unreleased]
+
+### Lockstep sync — YYYY-MM-DD
+
+- Ported <upstream-hash>: <description> [#classification]
+- Skipped <upstream-hash>: <reason>
+```
+
+Then commit the marker and changelog updates:
+
+```bash
+git add CHANGELOG.md .pi/skills/lockstep/.upstream-*-head
+git commit -m "lockstep: advance markers and update CHANGELOG"
+```
+
+### Step 8: Generate PR summary and verify checklist
+
+After markers and CHANGELOG are committed, generate the PR summary:
+
+```bash
+node .pi/skills/lockstep/scripts/lockstep.js --pr-summary
+```
+
+This saves a formatted PR description to `docs/pr-summary-YYYY-MM-DD.md` (gitignored).
+Read it and verify the checklist is complete before opening the PR:
+
+- [ ] Each ported change verified with `npx tsc --noEmit`
+- [ ] CHANGELOG.md updated with ported/skipped/deferred changes
+- [ ] Markers advanced to current upstream HEAD
+- [ ] Deferred decisions logged in DEFERRED.md
+- [ ] PR summary generated and reviewed
+
+The script auto-checks the first three items — verify the remaining ones manually.
+
+### Step 9: Open a PR
+
+Push the branch and open a pull request against `main`:
+
+```bash
+git push origin lockstep/YYYY-MM-DD
+```
+
+Use the saved PR description from `docs/pr-summary-YYYY-MM-DD.md` when creating the PR on GitHub.
+
+### Step 10: Check PR reviews
+
+After the PR is opened, reviewers may leave comments. Fetch them all (including line-level suggestions):
+
+```bash
+node .pi/skills/lockstep/scripts/lockstep.js --fetch-reviews <pr-number>
+```
+
+This auto-detects the PR from the current branch if `<pr-number>` is omitted, and outputs all review bodies and line-level suggestions. Evaluate each suggestion against the actual code — do not blindly apply automated reviews.
 
 ## Marker files — what they mean
 
 | File | Tracks | Current value |
 |---|---|---|
 | `.upstream-vcc-head` | Last audited pi-vcc commit | `1994b26...` (v0.3.15 — our fork point) |
-| `.upstream-om-head` | Last audited OM commit | `6777643...` (HEAD — already reviewed) |
+| `.upstream-om-head` | Last audited OM commit | `6777643...` (marker as of last audit) |
 
-The VCC marker is set to v0.3.15 because that's the version we file-copied. The 2 commits after it (`a156870` + `b4c9099`) are the normalization cleanup — skip/port decision pending.
+Markers are stored on the lockstep branch after review. They advance as upstream releases arrive.
 
 To see what upstream changes are available but not yet reviewed:
 ```bash
@@ -152,6 +246,7 @@ node .pi/skills/lockstep/scripts/lockstep.js --vcc
 
 To reset a marker (start over from upstream HEAD):
 ```bash
+cd <pi-blackhole-repo-root>
 git rev-parse refs/remotes/upstream-pi-vcc/master > .pi/skills/lockstep/.upstream-vcc-head
 ```
 

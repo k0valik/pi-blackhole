@@ -1,8 +1,15 @@
 node_modules/
 dist/
+
 *.debug.json
 *.ndjson
 debug.ndjson
 pi-vcc-om-cooldown.json
 *-pending.json
 *-pending.stale.json
+
+# Local design notes and investigation docs
+docs/
+
+# Windows NTFS alternate data stream artifacts
+*:Zone.Identifier

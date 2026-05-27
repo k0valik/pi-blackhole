@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.3] - 2026-05-27
+
+### Lockstep sync — 2026-05-27
+
+- Ported upstream OM prompt refinements: coverage tiers in dropper prompt, "highest-resistance" critical framing in observer, coverage stewardship in reflector (#safe)
+- Ported upstream debug logging: `dropper.agent_start`, `dropper.tool_call`, `dropper.result` with full coverage/relevance diagnostics (#d6b02c0)
+- Ported upstream coverage-aware pruning: new `coverage.ts` module, drop candidate sort by coverage→relevance→age, critical observations no longer hard-rejected (#e00363a)
+- Adapted config: added `observationsPoolTargetTokens` as forward-compat no-op (upstream 52b5844 budgetTokens→targetTokens rename)
+- Skipped upstream pool refactor (bf79ff7) and rename (52b5844): kept our ratio-based urgency algorithm
+- Recovered output cap from feat/compaction-output-cap: `buildCompactionProjection` now caps rendered observations to `observationsPoolMaxTokens` budget via relevance+recency scoring
+
 ## [0.2.2] - 2026-05-26
 
 ### Added
