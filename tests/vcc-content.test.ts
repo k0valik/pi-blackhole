@@ -3,7 +3,7 @@
  * Changes: bun:test → vitest, added .js import extensions
  */
 import { describe, it, expect } from "vitest";
-import { textParts, textOf, clip, firstLine } from "../src/core/content.js.js";
+import { textParts, textOf, clip, firstLine } from "../src/core/content.js";
 
 describe("textParts", () => {
   it("returns [] for undefined content", () => {

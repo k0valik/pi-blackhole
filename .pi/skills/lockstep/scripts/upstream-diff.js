@@ -231,7 +231,7 @@ function verifyMapping() {
   });
 
   for (const entry of entries) {
-    const displayPath = entry.ours || entry.path || entry.path;
+    const displayPath = entry.ours || entry.path;
     const declaredStatus = entry.status;
 
     // Skip entries that can't be meaningfully verified

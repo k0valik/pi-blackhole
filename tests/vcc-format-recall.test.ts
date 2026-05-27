@@ -3,8 +3,8 @@
  * Changes: bun:test → vitest, added .js import extensions
  */
 import { describe, it, expect } from "vitest";
-import { formatRecallOutput } from "../src/core/format-recall.js.js";
-import type { RenderedEntry } from "../src/core/render-entries.js.js";
+import { formatRecallOutput } from "../src/core/format-recall.js";
+import type { RenderedEntry } from "../src/core/render-entries.js";
 
 describe("formatRecallOutput", () => {
   it("shows no-match message with query", () => {
