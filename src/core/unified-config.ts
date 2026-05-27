@@ -44,6 +44,16 @@ export interface UnifiedConfig {
 	compactAfterTokens: number;
 	/** Observation pool token pressure for full fold. */
 	observationsPoolMaxTokens: number;
+	/** Target token budget for the observation pool (dropper aims here).
+	 *  Optional; defaults to half of observationsPoolMaxTokens when unset.
+	 *  Must be less than observationsPoolMaxTokens.
+	 *
+	 *  NOTE: Ported from upstream as forward-compat (no-op in our pool algorithm).
+	 *  Upstream renamed budgetTokens→targetTokens (52b5844) and uses this
+	 *  for their tokensOverTarget / avgTokensPerObservation drop calculation.
+	 *  We keep our ratio-based urgency algorithm; this knob exists so future
+	 *  lockstep iterations don't diverge on the config shape. */
+	observationsPoolTargetTokens: number;
 	/** Max prompt tokens for reflector model input (rolling window cap). */
 	reflectorInputMaxTokens: number;
 	/** Max prompt tokens for dropper model input (rolling window cap). */
@@ -96,6 +106,7 @@ export const DEFAULTS: UnifiedConfig = {
 	reflectAfterTokens: 25_000,
 	compactAfterTokens: 81_000,
 	observationsPoolMaxTokens: 20_000,
+	observationsPoolTargetTokens: 10_000,
 	reflectorInputMaxTokens: 80_000,
 	dropperInputMaxTokens: 80_000,
 	observerChunkMaxTokens: 40_000,
@@ -160,7 +171,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
 	// Positive integers
-	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
+	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
 	for (const k of numKeys) {
 		const v = positiveInt(raw[k]);
 		if (v !== undefined) (c as Record<string, unknown>)[k] = v;
@@ -238,7 +249,15 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 		else if (["0", "false", "no", "off"].includes(v)) parsed.passive = false;
 	}
 
-	return { ...DEFAULTS, ...parsed };
+	// Merge defaults then override
+	const merged = { ...DEFAULTS, ...parsed };
+
+	// Derive observationsPoolTargetTokens if unset or invalid (must be < max)
+	if (merged.observationsPoolTargetTokens >= merged.observationsPoolMaxTokens) {
+		merged.observationsPoolTargetTokens = Math.floor(merged.observationsPoolMaxTokens / 2);
+	}
+
+	return merged;
 }
 
 /**
