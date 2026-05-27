@@ -5,7 +5,8 @@
  * single ndjson file at ~/.pi/agent/pi-blackhole/debug.ndjson with rotation.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, statSync, renameSync, appendFileSync } from "node:fs";
+import fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -96,9 +97,15 @@ describe("debug-log", () => {
 	});
 
 	it("never throws on write failure", () => {
-		// Make the directory non-writable
-		mkdirSync(join(agentDir, "pi-blackhole"), { recursive: true });
-		writeFileSync(join(agentDir, "pi-blackhole", "debug.ndjson"), "");
+		const spy = vi.spyOn(fs, "appendFileSync").mockImplementation(() => {
+			throw new Error("Write failure");
+		});
+		expect(() => {
+			withDebugLogContext({ enabled: true }, () => {
+				debugLog("test.event");
+			});
+		}).not.toThrow();
+		spy.mockRestore();
 	});
 
 	it("exports known constants", () => {

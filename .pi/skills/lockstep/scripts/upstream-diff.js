@@ -194,7 +194,6 @@ function readMarker(name) {
  */
 function upstreamFileContentAtCommit(upstreamName, upstreamPath, commit) {
   try {
-    const remote = `upstream-${upstreamName}`;
     // Try with the full SHA — git can resolve it from fetched objects
     return execSync(`git show ${commit}:${upstreamPath}`, {
       cwd: REPO_DIR, encoding: "utf-8", timeout: 10000,

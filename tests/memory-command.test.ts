@@ -87,19 +87,7 @@ function createMockEnvironment() {
 	};
 }
 
-function invokeMemory(handlerMap: Map<string, unknown>, args: unknown, ctxOverrides: Record<string, unknown> = {}) {
-	const handler = handlerMap.get("blackhole-memory") as ((args: unknown, ctx: unknown) => Promise<void>) | undefined;
-	if (!handler) throw new Error("blackhole-memory command not registered");
-	return handler(args, {
-		cwd: "/tmp/test",
-		sessionManager: {
-			getBranch: vi.fn(() => []),
-			getSessionId: vi.fn(() => "test-session"),
-		},
-		ui: { notify: vi.fn() },
-		...ctxOverrides,
-	});
-}
+
 
 describe("/blackhole-memory command", () => {
 	it("registers the command on pi", () => {

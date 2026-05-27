@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { searchEntries } from "../src/core/search-entries.js";
-import type { RenderedEntry } from "../src/core/render-entries.js.js";
+import type { RenderedEntry } from "../src/core/render-entries.js";
 import type { Message } from "@earendil-works/pi-ai";
 
 const entries: RenderedEntry[] = [
