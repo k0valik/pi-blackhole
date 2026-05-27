@@ -1,6 +1,6 @@
 # Changelog
 
-## [unreleased]
+## [0.2.3] - 2026-05-27
 
 ### Lockstep sync — 2026-05-27
 
