@@ -54,7 +54,7 @@ function stripAnsi(str) {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
 }
 
-if (SAVE_OUTPUT) {
+if (SAVE_OUTPUT || PR_SUMMARY) {
   console.log = function (...args) {
     const msg = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
     outputBuffer.push(msg);
@@ -68,7 +68,6 @@ if (SAVE_OUTPUT) {
 }
 
 function saveReport() {
-  if (!SAVE_OUTPUT) return;
   const docsDir = resolve(REPO_DIR, "docs");
   if (!existsSync(docsDir)) {
     try {
@@ -79,10 +78,18 @@ function saveReport() {
     }
   }
   const date = new Date().toISOString().slice(0, 10);
-  const reportPath = resolve(docsDir, `lockstep-report-${date}.md`);
   const plainText = outputBuffer.map(stripAnsi).join("\n") + "\n";
-  writeFileSync(reportPath, plainText);
-  originalLog(`\n  📄 Report saved to docs/lockstep-report-${date}.md`);
+
+  // PR summary mode always saves; audit mode only saves with --save
+  if (PR_SUMMARY) {
+    const summaryPath = resolve(docsDir, `pr-summary-${date}.md`);
+    writeFileSync(summaryPath, plainText);
+    originalLog(`\n  📄 PR summary saved to docs/pr-summary-${date}.md`);
+  } else if (SAVE_OUTPUT) {
+    const reportPath = resolve(docsDir, `lockstep-report-${date}.md`);
+    writeFileSync(reportPath, plainText);
+    originalLog(`\n  📄 Report saved to docs/lockstep-report-${date}.md`);
+  }
 }
 
 // ── Load mapping table ──────────────────────────────────────────────────────
