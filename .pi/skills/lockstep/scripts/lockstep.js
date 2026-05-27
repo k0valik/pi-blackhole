@@ -11,6 +11,7 @@
  *   node scripts/lockstep.js --create-branch --vcc   # create branch + audit VCC only
  *   node scripts/lockstep.js --update-markers        # update .upstream-*-head after review
  *   node scripts/lockstep.js --pr-summary            # generate PR description from state
+ *   node scripts/lockstep.js --save                  # also save full report to docs/lockstep-report-<date>.md
  *
  * This script never modifies source code except for marker files (with --update-markers).
  * It fetches upstream commits, classifies changed files against our mapping table,
@@ -32,12 +33,56 @@ const CHECK_OM = args.includes("--om") || (!args.includes("--om") && !args.inclu
 const UPDATE_MARKERS = args.includes("--update-markers");
 const CREATE_BRANCH = args.includes("--create-branch");
 const PR_SUMMARY = args.includes("--pr-summary");
+const SAVE = args.includes("--save");
 
 // Extract custom branch name from --branch <name>
 let customBranch = null;
 const branchIdx = args.indexOf("--branch");
 if (branchIdx !== -1 && branchIdx < args.length - 1) {
   customBranch = args[branchIdx + 1];
+}
+
+// ── Output capture for --save ───────────────────────────────────────────────
+
+const SAVE_OUTPUT = SAVE;
+let outputBuffer = [];
+const originalLog = console.log;
+const originalError = console.error;
+
+// Strip ANSI escape codes for file output
+function stripAnsi(str) {
+  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
+}
+
+if (SAVE_OUTPUT) {
+  console.log = function (...args) {
+    const msg = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
+    outputBuffer.push(msg);
+    originalLog.apply(console, args);
+  };
+  console.error = function (...args) {
+    const msg = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
+    outputBuffer.push(msg);
+    originalError.apply(console, args);
+  };
+}
+
+function saveReport() {
+  if (!SAVE_OUTPUT) return;
+  const docsDir = resolve(REPO_DIR, "docs");
+  if (!existsSync(docsDir)) {
+    try {
+      const { mkdirSync } = require("node:fs");
+      mkdirSync(docsDir, { recursive: true });
+    } catch {
+      // ignore
+    }
+  }
+  const date = new Date().toISOString().slice(0, 10);
+  const reportPath = resolve(docsDir, `lockstep-report-${date}.md`);
+  const plainText = outputBuffer.map(stripAnsi).join("\n") + "\n";
+  writeFileSync(reportPath, plainText);
+  originalLog(`\n  📄 Report saved to docs/lockstep-report-${date}.md`);
 }
 
 // ── Load mapping table ──────────────────────────────────────────────────────
@@ -125,12 +170,23 @@ function hasDirtyChanges() {
 
 function ensureCleanWorkingTree() {
   if (!hasDirtyChanges()) return false;
+
+  // Check if lockstep scripts themselves have uncommitted changes
+  const lockstepStatus = run("git status --porcelain .pi/skills/lockstep/");
+  if (lockstepStatus && lockstepStatus.length > 0) {
+    console.log(`  ${color("yellow", "⚠ Lockstep scripts have uncommitted changes.")}`);
+    console.log(`    These will be stashed and main's versions used for this audit.`);
+    console.log(`    ${color("gray", "To avoid this, commit lockstep changes first:")}`);
+    console.log(`    ${color("gray", "  git add .pi/skills/lockstep/")}`);
+    console.log(`    ${color("gray", "  git commit -m 'lockstep: update workflow'\n")}`);
+  }
+
   const stashResult = run("git stash push -m 'lockstep: auto-stash before branch switch' 2>&1");
   if (stashResult === null) {
     console.error("  ❌ Could not stash dirty changes. Please commit or stash manually.");
     process.exit(1);
   }
-  console.log(`  💾 Stashed dirty working tree.`);
+  console.log(`  💾 Stashed ${color("gray", "(restored after lockstep)")}`);
   return true;
 }
 
@@ -164,7 +220,8 @@ function setupLockstepBranch() {
   }
 
   // Switch to main and pull
-  console.log(`\n  Switching to ${color("bold", "main")}...`);
+  console.log(`\n  ${color("bold", "Step 1:")} Switch to main...`);
+  const mainHashBefore = run("git rev-parse --short HEAD");
   const checkoutResult = run("git checkout main 2>&1");
   if (checkoutResult === null) {
     console.error("  ❌ Could not switch to main. Check for conflicts.");
@@ -175,11 +232,15 @@ function setupLockstepBranch() {
   if (pullResult === null) {
     console.warn("  ⚠ Could not pull main (may not have remote tracking). Continuing...");
   } else {
-    console.log(`  Pulled latest main.`);
+    console.log(`  ✓ main is up to date.`);
   }
 
+  const mainHash = run("git rev-parse --short HEAD");
+
   // Create the lockstep branch
-  console.log(`\n  Creating ${color("bold", branchName)}...`);
+  console.log(`\n  ${color("bold", "Step 2:")} Create lockstep branch...`);
+  console.log(`  Origin: ${color("green", "main")} @ ${color("bold", mainHash)}`);
+  console.log(`  New:    ${color("cyan", branchName)}`);
   const branchResult = run(`git checkout -b ${branchName} 2>&1`);
   if (branchResult === null) {
     // Branch may already exist — try checking it out
@@ -508,6 +569,7 @@ async function main() {
   // ── PR summary mode ─────────────────────────────────────────────────
   if (PR_SUMMARY) {
     generatePRSummary();
+    saveReport();
     process.exit(0);
   }
 
@@ -556,6 +618,8 @@ async function main() {
 
   console.log(`${color("bold", "Lockstep audit complete.")}`);
 
+  saveReport();
+
   // ── Next steps ───────────────────────────────────────────────────────
   if (CREATE_BRANCH) {
     const branch = getCurrentBranch();
@@ -568,11 +632,12 @@ async function main() {
     console.log(`  6. ${color("cyan", "Push")}  git push origin ${branch}`);
     console.log(`  7. ${color("cyan", "Open")} a PR against main — use --pr-summary for the description`);
     console.log();
-    console.log(`  ${color("gray", "After merging, switch back to your feature branch:")}`);
-    console.log(`  ${color("gray", "  git checkout <your-branch>")}`);
-    if (hasDirtyChanges()) {
-      console.log(`  ${color("gray", "  git stash pop")}`);
-    }
+    console.log(`  ${color("bold", "After the lockstep PR is merged:")}`);
+    console.log(`  ${color("gray", "  1. Switch back to your original feature branch:")}`);
+    console.log(`  ${color("gray", "     git checkout feat/compaction-output-cap")}`);
+    console.log(`  ${color("gray", "  2. Merge main to get the lockstep updates:")}`);
+    console.log(`  ${color("gray", "     git merge main")}`);
+    console.log(`  ${color("gray", "  3. Continue working on your feature.")}`);
   }
 
   process.exit(0);
