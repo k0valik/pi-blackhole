@@ -111,7 +111,7 @@ This compares each file against upstream HEAD and flags:
 △ obsolete MODIFIED   — file marked modified but now matches upstream (annotation out of date)
 ```
 
-If the verify finds stale entries, fix the mapping before porting (see Step 4b below).
+If the verify finds stale entries, fix the mapping before porting (see Step 3 below).
 
 
 ### Step 3: Classify each changed file
