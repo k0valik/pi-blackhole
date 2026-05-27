@@ -220,6 +220,16 @@ git push origin lockstep/YYYY-MM-DD
 
 Use the saved PR description from `docs/pr-summary-YYYY-MM-DD.md` when creating the PR on GitHub.
 
+### Step 10: Check PR reviews
+
+After the PR is opened, reviewers may leave comments. Fetch them all (including line-level suggestions):
+
+```bash
+node .pi/skills/lockstep/scripts/lockstep.js --fetch-reviews <pr-number>
+```
+
+This auto-detects the PR from the current branch if `<pr-number>` is omitted, and outputs all review bodies and line-level suggestions. Evaluate each suggestion against the actual code — do not blindly apply automated reviews.
+
 ## Marker files — what they mean
 
 | File | Tracks | Current value |

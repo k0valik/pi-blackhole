@@ -11,6 +11,7 @@
  *   node scripts/lockstep.js --create-branch --vcc   # create branch + audit VCC only
  *   node scripts/lockstep.js --update-markers        # update .upstream-*-head after review
  *   node scripts/lockstep.js --pr-summary            # generate PR description from state
+ *   node scripts/lockstep.js --fetch-reviews [n]     # fetch PR review comments (optional PR number)
  *   node scripts/lockstep.js --save                  # also save full report to docs/lockstep-report-<date>.md
  *
  * This script never modifies source code except for marker files (with --update-markers).
@@ -28,8 +29,9 @@ const SKILL_DIR = resolve(__dirname, "..");
 const REPO_DIR = resolve(SKILL_DIR, "..", "..", ".."); // .pi/skills/lockstep/ → repo root
 
 const args = process.argv.slice(2);
-const CHECK_VCC = args.includes("--vcc") || (!args.includes("--om") && !args.includes("--vcc") && !args.includes("--pr-summary"));
-const CHECK_OM = args.includes("--om") || (!args.includes("--om") && !args.includes("--vcc") && !args.includes("--pr-summary"));
+const FETCH_REVIEWS = args.includes("--fetch-reviews");
+const CHECK_VCC = args.includes("--vcc") || (!args.includes("--om") && !args.includes("--vcc") && !args.includes("--pr-summary") && !args.includes("--fetch-reviews"));
+const CHECK_OM = args.includes("--om") || (!args.includes("--om") && !args.includes("--vcc") && !args.includes("--pr-summary") && !args.includes("--fetch-reviews"));
 const UPDATE_MARKERS = args.includes("--update-markers");
 const CREATE_BRANCH = args.includes("--create-branch");
 const PR_SUMMARY = args.includes("--pr-summary");
@@ -606,6 +608,73 @@ function generatePRSummary() {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // ── Fetch reviews mode ──────────────────────────────────────────────
+  if (FETCH_REVIEWS) {
+    const branch = getCurrentBranch();
+    // Derive repo owner/name from git remote
+    const remoteUrl = run("git remote get-url origin", { silent: true }).trim();
+    const repoMatch = remoteUrl.match(/(?:github\.com[:/])([^\/]+)\/([^\/\.]+)/);
+    if (!repoMatch) {
+      console.error("❌ Could not determine GitHub repo from remote URL:", remoteUrl);
+      process.exit(1);
+    }
+    const repo = `${repoMatch[1]}/${repoMatch[2]}`;
+    // Find PR for this branch
+    let prNumber;
+    const prArg = args.find((a) => /^\d+$/.test(a));
+    if (prArg) {
+      prNumber = prArg;
+    } else {
+      try {
+        const prJson = run(`gh pr list --head "${branch}" --json number --jq '.[0].number'`, { silent: true }).trim();
+        if (prJson && /^\d+$/.test(prJson)) prNumber = prJson;
+      } catch { /* ignore */ }
+    }
+    if (!prNumber) {
+      console.error(`❌ Could not determine PR number for branch "${branch}". Pass it as an argument.`);
+      process.exit(1);
+    }
+    console.log(`${color("bold", `PR #${prNumber} — Review Comments`)}`);
+    console.log();
+    // Fetch reviews (summary bodies)
+    try {
+      const reviews = JSON.parse(run(`gh api repos/${repo}/pulls/${prNumber}/reviews`, { silent: true }));
+      for (const r of reviews) {
+        if (r.body && r.body.trim()) {
+          console.log(`### Review by ${r.user.login} (${r.state})`);
+          console.log();
+          console.log(r.body);
+          console.log();
+          console.log("---");
+          console.log();
+        }
+      }
+      // Fetch line-level comments
+      const comments = JSON.parse(run(`gh api repos/${repo}/pulls/${prNumber}/comments`, { silent: true }));
+      if (comments.length > 0) {
+        console.log(`### ${comments.length} line-level suggestion${comments.length === 1 ? "" : "s"}`);
+        for (const c of comments) {
+          console.log();
+          console.log(`**${c.path}:${c.line}** — ${c.user.login}`);
+          console.log();
+          console.log(c.body);
+          if (c.diff_hunk) {
+            console.log();
+            console.log("```diff");
+            console.log(c.diff_hunk);
+            console.log("```");
+          }
+          console.log("---");
+        }
+      }
+    } catch (err) {
+      console.error("❌ Failed to fetch reviews:", err.message);
+      process.exit(1);
+    }
+    if (SAVE) saveReport();
+    process.exit(0);
+  }
+
   // ── PR summary mode ─────────────────────────────────────────────────
   if (PR_SUMMARY) {
     generatePRSummary();
