@@ -49,18 +49,25 @@ describe("V3 dropper agent", () => {
 		expect(observationPoolFullness(25, 100)).toBe(0.25);
 	});
 
-	it("computes max drops from token excess above budget", () => {
+	it("computes max drops from pool fullness ratio (blackhole algorithm)", () => {
 		const observations = Array.from({ length: 10 }, (_, index) =>
 			observation(`${index}`.padStart(12, "a"), { relevance: "low", tokenCount: 10 }),
 		);
 
-		expect(maxDropCountForPool(observations, 100, 100)).toBe(0);
-		expect(maxDropCountForPool(observations, 100, 90)).toBe(1);
-		expect(maxDropCountForPool(observations, 100, 50)).toBe(5);
-		expect(maxDropCountForPool(observations, 100, 0)).toBe(10);
+		// Below skip threshold (fullness < 0.10) → 0 drops
+		expect(maxDropCountForPool(observations, 5, 100)).toBe(0);
+
+		// At budget (fullness = 1.0) → max ratio 0.50 → floor(10 × 0.50) = 5
+		expect(maxDropCountForPool(observations, 100, 100)).toBe(5);
+
+		// Over budget (fullness > 1.0) → capped at 1.0 → same max ratio
+		expect(maxDropCountForPool(observations, 200, 100)).toBe(5);
+
+		// Budget ≤ 0 → guarded, returns 0
+		expect(maxDropCountForPool(observations, 100, 0)).toBe(0);
 	});
 
-	it("uses active observation count for budget-return max drops while critical ids remain eligible later", () => {
+	it("respects critical relevance in droppableCount — critical obs are never counted as droppable", () => {
 		const observations = [
 			observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 10 }),
 			observation("bbbbbbbbbbbb", { relevance: "medium", tokenCount: 10 }),
@@ -68,7 +75,9 @@ describe("V3 dropper agent", () => {
 			observation("dddddddddddd", { relevance: "critical", tokenCount: 10 }),
 		];
 
-		expect(maxDropCountForPool(observations, 40, 20)).toBe(2);
+		// tokens=40, budget=20 → fullness=2.0 → capped 1.0 → dropRatio 0.50
+		// droppableCount=2 (only low and medium) → floor(2 × 0.50) = 1, max(1,1) = 1
+		expect(maxDropCountForPool(observations, 40, 20)).toBe(1);
 	});
 
 	it("keeps core dropper safety guidance in V3 terms", async () => {
@@ -214,16 +223,17 @@ describe("V3 dropper agent", () => {
 		await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
 	});
 
-	it("skips the model at or below the budget", async () => {
+	it("skips the model when pool fullness is below the skip threshold", async () => {
 		let called = false;
 		const loop = fakeAgentLoop(() => {
 			called = true;
 		});
 
+		// 1 observation × 10 tokens, budget=200 → fullness=0.05 < DROP_SKIP_FULLNESS(0.10)
 		await expect(runDropper({
 			...baseArgs,
 			observations: [observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 10 })],
-			budgetTokens: 10,
+			budgetTokens: 200,
 			agentLoop: loop,
 		})).resolves.toBeUndefined();
 		expect(called).toBe(false);
