@@ -22,3 +22,32 @@ Porting would remove error highlighting (`[tool_error]` sections, `ERROR` prefix
 ### Decision needed
 Option A: Skip entirely (keep error highlighting)
 Option B: Manually extract only the safe parts (thinking removal + dead code cleanup) without touching `isError`
+
+---
+
+## pi-observational-memory `bf79ff7` + `52b5844` — pool refactor and budgetTokens→targetTokens rename
+
+**Date**: 2026-05-27
+**Status**: ⏳ Deferred
+**Commits**:
+- `bf79ff7` Use active ledger pressure for dropper
+- `52b5844` Gate dropper on target tokens after reflection
+
+### What they do
+- `bf79ff7`: Extracts pool metric functions (observationPoolFullness, dropUrgencyForFullness, maxDropCountForPool) from `agent.ts` into a new `pool.ts` module. Replaces inline calculations with `observationPoolMetrics()` call.
+- `52b5844`: Renames `budgetTokens` → `targetTokens` in the RunDropperArgs interface, removes `dropUrgencyForFullness` export, adds `tokensOverTarget` metric. Changes the pool algorithm from ratio-based (fullness% → urgency → % of pool) to over-budget-based (tokensOverTarget / avgObservationTokens).
+
+### Why deferred
+These commits touch heavily modified ground:
+1. The pool refactor extracts shared functions that our `consolidation.ts` call site also uses — porting would conflict with our existing `budgetTokens` call at consolidation.ts:654
+2. The rename (`budgetTokens` → `targetTokens`) percolates to `consolidation.ts` which is also modified by local branches (fix/noautocompact-reflector-dropper)
+3. The pool algorithm change (ratio-based → over-budget-based) is a behavioral change that needs careful testing against our noAutoCompact mode
+4. We have unique features (`existingObservationsSummary`, `observerPreambleMaxTokens`) that interact with the dropper interface
+
+### Mitigation applied
+Added `observationsPoolTargetTokens` as a forward-compat no-op config entry (`unified-config.ts`) so the config shape is aligned with upstream even though our code doesn't use it yet. This prevents downstream lockstep divergence on the config schema.
+
+### Decision needed
+Option A: Port both commits when we can also update consolidation.ts (requires coordination with fix/noautocompact-reflector-dropper branch)
+Option B: Skip permanently — our ratio-based algorithm works, and the rename is cosmetic
+Option C: Port the rename only (adapt consolidation.ts call sites) but keep our pool algorithm
