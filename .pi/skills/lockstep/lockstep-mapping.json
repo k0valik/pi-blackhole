@@ -1,0 +1,416 @@
+{
+  "_description": "Bijection table mapping upstream files to blackhole's versions. Each entry describes how the file relates.",
+  "_note": "Keys use upstream path relative to repo root. Values describe the relationship.",
+  "upstreams": {
+    "pi-vcc": {
+      "git": "https://github.com/sting8k/pi-vcc.git",
+      "branch": "master",
+      "marker": ".upstream-vcc-head"
+    },
+    "pi-observational-memory": {
+      "git": "https://github.com/elpapi42/pi-observational-memory.git",
+      "branch": "master",
+      "marker": ".upstream-om-head"
+    }
+  },
+  "_status_legend": {
+    "UNCHANGED": "We have this file at the same path, unmodified from upstream.",
+    "MODIFIED": "Same path, but we changed it.",
+    "MOVED": "Upstream path → our path differs.",
+    "MERGED": "Upstream content was absorbed into a different file (usually ours that combines multiple upstream sources).",
+    "REWRITTEN": "We have a file at the mapped path that serves the same purpose but was fundamentally rewritten.",
+    "ELIMINATED": "Upstream file has no direct descendant in our repo — its purpose is served by a combination of our files.",
+    "DELETED": "Upstream file was deleted in a recent commit; we may still have it.",
+    "UNIQUE": "Our file with no upstream counterpart."
+  },
+  "files": [
+    {
+      "upstream": "pi-vcc",
+      "path": "src/hooks/before-compact.ts",
+      "ours": "src/hooks/before-compact.ts",
+      "status": "MODIFIED",
+      "_note": "VCC hook extended with OM content injection (buildCompactionProjection + renderSummary) at end of handler. OM compaction-hook merged into this."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/commands/pi-vcc.ts",
+      "ours": "src/commands/pi-vcc.ts",
+      "status": "MODIFIED",
+      "_note": "Added omRuntime parameter for noAutoCompact flush. Extended to write pending observations on /blackhole."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/commands/vcc-recall.ts",
+      "ours": "src/commands/vcc-recall.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/tools/recall.ts",
+      "ours": "src/tools/recall.ts",
+      "status": "MODIFIED",
+      "_note": "Unified recall tool — merged VCC recall + OM recall-observation into single tool with #N and [12char] support."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "index.ts",
+      "ours": "index.ts",
+      "status": "MODIFIED",
+      "_note": "Extended entrypoint — registers OM consolidation + compaction triggers and memory command."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/summarize.ts",
+      "ours": "src/core/summarize.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/brief.ts",
+      "ours": "src/core/brief.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/build-sections.ts",
+      "ours": "src/core/build-sections.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/normalize.ts",
+      "ours": "src/core/normalize.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/filter-noise.ts",
+      "ours": "src/core/filter-noise.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/content.ts",
+      "ours": "src/core/content.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/format.ts",
+      "ours": "src/core/format.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/format-recall.ts",
+      "ours": "src/core/format-recall.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/load-messages.ts",
+      "ours": "src/core/load-messages.ts",
+      "status": "MODIFIED",
+      "_note": "Added silent JSON parse failure logging."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/sanitize.ts",
+      "ours": "src/core/sanitize.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/lineage.ts",
+      "ours": "src/core/lineage.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/render-entries.ts",
+      "ours": "src/core/render-entries.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/search-entries.ts",
+      "ours": "src/core/search-entries.ts",
+      "status": "MODIFIED",
+      "_note": "Minor modifications for unified recall format."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/tool-args.ts",
+      "ours": "src/core/tool-args.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/recall-scope.ts",
+      "ours": "src/core/recall-scope.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/skill-collapse.ts",
+      "ours": "src/core/skill-collapse.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/extract/commits.ts",
+      "ours": "src/extract/commits.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/extract/files.ts",
+      "ours": "src/extract/files.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/extract/goals.ts",
+      "ours": "src/extract/goals.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/extract/preferences.ts",
+      "ours": "src/extract/preferences.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/types.ts",
+      "ours": "src/types.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/sections.ts",
+      "ours": "src/sections.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/details.ts",
+      "ours": "src/details.ts",
+      "status": "MODIFIED",
+      "_note": "Renamed compactor field from 'pi-vcc' to 'blackhole'."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/report.ts",
+      "ours": null,
+      "status": "ELIMINATED",
+      "_note": "Dead code removed in blackhole v0.2.1. Upstream still has it."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "src/core/settings.ts",
+      "ours": null,
+      "status": "ELIMINATED",
+      "_note": "Standalone settings replaced by unified-config.ts which merges VCC + OM config into one."
+    },
+    {
+      "upstream": "pi-vcc",
+      "path": "package.json",
+      "ours": "package.json",
+      "status": "MODIFIED",
+      "_note": "Different package name, version, dependencies, files array."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/index.ts",
+      "ours": null,
+      "status": "ELIMINATED",
+      "_note": "OM entry point functionality merged into our index.ts."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/config.ts",
+      "ours": "src/om/config.ts",
+      "status": "REWRITTEN",
+      "_note": "Thin re-export of unified-config types. Original OM config had its own Config interface; we now share UnifiedConfig with VCC settings."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/runtime.ts",
+      "ours": "src/om/runtime.ts",
+      "status": "MODIFIED",
+      "_note": "Extended with: buildCandidateList, findCandidateConfig, recordRetryableError, markConsolidationError, isConsolidationRetryGated, compactionStats, compactWasPiVcc, cooldown integration."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/hooks/consolidation-trigger.ts",
+      "ours": "src/om/consolidation.ts",
+      "status": "REWRITTEN",
+      "_note": "Same pipeline (observer→reflector→dropper) but each stage has fallback model retry loops, cooldown recording, noAutoCompact pending.json support, observerPreambleMaxTokens capping, MAX_STAGE_ATTEMPTS per stage, and duplicate/empty observation diagnosis."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/hooks/compaction-trigger.ts",
+      "ours": "src/om/compaction-trigger.ts",
+      "status": "MODIFIED",
+      "_note": "Added: noAutoCompact gate, memory=false gate, queueMicrotask instead of setTimeout, session ID identity validation to prevent stale context."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/hooks/compaction-hook.ts",
+      "ours": null,
+      "status": "MERGED",
+      "_note": "OM compaction hook content merged into src/hooks/before-compact.ts (the combined VCC+OM hook)."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/types.ts",
+      "ours": "src/om/ledger/types.ts",
+      "status": "MOVED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/fold.ts",
+      "ours": "src/om/ledger/fold.ts",
+      "status": "MOVED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/projection.ts",
+      "ours": "src/om/ledger/projection.ts",
+      "status": "MODIFIED",
+      "_note": "Added selectPriorObservations for preamble capping, visibleProjection, extends to support noAutoCompact mode."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/progress.ts",
+      "ours": "src/om/ledger/progress.ts",
+      "status": "MODIFIED",
+      "_note": "Added rawTokensAfterIndex, entryIndexForId, findLastCompactionIndex, observationsCreatedAfterIndex, reflectionsCreatedAfterIndex."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/recall.ts",
+      "ours": "src/om/ledger/recall.ts",
+      "status": "MODIFIED",
+      "_note": "Extended with cross-reference annotations (#N ↔ hex-id)."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/render-summary.ts",
+      "ours": "src/om/ledger/render-summary.ts",
+      "status": "MODIFIED",
+      "_note": "Added buildExistingObservationsSummary, buildExistingReflectionsSummary for staged context in reflector/dropper."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/session-ledger/index.ts",
+      "ours": "src/om/ledger/index.ts",
+      "status": "MOVED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/agents/observer/agent.ts",
+      "ours": "src/om/agents/observer/agent.ts",
+      "status": "MODIFIED",
+      "_note": "Added agent_end stopReason='error' detection, empty observation diagnosis (emptyReason with tool_not_called/all_rejected/all_duplicates/empty_array/no_new_content)."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/agents/observer/prompts.ts",
+      "ours": "src/om/agents/observer/prompts.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/agents/reflector/agent.ts",
+      "ours": "src/om/agents/reflector/agent.ts",
+      "status": "MODIFIED",
+      "_note": "Added existingReflectionsSummary and existingObservationsSummary input for staged context."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/agents/reflector/prompts.ts",
+      "ours": "src/om/agents/reflector/prompts.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/agents/dropper/agent.ts",
+      "ours": "src/om/agents/dropper/agent.ts",
+      "status": "MODIFIED",
+      "_note": "Added existingObservationsSummary input for staged context."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/agents/dropper/prompts.ts",
+      "ours": "src/om/agents/dropper/prompts.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/commands/status.ts",
+      "ours": null,
+      "status": "ELIMINATED",
+      "_note": "Replaced by our /blackhole-memory command (src/commands/memory.ts) with richer display."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/commands/view.ts",
+      "ours": null,
+      "status": "ELIMINATED",
+      "_note": "Functionality folded into /blackhole-memory view|full."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/tools/recall-observation.ts",
+      "ours": null,
+      "status": "MERGED",
+      "_note": "OM recall tool merged into src/tools/recall.ts (unified with VCC recall)."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/clipboard.ts",
+      "ours": "src/om/clipboard.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/debug-log.ts",
+      "ours": "src/om/debug-log.ts",
+      "status": "UNCHANGED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/ids.ts",
+      "ours": "src/om/ids.ts",
+      "status": "MOVED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/model-budget.ts",
+      "ours": "src/om/model-budget.ts",
+      "status": "MOVED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/serialize.ts",
+      "ours": "src/om/serialize.ts",
+      "status": "MODIFIED",
+      "_note": "Extended truncateRecordContent."
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "src/tokens.ts",
+      "ours": "src/om/tokens.ts",
+      "status": "MOVED"
+    },
+    {
+      "upstream": "pi-observational-memory",
+      "path": "package.json",
+      "ours": "package.json",
+      "status": "MODIFIED",
+      "_note": "Different package name, version, dependencies."
+    }
+  ]
+}
