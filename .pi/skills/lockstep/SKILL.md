@@ -190,7 +190,26 @@ git add CHANGELOG.md .pi/skills/lockstep/.upstream-*-head
 git commit -m "lockstep: advance markers and update CHANGELOG"
 ```
 
-### Step 8: Open a PR
+### Step 8: Generate PR summary and verify checklist
+
+After markers and CHANGELOG are committed, generate the PR summary:
+
+```bash
+node .pi/skills/lockstep/scripts/lockstep.js --pr-summary
+```
+
+This saves a formatted PR description to `docs/pr-summary-YYYY-MM-DD.md` (gitignored).
+Read it and verify the checklist is complete before opening the PR:
+
+- [ ] Each ported change verified with `npx tsc --noEmit`
+- [ ] CHANGELOG.md updated with ported/skipped/deferred changes
+- [ ] Markers advanced to current upstream HEAD
+- [ ] Deferred decisions logged in DEFERRED.md
+- [ ] PR summary generated and reviewed
+
+The script auto-checks the first three items — verify the remaining ones manually.
+
+### Step 9: Open a PR
 
 Push the branch and open a pull request against `main`:
 
@@ -198,13 +217,7 @@ Push the branch and open a pull request against `main`:
 git push origin lockstep/YYYY-MM-DD
 ```
 
-The script can generate a PR description summary with `--pr-summary` (after markers are updated):
-
-```bash
-node .pi/skills/lockstep/scripts/lockstep.js --pr-summary
-```
-
-This reads the marker state and CHANGELOG to produce a structured PR description with the list of ported/skipped/deferred changes.
+Use the saved PR description from `docs/pr-summary-YYYY-MM-DD.md` when creating the PR on GitHub.
 
 ## Marker files — what they mean
 

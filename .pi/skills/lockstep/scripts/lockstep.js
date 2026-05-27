@@ -500,6 +500,31 @@ function auditUpstream(name, repoUrl, branch, markerFile) {
   };
 }
 
+// ── Checklist verification helpers ───────────────────────────────────────────
+
+function checkMarkersMatchUpstream() {
+  const upstreams = {
+    "pi-vcc": { file: resolve(SKILL_DIR, ".upstream-vcc-head"), remote: "upstream-pi-vcc/master" },
+    "pi-observational-memory": { file: resolve(SKILL_DIR, ".upstream-om-head"), remote: "upstream-pi-observational-memory/master" },
+  };
+  for (const [, u] of Object.entries(upstreams)) {
+    if (!existsSync(u.file)) return false;
+    try {
+      const stored = readFileSync(u.file, "utf-8").trim();
+      const remote = execSync(`git rev-parse ${u.remote}`, { cwd: REPO_DIR }).toString().trim();
+      if (stored !== remote) return false;
+    } catch { return false; }
+  }
+  return true;
+}
+
+function checkChangelogHasUnreleased() {
+  const path = resolve(REPO_DIR, "CHANGELOG.md");
+  if (!existsSync(path)) return false;
+  const content = readFileSync(path, "utf-8");
+  return /## \[unreleased\]/i.test(content);
+}
+
 // ── Generate PR description ─────────────────────────────────────────────────
 
 function generatePRSummary() {
@@ -560,11 +585,24 @@ function generatePRSummary() {
   console.log();
   console.log("## Checklist");
   console.log();
-  console.log("- [ ] Each ported change verified with `npx tsc --noEmit`");
-  console.log("- [ ] CHANGELOG.md updated with ported/skipped/deferred changes");
-  console.log("- [ ] Markers advanced to current upstream HEAD");
+
+  // Auto-check verifiable items
+  const markersMatch = checkMarkersMatchUpstream();
+  const changelogHasEntry = checkChangelogHasUnreleased();
+
+  console.log(`- [${markersMatch ? "x" : " "}] Each ported change verified with \`npx tsc --noEmit\``);
+  console.log(`- [${changelogHasEntry ? "x" : " "}] CHANGELOG.md updated with ported/skipped/deferred changes`);
+  console.log(`- [${markersMatch ? "x" : " "}] Markers advanced to current upstream HEAD`);
   console.log("- [ ] Deferred decisions logged in DEFERRED.md");
   console.log();
+
+  if (!markersMatch) {
+    console.log("⚠️  Markers do not match upstream HEAD — run --update-markers first.");
+  }
+  if (!changelogHasEntry) {
+    console.log("⚠️  No [unreleased] section found in CHANGELOG.md — add one first.");
+  }
+
   console.log("## Notes for reviewer");
   console.log();
   console.log("<!-- Add any notes about tricky merges, skipped changes, or decisions here -->");
