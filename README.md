@@ -7,6 +7,10 @@ Combines [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memor
 > This is a frankenmerge. I liked both extensions but they were not compatible - observational memory hooked into Pi's default compaction and prevented pi-vcc from working. So I merged them, made them share the same hook and output, and added the things both were missing: fallback chains, cooldowns, and a toggle between them.
 > Please also see the [`CHANGELOG.md`](CHANGELOG.md)
 
+### Lockstep with upstreams
+
+pi-blackhole tracks both upstream repositories via a [lockstep audit system](https://github.com/k0valik/pi-blackhole/pull/8) that classifies every new upstream commit as safe-to-port, modified (needs review), rewritten (skip), or orphan (needs mapping). The goal is to lift bugfixes, prompts improvements, and compatible features without breaking existing users or rolling back intentional divergences. Ported changes are reviewed per-commit with human approval — nothing is blindly merged. See [SKILL.md](.pi/skills/lockstep/SKILL.md) for the full workflow.
+
 #### For easy setup pass the [`llms.txt`](llms.txt) llms.txt to your agent and it will guide you through the config without needing to read all the docs if you're as lazy as me.
 
 
