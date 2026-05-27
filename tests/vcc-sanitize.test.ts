@@ -3,7 +3,7 @@
  * Changes: bun:test → vitest, added .js import extensions
  */
 import { describe, it, expect } from "vitest";
-import { sanitize } from "../src/core/sanitize.js";
+import { sanitize } from "../src/core/sanitize.js.js";
 
 describe("sanitize", () => {
   it("strips ANSI escape codes", () => {

@@ -29,7 +29,7 @@ import {
 const DEFAULT_RECENT = 25;
 const PAGE_SIZE = 5;
 
-const invalidExpandIndices = (requested: number[], available: Set<number>): number[] =>
+export const invalidExpandIndices = (requested: number[], available: Set<number>): number[] =>
 	requested.filter((i) => !Number.isInteger(i) || !available.has(i));
 
 async function vccRecall(params: { query?: string; expand?: number[]; page?: number; scope?: "lineage" | "all" }, ctx: any) {
