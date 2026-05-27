@@ -46,8 +46,8 @@ describe("Config defaults", () => {
 		const config = loadUnifiedConfig(testDir);
 		expect(config.overrideDefaultCompaction).toBe(false);
 		expect(config.debug).toBe(false);
-		expect(config.observeAfterTokens).toBe(10_000);
-		expect(config.reflectAfterTokens).toBe(20_000);
+		expect(config.observeAfterTokens).toBe(15_000); // blackhole default (upstream is 10_000)
+		expect(config.reflectAfterTokens).toBe(25_000); // blackhole default (upstream is 20_000)
 		expect(config.compactAfterTokens).toBe(81_000);
 		expect(config.observationsPoolMaxTokens).toBe(20_000);
 		expect(config.agentMaxTurns).toBe(16);
@@ -284,8 +284,8 @@ describe("Integer fields are validated as positive integers", () => {
 			compactAfterTokens: 81_000,
 		});
 		const config = loadUnifiedConfig(testDir);
-		expect(config.observeAfterTokens).toBe(10_000); // default
-		expect(config.reflectAfterTokens).toBe(20_000); // default (0 is not > 0)
+		expect(config.observeAfterTokens).toBe(15_000); // blackhole default (upstream is 10_000)
+		expect(config.reflectAfterTokens).toBe(25_000); // blackhole default (upstream is 20_000)
 		expect(config.compactAfterTokens).toBe(81_000); // from config
 	});
 });

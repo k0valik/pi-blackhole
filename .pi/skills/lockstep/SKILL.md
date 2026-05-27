@@ -50,7 +50,7 @@ Even after I approve porting a specific fix or feature, you must then:
 | Script | Purpose |
 |---|---|
 | `scripts/lockstep.js` | Create lockstep branch, fetch upstreams, show new commits since last mark, classify each changed file against our mapping table. Use `--create-branch` to auto-setup the branch. Add `--save` to also write the full report to `docs/lockstep-report-<date>.md` (gitignored) for local viewing. |
-| `scripts/upstream-diff.js` | Compare our files against upstream HEAD — shows what truly differs (stripping comment headers). Use `--summary` for counts, `--only-different` to skip identical files. |
+| `scripts/upstream-diff.js` | Compare our files against upstream HEAD — shows what truly differs (stripping comment headers). Use `--summary` for counts, `--only-different` to skip identical files, `--verify` to cross-check mapping annotations against actual diffs (catches stale UNCHANGED/MODIFIED statuses). Add `--save` to write report to `docs/`. |
 
 ## Workflow
 
@@ -95,6 +95,24 @@ git show <hash>
 # Or compare our file directly against upstream HEAD
 node .pi/skills/lockstep/scripts/upstream-diff.js --only-different
 ```
+
+### Step 2b: Verify mapping annotations are current
+
+The `lockstep-mapping.json` statuses (UNCHANGED, MODIFIED, REWRITTEN) were written once and can go stale if we modify files without updating the mapping. Before trusting the SAFE/MODIFIED/REWRITTEN classification, cross-check with a fresh diff:
+
+```bash
+node .pi/skills/lockstep/scripts/upstream-diff.js --verify
+```
+
+This compares each file against upstream HEAD and flags:
+
+```
+⚠ stale UNCHANGED     — file marked unchanged but actually differs from upstream
+△ obsolete MODIFIED   — file marked modified but now matches upstream (annotation out of date)
+```
+
+If the verify finds stale entries, fix the mapping before porting (see Step 3 below).
+
 
 ### Step 3: Classify each changed file
 
