@@ -96,6 +96,24 @@ git show <hash>
 node .pi/skills/lockstep/scripts/upstream-diff.js --only-different
 ```
 
+### Step 2b: Verify mapping annotations are current
+
+The `lockstep-mapping.json` statuses (UNCHANGED, MODIFIED, REWRITTEN) were written once and can go stale if we modify files without updating the mapping. Before trusting the SAFE/MODIFIED/REWRITTEN classification, cross-check with a fresh diff:
+
+```bash
+node .pi/skills/lockstep/scripts/upstream-diff.js --verify
+```
+
+This compares each file against upstream HEAD and flags:
+
+```
+⚠ stale UNCHANGED     — file marked unchanged but actually differs from upstream
+△ obsolete MODIFIED   — file marked modified but now matches upstream (annotation out of date)
+```
+
+If the verify finds stale entries, fix the mapping before porting (see Step 4b below).
+
+
 ### Step 3: Classify each changed file
 
 For every file the upstream changed, consult `lockstep-mapping.json`:
