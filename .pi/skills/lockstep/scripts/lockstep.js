@@ -188,7 +188,7 @@ function ensureCleanWorkingTree() {
     console.error("  ❌ Could not stash dirty changes. Please commit or stash manually.");
     process.exit(1);
   }
-  console.log(`  💾 Stashed ${color("gray", "(restored after lockstep)")}`);
+  console.log(`  💾 Stashed ${color("gray", "(restore after lockstep with 'git stash pop')")}`);
   return true;
 }
 
@@ -673,11 +673,13 @@ async function main() {
     console.log(`  7. ${color("cyan", "Open")} a PR against main — use --pr-summary for the description`);
     console.log();
     console.log(`  ${color("bold", "After the lockstep PR is merged:")}`);
-    console.log(`  ${color("gray", "  1. Switch back to your original feature branch:")}`);
-    console.log(`  ${color("gray", "     git checkout feat/compaction-output-cap")}`);
-    console.log(`  ${color("gray", "  2. Merge main to get the lockstep updates:")}`);
+    console.log(`  ${color("gray", "  1. Restore any stashed changes first:")}`);
+    console.log(`  ${color("gray", "     git stash pop")}`);
+    console.log(`  ${color("gray", "  2. Switch back to your original feature branch:")}`);
+    console.log(`  ${color("gray", "     git checkout <original-branch>")}`);
+    console.log(`  ${color("gray", "  3. Merge main to get the lockstep updates:")}`);
     console.log(`  ${color("gray", "     git merge main")}`);
-    console.log(`  ${color("gray", "  3. Continue working on your feature.")}`);
+    console.log(`  ${color("gray", "  4. Continue working on your feature.")}`);
   }
 
   process.exit(0);

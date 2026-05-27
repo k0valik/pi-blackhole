@@ -92,7 +92,7 @@ export function maxDropCountForPool(observations: readonly Observation[], observ
 
 function relevanceCounts(observations: readonly Observation[]): Record<Observation["relevance"], number> {
 	return observations.reduce<Record<Observation["relevance"], number>>((counts, observation) => {
-		counts[observation.relevance]++;
+		if (observation.relevance in counts) counts[observation.relevance]++;
 		return counts;
 	}, { low: 0, medium: 0, high: 0, critical: 0 });
 }
@@ -145,7 +145,9 @@ export function selectDropCandidates(
 			const coverageDelta = REFLECTION_COVERAGE_DROP_RANK[coverageTierForObservation(a.observation, coverageById)]
 				- REFLECTION_COVERAGE_DROP_RANK[coverageTierForObservation(b.observation, coverageById)];
 			const relevanceDelta = RELEVANCE_DROP_RANK[a.observation.relevance] - RELEVANCE_DROP_RANK[b.observation.relevance];
-			const ageDelta = timestampRank(a.observation.timestamp) - timestampRank(b.observation.timestamp);
+			const aAge = timestampRank(a.observation.timestamp);
+			const bAge = timestampRank(b.observation.timestamp);
+			const ageDelta = aAge === bAge ? 0 : aAge - bAge;
 			return coverageDelta || relevanceDelta || ageDelta || a.index - b.index;
 		})
 		.slice(0, maxDrops)
