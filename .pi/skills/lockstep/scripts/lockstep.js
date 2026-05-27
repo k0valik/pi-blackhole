@@ -18,7 +18,7 @@
  * and produces a structured report.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,12 +70,7 @@ if (SAVE_OUTPUT || PR_SUMMARY) {
 function saveReport() {
   const docsDir = resolve(REPO_DIR, "docs");
   if (!existsSync(docsDir)) {
-    try {
-      const { mkdirSync } = require("node:fs");
-      mkdirSync(docsDir, { recursive: true });
-    } catch {
-      // ignore
-    }
+    try { mkdirSync(docsDir, { recursive: true }); } catch { /* ignore */ }
   }
   const date = new Date().toISOString().slice(0, 10);
   const plainText = outputBuffer.map(stripAnsi).join("\n") + "\n";

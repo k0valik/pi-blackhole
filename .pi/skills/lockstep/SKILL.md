@@ -19,10 +19,11 @@ This keeps lockstep work isolated from feature branches (`feat/*`) and ensures t
 
 ## Setup prerequisites
 
-The lockstep scripts must be run from the **pi-blackhole repo root** (the extension directory):
+The lockstep scripts must be run from the **pi-blackhole repo root** (the extension directory).
+The agent's CWD is set automatically — for manual runs:
 
 ```bash
-cd /home/kovalik/.pi/agent/extensions/pi-blackhole
+cd <pi-blackhole-repo-root>
 git fetch upstream-pi-vcc                     # one-time setup
 git fetch upstream-pi-observational-memory    # one-time setup
 ```
@@ -235,7 +236,7 @@ node .pi/skills/lockstep/scripts/lockstep.js --vcc
 
 To reset a marker (start over from upstream HEAD):
 ```bash
-cd /home/kovalik/.pi/agent/extensions/pi-blackhole
+cd <pi-blackhole-repo-root>
 git rev-parse refs/remotes/upstream-pi-vcc/master > .pi/skills/lockstep/.upstream-vcc-head
 ```
 
