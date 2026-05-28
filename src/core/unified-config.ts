@@ -252,8 +252,30 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 	// Merge defaults then override
 	const merged = { ...DEFAULTS, ...parsed };
 
-	// Derive observationsPoolTargetTokens if unset or invalid (must be < max)
-	if (merged.observationsPoolTargetTokens >= merged.observationsPoolMaxTokens) {
+	// ── Validate all numeric fields ──
+	// Prevents NaN/undefined from leaking into runtime math.
+	const NUMERIC_KEYS: ReadonlyArray<keyof UnifiedConfig> = [
+		"observeAfterTokens", "reflectAfterTokens", "compactAfterTokens",
+		"observationsPoolMaxTokens", "observationsPoolTargetTokens",
+		"reflectorInputMaxTokens", "dropperInputMaxTokens",
+		"observerChunkMaxTokens", "observerPreambleMaxTokens",
+		"agentMaxTurns",
+	];
+	for (const k of NUMERIC_KEYS) {
+		const v = (merged as Record<string, unknown>)[k];
+		// observerPreambleMaxTokens=0 means "auto-compute from observerChunkMaxTokens (30%)"
+		// so 0 is valid for that field. All other numeric fields must be strictly positive.
+		const minVal = k === "observerPreambleMaxTokens" ? 0 : 1;
+		if (typeof v !== "number" || !Number.isFinite(v) || v < minVal) {
+			(merged as Record<string, unknown>)[k] = DEFAULTS[k];
+		}
+	}
+
+	// Derive observationsPoolTargetTokens if still unset or invalid (must be < max)
+	if (
+		merged.observationsPoolTargetTokens === undefined ||
+		merged.observationsPoolTargetTokens >= merged.observationsPoolMaxTokens
+	) {
 		merged.observationsPoolTargetTokens = Math.floor(merged.observationsPoolMaxTokens / 2);
 	}
 
@@ -279,7 +301,11 @@ export function saveUnifiedConfig(settings: Partial<UnifiedConfig>): boolean {
 
 /**
  * Ensure ~/.pi/agent/pi-blackhole/pi-blackhole-config.json exists with defaults.
- * If the file exists but is missing keys, fill them in.
+ *
+ * Only creates the file if it doesn't exist. Missing keys are filled at read
+ * time by loadUnifiedConfig() via { ...DEFAULTS, ...parsed } merge, so there
+ * is no need to keep the on-disk file "complete". This avoids a crash on
+ * read-only filesystems where the config is managed externally (e.g., Nix).
  */
 export function scaffoldConfig(): void {
 	try {
@@ -289,21 +315,7 @@ export function scaffoldConfig(): void {
 
 		if (!existsSync(path)) {
 			writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`);
-			return;
 		}
-
-		const parsed = readJson(path);
-		if (!parsed || typeof parsed !== "object") return;
-
-		let changed = false;
-		const next: Record<string, unknown> = { ...parsed };
-		for (const [key, value] of Object.entries(DEFAULTS)) {
-			if (!(key in next)) {
-				next[key] = value;
-				changed = true;
-			}
-		}
-		if (changed) writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
 	} catch (e) {
 		console.error("blackhole: config scaffold failed", e);
 	}

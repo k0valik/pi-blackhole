@@ -57,10 +57,17 @@ function readCooldownMap(): CooldownMap {
 }
 
 function writeCooldownMap(map: CooldownMap): void {
-	const path = cooldownPath();
-	const dir = dirname(path);
-	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	writeFileSync(path, `${JSON.stringify(map, null, 2)}\n`);
+	try {
+		const path = cooldownPath();
+		const dir = dirname(path);
+		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+		writeFileSync(path, `${JSON.stringify(map, null, 2)}\n`);
+	} catch {
+		// Best-effort: cooldowns are advisory. Losing them means a rate-limited
+		// model might be retried before its cooldown window expires — slightly
+		// more API traffic, no data loss. This also prevents a process crash
+		// on read-only filesystems.
+	}
 }
 
 // ── API ─────────────────────────────────────────────────────────────────────
