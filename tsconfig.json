@@ -12,5 +12,5 @@
     "noEmit": true,
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "index.ts"]
+  "include": ["src/**/*.ts", "index.ts"]
 }
