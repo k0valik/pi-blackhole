@@ -2,10 +2,6 @@
 
 ## [0.2.4] - 2026-05-29
 
-### Added
-
-- **After-compaction consolidation (design doc):** `docs/NEW_FEATURE_AFTER_COMPACTION_CONSOLIDATION.md` — spec for a post-dropper consolidation step that distills low/medium and previously dropped entries into a compact context note, injected into the next compaction's preamble. Not yet implemented. ([#NEW_FEATURE_DOC](../docs/NEW_FEATURE_AFTER_COMPACTION_CONSOLIDATION.md))
-
 ### Recall: progressive discovery
 
 - **Touched mode (`mode:touched`):** aggregate view of all files written/edited across the session, grouped by path with entry indices. Accessible via `recall` tool and `/blackhole-recall` command. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
