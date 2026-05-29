@@ -41,7 +41,7 @@ async function augmentWithObservations(
 export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 	pi.registerCommand("blackhole-recall", {
 		description:
-			"Search session history. Defaults to active lineage; add scope:all for off-lineage branches. Usage: /blackhole-recall <query> [page:N] [scope:all]",
+			"Search session history. Defaults to active lineage. Usage: /blackhole-recall <query> [page:N] [scope:all] [mode:file|transcript]",
 		handler: async (args: string, ctx) => {
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			if (!sessionFile) {
@@ -55,6 +55,7 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 				parsed.scope === "lineage"
 					? getActiveLineageEntryIds(ctx.sessionManager)
 					: undefined;
+			const mode = parsed.mode;
 
 			if (!parsed.text) {
 				// No query: show recent entries
@@ -87,7 +88,7 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 			}
 
 			const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
-			const allResults = searchEntries(rendered, rawMessages, query);
+			const allResults = searchEntries(rendered, rawMessages, query, undefined, mode);
 
 			const start = (page - 1) * PAGE_SIZE;
 			const pageResults = allResults.slice(start, start + PAGE_SIZE);

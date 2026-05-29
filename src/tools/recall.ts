@@ -7,10 +7,13 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
-import { searchEntries } from "../core/search-entries";
+import { searchEntries, getFileIndicators } from "../core/search-entries";
+import type { RenderedEntry } from "../core/render-entries";
+import type { SearchHit } from "../core/search-entries";
 import { formatRecallOutput } from "../core/format-recall";
 import { getActiveLineageEntryIds } from "../core/lineage";
-import { normalizeRecallScope } from "../core/recall-scope";
+import { normalizeRecallScope, normalizeRecallMode } from "../core/recall-scope";
+import { parseDrillDown, expandEntryFile } from "../core/drill-down.js";
 import {
 	recallMemorySources,
 	type Entry,
@@ -32,17 +35,51 @@ const PAGE_SIZE = 5;
 export const invalidExpandIndices = (requested: number[], available: Set<number>): number[] =>
 	requested.filter((i) => !Number.isInteger(i) || !available.has(i));
 
-async function vccRecall(params: { query?: string; expand?: number[]; page?: number; scope?: "lineage" | "all" }, ctx: any) {
+/**
+ * Merge expanded (full-content) entries into search results.
+ * Overlapping entries get their summary replaced with full content.
+ * Non-overlapping expanded entries are appended. Results are sorted by index.
+ */
+export function mergeExpandedIntoSearchResults(
+	searchResults: SearchHit[],
+	expandedEntries: RenderedEntry[],
+): SearchHit[] {
+	if (expandedEntries.length === 0) return searchResults;
+
+	const expandedByIndex = new Map(expandedEntries.map((e) => [e.index, e]));
+
+	// Replace truncated summaries with full content for expanded indices
+	const merged = searchResults.map((r) => {
+		const full = expandedByIndex.get(r.index);
+		return full ? { ...r, summary: full.summary } : r;
+	});
+
+	// Append expand-only entries not already in search results
+	for (const fe of expandedEntries) {
+		if (!merged.some((r) => r.index === fe.index)) {
+			merged.push(fe as SearchHit);
+		}
+	}
+
+	// Maintain natural order by index
+	merged.sort((a, b) => a.index - b.index);
+	return merged;
+}
+
+async function vccRecall(params: { query?: string; expand?: number[]; page?: number; scope?: "lineage" | "all"; mode?: string }, ctx: any) {
 	const sessionFile = ctx.sessionManager.getSessionFile();
 	if (!sessionFile) {
 		return { content: [{ type: "text" as const, text: "No session file available." }], details: undefined };
 	}
 	const scope = normalizeRecallScope(params.scope);
+	const mode = normalizeRecallMode(params.mode);
 	const lineageEntryIds = scope === "lineage" ? getActiveLineageEntryIds(ctx.sessionManager) : undefined;
 	const expandSet = new Set(params.expand ?? []);
 	const hasExpand = expandSet.size > 0;
 
-	if (hasExpand && !params.query) {
+	// ── Pre-load full messages if expand is requested ──
+	let expandedFullEntries: RenderedEntry[] | undefined;
+	if (hasExpand) {
 		const { rendered: fullMsgs } = loadAllMessages(sessionFile, true, lineageEntryIds);
 		const requested = [...expandSet];
 		const byIndex = new Map(fullMsgs.map((m) => [m.index, m]));
@@ -50,34 +87,55 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 		if (invalid.length > 0) {
 			return { content: [{ type: "text" as const, text: `Cannot expand indices outside ${scope === "all" ? "session history" : "active lineage"}: ${invalid.join(", ")}` }], details: undefined };
 		}
-		const expanded = requested.map((i) => byIndex.get(i)).filter((m): m is NonNullable<typeof m> => Boolean(m));
-		let output = (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(expanded);
+		expandedFullEntries = requested.map((i) => byIndex.get(i)).filter((m): m is NonNullable<typeof m> => Boolean(m));
 
-		// Coupling: look up related OM observations
-		const expandedIds = expanded.map((e) => e.id).filter(Boolean);
-		if (expandedIds.length > 0) {
-			try {
-				const branchEntries = ctx.sessionManager.getBranch() as Entry[];
-				const obs = findObservationsForEntryIds(branchEntries, expandedIds);
-				const refs = findReflectionsForEntryIds(branchEntries, expandedIds);
-				if (obs.length > 0 || refs.length > 0) {
-					output += "\n\n" + formatRelatedObservations(obs, refs);
-				}
-			} catch { /* branch may not be available */ }
+		// Expand-only path (no query): return expanded entries immediately
+		if (!params.query) {
+			let output = (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(expandedFullEntries);
+
+			// Coupling: look up related OM observations
+			const expandedIds = expandedFullEntries.map((e) => e.id).filter(Boolean);
+			if (expandedIds.length > 0) {
+				try {
+					const branchEntries = ctx.sessionManager.getBranch() as Entry[];
+					const obs = findObservationsForEntryIds(branchEntries, expandedIds);
+					const refs = findReflectionsForEntryIds(branchEntries, expandedIds);
+					if (obs.length > 0 || refs.length > 0) {
+						output += "\n\n" + formatRelatedObservations(obs, refs);
+					}
+				} catch { /* branch may not be available */ }
+			}
+
+			return { content: [{ type: "text" as const, text: output }], details: undefined };
 		}
-
-		return { content: [{ type: "text" as const, text: output }], details: undefined };
+		// With query: fall through to search, then merge expanded entries into results
 	}
 
 	const { rendered: msgs, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
-	const allResults = params.query?.trim()
-		? searchEntries(msgs, rawMessages, params.query)
-		: msgs.slice(-DEFAULT_RECENT);
+	let allResults: SearchHit[] = params.query?.trim()
+		? searchEntries(msgs, rawMessages, params.query, undefined, mode)
+		: msgs.slice(-DEFAULT_RECENT).map((entry, i) => {
+				const msgIndex = Math.max(0, msgs.length - DEFAULT_RECENT) + i;
+				const msg = rawMessages[msgIndex];
+				if (msg) {
+					const indicators = getFileIndicators(msg);
+					if (indicators.length > 0) {
+						return { ...entry, fileMatches: indicators };
+					}
+				}
+				return entry;
+			});
+
+	// Merge expanded entries into full result set BEFORE pagination
+	// so pagination counts and positioning stay consistent
+	if (expandedFullEntries) {
+		allResults = mergeExpandedIntoSearchResults(allResults, expandedFullEntries);
+	}
 
 	if (params.query?.trim()) {
 		const page = Math.max(1, params.page ?? 1);
 		const start = (page - 1) * PAGE_SIZE;
-		const pageResults = allResults.slice(start, start + PAGE_SIZE);
+		const pageResults: SearchHit[] = allResults.slice(start, start + PAGE_SIZE);
 		const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
 		const scopeSuffix = scope === "all" ? " (scope: all)" : "";
 		const header = totalPages > 1
@@ -86,6 +144,7 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 		const footer = page < totalPages
 			? `\n--- Use page:${page + 1}${scope === "all" ? " with scope:'all'" : ""} for more results ---`
 			: "";
+
 		let output = formatRecallOutput(pageResults, params.query, header) + footer;
 
 		// Coupling: augment search results with related observations
@@ -104,6 +163,7 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 		return { content: [{ type: "text" as const, text: output }], details: undefined };
 	}
 
+	// No query: show recent entries (expand already merged above)
 	const output = (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(allResults, params.query);
 	return { content: [{ type: "text" as const, text: output }], details: undefined };
 }
@@ -163,16 +223,15 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 			"Recall session history or memory evidence. This is text/pattern matching, NOT semantic search. Accepts:\n" +
 			"- A 12-char hex id [a1b2c3d4e5f6] to recover observation/reflection source evidence.\n" +
 			"- A #N entry index to expand a specific transcript entry from compacted output.\n" +
+			"- A #N:path pattern to drill into file content from a tool call (e.g., #42:auth.ts).\n" +
 			"- A text/regex query to search conversation content. Multi-word queries use BM25 ranking with stopword filtering.\n" +
-			"Search tips: use unique concrete words (file names, function names, exact phrases), not conceptual questions. Regex metacharacters (|, *, .) trigger regex mode. Default scope is active lineage; use scope:'all' for off-lineage branches.",
+			"Search tips: use unique concrete words (file names, function names, error messages), not conceptual questions. Regex metacharacters (|, *, .) trigger regex mode. Default scope is active lineage; use scope:'all' for off-lineage branches.",
 		promptSnippet:
-			"recall: Text/regex search (not semantic). Also: 12-char hex ids recover obs/reflection sources; #N indices expand transcript entries. Use concrete words for search. scope:'all' for off-lineage.",
+			"recall: Search previous conversation history + file write/edit content (text/regex, mode:'file'/'transcript'). Hex observation/reflection ids and #N entry indices link both ways. #N expand, #N:path drill-down.",
 		promptGuidelines: [
-			"Use recall with a 12-char hex id before making an important decision that depends on a compacted observation or reflection whose details are unclear.",
-			"Use recall with a search query when you need to find specific conversation content. Use unique concrete terms (file paths, function names, error messages, exact phrases), not conceptual questions. Example: 'merge_design.md' not 'what did we decide about merging'.",
-			"Use recall with #N to expand a transcript entry reference from compacted output.",
-			"After compaction, the summary includes observation/reflection ids in brackets. Use recall with those ids to recover full source evidence.",
-			"If you get no results, try fewer terms, use a distinctive single word, or use a regex pattern (e.g. 'fork.*pi-vcc').",
+			"Before relying on a compacted observation or reflection, use recall with its 12-char hex id to recover full source evidence with #N entry annotations. Search results also surface related hex ids — entries and observations link both ways.",
+			"When searching, use unique concrete terms (file paths, function names, quoted phrases) — file content from content-bearing tool calls (write, edit, etc.) is also indexed.",
+			"If no results, try fewer/distinctive terms or a regex pattern (e.g. 'fork.*pi-vcc'). Use mode:'file' for file-only grep, mode:'transcript' for conversation-only.",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
@@ -190,10 +249,26 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 					Type.Literal("all"),
 				], { description: "Search scope. Default: lineage; all includes off-lineage branches." }),
 			),
+			mode: Type.Optional(
+				Type.Union([
+					Type.Literal("hybrid"),
+					Type.Literal("file"),
+					Type.Literal("transcript"),
+				], { description: "What content to search. 'hybrid' (default) = transcript + file indicators. 'file' = file content only (grep mode). 'transcript' = conversation text only." }),
+			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const q = params.query?.trim();
 			// Dispatch by format
+			if (q && parseDrillDown(q)) {
+				const parsed = parseDrillDown(q)!;
+				const sessionFile = ctx.sessionManager.getSessionFile();
+				if (!sessionFile) {
+					return { content: [{ type: "text" as const, text: "No session file available." }], details: undefined };
+				}
+				const text = expandEntryFile(sessionFile, parsed.index, parsed.pathPattern, parsed.full);
+				return { content: [{ type: "text" as const, text }], details: undefined };
+			}
 			if (q && VCC_ENTRY_PATTERN.test(q)) {
 				// #N → expand entry indices
 				const match = q.match(VCC_ENTRY_PATTERN);

@@ -15,10 +15,37 @@ describe("normalizeRecallScope", () => {
   });
 });
 
+describe("normalizeRecallMode", () => {
+  it("defaults to hybrid", async () => {
+    const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
+    expect(normalizeRecallMode()).toBe("hybrid");
+    expect(normalizeRecallMode("unknown")).toBe("hybrid");
+    expect(normalizeRecallMode(123)).toBe("hybrid");
+  });
+
+  it("accepts file mode", async () => {
+    const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
+    expect(normalizeRecallMode("file")).toBe("file");
+    expect(normalizeRecallMode("FILE")).toBe("file");
+  });
+
+  it("accepts transcript mode", async () => {
+    const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
+    expect(normalizeRecallMode("transcript")).toBe("transcript");
+    expect(normalizeRecallMode("TRANSCRIPT")).toBe("transcript");
+  });
+
+  it("accepts hybrid mode", async () => {
+    const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
+    expect(normalizeRecallMode("hybrid")).toBe("hybrid");
+  });
+});
+
 describe("parseRecallScope", () => {
   it("removes scope token from command text", () => {
     expect(parseRecallScope("license scope:all page:2")).toEqual({
       scope: "all",
+      mode: "hybrid",
       text: "license page:2",
     });
   });
@@ -26,7 +53,24 @@ describe("parseRecallScope", () => {
   it("defaults to lineage when no scope token is present", () => {
     expect(parseRecallScope("license page:2")).toEqual({
       scope: "lineage",
+      mode: "hybrid",
       text: "license page:2",
+    });
+  });
+
+  it("parses mode token from command text", () => {
+    expect(parseRecallScope("login mode:file scope:all")).toEqual({
+      scope: "all",
+      mode: "file",
+      text: "login",
+    });
+  });
+
+  it("defaults to hybrid when no mode token is present", () => {
+    expect(parseRecallScope("login scope:all")).toEqual({
+      scope: "all",
+      mode: "hybrid",
+      text: "login",
     });
   });
 });

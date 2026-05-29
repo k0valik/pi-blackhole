@@ -48,6 +48,72 @@ export const textParts = (content: Message["content"]): string[] => {
 export const textOf = (content: Message["content"]): string =>
   textParts(content).join("\n");
 
+/**
+ * Check if tool call arguments contain content-bearing data.
+ *
+ * A call is content-bearing if it has a path argument AND at least one
+ * large string/array field (content, edits, oldText, newText).
+ * This is a generic heuristic — not dependent on tool names.
+ */
+export const isContentBearing = (args: Record<string, unknown>): boolean => {
+  if (!args || typeof args !== "object") return false;
+  // Must have a path in one of the known keys
+  const hasPath = ["path", "filePath", "file_path", "file"].some((k) => typeof args[k] === "string");
+  if (!hasPath) return false;
+  // Must have at least one content-bearing field
+  if (typeof args.content === "string" && args.content.length > 0) return true;
+  if (Array.isArray(args.edits) && args.edits.length > 0) return true;
+  if (typeof args.oldText === "string" && args.oldText.length > 0 && !Array.isArray(args.edits)) return true;
+  if (typeof args.newText === "string" && args.newText.length > 0 && !Array.isArray(args.edits)) return true;
+  return false;
+};
+
+/**
+ * Extract textual content from tool call arguments (write, edit, hex_edit).
+ *
+ * Looks for content-bearing tool calls (those with a `path` argument and
+ * at least one large string/array field like `content`, `edits`, `oldText`, `newText`).
+ * Each call is capped at `maxBytesPerCall` to avoid inflating the search index.
+ */
+export const toolCallArgsText = (
+  content: Message["content"],
+  maxBytesPerCall = 10_240,
+): string => {
+  if (!content || typeof content === "string") return "";
+  const parts: string[] = [];
+  for (const part of content) {
+    if (part.type !== "toolCall") continue;
+    const args = part.arguments as Record<string, unknown>;
+    if (!isContentBearing(args)) continue;
+
+    let extracted = "";
+    if (typeof args.content === "string") {
+      extracted += args.content.slice(0, maxBytesPerCall) + "\n";
+    }
+    if (Array.isArray(args.edits)) {
+      for (const edit of args.edits) {
+        if (typeof edit.oldText === "string") {
+          extracted += edit.oldText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+        }
+        if (typeof edit.newText === "string") {
+          extracted += edit.newText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+        }
+      }
+    }
+    if (typeof args.oldText === "string" && !Array.isArray(args.edits)) {
+      extracted += args.oldText.slice(0, maxBytesPerCall) + "\n";
+    }
+    if (typeof args.newText === "string" && !Array.isArray(args.edits)) {
+      extracted += args.newText.slice(0, maxBytesPerCall) + "\n";
+    }
+
+    if (extracted) {
+      parts.push(extracted.slice(0, maxBytesPerCall));
+    }
+  }
+  return parts.join("\n");
+};
+
 /** Extract a snippet of ~`radius` chars around the first match of `term` in `text`. */
 export const snippet = (text: string, term: string, radius = 60): string | null => {
   const idx = text.toLowerCase().indexOf(term.toLowerCase());

@@ -34,9 +34,10 @@ export const loadAllMessages = (
 
     const allowed = !allowedEntryIds || allowedEntryIds.has(e.id);
     if (allowed) {
-      rendered.push(renderMessage(e.message, messageIndex, String(e.id), full));
+      const entryId = e.id != null ? String(e.id) : "";
+      rendered.push(renderMessage(e.message, messageIndex, entryId, full));
       rawMessages.push(e.message);
-      entryIds.push(String(e.id));
+      entryIds.push(entryId);
     }
     messageIndex++;
   }

@@ -27,6 +27,27 @@ describe("loadAllMessages", () => {
     }
   });
 
+  it("handles entries without an id field without producing \"undefined\" string", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-vcc-load-noid-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const lines = [
+        JSON.stringify({ type: "message", id: "m1", message: { role: "user", content: "u1" } }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "no-id entry" } }),
+      ];
+      writeFileSync(file, lines.join("\n") + "\n", "utf8");
+
+      const loaded = loadAllMessages(file, false);
+      expect(loaded.rendered).toHaveLength(2);
+      // Neither entry should have "undefined" as its id
+      expect(loaded.entryIds).not.toContain("undefined");
+      // The second entry (no id) should have an empty string or some sentinel
+      expect(loaded.rendered[1].id).not.toBe("undefined");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("filters messages by allowed lineage entry IDs and preserves original message index", () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-vcc-load-filter-"));
     const file = join(dir, "session.jsonl");
