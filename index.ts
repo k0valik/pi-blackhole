@@ -43,8 +43,12 @@ export default (pi: ExtensionAPI) => {
 
 	// Fallback: on agent_start, capture providers that registered before our wrapper
 	// (handles the case where pi-blackhole loads after another provider extension).
+	// Uses a dedicated flag instead of checking providerStreams.size so the scan
+	// always runs once even if the wrapper already captured some providers.
+	let hasScannedFallback = false;
 	pi.on("agent_start", (_event: unknown, ctx: any) => {
-		if (providerStreams.size > 0) return; // Already have captures
+		if (hasScannedFallback) return;
+		hasScannedFallback = true
 		// modelRegistry.registeredProviders is declared private in TypeScript but is a
 		// regular JS class field at runtime. We access it via bracket notation for
 		// future-proofing against potential #private migration.

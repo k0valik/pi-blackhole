@@ -154,7 +154,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 	const bridgeStreamFn = (model: any, ctx: any, opts: any) => {
 		const providerStreams: Map<string, Function> | undefined = (globalThis as any)[PROVIDER_STREAMS_KEY];
 		if (!providerStreams) return streamSimple(model, ctx, opts);
-		const customFn = providerStreams.get(model.api);
+		const customFn = model?.api ? providerStreams.get(model.api) : undefined;
 		return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
 	};
 	const streamFn = args.streamFn ?? bridgeStreamFn;
