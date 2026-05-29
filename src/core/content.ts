@@ -92,10 +92,12 @@ export const toolCallArgsText = (
     }
     if (Array.isArray(args.edits)) {
       for (const edit of args.edits) {
+        if (extracted.length >= maxBytesPerCall) break;
         if (edit && typeof edit === "object") {
           if (typeof edit.oldText === "string") {
             extracted += edit.oldText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
           }
+          if (extracted.length >= maxBytesPerCall) break;
           if (typeof edit.newText === "string") {
             extracted += edit.newText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
           }
