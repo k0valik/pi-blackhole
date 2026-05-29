@@ -1,5 +1,5 @@
 {
-  "_comment": "blackhole unified configuration — ~/.pi/agent/pi-blackhole-config.json",
+  "_comment": "blackhole unified configuration — ~/.pi/agent/pi-blackhole/pi-blackhole-config.json",
   "_all_settings_in_one_file": true,
 
   "overrideDefaultCompaction": false,
@@ -90,12 +90,14 @@
   "reflectAfterTokens": 25000,
   "compactAfterTokens": 81000,
   "observationsPoolMaxTokens": 20000,
+  "observationsPoolTargetTokens": 10000,
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000,
   "observerChunkMaxTokens": 40000,
   "observerPreambleMaxTokens": 0,
   "agentMaxTurns": 16,
 
+  "memory": true,
   "passive": false,
   "noAutoCompact": false,
   "debugLog": false,
@@ -114,7 +116,9 @@
     "Env override for passive mode: PI_BLACKHOLE_PASSIVE=true.",
     "",
     "noAutoCompact mode accumulates observationBatches/reflectionBatches in",
-    "pending.json across pipeline runs. The observer preamble (CURRENT OBSERVATIONS)",
+    "<sessionId>-pending.json (per-session) across pipeline runs.",
+    "On /blackhole flush, all accumulated batches are written to the branch and the file is cleared.",
+    "The observer preamble (CURRENT OBSERVATIONS)",
     "is capped to observerPreambleMaxTokens (default 0 = auto 30% of observerChunkMaxTokens).",
     "This is a soft safety valve — it only trims when accumulated observations exceed",
     "the budget. High-relevance observations are always kept. Reflections are never trimmed.",

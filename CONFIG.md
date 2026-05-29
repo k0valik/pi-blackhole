@@ -158,6 +158,14 @@ Same concept as `reflectorInputMaxTokens` but for the dropper. The dropper decid
 
 When the total size of active observations exceeds this budget, the dropper is triggered (after the reflector runs) to prune old or low-value observations. This keeps the active observation pool from growing unbounded.
 
+### `observationsPoolTargetTokens`
+
+**Default:** `10000` (auto-derived: half of `observationsPoolMaxTokens`)
+
+The target size the dropper aims for after pruning. Once the dropper runs, it tries to reduce the active observation pool to roughly this size. This is derived automatically as `observationsPoolMaxTokens / 2`, so you usually don't need to set it explicitly.
+
+Override only if you want a tighter or looser target than the default half ratio. Must be less than `observationsPoolMaxTokens` or it will be ignored.
+
 ---
 
 ## Behavior flags
@@ -196,7 +204,7 @@ This is a lighter alternative to `passive`: workers are off but auto-compaction 
 
 When `true`, completely disables all background workers (observer, reflector, dropper) and auto-compaction. The extension is effectively inactive. Only explicit `/blackhole` compaction works.
 
-Can also be set via environment variable: `PI_BLACKHOLE_PASSIVE=true`
+Can also be set via environment variables: `PI_BLACKHOLE_PASSIVE=true` (also accepts legacy `PI_VCC_OM_PASSIVE` or `PI_OBSERVATIONAL_MEMORY_PASSIVE` for compatibility)
 
 ### `debug`
 
@@ -278,6 +286,7 @@ For lower-context or less capable models, reducing this (e.g., `8`) prevents the
   "observerPreambleMaxTokens": 0,
   "agentMaxTurns": 16,
 
+  "memory": true,
   "noAutoCompact": false,
   "passive": false,
   "debugLog": false

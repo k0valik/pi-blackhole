@@ -33,7 +33,7 @@ Key things to understand from reading:
 - Three workers: **Observer** (extracts facts — most frequent, needs speed),
   **Reflector** (synthesizes durable reflections — needs reasoning),
   **Dropper** (prunes observations — needs judgment)
-- Four behavior flags: `noAutoCompact`, `passive`, `memory`, `overrideDefaultCompaction`
+- Behavior flags: `noAutoCompact`, `passive`, `memory`, `overrideDefaultCompaction`, `debug`, `debugLog`
 - Token thresholds vs budget caps: thresholds trigger *when* a worker runs,
   budget caps limit *how much* data is sent
 - Three presets: low (32-64k), medium/128k default, high (200k+)
@@ -71,7 +71,7 @@ Read these files to understand what the user already has:
   with context windows, costs, APIs. This tells you what models are available
   for workers.
 - **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — existing config
-  if present (may also be merged from legacy `~/.pi/agent/pi-vcc-config.json` or `settings.json["observational-memory"]`)
+  if present (may also be merged from legacy `~/.pi/agent/pi-vcc-config.json`, `settings.json["pi-blackhole"]`, or `settings.json["observational-memory"]`)
 - **`~/.pi/agent/guardrails.json`** — optional, check if present
 
 DO NOT read `auth.json` — it contains API keys and credentials.
@@ -80,17 +80,17 @@ DO NOT read `auth.json` — it contains API keys and credentials.
 
 ## 3. Inventory available models
 
-From `models.json`, note these per-provider (example, use the user's own config:
+From `models.json`, note which providers and models are available (this is an example; check what the user actually has):
 
-| Provider | Models available | Context windows | Free tiers? |
+| Provider | Notes | Context windows | Free tiers? |
 |---|---|---|---|
-| `openrouter` | Several free models: qwen3-next-80b, gemma-4-31b-it, gpt-oss-120b, etc. | 121k-256k | Yes (free) |
-| `cerebras` | gpt-oss-120b, zai-glm-4.7 | 128k | Yes (free) |
-| `ollama` | Models via Ollama Cloud: deepseek-v4-pro, gemma4:31b-cloud | 192k-256k | Yes |
+| `openrouter` | Many free models available; model selection changes frequently | varies by model | Many free |
+| `cerebras` | gpt-oss-120b (good for reasoning tasks) | 128k | Yes (free) |
+| `ollama` | Cloud-hosted models like deepseek-v4-pro, gemma4:31b-cloud | varies | Yes |
 | `zai` | glm-4.7 | 128k | Yes (free) |
-| `opencode` | gemini-3.5-flash, deepseek-v4-flash-free, qwen3.6-plus-free | 128k-456k | Yes (free) |
+| `opencode` | Several free models | varies | Yes (free) |
 | `local` | User's local endpoint | varies | Free |
-| Others | nvidia, modal, llama-cpp | varies | Depends |
+| Others | nvidia, modal, llama-cpp, etc. | varies | Depends |
 
 The user's **session model** (from `settings.json`: `defaultModel`) is what
 they use for their main conversation. Workers should preferably use different (cheaper/
@@ -292,6 +292,30 @@ You can recommend deleting them, but don't force it.
 cool-downs across restarts. If the user switches models, this file may
 still have stale cooldowns for old models — harmless but can be cleaned up.
 
+### Per-session pending files
+
+In `noAutoCompact` mode, each session gets its own pending file at
+`~/.pi/agent/pi-blackhole/<sessionId>-pending.json`. This isolates state
+between concurrent Pi sessions. The batch arrays (`observationBatches`,
+`reflectionBatches`, `droppedBatches`) accumulate across pipeline runs so
+that the observer/reflector/dropper always see full historical context.
+
+When flushing with `/blackhole`, all accumulated batches are written to the
+branch and the pending file is cleared. If you abandon a session, stale
+pending files are harmless — they'll be cleaned up when the session resumes.
+
+### Custom provider bridge for jiti-loaded agents
+
+Consolidation agents (observer, reflector, dropper) run in a separate jiti
+context (`moduleCache: false`) which creates a separate `pi-ai` instance.
+Custom providers registered by other extensions (e.g., claude-bridge) won't
+be visible to jiti-loaded agents unless the provider's `streamSimple`
+function is shared via a global map. The extension handles this
+automatically — registering providers at registration time and scanning
+the model registry as a fallback on first `agent_start`. As a user, you
+generally don't need to worry about this, but if a custom provider
+mysteriously doesn't work for the background workers, this is why.
+
 ### Models that don't exist in models.json
 
 If the user specifies a model in the config that isn't in `models.json`,
@@ -350,6 +374,7 @@ From `DEFAULTS` in `unified-config.ts`:
 | `reflectAfterTokens` | 25,000 | Reflector + dropper cadence |
 | `compactAfterTokens` | 81,000 | Auto-compaction trigger |
 | `observationsPoolMaxTokens` | 20,000 | Max active observations before pruning |
+| `observationsPoolTargetTokens` | 10,000 | Target size dropper aims for after pruning (auto: half of pool max) |
 | `reflectorInputMaxTokens` | 80,000 | Max reflector prompt budget |
 | `dropperInputMaxTokens` | 80,000 | Max dropper prompt budget |
 | `observerChunkMaxTokens` | 40,000 | Max observer chunk size (newest-first) |
@@ -364,7 +389,8 @@ observeAfterTokens:        compactAfterTokens / 8
 reflectAfterTokens:        compactAfterTokens / 4
 observerChunkMaxTokens:    compactAfterTokens / 2
 observerPreambleMaxTokens:  0 (auto-compute 30% of observerChunkMaxTokens)
-observationsPoolMaxTokens: compactAfterTokens / 4
-reflectorInputMaxTokens:   compactAfterTokens * 1.0
-dropperInputMaxTokens:     compactAfterTokens * 1.0
+observationsPoolMaxTokens:      compactAfterTokens / 4
+observationsPoolTargetTokens:   observationsPoolMaxTokens / 2
+reflectorInputMaxTokens:        compactAfterTokens * 1.0
+dropperInputMaxTokens:          compactAfterTokens * 1.0
 ```
