@@ -82,7 +82,7 @@ export const toolCallArgsText = (
   if (!content || typeof content === "string") return "";
   const parts: string[] = [];
   for (const part of content) {
-    if (part.type !== "toolCall") continue;
+    if (!part || typeof part !== "object" || part.type !== "toolCall") continue;
     const args = part.arguments as Record<string, unknown>;
     if (!isContentBearing(args)) continue;
 
@@ -92,11 +92,13 @@ export const toolCallArgsText = (
     }
     if (Array.isArray(args.edits)) {
       for (const edit of args.edits) {
-        if (typeof edit.oldText === "string") {
-          extracted += edit.oldText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
-        }
-        if (typeof edit.newText === "string") {
-          extracted += edit.newText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+        if (edit && typeof edit === "object") {
+          if (typeof edit.oldText === "string") {
+            extracted += edit.oldText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+          }
+          if (typeof edit.newText === "string") {
+            extracted += edit.newText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+          }
         }
       }
     }

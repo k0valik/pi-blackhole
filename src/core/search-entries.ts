@@ -193,8 +193,10 @@ function extractToolCallText(args: Record<string, unknown>): string {
   if (typeof args.content === "string") text += args.content + "\n";
   if (Array.isArray(args.edits)) {
     for (const edit of args.edits) {
-      if (typeof edit.oldText === "string") text += edit.oldText + "\n";
-      if (typeof edit.newText === "string") text += edit.newText + "\n";
+      if (edit && typeof edit === "object") {
+        if (typeof edit.oldText === "string") text += edit.oldText + "\n";
+        if (typeof edit.newText === "string") text += edit.newText + "\n";
+      }
     }
   }
   if (typeof args.oldText === "string" && !Array.isArray(args.edits)) text += args.oldText + "\n";
@@ -209,7 +211,7 @@ export function getFileIndicators(msg: Message): FileMatch[] {
   if (!msg?.content || typeof msg.content === "string") return [];
   const fileMatches: FileMatch[] = [];
   for (const part of msg.content) {
-    if (part.type !== "toolCall") continue;
+    if (!part || typeof part !== "object" || part.type !== "toolCall") continue;
     const args = part.arguments as Record<string, unknown>;
     if (!isContentBearing(args)) continue;
 
@@ -237,7 +239,7 @@ function computeFileMatches(msg: Message | undefined, query: string): FileMatch[
   const fileMatches: FileMatch[] = [];
 
   for (const part of msg.content) {
-    if (part.type !== "toolCall") continue;
+    if (!part || typeof part !== "object" || part.type !== "toolCall") continue;
     const args = part.arguments as Record<string, unknown>;
     if (!isContentBearing(args)) continue;
 

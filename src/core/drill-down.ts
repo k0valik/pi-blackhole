@@ -44,7 +44,9 @@ function findContentBearingCalls(content: unknown[]): ContentBearingCall[] {
     if (!path) continue;
     const entry: ContentBearingCall = { name: (part as any).name ?? "", path };
     if (typeof args.content === "string") entry.content = args.content;
-    if (Array.isArray(args.edits)) entry.edits = args.edits;
+    if (Array.isArray(args.edits)) {
+      entry.edits = args.edits.filter((e: unknown): e is { oldText?: string; newText?: string } => e !== null && typeof e === "object");
+    }
     if (typeof args.oldText === "string" && !Array.isArray(args.edits)) entry.oldText = args.oldText;
     if (typeof args.newText === "string" && !Array.isArray(args.edits)) entry.newText = args.newText;
     results.push(entry);
