@@ -13,3 +13,7 @@ docs/
 
 # Windows NTFS alternate data stream artifacts
 *:Zone.Identifier
+
+# All skills are local-only except lockstep (which is committed)
+.pi/skills/*
+!.pi/skills/lockstep/
