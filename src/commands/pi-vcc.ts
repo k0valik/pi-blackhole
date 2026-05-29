@@ -35,19 +35,29 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 			if (trimmed === "om-off") {
 				const saved = saveUnifiedConfig({ memory: false });
 				runtime.config.memory = false;
-				ctx.ui.notify(
-					saved ? "Observational memory disabled. Use /blackhole om-on to re-enable." : "Failed to save config.",
-					"info",
-				);
+				if (saved) {
+					ctx.ui.notify("Observational memory disabled. Use /blackhole om-on to re-enable.", "info");
+				} else {
+					ctx.ui.notify(
+						"Failed to save config — the config file may be read-only (e.g., managed by Nix). " +
+						"Runtime state updated for this session only.",
+						"warning",
+					);
+				}
 				return;
 			}
 			if (trimmed === "om-on") {
 				const saved = saveUnifiedConfig({ memory: true });
 				runtime.config.memory = true;
-				ctx.ui.notify(
-					saved ? "Observational memory enabled." : "Failed to save config.",
-					"info",
-				);
+				if (saved) {
+					ctx.ui.notify("Observational memory enabled.", "info");
+				} else {
+					ctx.ui.notify(
+						"Failed to save config — the config file may be read-only (e.g., managed by Nix). " +
+						"Runtime state updated for this session only.",
+						"warning",
+					);
+				}
 				return;
 			}
 

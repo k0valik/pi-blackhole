@@ -4,7 +4,7 @@
  *
  * Created by pi-vcc-om. Replaces pi-vcc's vcc_recall and OM's standalone recall-observation.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
 import { searchEntries } from "../core/search-entries";

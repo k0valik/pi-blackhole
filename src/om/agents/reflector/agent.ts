@@ -7,7 +7,8 @@
  */
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { Type } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { Static } from "typebox";
 import { hashId } from "../../ids.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
@@ -29,6 +30,10 @@ interface RunReflectorArgs {
 	existingObservationsSummary?: string;
 	signal?: AbortSignal;
 	agentLoop?: typeof agentLoop;
+	/** Optional custom stream function bypassing agentLoop's default streamSimple.
+	 *  Used by the Symbol.for bridge to access native pi-ai provider registrations
+	 *  from jiti-loaded consolidation agents. */
+	streamFn?: (model: any, context: any, options: any) => any;
 	maxTurns?: number;
 	thinkingLevel?: ModelThinkingLevel;
 }
@@ -144,7 +149,16 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 	};
 
 	const loop = args.agentLoop ?? agentLoop;
-	const stream = loop(prompts, context, config, signal);
+	// ── Bridge stream function ──
+	const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
+	const bridgeStreamFn = (model: any, ctx: any, opts: any) => {
+		const providerStreams: Map<string, Function> | undefined = (globalThis as any)[PROVIDER_STREAMS_KEY];
+		if (!providerStreams) return streamSimple(model, ctx, opts);
+		const customFn = model?.api ? providerStreams.get(model.api) : undefined;
+		return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
+	};
+	const streamFn = args.streamFn ?? bridgeStreamFn;
+	const stream = loop(prompts, context, config, signal, streamFn);
 	let agentError: string | undefined;
 	for await (const event of stream) {
 		// Tool execution collects records.

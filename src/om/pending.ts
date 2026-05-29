@@ -141,7 +141,13 @@ function writeSessionState(sessionId: string, state: PendingOMState): void {
 		}
 	} catch { /* best-effort — stale backup is optional */ }
 
-	writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`);
+	try {
+		writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`);
+	} catch {
+		// Best-effort: pending state loss means consolidation may re-process
+		// the same data on the next run — safe (idempotent by design).
+		// Prevents process crash on read-only filesystems.
+	}
 }
 
 /**
