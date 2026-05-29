@@ -145,4 +145,241 @@ describe("searchEntries", () => {
     expect(snip).toContain("line 2");
     expect(snip).not.toContain("line 3");
   });
+
+  // ── file content searchability (Phase 1) ──
+
+  it("finds text written via tool call content field", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "write path=a.ts" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Let me write the file" },
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "write",
+            arguments: {
+              path: "auth.ts",
+              content: "function rateLimitExceeded() { return true; }",
+            },
+          },
+        ],
+      } as any,
+    ];
+    const r = searchEntries(e, m, "rateLimitExceeded");
+    expect(r).toHaveLength(1);
+    expect(r[0].index).toBe(0);
+  });
+
+  it("finds text from edit tool call edits array", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "edit path=main.go" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "edit",
+            arguments: {
+              path: "main.go",
+              edits: [
+                { oldText: "func old() {}", newText: "func new() {}" },
+              ],
+            },
+          },
+        ],
+      } as any,
+    ];
+    const r = searchEntries(e, m, "func new()");
+    expect(r).toHaveLength(1);
+    expect(r[0].index).toBe(0);
+  });
+
+  it("finds text from hex_edit tool call oldText", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "hex_edit path=config.yaml" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "hex_edit",
+            arguments: {
+              path: "config.yaml",
+              oldText: "debug: false",
+              newText: "debug: true",
+            },
+          },
+        ],
+      } as any,
+    ];
+    const r = searchEntries(e, m, "debug: false");
+    expect(r).toHaveLength(1);
+    expect(r[0].index).toBe(0);
+  });
+
+  // ── mode filtering (Phase 4) ──
+
+  it("mode:'file' only searches tool call args, not transcript text", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "summary" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "The user wants login fix" },
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "write",
+            arguments: {
+              path: "auth.ts",
+              content: "function login() { return true; }",
+            },
+          },
+        ],
+      } as any,
+    ];
+    // "login" appears in both transcript + file content — should match both
+    const hybrid = searchEntries(e, m, "login");
+    expect(hybrid).toHaveLength(1);
+
+    // "login" in file mode should match (from tool call content)
+    const fileMode = searchEntries(e, m, "login", undefined, "file");
+    expect(fileMode).toHaveLength(1);
+
+    // "user wants" in file mode should NOT match (only in transcript)
+    const noMatch = searchEntries(e, m, "user wants", undefined, "file");
+    expect(noMatch).toHaveLength(0);
+
+    // "user wants" in transcript mode should match
+    const transcriptMode = searchEntries(e, m, "user wants", undefined, "transcript");
+    expect(transcriptMode).toHaveLength(1);
+
+    // "return true" in transcript mode should NOT match (only in tool call)
+    const noTranscript = searchEntries(e, m, "return true", undefined, "transcript");
+    expect(noTranscript).toHaveLength(0);
+  });
+
+  it("mode:'file' populates fileMatches correctly", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "write step" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "write",
+            arguments: {
+              path: "auth.ts",
+              content: "function login() { return true; }",
+            },
+          },
+        ],
+      } as any,
+    ];
+    const r = searchEntries(e, m, "login", undefined, "file");
+    expect(r).toHaveLength(1);
+    expect(r[0].fileMatches).toBeDefined();
+    expect(r[0].fileMatches![0].toolName).toBe("write");
+    expect(r[0].fileMatches![0].path).toBe("auth.ts");
+  });
+
+  it("mode field works with regex queries", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "editing" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "let me fix" },
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "edit",
+            arguments: {
+              path: "main.go",
+              edits: [{ oldText: "old version", newText: "new version" }],
+            },
+          },
+        ],
+      } as any,
+    ];
+    // regex in file mode should match edit content (same line)
+    const r = searchEntries(e, m, "old.*version", undefined, "file");
+    expect(r).toHaveLength(1);
+
+    // regex in transcript mode should NOT match file content
+    // Use a pattern that only appears in the edits, not in "let me fix"
+    const r2 = searchEntries(e, m, "old version", undefined, "transcript");
+    expect(r2).toHaveLength(0);
+  });
+
+  it("mode:'file' does not include bash command output", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "ran bash" },
+    ];
+    const m: Message[] = [
+      {
+        role: "bashExecution" as any,
+        command: "echo secret_api_key",
+        output: "secret_api_key",
+      } as any,
+    ];
+    // In mode:'file', bash output should NOT be searchable
+    const r = searchEntries(e, m, "secret_api_key", undefined, "file");
+    expect(r).toHaveLength(0);
+    // In hybrid mode, bash output should still be searchable (existing behavior)
+    const hybrid = searchEntries(e, m, "secret_api_key");
+    expect(hybrid).toHaveLength(1);
+  });
+
+  it("transcript mode does not include fileMatches", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "write login handler" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "writing the login handler" },
+          {
+            type: "toolCall",
+            id: "tc1",
+            name: "write",
+            arguments: {
+              path: "auth.ts",
+              content: "function login() { return true; }",
+            },
+          },
+        ],
+      } as any,
+    ];
+    // "login" appears in BOTH transcript and file content
+    // In hybrid mode, fileMatches should be present
+    const hybrid = searchEntries(e, m, "login");
+    expect(hybrid).toHaveLength(1);
+    expect(hybrid[0].fileMatches).toBeDefined();
+    expect(hybrid[0].fileMatches!.length).toBeGreaterThan(0);
+
+    // In transcript mode, fileMatches should NOT be populated even though
+    // the file content contains "login"
+    const transcript = searchEntries(e, m, "login", undefined, "transcript");
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0].fileMatches).toBeUndefined();
+  });
 });
