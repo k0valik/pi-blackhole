@@ -230,14 +230,12 @@ ${conversation}`;
 	// If no custom provider is found, it falls back to the jiti-loaded streamSimple
 	// which handles all built-in providers correctly.
 	const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
-	const bridgeStreamFn = (() => {
+	const bridgeStreamFn = (model: any, ctx: any, opts: any) => {
 		const providerStreams: Map<string, Function> | undefined = (globalThis as any)[PROVIDER_STREAMS_KEY];
-		if (!providerStreams || providerStreams.size === 0) return undefined;
-		return (model: any, ctx: any, opts: any) => {
-			const customFn = providerStreams.get(model.api);
-			return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
-		};
-	})();
+		if (!providerStreams) return streamSimple(model, ctx, opts);
+		const customFn = providerStreams.get(model.api);
+		return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
+	};
 	const streamFn = args.streamFn ?? bridgeStreamFn;
 	const stream = loop(prompts, context, config, signal, streamFn);
 	let agentError: string | undefined;
