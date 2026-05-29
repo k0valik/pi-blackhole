@@ -11,5 +11,9 @@ pi-vcc-om-cooldown.json
 # Local design notes and investigation docs
 docs/
 
+# All skills are local-only except lockstep (which is committed)
+.pi/skills/*
+!.pi/skills/lockstep/
+
 # Windows NTFS alternate data stream artifacts
 *:Zone.Identifier
