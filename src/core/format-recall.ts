@@ -115,6 +115,11 @@ export const formatRecallOutput = (
       if (e.fileMatches.length > 3) {
         line += `\n  ...(${e.fileMatches.length - 3} more file matches)`;
       }
+    } else if (e.files?.length) {
+      // Fallback: entries without fileMatches (e.g. expand-only path) still have
+      // the legacy .files array from renderMessage — show it in old format.
+      const fileSuffix = ` files:[${e.files.join(", ")}]`;
+      line += `${fileSuffix} ${body}`;
     } else {
       line += ` ${body}`;
     }
