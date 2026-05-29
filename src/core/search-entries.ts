@@ -20,6 +20,18 @@ export interface FileMatch {
   snippet?: string;
 }
 
+/** A file touched in one entry — used by mode:touched aggregation. */
+export interface FileTouch {
+  index: number;
+  toolName: string;
+}
+
+/** Aggregated view of a file touched across multiple entries. */
+export interface TouchedFile {
+  path: string;
+  entries: FileTouch[];
+}
+
 export interface SearchHit extends RenderedEntry {
   /** Context snippet around the first matched term (only when query provided) */
   snippet?: string;
@@ -264,6 +276,26 @@ function computeFileMatches(msg: Message | undefined, query: string): FileMatch[
   }
 
   return fileMatches;
+}
+
+/** Aggregate file operations across all entries for mode:touched. */
+export function getTouchedFiles(
+  messages: Message[],
+  rendered: RenderedEntry[],
+): TouchedFile[] {
+  const map = new Map<string, TouchedFile>();
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const indicators = getFileIndicators(msg);
+    for (const fm of indicators) {
+      const index = rendered[i]?.index ?? i;
+      if (!map.has(fm.path)) {
+        map.set(fm.path, { path: fm.path, entries: [] });
+      }
+      map.get(fm.path)!.entries.push({ index, toolName: fm.toolName });
+    }
+  }
+  return Array.from(map.values());
 }
 
 export const searchEntries = (

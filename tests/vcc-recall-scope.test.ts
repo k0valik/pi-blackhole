@@ -39,6 +39,12 @@ describe("normalizeRecallMode", () => {
     const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
     expect(normalizeRecallMode("hybrid")).toBe("hybrid");
   });
+
+  it("accepts touched mode", async () => {
+    const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
+    expect(normalizeRecallMode("touched")).toBe("touched");
+    expect(normalizeRecallMode("TOUCHED")).toBe("touched");
+  });
 });
 
 describe("parseRecallScope", () => {
@@ -71,6 +77,14 @@ describe("parseRecallScope", () => {
       scope: "all",
       mode: "hybrid",
       text: "login",
+    });
+  });
+
+  it("parses touched mode from command text", () => {
+    expect(parseRecallScope("mode:touched")).toEqual({
+      scope: "lineage",
+      mode: "touched",
+      text: "",
     });
   });
 });

@@ -4,13 +4,13 @@
  *
  * Created by pi-vcc-om. Replaces pi-vcc's vcc_recall and OM's standalone recall-observation.
  */
-import { Type } from "@earendil-works/pi-ai";
+import { Type, StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
-import { searchEntries, getFileIndicators } from "../core/search-entries";
+import { searchEntries, getFileIndicators, getTouchedFiles } from "../core/search-entries";
 import type { RenderedEntry } from "../core/render-entries";
 import type { SearchHit } from "../core/search-entries";
-import { formatRecallOutput } from "../core/format-recall";
+import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall";
 import { getActiveLineageEntryIds } from "../core/lineage";
 import { normalizeRecallScope, normalizeRecallMode } from "../core/recall-scope";
 import { parseDrillDown, expandEntryFile } from "../core/drill-down.js";
@@ -74,6 +74,15 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 	const scope = normalizeRecallScope(params.scope);
 	const mode = normalizeRecallMode(params.mode);
 	const lineageEntryIds = scope === "lineage" ? getActiveLineageEntryIds(ctx.sessionManager) : undefined;
+
+	// ── "touched" mode: aggregate file operations ──
+	if (mode === "touched") {
+		const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
+		const touched = getTouchedFiles(rawMessages, rendered);
+		const text = formatTouchedOutput(touched, params.page);
+		return { content: [{ type: "text" as const, text }], details: undefined };
+	}
+
 	const expandSet = new Set(params.expand ?? []);
 	const hasExpand = expandSet.size > 0;
 
@@ -220,41 +229,32 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 		name: "recall",
 		label: "Recall",
 		description:
-			"Recall session history or memory evidence. This is text/pattern matching, NOT semantic search. Accepts:\n" +
-			"- A 12-char hex id [a1b2c3d4e5f6] to recover observation/reflection source evidence.\n" +
-			"- A #N entry index to expand a specific transcript entry from compacted output.\n" +
-			"- A #N:path pattern to drill into file content from a tool call (e.g., #42:auth.ts).\n" +
-			"- A text/regex query to search conversation content. Multi-word queries use BM25 ranking with stopword filtering.\n" +
-			"Search tips: use unique concrete words (file names, function names, error messages), not conceptual questions. Regex metacharacters (|, *, .) trigger regex mode. Default scope is active lineage; use scope:'all' for off-lineage branches.",
+			"Search session history and earlier lines omitted, file write/edit content by text/regex. " +
+			"Expand entries (#N), drill-down file content (#N:path) with paging, or aggregate touched files (mode:touched).",
 		promptSnippet:
-			"recall: Search previous conversation history + file write/edit content (text/regex, mode:'file'/'transcript'). Hex observation/reflection ids and #N entry indices link both ways. #N expand, #N:path drill-down.",
+			"recall: Search session history + file write/edit content by text/regex. #N expand, #N:path drill-down with offset/limit paging, mode:file/transcript/touched.",
 		promptGuidelines: [
-			"Before relying on a compacted observation or reflection, use recall with its 12-char hex id to recover full source evidence with #N entry annotations. Search results also surface related hex ids — entries and observations link both ways.",
-			"When searching, use unique concrete terms (file paths, function names, quoted phrases) — file content from content-bearing tool calls (write, edit, etc.) is also indexed.",
-			"If no results, try fewer/distinctive terms or a regex pattern (e.g. 'fork.*pi-vcc'). Use mode:'file' for file-only grep, mode:'transcript' for conversation-only.",
+			"Use recall — search is literal text/regex matching, NOT semantic. If no results, try different terms or a regex pattern. Set scope:'all' to search the full session.",
+			"Use recall — mode:file to search only write/edit file content, mode:transcript for conversation-only, mode:touched for aggregate view of all files written/edited across the session.",
+			"Use recall — drill-down supports paging: #42:auth.ts shows first 30 lines, #42:auth.ts:30 shows next 30, #42:auth.ts:full shows everything. Note: edit diffs are not indexed for text search — drill-down reads them from raw JSONL.",
+			"Use recall — when a drill-down path matches multiple files, options are listed. Narrow with a more specific path substring.",
+			"Use recall — hex observation/reflection ids (12-char hex) link memory evidence to session entries with cross-references for navigation.",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
-				Type.String({ description: "12-char hex id, #N entry index, or text/regex search terms. NOT semantic — use concrete words (file names, quoted phrases, identifiers). Regex metacharacters trigger regex mode. Multi-word = BM25-ranked OR." }),
+				Type.String({ description: "Text/regex search; #N expands entry; #N:path drills file (#N:file auto-selects); #N:path:full all lines; #N:path:offset:limit range; 12-char hex for observations. Only full-file writes indexed." }),
 			),
 			expand: Type.Optional(
-				Type.Array(Type.Number(), { description: "Entry indices to return full untruncated content for (blackhole format only)." }),
+				Type.Array(Type.Number(), { description: "Entry indices to return full untruncated content for. Standalone or with query." }),
 			),
 			page: Type.Optional(
-				Type.Number({ description: "Page number (1-based) for paginated search results. Default: 1." }),
+				Type.Number({ description: "Page number (1-based) for paginated results. Default: 1." }),
 			),
 			scope: Type.Optional(
-				Type.Union([
-					Type.Literal("lineage"),
-					Type.Literal("all"),
-				], { description: "Search scope. Default: lineage; all includes off-lineage branches." }),
+				StringEnum(["lineage", "all"] as const, { description: "Search scope. lineage = active lineage (default), all = entire session." }),
 			),
 			mode: Type.Optional(
-				Type.Union([
-					Type.Literal("hybrid"),
-					Type.Literal("file"),
-					Type.Literal("transcript"),
-				], { description: "What content to search. 'hybrid' (default) = transcript + file indicators. 'file' = file content only (grep mode). 'transcript' = conversation text only." }),
+				StringEnum(["hybrid", "file", "transcript", "touched"] as const, { description: "What content to search. hybrid (default) = transcript + file indicators. file = write/edit file content only. transcript = conversation only. touched = aggregate files grouped by path (not per-entry search)." }),
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -266,7 +266,7 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 				if (!sessionFile) {
 					return { content: [{ type: "text" as const, text: "No session file available." }], details: undefined };
 				}
-				const text = expandEntryFile(sessionFile, parsed.index, parsed.pathPattern, parsed.full);
+				const text = expandEntryFile(sessionFile, parsed.index, parsed.pathPattern, parsed.full, parsed.offset, parsed.limit);
 				return { content: [{ type: "text" as const, text }], details: undefined };
 			}
 			if (q && VCC_ENTRY_PATTERN.test(q)) {

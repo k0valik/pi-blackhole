@@ -350,3 +350,189 @@ describe("expandEntryFile", () => {
     }
   });
 });
+
+describe("parseDrillDown with offset/limit", () => {
+  it("parses #N:path:offset", async () => {
+    const { parseDrillDown } = await import("../src/core/drill-down.js");
+    const r = parseDrillDown("#42:auth.ts:30");
+    expect(r).toEqual({ index: 42, pathPattern: "auth.ts", full: false, offset: 30, limit: undefined });
+  });
+
+  it("parses #N:path:offset:limit", async () => {
+    const { parseDrillDown } = await import("../src/core/drill-down.js");
+    const r = parseDrillDown("#42:auth.ts:30:20");
+    expect(r).toEqual({ index: 42, pathPattern: "auth.ts", full: false, offset: 30, limit: 20 });
+  });
+
+  it("parses #N:path:full still works", async () => {
+    const { parseDrillDown } = await import("../src/core/drill-down.js");
+    const r = parseDrillDown("#42:auth.ts:full");
+    expect(r).toEqual({ index: 42, pathPattern: "auth.ts", full: true, offset: undefined, limit: undefined });
+  });
+
+  it("parses plain #N:path still works", async () => {
+    const { parseDrillDown } = await import("../src/core/drill-down.js");
+    const r = parseDrillDown("#42:auth.ts");
+    expect(r).toEqual({ index: 42, pathPattern: "auth.ts", full: false, offset: undefined, limit: undefined });
+  });
+
+  it("parses #N:file:0 — offset 0 from start", async () => {
+    const { parseDrillDown } = await import("../src/core/drill-down.js");
+    const r = parseDrillDown("#42:file:0");
+    expect(r).toEqual({ index: 42, pathPattern: "file", full: false, offset: 0, limit: undefined });
+  });
+});
+
+describe("expandEntryFile with offset/limit", () => {
+  it("shows content from offset with default limit", async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const dir = mkdtempSync(join(tmpdir(), "drilldown-offset-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
+      const session = [
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "tc1",
+                name: "write",
+                arguments: {
+                  path: "long.txt",
+                  content: lines,
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      writeFileSync(file, session.join("\n") + "\n", "utf8");
+
+      // offset 20 → shows lines 21-50 (30 lines default)
+      const result = expandEntryFile(file, 0, "long.txt", false, 20);
+      expect(result).toContain("line 21");
+      expect(result).toContain("line 50");
+      expect(result).not.toContain("line 1");
+      expect(result).toContain("Lines 21-50");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("shows content window from offset with custom limit", async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const dir = mkdtempSync(join(tmpdir(), "drilldown-win-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n");
+      const session = [
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "tc1",
+                name: "write",
+                arguments: {
+                  path: "big.txt",
+                  content: lines,
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      writeFileSync(file, session.join("\n") + "\n", "utf8");
+
+      // offset 40, limit 10 → shows lines 41-50
+      const result = expandEntryFile(file, 0, "big.txt", false, 40, 10);
+      expect(result).toContain("line 41");
+      expect(result).toContain("line 50");
+      expect(result).not.toContain("line 40");
+      expect(result).not.toContain("line 51");
+      expect(result).toContain("Lines 41-50");
+      expect(result).toContain("#0:big.txt:50");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("full overrides offset/limit", async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const dir = mkdtempSync(join(tmpdir(), "drilldown-full-over-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
+      const session = [
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "tc1",
+                name: "write",
+                arguments: {
+                  path: "full.txt",
+                  content: lines,
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      writeFileSync(file, session.join("\n") + "\n", "utf8");
+
+      // full=true with offset=20 — full wins
+      const result = expandEntryFile(file, 0, "full.txt", true, 20);
+      expect(result).toContain("line 1");
+      expect(result).toContain("line 50");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles offset beyond content length gracefully", async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const dir = mkdtempSync(join(tmpdir(), "drilldown-beyond-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const session = [
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                id: "tc1",
+                name: "write",
+                arguments: {
+                  path: "short.txt",
+                  content: "line 1\nline 2\n",
+                },
+              },
+            ],
+          },
+        }),
+      ];
+      writeFileSync(file, session.join("\n") + "\n", "utf8");
+
+      const result = expandEntryFile(file, 0, "short.txt", false, 100);
+      expect(result).toContain("beyond file length");
+      expect(result).toContain("#0:short.txt");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
