@@ -165,13 +165,13 @@ Set `memory: false` or run `/blackhole om-off` for pure pi-vcc compaction — no
 | `/blackhole-memory` | Pipeline status: token progress, worker counts, last errors |
 | `/blackhole-memory view` | Visible observations and reflections, copied to clipboard |
 | `/blackhole-memory full` | Complete recorded memory, copied to clipboard |
-| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all` |
+| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file|transcript|touched` |
 
 ## Tools
 
 | Tool | Input | Returns |
 |---|---|---|
-| `recall` | `[12char hex]` — source evidence for an observation/reflection; `#N` — transcript entry by index; free text — BM25+regex ranked search | Source message(s) with timestamps |
+| `recall` | `[12char hex]` — source evidence; `#N` — expand entry; `#N:path` — drill-down file content; free text — BM25+regex ranked search; `mode:file|transcript|touched` — filter or aggregate | Source message(s) with timestamps; file content on drill-down; aggregated file list on touched mode |
 
 ---
 
@@ -317,7 +317,13 @@ Searches the raw session JSONL directly, bypassing compaction. Default scope is 
 |---|---|
 | `[12char hex]` | Recover source evidence for an observation or reflection |
 | `#N` | Expand a transcript entry by index |
+| `#N:path` | Drill-down into file content from a tool call (e.g. `#42:auth.ts`) |
+| `#N:path:full` | Show all lines of a file (vs. default preview of first 30) |
+| `#N:path:offset:limit` | Paginated file content (e.g. `#42:auth.ts:30` = next 30 lines) |
 | Free text | BM25-ranked OR search, rare terms weighted higher |
+| `mode:file` | Search only write/edit file content (not transcript text) |
+| `mode:transcript` | Search only conversation text (not file content) |
+| `mode:touched` | Aggregate view of all files written/edited, grouped by path with entry indices |
 | Regex | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`) |
 
 ### `/blackhole-recall` command (user-facing)
@@ -325,11 +331,14 @@ Searches the raw session JSONL directly, bypassing compaction. Default scope is 
 Results are shown as a collapsible message and auto-fed to the agent as context.
 
 ```
-/blackhole-recall auth token              # active-lineage search, ranked
-/blackhole-recall auth token page:2       # paginated (5 results/page)
-/blackhole-recall hook|inject             # regex
-/blackhole-recall fail.*build scope:all   # regex across all lineages
-/blackhole-recall                         # recent 25 entries
+/blackhole-recall auth token                    # active-lineage search, ranked
+/blackhole-recall auth token page:2             # paginated (5 results/page)
+/blackhole-recall hook|inject                   # regex
+/blackhole-recall fail.*build scope:all         # regex across all lineages
+/blackhole-recall mode:file                     # search only write/edit file content
+/blackhole-recall mode:transcript               # search only conversation
+/blackhole-recall mode:touched                  # aggregate view of all files touched
+/blackhole-recall                               # recent 25 entries
 ```
 
 ---

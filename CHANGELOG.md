@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.4] - 2026-05-29
+
+### Added
+
+- **After-compaction consolidation (design doc):** `docs/NEW_FEATURE_AFTER_COMPACTION_CONSOLIDATION.md` — spec for a post-dropper consolidation step that distills low/medium and previously dropped entries into a compact context note, injected into the next compaction's preamble. Not yet implemented. ([#NEW_FEATURE_DOC](../docs/NEW_FEATURE_AFTER_COMPACTION_CONSOLIDATION.md))
+
+### Recall: progressive discovery
+
+- **Touched mode (`mode:touched`):** aggregate view of all files written/edited across the session, grouped by path with entry indices. Accessible via `recall` tool and `/blackhole-recall` command. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+- **Drill-down (`#N:path`):** read file content from tool call arguments in any transcript entry. Supports `#42:auth.ts` (preview first 30 lines), `#42:auth.ts:full` (all lines), `#42:auth.ts:offset:limit` (paged). Path auto-selects when unique; ambiguous paths list options. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+- **Search mode filtering (`mode:file`, `mode:transcript`, `mode:hybrid`):** `mode:file` searches only write/edit file content; `mode:transcript` searches only conversation text; `mode:hybrid` (default) searches both. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+- **Merged expand + search:** `#N` expand entries are now merged into search results (rather than being mutually exclusive), with proper pagination and sorting. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+- **`scope` parameter as `StringEnum`:** tool schema now uses `StringEnum` (strict literal union) instead of `Type.Union` for `scope` and `mode` parameters. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+
+### Fixed
+
+- **Null-safe entry IDs in `load-messages.ts`:** gracefully handles entries with `null` IDs instead of crashing with `String(null)` → `"null"`. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+- **`formatRecallOutput` preserves legacy `files:[...]` format:** the expand-only path (no query) was silently dropping file info from entries that have the `files` field but no `fileMatches` — now falls back to the old `files:[path1, path2]` suffix. ([#12](https://github.com/k0valik/pi-blackhole/pull/12))
+
+### Crash protection — jiti bridge, EACCES guards, config safety
+
+- **Jiti bridge for custom providers:** `index.ts` now wraps `pi.registerProvider` to capture `streamSimple` functions into a `Symbol.for()` global, and scans `modelRegistry.registeredProviders` once on `agent_start`. This prevents crashes when consolidation agents (loaded via jiti with `moduleCache: false`) resolve a custom provider like `claude-bridge` — previously the jiti-loaded pi-ai instance had an empty `apiProviderRegistry` and threw `"No API provider registered"`. ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+- **Lazy bridge evaluation:** the bridge stream function now checks the provider map at call time instead of at import time, fixing an IIFE race condition where the bridge was permanently disabled because provider registration hadn't happened yet at module load. ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+- **Always-run fallback scan:** replaced `providerStreams.size > 0` guard with a dedicated `hasScannedFallback` flag — the fallback scan now always runs once regardless of how many providers the wrapper already captured, handling extensions that register before blackhole loads. ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+- **EACCES guards:** `writeCooldownMap()` and `writeSessionState()` now wrapped in try/catch. Prevents process crash on read-only filesystems (e.g., Nix-managed config). Cooldown loss is advisory (slightly more API traffic); pending state loss is safe (idempotent re-processing). ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+- **Numeric config validation:** all numeric fields are validated at load — NaN, infinity, and negative values are reset to defaults. Prevents silent math errors in pipeline logic. ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+- **`observerPreambleMaxTokens=0` explicitly allowed** in numeric validation (means "auto-compute"). ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+- **Better error messages for config save failures:** `/blackhole om-on` / `om-off` now use `"warning"`-level notification with an explanation about read-only filesystems when the config save fails, instead of a misleading `"info"`-level "Failed to save config.". ([#11](https://github.com/k0valik/pi-blackhole/pull/11))
+
 ## [0.2.3] - 2026-05-27
 
 ### Lockstep sync — 2026-05-27
