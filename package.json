@@ -14,7 +14,8 @@
     "example-config.json"
   ],
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "lint": "eslint src/"
   },
   "keywords": [
     "pi-package",
@@ -53,8 +54,13 @@
     "@earendil-works/pi-ai": "0.75.4",
     "@earendil-works/pi-coding-agent": "0.75.4",
     "@earendil-works/pi-tui": "0.75.5",
-    "typebox": "^1.1.38",
-    "typescript": "^5.7.3",
-    "vitest": "^4.1.7"
+    "@typescript-eslint/eslint-plugin": "8.60.0",
+    "@typescript-eslint/parser": "8.60.0",
+    "eslint": "9.39.4",
+    "husky": "9.1.7",
+    "lint-staged": "15.5.2",
+    "typebox": "1.1.38",
+    "typescript": "5.9.3",
+    "vitest": "4.1.7"
   }
 }

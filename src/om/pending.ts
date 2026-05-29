@@ -14,10 +14,8 @@
  * concurrent pi sessions writing to a shared file.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { Observation, Reflection } from "./ledger/types.js";
-
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export interface PendingObservation {

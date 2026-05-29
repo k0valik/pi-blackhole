@@ -5,7 +5,7 @@
  * Unmodified.
  */
 import type { NormalizedBlock } from "../types";
-import { clip, clipSentence, firstLine, nonEmptyLines } from "./content";
+import { clipSentence, firstLine, nonEmptyLines } from "./content";
 import type { SectionData } from "../sections";
 import { extractGoals } from "../extract/goals";
 import { extractFiles } from "../extract/files";

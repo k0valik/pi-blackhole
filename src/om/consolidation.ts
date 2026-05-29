@@ -49,7 +49,6 @@ import {
 	rawTokensSinceReflectionCoverage,
 	reflectionToSummaryLine,
 	reflectionsCreatedAfterIndex,
-	scoreObservation,
 	selectPriorObservations,
 	type Entry,
 	type Observation,
