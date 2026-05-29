@@ -11,14 +11,17 @@ const CWD = process.cwd();
  * - Short paths (≤3 components) returned as-is
  */
 export function shortPath(fullPath: string): string {
-  if (fullPath.startsWith(CWD + "/")) {
-    return "." + fullPath.slice(CWD.length);
+  // Normalize backslashes to forward slashes for cross-platform path handling
+  const normalized = fullPath.replace(/\\/g, "/");
+  const cwdNormalized = CWD.replace(/\\/g, "/");
+  if (normalized.startsWith(cwdNormalized + "/")) {
+    return "." + normalized.slice(cwdNormalized.length);
   }
-  const parts = fullPath.split("/");
+  const parts = normalized.split("/");
   if (parts.length > 3) {
     return ".../" + parts.slice(-3).join("/");
   }
-  return fullPath;
+  return normalized;
 }
 
 // ── File indicator formatting ─────────────────────────────────────────────

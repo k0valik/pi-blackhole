@@ -210,4 +210,11 @@ describe("shortPath", () => {
     expect(shortPath("a/b.ts")).toBe("a/b.ts");
     expect(shortPath("a/b/c.ts")).toBe("a/b/c.ts");
   });
+
+  it("normalizes backslashes to forward slashes (cross-platform)", () => {
+    // Windows path — should fall through to last-3-components shortening
+    // (CWD is a Linux path so C:\ prefix won't match it)
+    const result = shortPath("C:\\Users\\user\\project\\src\\auth.ts");
+    expect(result).toBe(".../project/src/auth.ts");
+  });
 });
