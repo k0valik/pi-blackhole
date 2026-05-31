@@ -26,6 +26,7 @@ async function flushAll(): Promise<void> {
 }
 
 function captureHandler(args: {
+	overrideDefaultCompaction?: boolean;
 	compactAfterTokens?: number;
 	passive?: boolean;
 	compactInFlight?: boolean;
@@ -42,6 +43,7 @@ function captureHandler(args: {
 	const runtime = {
 		ensureConfig: vi.fn(),
 		config: {
+			overrideDefaultCompaction: args.overrideDefaultCompaction ?? true,
 			compactAfterTokens: args.compactAfterTokens ?? 3,
 			passive: args.passive ?? false,
 			noAutoCompact: args.noAutoCompact ?? false,
@@ -120,6 +122,18 @@ describe("V3 compaction trigger (blackhole)", () => {
 			"Observational memory: compaction threshold reached (~3 tokens); triggering compaction",
 			"info",
 		);
+	});
+
+	it("skips when overrideDefaultCompaction is false (default)", async () => {
+		const { handler, runtime } = captureHandler({ overrideDefaultCompaction: false });
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
+		expect(ctx.compact).not.toHaveBeenCalled();
 	});
 
 	it("skips passive mode", async () => {

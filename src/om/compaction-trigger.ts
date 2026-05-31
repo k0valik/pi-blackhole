@@ -24,6 +24,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			passive: runtime.config.passive,
 			memory: runtime.config.memory,
 			noAutoCompact: runtime.config.noAutoCompact,
+			overrideDefaultCompaction: runtime.config.overrideDefaultCompaction,
 			compactInFlight: runtime.compactInFlight,
 			compactAfterTokens: runtime.config.compactAfterTokens,
 		});
@@ -38,6 +39,13 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		}
 		if (runtime.config.noAutoCompact === true) {
 			dbg("compaction_trigger.skip", { reason: "noAutoCompact" });
+			return;
+		}
+		// Don't force Pi to compact unless the user explicitly opted into blackhole's pipeline.
+		// When overrideDefaultCompaction is false (default), blackhole stays out of the way
+		// and lets Pi handle its own compaction naturally.
+		if (runtime.config.overrideDefaultCompaction === false) {
+			dbg("compaction_trigger.skip", { reason: "overrideDefaultCompaction_false" });
 			return;
 		}
 		if (runtime.compactInFlight) {

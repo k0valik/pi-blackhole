@@ -1,5 +1,12 @@
 # pi-blackhole
 
+> [!NOTE]
+> **For blackhole to handle all compaction automatically**, set `"overrideDefaultCompaction": true` in your config at
+> `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`. Without this, blackhole stays out of Pi's compaction by default
+> and only activates via the `/blackhole` command.
+>
+> See [`CONFIG.md`](CONFIG.md) for the full reference.
+
 **Algorithmic compaction + session-aware observational memory for [Pi](https://github.com/badlogic/pi-mono) — in one unified extension.**
 
 Blackhole merges the best ideas from [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memory](https://github.com/elpapi42/pi-observational-memory) into something that's become its own beast entirely. Deterministic compaction that costs nothing. A memory layer that survives compactions. Per-worker model fallback chains with persisted cooldowns. Manual flush mode. All configured from one JSON file.
@@ -7,6 +14,21 @@ Blackhole merges the best ideas from [pi-vcc](https://github.com/sting8k/pi-vcc)
 > **Why this exists:** I liked both extensions but they fought each other — OM hooked into Pi's default compaction and blocked vcc from working. So I merged them, made them share a single hook and output, and added everything both were missing: fallback chains, cooldowns, a memory toggle, and a manual mode for people who want to control when context gets compressed.
 >
 > The codebase has since diverged heavily from both upstreams, but tries to keep up-to-date with any fixes from them..
+
+> [!IMPORTANT]
+> **Auto-compaction behavior & configuration**
+>
+> Blackhole's auto-compaction **only activates when explicitly opted in**. By default (`overrideDefaultCompaction: false`), blackhole stays out of Pi's compaction — Pi handles its own automatically, and blackhole's `/blackhole` command still works manually.
+>
+> Configure via your Pi agent's `config.json`:
+>
+> | What you want | `overrideDefaultCompaction` | `noAutoCompact` |
+> |---|---|---|
+> | Blackhole auto-compacts at your threshold | `true` | `false` |
+> | Pi handles auto-compaction (default) | `false` | `false` |
+> | Manual only — use `/blackhole` | any | `true` |
+>
+> See [`CONFIG.md`](CONFIG.md) for the full reference.
 
 📖 See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 ⚙️ See [`CONFIG.md`](CONFIG.md) for the full configuration reference.

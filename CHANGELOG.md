@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.2] - 2026-06-01
+
+### Fixed
+
+- **Auto-compaction gating:** added explicit guard at the top of the compaction trigger that returns early when `overrideDefaultCompaction` is `false` (the default). Previously, blackhole would still evaluate token thresholds and call Pi's default compaction hook even when not opted in — causing confusing log entries and unnecessary evaluations. Now blackhole stays completely out of Pi's compaction unless the user explicitly opts in. ([#13](https://github.com/k0valik/pi-blackhole/pull/13))
+
+### Added
+
+- **README top banner:** prominent NOTE at the top instructing users to set `"overrideDefaultCompaction": true` for blackhole to handle compaction automatically. Existing config matrix in the IMPORTANT section retained for reference.
+
 ## [0.3.1] - 2026-05-31
 
 ### Fixed
