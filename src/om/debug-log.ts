@@ -25,9 +25,10 @@ export function withDebugLogContext<T>(context: DebugLogContext, fn: () => T): T
 	return storage.run({ ...parent, ...context }, fn);
 }
 
-export function debugLog(event: string, data: Record<string, unknown> = {}): void {
+export function debugLog(event: string, data: Record<string, unknown> = {}, forceEnabled?: boolean): void {
 	const context = storage.getStore();
-	if (context?.enabled !== true) return;
+	const enabled = forceEnabled ?? context?.enabled ?? false;
+	if (enabled !== true) return;
 
 	try {
 		const path = join(getAgentDir(), DEBUG_LOG_RELATIVE_PATH);
@@ -36,8 +37,8 @@ export function debugLog(event: string, data: Record<string, unknown> = {}): voi
 		const payload = {
 			ts: new Date().toISOString(),
 			event,
-			cwd: context.cwd,
-			runId: context.runId,
+			cwd: context?.cwd,
+			runId: context?.runId,
 			data,
 		};
 		appendFileSync(path, `${JSON.stringify(payload)}\n`, "utf-8");
