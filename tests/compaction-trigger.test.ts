@@ -5,7 +5,7 @@
  *   - Adapted for blackhole's queueMicrotask-based deferral (upstream uses setTimeout)
  *   - Added noAutoCompact, memory, ensureConfig to runtime mock
  *   - Added getSessionId to sessionManager mock
- *   - Uses await flushMicrotasks() instead of vi.runAllTimersAsync()
+ *   - Uses await flushAll() instead of vi.runAllTimersAsync()
  *   - Skipped "does not await observer/reflect promises" test (not applicable)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,9 +13,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerCompactionTrigger } from "../src/om/compaction-trigger.js";
 import { compactionEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
 
-/** Helper — run pending microtasks (queueMicrotask) synchronously-ish */
-function flushMicrotasks(): Promise<void> {
-	return new Promise(resolve => resolve());
+/** Flush microtasks AND fire pending fake timers (setTimeout callbacks).
+ * With vi.useFakeTimers(), setTimeout callbacks don't fire automatically.
+ * We need to advance timers manually after flushing microtasks. */
+async function flushAll(): Promise<void> {
+	// Flush microtask queue (Promise callbacks)
+	await Promise.resolve();
+	// Fire any setTimeout(..., 0) callbacks scheduled by the trigger
+	vi.advanceTimersByTime(0);
+	// Flush any chained microtasks from those callbacks
+	await Promise.resolve();
 }
 
 function captureHandler(args: {
@@ -94,7 +101,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([belowBranch]);
 
 		handler(agentEnd(), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.compact).not.toHaveBeenCalled();
@@ -106,7 +113,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 
 		handler(agentEnd(), ctx);
 		expect(runtime.compactInFlight).toBe(true);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
@@ -120,7 +127,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([dueBranch]);
 
 		handler(agentEnd(), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
@@ -132,7 +139,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([dueBranch]);
 
 		handler(agentEnd(), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
 		expect(ctx.compact).not.toHaveBeenCalled();
@@ -143,7 +150,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([dueBranch]);
 
 		handler(agentEnd("fetch failed: connection lost"), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
@@ -155,7 +162,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([dueBranch], { isIdle: vi.fn(() => false) });
 
 		handler(agentEnd(), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
 		expect(runtime.compactInFlight).toBe(false);
@@ -170,7 +177,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([dueBranch, belowBranch]);
 
 		handler(agentEnd(), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
 		expect(runtime.compactInFlight).toBe(false);
@@ -191,7 +198,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const ctx = fakeCtx([branch]);
 
 		handler(agentEnd(), ctx);
-		await flushMicrotasks();
+		await flushAll();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
 	});

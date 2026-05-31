@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { rawTokensSinceLastCompaction, type Entry } from "./ledger/index.js";
 import type { Runtime } from "./runtime.js";
-import { debugLog, withDebugLogContext } from "./debug-log.js";
+import { debugLog } from "./debug-log.js";
 
 /**
  * Regex matching Pi's internal retryable error detection.
@@ -15,6 +15,9 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 	pi.on("agent_end", (event: any, ctx: any) => {
 		runtime.ensureConfig(ctx.cwd);
 
+		// Pass the config flag explicitly — this handler runs outside ALS context
+		// (agent_end events don't flow through consolidation's withDebugLogContext),
+		// and the setTimeout callback would lose ALS context anyway.
 		const dbg = (ev: string, d?: Record<string, unknown>) => debugLog(ev, d, runtime.config.debugLog === true);
 
 		dbg("compaction_trigger.agent_end", {
@@ -83,7 +86,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 		runtime.compactInFlight = true;
 		dbg("compaction_trigger.scheduled", { compactInFlight: runtime.compactInFlight });
 
-		queueMicrotask(() => {
+		setTimeout(() => {
 			dbg("compaction_trigger.microtask.enter", {});
 			try {
 				// Validate session identity — bail if the session was replaced/reloaded.
@@ -146,6 +149,6 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 				dbg("compaction_trigger.microtask.error", { message: msg });
 				if (hasUI) ui?.notify(`Observational memory: compact threw: ${msg}`, "error");
 			}
-		});
+		}, 0);
 	});
 }
