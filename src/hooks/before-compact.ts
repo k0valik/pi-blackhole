@@ -237,7 +237,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     trace("before_compact.proceeding", {
       messageCount: ownCut.messages.length,
       firstKeptEntryId: ownCut.firstKeptEntryId,
-      compactAll: (ownCut as any).compactAll,
+      compactAll: ownCut.compactAll,
       isPiVcc,
     });
 

@@ -135,7 +135,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 					},
 					onError: (error: { message: string }) => {
 						runtime.compactInFlight = false;
-						dbg("compaction_trigger.onError", { message: error.message });
+						dbg("compaction_trigger.onError", { message: error?.message ?? String(error) });
 						if (error.message === "Compaction cancelled") {
 							// We already notified the user with the real reason before returning { cancel: true }.
 							return;
