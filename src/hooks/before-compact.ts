@@ -14,6 +14,7 @@ import { compile } from "../core/summarize";
 import type { PiVccCompactionDetails } from "../details";
 import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
+import { debugLog } from "../om/debug-log.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -141,14 +142,28 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
   pi.on("session_before_compact", (event, ctx) => {
     const { preparation, branchEntries, customInstructions } = event;
     omRuntime.ensureConfig(ctx.cwd ?? process.cwd());
+    const trace = (ev: string, d?: Record<string, unknown>) => debugLog(ev, d, omRuntime.config.debugLog === true);
+
+    trace("before_compact.enter", {
+      customInstructions,
+      isPiVcc: customInstructions === PI_VCC_COMPACT_INSTRUCTION,
+      overrideDefaultCompaction: omRuntime.config.overrideDefaultCompaction,
+      noAutoCompact: omRuntime.config.noAutoCompact,
+      branchLength: branchEntries.length,
+      hasPreviousSummary: !!preparation.previousSummary,
+    });
 
     // Always handle explicit /blackhole marker.
     // Otherwise, only handle when user opted in via settings.
     const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
-    if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) return;
+    if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
+      trace("before_compact.return_early", { reason: "overrideDefaultCompaction=false and not /blackhole" });
+      return;
+    }
 
     // When noAutoCompact is active, only /blackhole can trigger compaction
     if (omRuntime.config.noAutoCompact && !isPiVcc) {
+      trace("before_compact.cancel", { reason: "noAutoCompact and not /blackhole" });
       return { cancel: true };
     }
 
@@ -212,11 +227,19 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         })),
       });
 
+      trace("before_compact.cancel", { reason: ownCut.reason, isPiVcc });
       try {
         ctx?.ui?.notify?.(REASON_MESSAGES[ownCut.reason], "warning");
       } catch {}
       return { cancel: true };
     }
+
+    trace("before_compact.proceeding", {
+      messageCount: ownCut.messages.length,
+      firstKeptEntryId: ownCut.firstKeptEntryId,
+      compactAll: (ownCut as any).compactAll,
+      isPiVcc,
+    });
 
     const agentMessages = ownCut.messages;
     const firstKeptEntryId = ownCut.firstKeptEntryId;
@@ -278,6 +301,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
     });
 
+    trace("before_compact.summary_generated", { summaryLength: summary.length, messageCount: agentMessages.length });
+
     const details: PiVccCompactionDetails = {
       compactor: "blackhole",
       version: 1,
@@ -291,6 +316,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // ── Inject observational-memory content ───────────────────────────
     let omContent = "";
     let omDetails: Record<string, unknown> | undefined;
+    trace("before_compact.om_injection", { memoryEnabled: omRuntime.config.memory !== false });
     if (omRuntime.config.memory !== false) {
       const projection = buildCompactionProjection(
       branchEntries as any[],
