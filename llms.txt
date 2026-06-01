@@ -107,19 +107,18 @@ user can make an informed decision.
 
 ```text
 Three modes:
-- **Auto** (compaction: "auto") — workers append observations as invisible
-  markers, compaction fires automatically at token threshold. Install and
-  forget.
-- **Manual** (compaction: "manual") — observations go to disk, compaction only
-  on `/blackhole`. Cleaner conversation, you control when to compact.
-  This is the maintainer's setup.
-- **Off** (compaction: "off" + memory: false) — all workers off, no auto-compact. Only
-  explicit `/blackhole` compaction works. Pure compaction, no memory layer.
+- **Auto** (compaction: "auto") — blackhole auto-compacts at token threshold
+  using its pipeline. Auto-trigger and Pi's /compact both use blackhole.
+  Install and forget.
+- **Manual** (compaction: "manual") — auto-trigger is skipped, /compact falls
+  through to Pi. Only /blackhole uses blackhole pipeline. Observations go
+  to disk; you control when to compact.
+- **Off** (compaction: "off") — auto and /compact handled by Pi. Only
+  /blackhole uses blackhole pipeline. Optionally set memory: false to
+  disable workers entirely.
 ```
 
-Ask: "Which mode fits how you work? Manual gives you control and a clean
-conversation. Auto is zero-thought. Passive is for debugging or if you only
-want compaction."
+Ask: "Which mode fits how you work? Auto is zero-thought (default). Manual gives you control and a clean conversation. Off leaves compaction to Pi entirely, blackhole only for /blackhole."
 
 ### 4b. Model selection per worker
 
@@ -164,9 +163,13 @@ Explain the chain: primary -> fallbacks -> base model -> session model
 
 ### 4e. Compaction engine
 
-Explain: `compactionEngine: "blackhole"` makes blackhole handle ALL
-compactions (including Pi's auto-compaction), not just `/blackhole`. Only
-set this if you want the algorithmic summary format everywhere.
+Explain: `compactionEngine: "blackhole"` (default) means blackhole owns
+auto-compaction — both when it triggers and what pipeline runs. Set
+`compactionEngine: "pi-default"` if you want Pi to handle all compaction
+(timing + execution), blackhole only activates for /blackhole.
+
+Only meaningful when `compaction: "auto"`. For `"manual"`/`"off"` the engine
+is irrelevant — blackhole's hook lets Pi handle everything except /blackhole.
 
 ---
 
