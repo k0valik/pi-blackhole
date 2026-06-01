@@ -18,6 +18,9 @@ import { type ResolveResult, type Runtime } from "./runtime.js";
 import { isRetryableError } from "./cooldown.js";
 import { effectiveContextWindow } from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
+
+/** Fixed overhead for system prompt, tool definitions, and turn scaffold in context window pre-check. */
+const AGENT_LOOP_RESERVE = 8_000;
 import {
 	readPendingState,
 	savePendingObservation,
@@ -371,7 +374,7 @@ async function runObserverStage(
 
 		// Check if estimated input fits in model's context window
 		const effectiveObsCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-		const observerEstimatedInput = runtime.config.observerChunkMaxTokens + runtime.config.agentLoopReserve;
+		const observerEstimatedInput = runtime.config.observerChunkMaxTokens + AGENT_LOOP_RESERVE;
 		if (observerEstimatedInput > effectiveObsCtx) {
 			debugLog("observer.context_window_exceeded", { estimatedInput: observerEstimatedInput, effectiveCtx: effectiveObsCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
 			runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveObsCtx} too small for estimated input ${observerEstimatedInput}`), "observer");
@@ -516,7 +519,7 @@ async function runReflectorStage(
 
 		// Check if estimated input fits in model's context window
 		const effectiveRefCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-		const reflectorEstimatedInput = runtime.config.reflectorInputMaxTokens + runtime.config.agentLoopReserve;
+		const reflectorEstimatedInput = runtime.config.reflectorInputMaxTokens + AGENT_LOOP_RESERVE;
 		if (reflectorEstimatedInput > effectiveRefCtx) {
 			debugLog("reflector.context_window_exceeded", { estimatedInput: reflectorEstimatedInput, effectiveCtx: effectiveRefCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
 			runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveRefCtx} too small for estimated input ${reflectorEstimatedInput}`), "reflector");
@@ -673,7 +676,7 @@ async function runDropperStage(
 
 			// Check if estimated input fits in model's context window
 			const effectiveDropCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-			const dropperEstimatedInput = runtime.config.dropperInputMaxTokens + runtime.config.agentLoopReserve;
+			const dropperEstimatedInput = runtime.config.dropperInputMaxTokens + AGENT_LOOP_RESERVE;
 			if (dropperEstimatedInput > effectiveDropCtx) {
 				debugLog("dropper.context_window_exceeded", { estimatedInput: dropperEstimatedInput, effectiveCtx: effectiveDropCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
 				runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveDropCtx} too small for estimated input ${dropperEstimatedInput}`), "dropper");

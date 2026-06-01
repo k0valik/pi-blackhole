@@ -54,7 +54,6 @@ describe("Config defaults", () => {
 		expect(config.compactAfterTokens).toBe(81_000);
 		expect(config.observationsPoolMaxTokens).toBe(20_000);
 		expect(config.agentMaxTurns).toBe(16);
-		expect(config.agentLoopReserve).toBe(8_000);
 		expect(config.memory).toBe(true);
 		expect(config.debugLog).toBe(false);
 		expect(config.model).toBeUndefined();

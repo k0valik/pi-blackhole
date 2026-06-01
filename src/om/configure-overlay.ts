@@ -66,8 +66,6 @@ const FIELDS: FieldDef[] = [
 		helpText: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)" },
 	{ key: "agentMaxTurns", label: "Max turns per agent", type: "number", section: "Observational Memory",
 		helpText: "Shared turn cap for background memory agents" },
-	{ key: "agentLoopReserve", label: "Agent loop reserve", type: "number", section: "Observational Memory",
-		helpText: "Tokens reserved in context window for agent loop overhead" },
 
 	// ── Debug ──
 	{ key: "debug", label: "Debug snapshots", type: "boolean", section: "Debug",

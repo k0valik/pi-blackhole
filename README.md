@@ -293,7 +293,6 @@ Everything else has sensible defaults.
 | `reflectorInputMaxTokens` | `80000` | Max reflector input budget |
 | `dropperInputMaxTokens` | `80000` | Max dropper input budget |
 | `agentMaxTurns` | `16` | Max agent-loop turns per worker per run |
-| `agentLoopReserve` | `8000` | Tokens reserved in context window for agent loop overhead (system prompt, tools, turn overhead). Used by the context window pre-check. |
 | `debug` | `false` | Pre-compaction snapshot to `/tmp/pi-blackhole-debug.json` |
 | `debugLog` | `false` | Continuous JSONL debug log to `~/.pi/agent/pi-blackhole/debug.ndjson` |
 

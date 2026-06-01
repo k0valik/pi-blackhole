@@ -99,8 +99,6 @@ export interface UnifiedConfig {
 	observerPreambleMaxTokens: number;
 	/** Shared turn cap for background memory agents. */
 	agentMaxTurns: number;
-	/** Reserved tokens in context window for agent loop overhead (system prompt, tools, turns). */
-	agentLoopReserve: number;
 
 
 	/** Base model override for all memory workers. */
@@ -149,7 +147,6 @@ export const DEFAULTS: UnifiedConfig = {
 	observerChunkMaxTokens: 40_000,
 	observerPreambleMaxTokens: 0,
 	agentMaxTurns: 16,
-	agentLoopReserve: 8_000,
 
 	memory: true,
 	debugLog: false,
@@ -229,7 +226,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
 	// Positive integers
-	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns", "agentLoopReserve"] as const;
+	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
 	for (const k of numKeys) {
 		const v = positiveInt(raw[k]);
 		if (v !== undefined) (c as Record<string, unknown>)[k] = v;
@@ -379,14 +376,13 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 		"observationsPoolMaxTokens", "observationsPoolTargetTokens",
 		"reflectorInputMaxTokens", "dropperInputMaxTokens",
 		"observerChunkMaxTokens", "observerPreambleMaxTokens",
-		"agentMaxTurns", "agentLoopReserve",
+		"agentMaxTurns",
 	];
 	for (const k of REQUIRED_NUMERIC_KEYS) {
 		const v = (merged as Record<string, unknown>)[k];
 		// observerPreambleMaxTokens=0 means "auto-compute from observerChunkMaxTokens (30%)"
-		// agentLoopReserve=0 means no reserve (all context window used for input)
 		// so 0 is valid for those fields. All other numeric fields must be strictly positive.
-		const minVal = (k === "observerPreambleMaxTokens" || k === "agentLoopReserve") ? 0 : 1;
+		const minVal = (k === "observerPreambleMaxTokens") ? 0 : 1;
 		if (typeof v !== "number" || !Number.isFinite(v) || v < minVal) {
 			(merged as Record<string, unknown>)[k] = DEFAULTS[k];
 		}

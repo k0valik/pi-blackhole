@@ -146,12 +146,6 @@ Controls whether observational memory workers run and whether OM content is inje
 
 These control the OM pipeline thresholds. Unchanged from the previous config.
 
-### `agentLoopReserve`
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `agentLoopReserve` | number | `8000` | Tokens reserved in context window for agent loop overhead (system prompt, tools, turn overhead). Used by the context window pre-check — before calling an OM agent, blackhole checks if the estimated input (stage cap + reserve) fits in the model's effective context window. If not, the next fallback is tried. |
-
 ## Debug Section
 
 ### `debug` / `debugLog`
