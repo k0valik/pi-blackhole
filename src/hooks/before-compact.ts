@@ -162,8 +162,8 @@ export function buildOwnCut(
       // (e.g., refers to a non-message entry like type:"custom" OM metadata or
       // type:"compaction"). Resolve to the next message entry after pi's cut point.
       if (liveCutIdx < 0) {
-        const nextMsgEntry = branchEntries.slice(cutInBranch + 1).find(
-          (e: any) => e.type === "message" && e.message,
+        const nextMsgEntry = branchEntries.find(
+          (e: any, i: number) => i > cutInBranch && e.type === "message" && e.message,
         );
         if (nextMsgEntry) {
           const resolvedId: string = nextMsgEntry.id;
