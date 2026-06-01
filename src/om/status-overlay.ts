@@ -106,9 +106,6 @@ export function createStatusOverlay(
 
 	// Render helpers: map a contiguous nav index to the display positions
 	// (section headers are inserted at render time, not in the nav model)
-	const navIsConfig = (idx: number) => idx < selectableConfigCount;
-	const navIsPipeline = (idx: number) => idx >= selectableConfigCount && idx < selectableConfigCount + selectablePipelineCount;
-	const navIsError = (idx: number) => idx >= selectableConfigCount + selectablePipelineCount && idx < selectableConfigCount + selectablePipelineCount + selectableErrorCount;
 	const navIsAction = (idx: number) => idx >= selectableConfigCount + selectablePipelineCount + selectableErrorCount;
 
 	let selectedIndex = 0;

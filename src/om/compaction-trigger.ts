@@ -38,6 +38,10 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			dbg("compaction_trigger.skip", { reason: "compaction_manual" });
 			return;
 		}
+		if (runtime.config.compactionEngine === "pi-default") {
+			dbg("compaction_trigger.skip", { reason: "compactionEngine_pi_default" });
+			return;
+		}
 		// NOTE: memory no longer gates compaction — memory:false + compaction:auto = compact without OM
 
 		// LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)

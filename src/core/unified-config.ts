@@ -285,6 +285,8 @@ function migrateOldKnobs(parsed: Record<string, unknown>): void {
 		if (parsed.tailBehavior === undefined) {
 			parsed.tailBehavior = "minimal";
 		}
+	} else if (parsed.overrideDefaultCompaction === false) {
+		parsed.compactionEngine = "pi-default";
 	}
 
 	// Remove old keys so migration runs only once
@@ -346,6 +348,12 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 		if (["1", "true", "yes", "on"].includes(v)) {
 			parsed.compaction = "off";
 			parsed.memory = false;
+		} else if (["0", "false", "no", "off"].includes(v)) {
+			// Falsy env override: undo passive migration when config relied on legacy key
+			if (raw?.passive === true) {
+				delete parsed.compaction;
+				delete parsed.memory;
+			}
 		}
 	}
 

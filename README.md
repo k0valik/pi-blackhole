@@ -1,12 +1,20 @@
 # pi-blackhole
 
-> [!NOTE]
-> **For blackhole to handle all compaction automatically**, set `"compactionEngine": "blackhole"` in your config at
-> `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`. Without this, blackhole stays out of Pi's compaction by default
-> and only activates via the `/blackhole` command.
+> [!IMPORTANT]
+> **Blackhole is the default compaction engine** (`compactionEngine: "blackhole"`, `compaction: "auto"`). Auto-compaction fires at the configured threshold using blackhole's pipeline — both auto-trigger and Pi's `/compact` command use it. No additional setup needed.
 >
-> See [`CONFIG.md`](CONFIG.md) for the full reference. Migrating from an older version? See
-> [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) and [`OLD_CONFIG.md`](OLD_CONFIG.md).
+> | Setting | Auto-trigger | `/compact` (Pi built-in) | `/blackhole` |
+> |---|---|---|---|---|
+> | `"auto"` + `"blackhole"` (default) | blackhole handles ✓ | blackhole handles | blackhole handles |
+> | `"auto"` + `"pi-default"` | Pi handles | Pi handles | blackhole handles |
+> | `"manual"` + any | skipped | Pi handles ✓ | blackhole handles |
+> | `"off"` + any | skipped (Pi handles) | Pi handles ✓ | blackhole handles |
+>
+> The `/blackhole` command always uses blackhole's pipeline regardless of settings.
+>
+> **Upgrading from an older version?** This version replaces legacy keys (`passive`, `noAutoCompact`, `overrideDefaultCompaction`) with `compaction`, `compactionEngine`, and `tailBehavior`. Automatic migration runs at startup — old configs continue to work. Best effort was made to preserve existing behavior, but review [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) if something behaves differently.
+>
+> See [`CONFIG.md`](CONFIG.md) for the full reference.
 
 **Algorithmic compaction + session-aware observational memory for [Pi](https://github.com/badlogic/pi-mono) — in one unified extension.**
 
@@ -14,22 +22,7 @@ Blackhole merges the best ideas from [pi-vcc](https://github.com/sting8k/pi-vcc)
 
 > **Why this exists:** I liked both extensions but they fought each other — OM hooked into Pi's default compaction and blocked vcc from working. So I merged them, made them share a single hook and output, and added everything both were missing: fallback chains, cooldowns, a memory toggle, and a manual mode for people who want to control when context gets compressed.
 >
-> The codebase has since diverged heavily from both upstreams, but tries to keep up-to-date with any fixes from them..
-
-> [!IMPORTANT]
-> **Auto-compaction behavior & configuration**
->
-> Blackhole's auto-compaction **only activates when explicitly opted in**. By default (`compactionEngine: "pi-default"` or unset), blackhole stays out of Pi's compaction — Pi handles its own automatically, and blackhole's `/blackhole` command still works manually.
->
-> Configure via your Pi agent's `config.json`:
->
-> | What you want | `compactionEngine` | `compaction` |
-> |---|---|---|
-> | Blackhole auto-compacts at your threshold | `"blackhole"` | `"auto"` |
-> | Pi handles auto-compaction (default) | `"pi-default"` | `"auto"` |
-> | Manual only — use `/blackhole` | any | `"manual"` |
->
-> See [`CONFIG.md`](CONFIG.md) for the full reference. See [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) if upgrading.
+> The codebase has since diverged heavily from both upstreams, but tries to keep up-to-date with any fixes from them.
 
 📖 See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 ⚙️ See [`CONFIG.md`](CONFIG.md) for the full configuration reference.
@@ -297,8 +290,8 @@ That's it. Everything else has sensible defaults.
 
 | Setting | Default | What it controls |
 |---|---|---|
-| `compaction` | `"auto"` | When compaction triggers: `"auto"`, `"manual"`, or `"off"` (off blocks auto but allows `/blackhole`) |
-| `compactionEngine` | `"blackhole"` | Which engine handles compaction: `"blackhole"` or `"pi-default"` |
+| `compaction` | `"auto"` | When compaction triggers: `"auto"` (blackhole auto-fires), `"manual"` (only `/blackhole`), `"off"` (Pi handles auto + `/compact`, `/blackhole` still works) |
+| `compactionEngine` | `"blackhole"` | Which engine handles auto-compaction: `"blackhole"` or `"pi-default"`. Only meaningful when `compaction: "auto"` — for `"manual"`/`"off"` the hook lets Pi handle everything except `/blackhole` |
 | `tailBehavior` | `"minimal"` | How much of the transcript stays visible after compaction: `"minimal"` (last user message only, default) or `"pi-default"` (gentle, ~20k tokens) |
 | `memory` | `true` | `false` = OM workers off + no memory injection (compaction still runs) |
 | `model` | — | Base fallback model for all workers (last resort before session model) |

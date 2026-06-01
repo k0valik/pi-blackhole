@@ -24,7 +24,7 @@ export function effectiveContextWindow(
 	if (modelConfig?.contextWindow !== undefined && modelConfig.contextWindow > 0) {
 		return modelConfig.contextWindow;
 	}
-	if (typeof resolvedModel.contextWindow === "number" && resolvedModel.contextWindow > 0) {
+	if (resolvedModel && typeof resolvedModel.contextWindow === "number" && resolvedModel.contextWindow > 0) {
 		return resolvedModel.contextWindow;
 	}
 	return 128_000;

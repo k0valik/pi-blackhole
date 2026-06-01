@@ -132,15 +132,15 @@ describe("V3 compaction trigger (blackhole)", () => {
 		);
 	});
 
-	it("compaction:auto + compactionEngine:pi-default fires trigger (engine is hook's concern)", async () => {
+	it("compaction:auto + compactionEngine:pi-default skips trigger (pi-default means Pi handles timing too)", async () => {
 		const { handler, runtime } = captureHandler({ compaction: "auto", compactionEngine: "pi-default", compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch]);
 
 		handler(agentEnd(), ctx);
-		expect(runtime.compactInFlight).toBe(true);
+		expect(runtime.compactInFlight).toBe(false);
 		await flushAll();
 
-		expect(ctx.compact).toHaveBeenCalledTimes(1);
+		expect(ctx.compact).not.toHaveBeenCalled();
 	});
 
 	it("LEGACY-BACKWARD: overrideDefaultCompaction:false with no new keys — legacy guard fires, no trigger", async () => {

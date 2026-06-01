@@ -223,25 +223,25 @@ describe("Old → new key migration", () => {
 		expect(config2.tailBehavior).toBe("minimal");
 	});
 
-	it("overrideDefaultCompaction:false (already default) — no migration needed", async () => {
+	it("overrideDefaultCompaction:false → compactionEngine:pi-default", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ overrideDefaultCompaction: false });
 
 		const config = loadUnifiedConfig(testDir);
 
-		// false is the default for overrideDefaultCompaction, so no migration
-		expect(config.compactionEngine).toBe("blackhole"); // default
-		expect(config.tailBehavior).toBe("minimal"); // default
+		// Explicit false means "use Pi's default"
+		expect(config.compactionEngine).toBe("pi-default");
+		expect(config.tailBehavior).toBe("minimal"); // default, not migrated
 	});
 
-	it("noAutoCompact:false + overrideDefaultCompaction:false — all defaults", async () => {
+	it("noAutoCompact:false + overrideDefaultCompaction:false — overrideDefault false migrated, noAutoCompact false no-op", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ noAutoCompact: false, overrideDefaultCompaction: false });
 
 		const config = loadUnifiedConfig(testDir);
 
 		expect(config.compaction).toBe("auto");
-		expect(config.compactionEngine).toBe("blackhole");
+		expect(config.compactionEngine).toBe("pi-default");
 		expect(config.tailBehavior).toBe("minimal");
 	});
 });

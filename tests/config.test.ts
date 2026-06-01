@@ -273,14 +273,14 @@ describe("Env overrides", () => {
 		expect(config.memory).toBe(false);
 	});
 
-	it("env PI_VCC_OM_PASSIVE=false does not force passive", async () => {
+	it("env PI_VCC_OM_PASSIVE=false undoes passive migration", async () => {
 		process.env.PI_VCC_OM_PASSIVE = "false";
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ passive: true });
 		const config = loadUnifiedConfig(testDir);
-		// passive:true in config is migrated → compaction:off + memory:false
-		expect(config.compaction).toBe("off");
-		expect(config.memory).toBe(false);
+		// Falsy env override undoes the passive migration, falling back to defaults
+		expect(config.compaction).toBe("auto");
+		expect(config.memory).toBe(true);
 	});
 
 	it("env PI_OBSERVATIONAL_MEMORY_PASSIVE also works (legacy)", async () => {

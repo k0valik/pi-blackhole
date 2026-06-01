@@ -118,19 +118,23 @@ export function buildOwnCut(
           compactAll: false,
         };
       }
-      // liveCutIdx === 0: Pi's cut is at first live message.
-      // Pi wants to keep everything, so only compact-all is acceptable (summarizes
-      // everything for a fresh page).  If minimal path would aggressively cut
-      // (multiple user messages), cancel to respect Pi's guidance.
-      let lastUserIdx = liveMessages.length - 1;
-      while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
-        lastUserIdx--;
+      if (liveCutIdx === 0) {
+        // Pi's cut is at first live message.
+        // Pi wants to keep everything, so only compact-all is acceptable (summarizes
+        // everything for a fresh page).  If minimal path would aggressively cut
+        // (multiple user messages), cancel to respect Pi's guidance.
+        let lastUserIdx = liveMessages.length - 1;
+        while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+          lastUserIdx--;
+        }
+        if (lastUserIdx > 0) {
+          // Multiple user messages — minimal would aggressively cut, violating Pi
+          return { ok: false, reason: "too_few_live_messages" };
+        }
+        // Single user message — fall through to minimal path (will compact-all)
       }
-      if (lastUserIdx > 0) {
-        // Multiple user messages — minimal would aggressively cut, violating Pi
-        return { ok: false, reason: "too_few_live_messages" };
-      }
-      // Single user message — fall through to minimal path (will compact-all)
+      // liveCutIdx === -1: piFirstKeptEntryId not found in liveMessages
+      // (e.g., refers to a compaction entry) — fall through to minimal/orphan recovery
     }
     // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
   }
@@ -206,10 +210,10 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       return;
     }
 
-    // compaction "manual" blocks auto-triggered but allows /blackhole
+    // compaction "manual": /compact falls through to Pi, /blackhole still works
     if (omRuntime.config.compaction === "manual" && !isPiVcc) {
-      trace("before_compact.cancel", { reason: "compaction_manual" });
-      return { cancel: true };
+      trace("before_compact.return_early", { reason: "compaction_manual" });
+      return;
     }
 
     // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)

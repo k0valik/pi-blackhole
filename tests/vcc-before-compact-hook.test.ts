@@ -249,14 +249,14 @@ describe("registerBeforeCompactHook: new config key guards", () => {
     expect(result.compaction).toBeDefined();
   });
 
-  test("T31: compaction:manual + auto → { cancel: true } (blocks auto)", () => {
+  test("T31: compaction:manual + auto → return (let Pi handle)", () => {
     const { pi, invoke, omRuntime } = createMockPi({ compaction: "manual" });
     registerBeforeCompactHook(pi, omRuntime);
 
     const entries = [msg("m1", "user"), msg("m2", "assistant"), msg("m3", "user"), msg("m4", "assistant")];
     const result = invoke(makeEvent(entries, undefined));
 
-    expect(result).toEqual({ cancel: true });
+    expect(result).toBeUndefined();
   });
 
   test("T32: compaction:auto + /blackhole → proceeds", () => {

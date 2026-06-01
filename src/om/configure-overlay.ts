@@ -253,7 +253,8 @@ export function createConfigureOverlay(
 					invalidate();
 					break;
 				case "enum": {
-					const vals = cur.def.enumValues!;
+					const vals = cur.def.enumValues;
+					if (!vals || vals.length === 0) return;
 					const idx = vals.indexOf(cur.value);
 					cur.value = vals[(idx + 1) % vals.length];
 					invalidate();
@@ -301,7 +302,7 @@ export function createConfigureOverlay(
 		if (cachedLines) return cachedLines;
 
 		const minW = contentWidth();
-		const w = Math.min(width - 2, Math.max(minW, 50));
+		const w = Math.max(2, Math.min(width - 2, Math.max(minW, 50)));
 		const innerW = w - 4;
 		const fg = (style: string, text: string) => th.fg(style, text);
 
@@ -309,7 +310,7 @@ export function createConfigureOverlay(
 
 		// Top border + header
 		lines.push(fg("border", `╭${"─".repeat(w - 2)}╮`));
-		lines.push(fg("border", `│ ${fg("accent", "Blackhole Configuration")}${" ".repeat(innerW + 1 - 24)}│`));
+		lines.push(fg("border", `│ ${fg("accent", "Blackhole Configuration")}${" ".repeat(Math.max(0, innerW + 1 - 24))}│`));
 		lines.push(fg("border", `├${"─".repeat(w - 2)}┤`));
 
 		let currentSection = "";

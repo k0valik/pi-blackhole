@@ -30,11 +30,11 @@ Pi-blackhole's configuration lives at `~/.pi/agent/pi-blackhole/pi-blackhole-con
 
 Controls when compaction triggers. Replaces the old `noAutoCompact` and partially replaces `passive`.
 
-| Value | Behavior |
-|-------|----------|
-| `"auto"` | Triggers automatically when `compactAfterTokens` threshold is reached (default) |
-| `"manual"` | Only via `/blackhole` command. Auto-triggered compaction is blocked |
-| `"off"` | Blackhole skips auto-triggered compaction (Pi handles), but explicit `/blackhole` still uses blackhole's pipeline |
+| Value | Auto-trigger | `/compact` (Pi built-in) | `/blackhole` |
+|-------|:---:|:---:|:---:|
+| `"auto"` | blackhole fires at `compactAfterTokens` threshold ✓ | blackhole handles | blackhole handles |
+| `"manual"` | skipped | Pi handles ✓ | blackhole handles |
+| `"off"` | skipped (Pi handles) | Pi handles ✓ | blackhole handles |
 
 **Examples:**
 
@@ -42,42 +42,32 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 // Auto-compact (default)
 { "compaction": "auto" }
 
-// Manual only — user runs /blackhole when they want to compact
+// Manual only — /compact falls through to Pi, /blackhole uses blackhole pipeline
 { "compaction": "manual" }
 
-// Blackhole skips auto, but /blackhole still works
+// Blackhole skips auto + /compact (Pi handles both), /blackhole still works
 { "compaction": "off" }
 ```
 
 ### `compactionEngine`
 
-Controls which engine handles the compaction summary generation. Replaces the old `overrideDefaultCompaction`.
+Controls which engine handles auto-compaction summaries. Only meaningful when `compaction: "auto"` — for `"manual"`/`"off"` the engine is irrelevant because blackhole's hook lets Pi handle everything except `/blackhole`.
+
+Replaces the old `overrideDefaultCompaction`.
 
 | Value | Behavior |
 |-------|----------|
-| `"blackhole"` | Blackhole's `compile()` function generates a structured summary and injects observational memory content (default) |
-| `"pi-default"` | Pi's built-in summarization handles everything. Blackhole runs no summary logic |
+| `"blackhole"` | Blackhole's `compile()` generates a structured summary and injects OM content (default). Also controls WHEN to compact (triggers at `compactAfterTokens`). |
+| `"pi-default"` | Pi handles ALL compaction (timing + execution). Blackhole's trigger skips entirely. Blackhole only activates for `/blackhole` command. |
 
-**Examples:**
+**Interaction matrix:**
 
-```jsonc
-// Blackhole handles compaction (default)
-{ "compactionEngine": "blackhole" }
-
-// Pi handles compaction — blackhole only adds memory content if memory:true
-{ "compactionEngine": "pi-default" }
-```
-
-**Interaction with auto/manual:**
-
-| compaction | compactionEngine | Result |
-|:---:|:---:|--------|
-| auto | blackhole | Auto-trigger → blackhole pipeline + OM injection |
-| auto | pi-default | Auto-trigger → Pi handles it (blackhole returns early) |
-| manual | blackhole | Only `/blackhole` → blackhole pipeline |
-| manual | pi-default | Only `/blackhole` → Pi-default compaction |
-| off | blackhole | Auto → Pi handles. `/blackhole` → blackhole pipeline |
-| off | pi-default | Auto → Pi handles. `/blackhole` → Pi default |
+| `compaction` | `compactionEngine` | Auto-trigger | `/compact` | `/blackhole` |
+|:---:|:---:|---|---|---|
+| auto | blackhole | blackhole fires at `compactAfterTokens` ✓ | blackhole handles | blackhole handles |
+| auto | pi-default | trigger skips (Pi decides when) | Pi handles | blackhole handles |
+| manual | (any) | skipped | Pi handles ✓ | blackhole handles |
+| off | (any) | skipped | Pi handles ✓ | blackhole handles |
 
 ### `tailBehavior`
 
