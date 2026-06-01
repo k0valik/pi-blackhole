@@ -58,7 +58,13 @@ export type OwnCutResult =
   | { ok: true; messages: any[]; firstKeptEntryId: string; compactAll: boolean }
   | { ok: false; reason: OwnCutCancelReason };
 
-export function buildOwnCut(branchEntries: any[]): OwnCutResult {
+export function buildOwnCut(
+  branchEntries: any[],
+  /** Pi's firstKeptEntryId from preparation (undefined = don't use Pi's cut). */
+  piFirstKeptEntryId?: string,
+  /** "pi-default" = use Pi's cut, "minimal" = keep only last user message (current). */
+  tailBehavior?: "pi-default" | "minimal",
+): OwnCutResult {
   // Find the last compaction entry and its firstKeptEntryId
   let lastCompactionIdx = -1;
   let lastKeptId: string | undefined;
@@ -97,6 +103,25 @@ export function buildOwnCut(branchEntries: any[]): OwnCutResult {
         liveMessages.push({ entry: e, message: e.message });
       }
     }
+  }
+
+  // ── Pi's cut path: use Pi's firstKeptEntryId instead of last-user cut ──
+  if (tailBehavior === "pi-default" && piFirstKeptEntryId) {
+    const cutInBranch = branchEntries.findIndex((e: any) => e.id === piFirstKeptEntryId);
+    if (cutInBranch >= 0) {
+      const liveCutIdx = liveMessages.findIndex((lm) => lm.entry.id === piFirstKeptEntryId);
+      if (liveCutIdx > 0) {
+        return {
+          ok: true,
+          messages: liveMessages.slice(0, liveCutIdx).map((e) => e.message),
+          firstKeptEntryId: piFirstKeptEntryId,
+          compactAll: false,
+        };
+      }
+      // liveCutIdx === 0: Pi's cut is at first live message → nothing to compile
+      // Fall through to minimal path
+    }
+    // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
   }
 
   if (liveMessages.length === 0) return { ok: false, reason: "no_live_messages" };
@@ -156,18 +181,56 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // Always handle explicit /blackhole marker.
     // Otherwise, only handle when user opted in via settings.
     const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
-    if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
-      trace("before_compact.return_early", { reason: "overrideDefaultCompaction=false and not /blackhole" });
-      return;
-    }
 
-    // When noAutoCompact is active, only /blackhole can trigger compaction
-    if (omRuntime.config.noAutoCompact && !isPiVcc) {
-      trace("before_compact.cancel", { reason: "noAutoCompact and not /blackhole" });
+    // NEW: Unified compaction guards
+    // compaction "off" blocks everything, even /blackhole
+    if (omRuntime.config.compaction === "off") {
+      trace("before_compact.cancel", { reason: "compaction_off" });
       return { cancel: true };
     }
 
-    const ownCut = buildOwnCut(branchEntries as any[]);
+    // compactionEngine "pi-default" means let Pi handle auto-triggered compactions
+    if (omRuntime.config.compactionEngine === "pi-default" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compactionEngine_pi_default" });
+      return;
+    }
+
+    // compaction "manual" blocks auto-triggered but allows /blackhole
+    if (omRuntime.config.compaction === "manual" && !isPiVcc) {
+      trace("before_compact.cancel", { reason: "compaction_manual" });
+      return { cancel: true };
+    }
+
+    // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
+    if (omRuntime.config.compaction === undefined && omRuntime.config.compactionEngine === undefined) {
+      if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
+        trace("before_compact.return_early", { reason: "overrideDefaultCompaction=false and not /blackhole" });
+        return;
+      }
+
+      if (omRuntime.config.noAutoCompact && !isPiVcc) {
+        trace("before_compact.cancel", { reason: "noAutoCompact and not /blackhole" });
+        return { cancel: true };
+      }
+    }
+
+    // Determine effective tail behavior for buildOwnCut
+    const effectiveTailBehavior = isPiVcc
+      ? (omRuntime.config.tailBehavior ?? "minimal")   // /blackhole: minimal by default
+      : (omRuntime.config.tailBehavior ?? "pi-default"); // auto: pi-default by default
+
+    trace("before_compact.tail_behavior", {
+      effectiveTailBehavior,
+      configTailBehavior: omRuntime.config.tailBehavior,
+      isPiVcc,
+      piFirstKeptEntryId: preparation.firstKeptEntryId,
+    });
+
+    const ownCut = buildOwnCut(
+      branchEntries as any[],
+      preparation.firstKeptEntryId,
+      effectiveTailBehavior,
+    );
     if (!ownCut.ok) {
       const lastComp = [...branchEntries].reverse().find((e: any) => e.type === "compaction");
       const lastCompIdx = lastComp ? (branchEntries as any[]).indexOf(lastComp) : -1;

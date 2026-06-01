@@ -15,7 +15,18 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 const CONFIG_DIR = "pi-blackhole";
 const CONFIG_FILE = "pi-blackhole-config.json";
 
-function configPath(): string {
+/** Test-only: override for config directory. Set via __setTestConfigDir(). */
+let __testConfigDir: string | undefined;
+
+/** Test-only: set to override config directory. Use in beforeEach/afterEach. */
+export function __setTestConfigDir(dir: string | undefined): void {
+	__testConfigDir = dir;
+}
+
+export function configPath(): string {
+	if (__testConfigDir) {
+		return join(__testConfigDir, CONFIG_DIR, CONFIG_FILE);
+	}
 	return join(getAgentDir(), CONFIG_DIR, CONFIG_FILE);
 }
 
@@ -31,10 +42,29 @@ export interface OmModelConfig {
 }
 
 export interface UnifiedConfig {
-	/** When true, pi-vcc handles all compactions (not just /pi-vcc). */
-	overrideDefaultCompaction: boolean;
+	/** @deprecated Use compactionEngine instead. */
+	overrideDefaultCompaction?: boolean;
 	/** Write debug snapshots to /tmp/pi-blackhole-debug.json. */
 	debug: boolean;
+
+	// ── New config surface — compaction, engine, tail behavior ──
+
+	/** Unified compaction control: "auto" | "manual" | "off".
+	 *  "auto"   — auto-trigger on compactAfterTokens threshold
+	 *  "manual"  — only via /blackhole command
+	 *  "off"    — never compact (disables auto + blocks /blackhole) */
+	compaction: "auto" | "manual" | "off";
+
+	/** Which engine handles compaction.
+	 *  "blackhole"  — blackhole's compile() + OM injection
+	 *  "pi-default" — Pi's built-in summarization */
+	compactionEngine: "blackhole" | "pi-default";
+
+	/** How much recent transcript to keep visible after compaction.
+	 *  "pi-default" — use Pi's firstKeptEntryId (respects Pi's keepRecentTokens)
+	 *  "minimal"    — keep only last user message (current agressive pi-vcc behavior)
+	 *  ONLY applies when compactionEngine: "blackhole" */
+	tailBehavior: "pi-default" | "minimal";
 
 	/** Token threshold for observer runs. */
 	observeAfterTokens: number;
@@ -84,12 +114,10 @@ export interface UnifiedConfig {
 	/** Fallback models for dropper, tried in order after primary model fails. */
 	dropperFallbackModels?: OmModelConfig[];
 
-	/** When true, observations/reflections are saved to pending.json
-	 *  instead of appended to the conversation. Auto-compaction is
-	 *  disabled.  User triggers /blackhole to flush and compact. */
-	noAutoCompact: boolean;
-	/** Disables background workers and auto-compaction entirely. */
-	passive: boolean;
+	/** @deprecated Use compaction instead. */
+	noAutoCompact?: boolean;
+	/** @deprecated Use compaction + memory instead. */
+	passive?: boolean;
 	/** Enables observational memory (workers + content injection). Set to false for pi-vcc only. */
 	memory: boolean;
 	/** Writes debug JSONL to agent directory. */
@@ -99,8 +127,12 @@ export interface UnifiedConfig {
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
 export const DEFAULTS: UnifiedConfig = {
-	overrideDefaultCompaction: false,
 	debug: false,
+
+	// New config surface
+	compaction: "auto",
+	compactionEngine: "blackhole",
+	tailBehavior: "pi-default",
 
 	observeAfterTokens: 15_000,
 	reflectAfterTokens: 25_000,
@@ -113,8 +145,6 @@ export const DEFAULTS: UnifiedConfig = {
 	observerPreambleMaxTokens: 0,
 	agentMaxTurns: 16,
 
-	noAutoCompact: false,
-	passive: false,
 	memory: true,
 	debugLog: false,
 };
@@ -122,6 +152,21 @@ export const DEFAULTS: UnifiedConfig = {
 // ── Parsing helpers ──────────────────────────────────────────────────────────
 
 const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+// String enums for new config surface
+const COMPACTION_VALUES = ["auto", "manual", "off"] as const;
+const COMPACTION_ENGINE_VALUES = ["blackhole", "pi-default"] as const;
+const TAIL_BEHAVIOR_VALUES = ["pi-default", "minimal"] as const;
+
+function isCompaction(v: unknown): v is "auto" | "manual" | "off" {
+	return typeof v === "string" && (COMPACTION_VALUES as readonly string[]).includes(v);
+}
+function isCompactionEngine(v: unknown): v is "blackhole" | "pi-default" {
+	return typeof v === "string" && (COMPACTION_ENGINE_VALUES as readonly string[]).includes(v);
+}
+function isTailBehavior(v: unknown): v is "pi-default" | "minimal" {
+	return typeof v === "string" && (TAIL_BEHAVIOR_VALUES as readonly string[]).includes(v);
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null;
@@ -160,6 +205,11 @@ function parseModelArray(v: unknown): OmModelConfig[] | undefined {
 function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	const c: Partial<UnifiedConfig> = {};
 
+	// String enums — compaction surface
+	if (isCompaction(raw.compaction)) c.compaction = raw.compaction;
+	if (isCompactionEngine(raw.compactionEngine)) c.compactionEngine = raw.compactionEngine;
+	if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
+
 	// Booleans — pi-vcc
 	if (typeof raw.overrideDefaultCompaction === "boolean") c.overrideDefaultCompaction = raw.overrideDefaultCompaction;
 	if (typeof raw.debug === "boolean") c.debug = raw.debug;
@@ -196,6 +246,43 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (dropFallback) c.dropperFallbackModels = dropFallback;
 
 	return c;
+}
+
+// ── Migration ────────────────────────────────────────────────────────────────
+
+/**
+ * Migrate legacy config knobs to new unified surface.
+ * Runs once at load time; old keys are removed from the parsed object.
+ * Does NOT mutate the on-disk config file.
+ */
+function migrateOldKnobs(parsed: Record<string, unknown>): void {
+	// Only run if new keys are absent AND old keys are present
+	if (parsed.compaction !== undefined || parsed.compactionEngine !== undefined) {
+		return; // new keys already set — no migration
+	}
+
+	// passive → compaction: "off" + memory: false
+	if (parsed.passive === true) {
+		parsed.compaction = "off";
+		parsed.memory = false;
+	}
+	// noAutoCompact → compaction: "manual"
+	else if (parsed.noAutoCompact === true) {
+		parsed.compaction = "manual";
+	}
+	// overrideDefaultCompaction → compactionEngine + tailBehavior
+	if (parsed.overrideDefaultCompaction === true) {
+		parsed.compactionEngine = "blackhole";
+		// Preserve aggressive cut for existing users
+		if (parsed.tailBehavior === undefined) {
+			parsed.tailBehavior = "minimal";
+		}
+	}
+
+	// Remove old keys so migration runs only once
+	delete parsed.passive;
+	delete parsed.noAutoCompact;
+	delete parsed.overrideDefaultCompaction;
 }
 
 // ── Load and save ────────────────────────────────────────────────────────────
@@ -241,12 +328,28 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 
 	const parsed = parseConfig(raw);
 
-	// Env override
+	// ── Migration: old → new knobs ──
+	migrateOldKnobs(parsed);
+
+	// Env override — legacy passive env vars
 	const envPassive = process.env.PI_BLACKHOLE_PASSIVE ?? process.env.PI_VCC_OM_PASSIVE ?? process.env.PI_OBSERVATIONAL_MEMORY_PASSIVE;
 	if (envPassive !== undefined) {
 		const v = envPassive.trim().toLowerCase();
-		if (["1", "true", "yes", "on"].includes(v)) parsed.passive = true;
-		else if (["0", "false", "no", "off"].includes(v)) parsed.passive = false;
+		if (["1", "true", "yes", "on"].includes(v)) {
+			parsed.compaction = "off";
+			parsed.memory = false;
+		}
+	}
+
+	// Env override — new compaction surface
+	const envCompaction = process.env.PI_BLACKHOLE_COMPACTION;
+	if (envCompaction !== undefined && isCompaction(envCompaction.trim().toLowerCase())) {
+		parsed.compaction = envCompaction.trim().toLowerCase() as "auto" | "manual" | "off";
+	}
+
+	const envCompactionEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
+	if (envCompactionEngine !== undefined && isCompactionEngine(envCompactionEngine.trim().toLowerCase())) {
+		parsed.compactionEngine = envCompactionEngine.trim().toLowerCase() as "blackhole" | "pi-default";
 	}
 
 	// Merge defaults then override
@@ -319,4 +422,23 @@ export function scaffoldConfig(): void {
 	} catch (e) {
 		console.error("blackhole: config scaffold failed", e);
 	}
+}
+
+// ── Toggle helpers ───────────────────────────────────────────────────────────
+
+/** Cycle compaction: auto → manual → off → auto */
+export function toggleCompaction(current: "auto" | "manual" | "off"): "auto" | "manual" | "off" {
+	const cycle: Array<"auto" | "manual" | "off"> = ["auto", "manual", "off"];
+	const idx = cycle.indexOf(current);
+	return cycle[(idx + 1) % cycle.length];
+}
+
+/** Toggle compactionEngine: blackhole ↔ pi-default */
+export function toggleCompactionEngine(current: "blackhole" | "pi-default"): "blackhole" | "pi-default" {
+	return current === "blackhole" ? "pi-default" : "blackhole";
+}
+
+/** Toggle tailBehavior: pi-default ↔ minimal */
+export function toggleTailBehavior(current: "pi-default" | "minimal"): "pi-default" | "minimal" {
+	return current === "pi-default" ? "minimal" : "pi-default";
 }

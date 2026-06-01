@@ -213,8 +213,12 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime)
 
 function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): void {
 	runtime.ensureConfig(ctx.cwd);
-	if (runtime.config.passive === true) return;
 	if (runtime.config.memory === false) return;
+
+	// LEGACY: passive check — only applies when new keys are absent (unmigrated config)
+	if (runtime.config.compaction === undefined && runtime.config.compactionEngine === undefined) {
+		if (runtime.config.passive === true) return;
+	}
 	if (runtime.consolidationInFlight) return;
 	if (runtime.isConsolidationRetryGated()) return;
 

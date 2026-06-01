@@ -1,8 +1,8 @@
 /**
- * /memory command — shows memory pipeline status and content.
+ * /blackhole-memory command — shows memory pipeline status and content.
  *
  * Created by pi-vcc-om. Replaces OM's standalone /om-status and /om-view.
- * Usage: /memory (status), /memory view, /memory full.
+ * Usage: /blackhole-memory [status|view|full]
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { copyTextToClipboard } from "../om/clipboard.js";
@@ -79,7 +79,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 			const sessionId = ctx.sessionManager.getSessionId();
 			const mode = firstArg(args);
 
-			// /memory full — show full recorded memory + copy to clipboard
+			// /blackhole-memory full — show full recorded memory + copy to clipboard
 			if (mode === "full") {
 				const projection = fullProjection(entries);
 				const output = renderContentOnlyProjection(projection, "recorded");
@@ -91,7 +91,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 				return;
 			}
 
-			// /memory view — show visible memory + copy to clipboard
+			// /blackhole-memory view — show visible memory + copy to clipboard
 			if (mode === "view") {
 				const projection = visibleProjection(entries);
 				const output = renderContentOnlyProjection(projection, "visible");
@@ -103,7 +103,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 				return;
 			}
 
-			// /memory (no args) — show status
+			// /blackhole-memory (no args) — show status
 			if (mode && mode !== "status") {
 				ctx.ui.notify("Usage: /blackhole-memory [status|view|full]", "info");
 				return;

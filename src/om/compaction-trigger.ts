@@ -29,24 +29,34 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			compactAfterTokens: runtime.config.compactAfterTokens,
 		});
 
-		if (runtime.config.passive === true) {
-			dbg("compaction_trigger.skip", { reason: "passive" });
+		// NEW: Unified compaction guards
+		if (runtime.config.compaction === "off") {
+			dbg("compaction_trigger.skip", { reason: "compaction_off" });
 			return;
 		}
-		if (runtime.config.memory === false) {
-			dbg("compaction_trigger.skip", { reason: "memory" });
+		if (runtime.config.compaction === "manual") {
+			dbg("compaction_trigger.skip", { reason: "compaction_manual" });
 			return;
 		}
-		if (runtime.config.noAutoCompact === true) {
-			dbg("compaction_trigger.skip", { reason: "noAutoCompact" });
-			return;
-		}
-		// Don't force Pi to compact unless the user explicitly opted into blackhole's pipeline.
-		// When overrideDefaultCompaction is false (default), blackhole stays out of the way
-		// and lets Pi handle its own compaction naturally.
-		if (runtime.config.overrideDefaultCompaction === false) {
-			dbg("compaction_trigger.skip", { reason: "overrideDefaultCompaction_false" });
-			return;
+		// NOTE: memory no longer gates compaction — memory:false + compaction:auto = compact without OM
+
+		// LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
+		if (runtime.config.compaction === undefined && runtime.config.compactionEngine === undefined) {
+			if (runtime.config.passive === true) {
+				dbg("compaction_trigger.skip", { reason: "passive" });
+				return;
+			}
+			if (runtime.config.noAutoCompact === true) {
+				dbg("compaction_trigger.skip", { reason: "noAutoCompact" });
+				return;
+			}
+			// Don't force Pi to compact unless the user explicitly opted into blackhole's pipeline.
+			// When overrideDefaultCompaction is false (default), blackhole stays out of the way
+			// and lets Pi handle its own compaction naturally.
+			if (runtime.config.overrideDefaultCompaction === false) {
+				dbg("compaction_trigger.skip", { reason: "overrideDefaultCompaction_false" });
+				return;
+			}
 		}
 		if (runtime.compactInFlight) {
 			dbg("compaction_trigger.skip", { reason: "compactInFlight" });
