@@ -63,7 +63,7 @@ const FIELDS: FieldDef[] = [
 	{ key: "observerChunkMaxTokens", label: "Observer chunk max", type: "number", section: "Observational Memory",
 		helpText: "Max source entry tokens sent to observer per chunk" },
 	{ key: "observerPreambleMaxTokens", label: "Observer preamble max", type: "number", section: "Observational Memory",
-		helpText: "Preamble budget in noAutoCompact mode (0=auto-compute 30% of chunk)" },
+		helpText: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)" },
 	{ key: "agentMaxTurns", label: "Max turns per agent", type: "number", section: "Observational Memory",
 		helpText: "Shared turn cap for background memory agents" },
 	{ key: "agentLoopReserve", label: "Agent loop reserve", type: "number", section: "Observational Memory",

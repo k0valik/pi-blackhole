@@ -40,7 +40,7 @@ describe("buildOwnCut", () => {
     expect(r.compactAll).toBe(false);
   });
 
-  test("T20: tailBehavior pi-default with Pi cut at first live message — fall through to minimal", () => {
+  test("T20: tailBehavior pi-default with Pi cut at first live message — cancels (too few)", () => {
     // Pi's cut at first live message → nothing to compile → fall through
     // With only 2 live messages, the minimal path cancels via too_few_live_messages.
     const r = buildOwnCut(
@@ -94,9 +94,8 @@ describe("buildOwnCut", () => {
     expect(r.messages).toHaveLength(2);
   });
 
-  test("T26: tailBehavior pi-default with single user message — compactAll", () => {
-    // Pi cut at first message → nothing to compile → fall through
-    // Single user at idx 0 → compactAll
+  test("T26: tailBehavior pi-default with Pi cut at first message — cancels (Pi wants all preserved)", () => {
+    // Pi cut at first message → Pi wants nothing compiled → cancel
     const r = buildOwnCut(
       [
         msg("m1", "user", "go"),
@@ -107,32 +106,27 @@ describe("buildOwnCut", () => {
       "m1",    // Pi cut at first message
       "pi-default",
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.compactAll).toBe(true);
-    expect(r.firstKeptEntryId).toBe("");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("too_few_live_messages");
   });
 
-  test("T27: tailBehavior pi-default with orphan firstKeptEntryId — Pi cut takes priority", () => {
-    // Orphan present (ORPHAN_ID not in branch), but Pi's cut at m1 is valid.
-    // liveCutIdx = 0 → fall through to minimal (no messages to compile before Pi's cut)
+  test("T27: tailBehavior pi-default with Pi cut at first live message — cancels compaction", () => {
+    // Pi's cut at first live message means Pi wants to keep everything.
+    // buildOwnCut should cancel rather than falling through to aggressive minimal.
     const r = buildOwnCut(
       [
-        msg("o1", "user", "old"),
-        comp("c1", "ORPHAN_ID"),  // orphan (id not in branch)
         msg("m1", "user", "a"),
         msg("m2", "assistant", "b"),
         msg("m3", "user", "c"),
         msg("m4", "assistant", "d"),
       ],
-      "m1",    // Pi cut at m1
+      "m1",    // Pi cut at first live message
       "pi-default",
     );
-    // Pi cut found but liveCutIdx === 0 → fall through to minimal
-    // Orphan recovery collects [m1,m2,m3,m4], minimal cuts at m3
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.firstKeptEntryId).toBe("m3");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("too_few_live_messages");
   });
 
   test("T25: tailBehavior minimal ignores Pi cut — /blackhole override behavior", () => {

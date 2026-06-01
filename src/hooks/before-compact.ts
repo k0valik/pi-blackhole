@@ -118,8 +118,8 @@ export function buildOwnCut(
           compactAll: false,
         };
       }
-      // liveCutIdx === 0: Pi's cut is at first live message → nothing to compile
-      // Fall through to minimal path
+      // liveCutIdx === 0: Pi wants to keep all live messages — cancel compaction
+      return { ok: false, reason: "too_few_live_messages" };
     }
     // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
   }
