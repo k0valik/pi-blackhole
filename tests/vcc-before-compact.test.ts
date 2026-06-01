@@ -76,6 +76,30 @@ describe("buildOwnCut", () => {
     expect(r.messages).toHaveLength(2);   // m1,m2 compiled
   });
 
+  test("T21b: tailBehavior pi-default with non-message Pi cut — resolves to next message", () => {
+    // Pi's cut points to a non-message entry (e.g. type: "custom" OM reflection).
+    // Should resolve to the next message entry and use Pi's cut position.
+    const r = buildOwnCut(
+      [
+        msg("m1", "user", "a"),
+        msg("m2", "assistant", "b"),
+        { id: "om1", type: "custom", customType: "om.reflections.recorded", data: {} },
+        msg("m3", "user", "c"),
+        msg("m4", "assistant", "d"),
+        msg("m5", "user", "e"),
+        msg("m6", "assistant", "f"),
+      ],
+      "om1",        // Pi cut at non-message entry
+      "pi-default",
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // Should resolve to m3 (next message after om1) and compile only [m1,m2]
+    expect(r.firstKeptEntryId).toBe("m3");
+    expect(r.messages).toHaveLength(2);
+    expect(r.compactAll).toBe(false);
+  });
+
   test("T22: tailBehavior pi-default with no piFirstKeptEntryId — fall through to minimal", () => {
     // No Pi cut provided → fall through to minimal, cut at m3 (last user)
     const r = buildOwnCut(

@@ -159,7 +159,41 @@ export function buildOwnCut(
         // Single user message — fall through to minimal path (will compact-all)
       }
       // liveCutIdx === -1: piFirstKeptEntryId not found in liveMessages
-      // (e.g., refers to a compaction entry) — fall through to minimal/orphan recovery
+      // (e.g., refers to a non-message entry like type:"custom" OM metadata or
+      // type:"compaction"). Resolve to the next message entry after pi's cut point.
+      if (liveCutIdx < 0) {
+        const nextMsgEntry = branchEntries.find(
+          (e: any, i: number) => i > cutInBranch && e.type === "message" && e.message,
+        );
+        if (nextMsgEntry) {
+          const resolvedId: string = nextMsgEntry.id;
+          const resolvedLiveIdx = liveMessages.findIndex(
+            (lm) => lm.entry.id === resolvedId,
+          );
+          if (resolvedLiveIdx > 0) {
+            return {
+              ok: true,
+              messages: liveMessages.slice(0, resolvedLiveIdx).map((e) => e.message),
+              firstKeptEntryId: resolvedId,
+              compactAll: false,
+            };
+          }
+          if (resolvedLiveIdx === 0) {
+            let lastUserIdx = liveMessages.length - 1;
+            while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+              lastUserIdx--;
+            }
+            if (lastUserIdx > 0) {
+              return { ok: false, reason: "too_few_live_messages" };
+            }
+            // Single user message — fall through to minimal (will compact-all)
+          }
+          // resolvedLiveIdx === -1: resolved message not in liveMessages
+          // (shouldn't happen since liveMessages starts from prior firstKeptEntryId
+          // which should be before or at pi's cut), but fall through if it does.
+        }
+        // No message found after pi's cut point in branch — fall through
+      }
     }
     // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
   }
