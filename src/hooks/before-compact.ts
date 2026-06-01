@@ -171,7 +171,7 @@ export function buildOwnCut(
 
 const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
   no_live_messages: "blackhole: Nothing to compact (no live messages)",
-  too_few_live_messages: "blackhole: Too few messages to compact",
+  too_few_live_messages: "blackhole: Too few live messages — Pi's default logic preserves visible context. Set tailBehavior to \"minimal\" in config to force compaction with fewer messages.",
 };
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {

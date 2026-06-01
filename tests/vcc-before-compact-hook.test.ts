@@ -102,7 +102,7 @@ describe("registerBeforeCompactHook: cancel paths", () => {
     expect(invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION))).toEqual({ cancel: true });
     expect(notifyCalls).toHaveLength(1);
     expect(notifyCalls[0].level).toBe("warning");
-    expect(notifyCalls[0].msg).toContain("Too few messages");
+    expect(notifyCalls[0].msg).toContain("Too few live");
   });
 
   test("/pi-vcc with no user message compacts all instead of cancelling", () => {
