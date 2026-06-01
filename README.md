@@ -299,7 +299,7 @@ That's it. Everything else has sensible defaults.
 |---|---|---|
 | `compaction` | `"auto"` | When compaction triggers: `"auto"`, `"manual"`, or `"off"` (off blocks auto but allows `/blackhole`) |
 | `compactionEngine` | `"blackhole"` | Which engine handles compaction: `"blackhole"` or `"pi-default"` |
-| `tailBehavior` | `"pi-default"` | How much of the transcript stays visible after compaction: `"pi-default"` (gentle, ~20k tokens) or `"minimal"` (last user message only) |
+| `tailBehavior` | `"minimal"` | How much of the transcript stays visible after compaction: `"minimal"` (last user message only, default) or `"pi-default"` (gentle, ~20k tokens) |
 | `memory` | `true` | `false` = OM workers off + no memory injection (compaction still runs) |
 | `model` | — | Base fallback model for all workers (last resort before session model) |
 | `observerModel` / `observerFallbackModels` | — / `[]` | Primary + fallback models for observer (extracts facts) |

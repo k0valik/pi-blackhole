@@ -42,7 +42,7 @@ Migration runs **in memory at config load time**. The on-disk file is never muta
 
 | Old Config | Migration Result | Notes |
 |-----------|-----------------|-------|
-| `{}` (empty / no file) | `compaction: "auto"`, `compactionEngine: "blackhole"`, `tailBehavior: "pi-default"` | New defaults for fresh installs |
+| `{}` (empty / no file) | `compaction: "auto"`, `compactionEngine: "blackhole"`, `tailBehavior: "minimal"` | New defaults for fresh installs |
 | `{ "overrideDefaultCompaction": true }` | `compactionEngine: "blackhole"`, `tailBehavior: "minimal"` | Preserves aggressive cut for existing users |
 | `{ "noAutoCompact": true }` | `compaction: "manual"` | `/blackhole` still works |
 | `{ "passive": true }` | `compaction: "off"`, `memory: false` | Blackhole disabled; Pi handles compaction normally. Was a nuclear switch in old config |
@@ -165,8 +165,8 @@ Blackhole's auto-trigger will return early and let Pi handle compaction. If you 
 
 ### "I want the aggressive pi-vcc cut for /blackhole but gentle Pi cut for auto"
 
-This is the new default behavior. No config change needed:
-- Auto-triggered → `tailBehavior: "pi-default"` (gentle)
+This is the current default. Both auto-triggered and `/blackhole` use `"minimal"`:
+- Auto-triggered → `tailBehavior: "minimal"` (always aggressive)
 - `/blackhole` → `tailBehavior: "minimal"` (aggressive)
 
 ### "I want backup before migrating"

@@ -9,7 +9,7 @@ Pi-blackhole's configuration lives at `~/.pi/agent/pi-blackhole/pi-blackhole-con
   // ── Compaction ──
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default"
-  "tailBehavior": "pi-default",   // "pi-default" | "minimal"
+  "tailBehavior": "minimal",   // "pi-default" | "minimal"
   "compactAfterTokens": 81000,    // Token threshold for auto-compaction
 
   // ── Observational Memory ──
