@@ -64,7 +64,7 @@ describe("New config keys — defaults", () => {
 
 		expect(config.compaction).toBe("auto");
 		expect(config.compactionEngine).toBe("blackhole");
-		expect(config.tailBehavior).toBe("pi-default");
+		expect(config.tailBehavior).toBe("minimal");
 	});
 
 	it("T1b: existing old DEFAULTS are preserved", async () => {
@@ -113,7 +113,7 @@ describe("New key parsing", () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ tailBehavior: "all" });
 		const config = loadUnifiedConfig(testDir);
-		expect(config.tailBehavior).toBe("pi-default");
+		expect(config.tailBehavior).toBe("minimal");
 	});
 
 	it("rejects invalid compactionEngine value", async () => {
@@ -184,7 +184,7 @@ describe("Old → new key migration", () => {
 		expect(config.compaction).toBe("manual"); // new wins
 		// overrideDefaultCompaction should NOT migrate since new key was present
 		expect(config.compactionEngine).toBe("blackhole"); // default, not migrated
-		expect(config.tailBehavior).toBe("pi-default"); // default, not migrated
+		expect(config.tailBehavior).toBe("minimal"); // default, not migrated
 	});
 
 	it("T7: all new keys directly — no migration runs", async () => {
@@ -231,7 +231,7 @@ describe("Old → new key migration", () => {
 
 		// false is the default for overrideDefaultCompaction, so no migration
 		expect(config.compactionEngine).toBe("blackhole"); // default
-		expect(config.tailBehavior).toBe("pi-default"); // default
+		expect(config.tailBehavior).toBe("minimal"); // default
 	});
 
 	it("noAutoCompact:false + overrideDefaultCompaction:false — all defaults", async () => {
@@ -242,7 +242,7 @@ describe("Old → new key migration", () => {
 
 		expect(config.compaction).toBe("auto");
 		expect(config.compactionEngine).toBe("blackhole");
-		expect(config.tailBehavior).toBe("pi-default");
+		expect(config.tailBehavior).toBe("minimal");
 	});
 });
 

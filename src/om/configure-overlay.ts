@@ -40,8 +40,8 @@ const FIELDS: FieldDef[] = [
 		helpText: "auto=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline" },
 	{ key: "compactionEngine", label: "Compaction engine", type: "enum", section: "Compaction", enumValues: ["blackhole", "pi-default"],
 		helpText: "blackhole=structured summary+OM, pi-default=built-in Pi summarization" },
-	{ key: "tailBehavior", label: "Visible tail", type: "enum", section: "Compaction", enumValues: ["pi-default", "minimal"],
-		helpText: "pi-default=keep Pi's ~20k tok, minimal=keep last user message only" },
+	{ key: "tailBehavior", label: "Visible tail", type: "enum", section: "Compaction", enumValues: ["minimal", "pi-default"],
+		helpText: "minimal=keep last user message only (default), pi-default=keep Pi's preserved visible context" },
 	{ key: "compactAfterTokens", label: "Auto-compact threshold", type: "number", section: "Compaction",
 		helpText: "Token count that triggers auto-compaction when reached" },
 

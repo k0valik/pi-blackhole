@@ -5,7 +5,7 @@
 
   "compaction": "auto",
   "compactionEngine": "blackhole",
-  "tailBehavior": "pi-default",
+  "tailBehavior": "minimal",
 
   "model": {
     "_comment": "Base model (last fallback before session model).",

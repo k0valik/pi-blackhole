@@ -47,7 +47,7 @@ describe("Config defaults", () => {
 		// New config surface defaults
 		expect(config.compaction).toBe("auto");
 		expect(config.compactionEngine).toBe("blackhole");
-		expect(config.tailBehavior).toBe("pi-default");
+		expect(config.tailBehavior).toBe("minimal");
 		expect(config.debug).toBe(false);
 		expect(config.observeAfterTokens).toBe(15_000);
 		expect(config.reflectAfterTokens).toBe(25_000);

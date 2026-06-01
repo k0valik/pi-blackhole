@@ -137,7 +137,7 @@ export const DEFAULTS: UnifiedConfig = {
 	// New config surface
 	compaction: "auto",
 	compactionEngine: "blackhole",
-	tailBehavior: "pi-default",
+	tailBehavior: "minimal",
 
 	observeAfterTokens: 15_000,
 	reflectAfterTokens: 25_000,
