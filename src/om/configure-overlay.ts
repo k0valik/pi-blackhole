@@ -281,10 +281,27 @@ export function createConfigureOverlay(
 		}
 	}
 
+	/** Compute minimum width to fit all content, plus borders. */
+	function contentWidth(): number {
+		const longestHelp = FIELDS.reduce((max, f) => {
+			if (!f.helpText) return max;
+			return Math.max(max, visibleWidth(f.helpText));
+		}, 0);
+		// Help line: │  ${help} ${│  → 4 chars overhead + at least 1 space
+		const helpOverhead = 4;
+		const longestLabel = FIELDS.reduce((max, f) => {
+			return Math.max(max, visibleWidth(f.label) + 3); // prefix + space + label
+		}, 0);
+		// Section header: ── N ──  → up to ~30, but help text dominates
+		// Hint line: ~54 visible
+		return Math.max(54 + 4, longestHelp + helpOverhead, longestLabel + 20);
+	}
+
 	function render(width: number): string[] {
 		if (cachedLines) return cachedLines;
 
-		const w = Math.min(width - 2, 72);
+		const minW = contentWidth();
+		const w = Math.min(width - 2, Math.max(minW, 50));
 		const innerW = w - 4;
 		const fg = (style: string, text: string) => th.fg(style, text);
 
