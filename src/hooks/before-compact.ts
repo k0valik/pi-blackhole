@@ -15,8 +15,33 @@ import type { PiVccCompactionDetails } from "../details";
 import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
+import { configFileNeedsMigration } from "../core/unified-config.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
+
+// ── Migration reminder ────────────────────────────────────────────────────────
+
+/** Per-session notification count for migration reminder (max 2). */
+const migrationNotifyCount = new Map<string, number>();
+
+/**
+ * Show migration reminder notification if user's on-disk config still has legacy keys.
+ * At most 2 notifications per session. Call after compaction completes.
+ */
+export function notifyMigrationReminder(
+	sessionId: string,
+	notify: (msg: string, level: string) => void,
+): void {
+	const count = migrationNotifyCount.get(sessionId) ?? 0;
+	if (count >= 2) return;
+	if (!configFileNeedsMigration()) return;
+	migrationNotifyCount.set(sessionId, count + 1);
+	notify(
+		"blackhole: Use `/blackhole configure` to save your updated configuration.",
+		"info",
+	);
+}
+
 
 const formatTokens = (n: number): string => {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -422,12 +447,14 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     if (omRuntime.compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
     const stats = omRuntime.compactionStats;
     if (!stats) return;
+    const sessionId = ctx.sessionManager.getSessionId();
     setTimeout(() => {
       try {
         ctx?.ui?.notify?.(
           `blackhole: ${stats.summarized} source entries processed; tail kept ${stats.kept} (~${formatTokens(stats.keptTokensEst)} tok).`,
           "info",
         );
+        notifyMigrationReminder(sessionId, (msg, level) => ctx?.ui?.notify?.(msg, level as any));
       } catch {}
     }, 500);
   });

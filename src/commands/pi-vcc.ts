@@ -8,7 +8,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
-import { PI_VCC_COMPACT_INSTRUCTION } from "../hooks/before-compact";
+import { PI_VCC_COMPACT_INSTRUCTION, notifyMigrationReminder } from "../hooks/before-compact";
 import { saveUnifiedConfig, configPath } from "../core/unified-config.js";
 import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
 import { createConfigureOverlay } from "../om/configure-overlay.js";
@@ -141,6 +141,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 					} else {
 						ctx.ui.notify("Compacted with blackhole", "info");
 					}
+					notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level as any));
 				},
 				onError: (err) => {
 					if (err.message === "Compaction cancelled" || err.message === "Already compacted") {

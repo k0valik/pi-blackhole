@@ -458,3 +458,24 @@ export function toggleCompactionEngine(current: "blackhole" | "pi-default"): "bl
 export function toggleTailBehavior(current: "pi-default" | "minimal"): "pi-default" | "minimal" {
 	return current === "pi-default" ? "minimal" : "pi-default";
 }
+
+// ── Migration detection ───────────────────────────────────────────────────────
+
+/**
+ * Check if the on-disk config file still uses legacy keys (needs migration).
+ * Returns true when the file exists, has no new keys, but has old keys.
+ * Used to prompt users to save their config with the new keys.
+ */
+export function configFileNeedsMigration(): boolean {
+	try {
+		const path = configPath();
+		if (!existsSync(path)) return false;
+		const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+		if (raw.compaction !== undefined || raw.compactionEngine !== undefined || raw.tailBehavior !== undefined) {
+			return false; // already has new keys
+		}
+		return raw.passive !== undefined || raw.noAutoCompact !== undefined || raw.overrideDefaultCompaction !== undefined;
+	} catch {
+		return false;
+	}
+}
