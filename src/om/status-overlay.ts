@@ -141,7 +141,7 @@ export function createStatusOverlay(
 	function render(width: number): string[] {
 		if (cachedLines) return cachedLines;
 
-		const w = Math.min(width - 2, 74);
+		const w = Math.max(2, Math.min(width - 2, 74));
 		const innerW = w - 4;
 
 		const pad = (s: string, len: number) => {
@@ -156,7 +156,7 @@ export function createStatusOverlay(
 
 		// Top border + header
 		lines.push(fg("border", `╭${"─".repeat(w - 2)}╮`));
-		lines.push(fg("border", `│ ${accent("Blackhole Status")}${" ".repeat(innerW + 1 - 16)}│`));
+		lines.push(fg("border", `│ ${accent("Blackhole Status")}${" ".repeat(Math.max(0, innerW + 1 - 16))}│`));
 		lines.push(fg("border", `├${"─".repeat(w - 2)}┤`));
 
 		// Config section

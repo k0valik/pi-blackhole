@@ -36,20 +36,42 @@ interface FieldState {
 
 const FIELDS: FieldDef[] = [
 	// ── Compaction ──
-	{ key: "compaction", label: "Compaction mode", type: "enum", section: "Compaction", enumValues: ["auto", "manual", "off"] },
-	{ key: "compactionEngine", label: "Compaction engine", type: "enum", section: "Compaction", enumValues: ["blackhole", "pi-default"] },
-	{ key: "tailBehavior", label: "Visible tail", type: "enum", section: "Compaction", enumValues: ["pi-default", "minimal"] },
-	{ key: "compactAfterTokens", label: "Auto-compact threshold", type: "number", section: "Compaction" },
+	{ key: "compaction", label: "Compaction mode", type: "enum", section: "Compaction", enumValues: ["auto", "manual", "off"],
+		helpText: "auto=trigger on threshold, manual=only /blackhole, off=never" },
+	{ key: "compactionEngine", label: "Compaction engine", type: "enum", section: "Compaction", enumValues: ["blackhole", "pi-default"],
+		helpText: "blackhole=structured summary+OM, pi-default=built-in Pi summarization" },
+	{ key: "tailBehavior", label: "Visible tail", type: "enum", section: "Compaction", enumValues: ["pi-default", "minimal"],
+		helpText: "pi-default=keep Pi's ~20k tok, minimal=keep last user message only" },
+	{ key: "compactAfterTokens", label: "Auto-compact threshold", type: "number", section: "Compaction",
+		helpText: "Token count that triggers auto-compaction when reached" },
 
 	// ── Observational Memory ──
-	{ key: "memory", label: "Observational memory", type: "boolean", section: "Observational Memory" },
-	{ key: "observeAfterTokens", label: "Observe threshold", type: "number", section: "Observational Memory" },
-	{ key: "reflectAfterTokens", label: "Reflect threshold", type: "number", section: "Observational Memory" },
-	{ key: "agentMaxTurns", label: "Max turns per agent", type: "number", section: "Observational Memory" },
+	{ key: "memory", label: "Observational memory", type: "boolean", section: "Observational Memory",
+		helpText: "Enable OM workers (observer, reflector, dropper) and content injection" },
+	{ key: "observeAfterTokens", label: "Observer threshold", type: "number", section: "Observational Memory",
+		helpText: "Tokens accumulated since last observer run before triggering next observe" },
+	{ key: "reflectAfterTokens", label: "Reflect + dropper threshold", type: "number", section: "Observational Memory",
+		helpText: "Tokens accumulated since last reflect before triggering reflector and dropper" },
+	{ key: "observationsPoolMaxTokens", label: "Observation pool max", type: "number", section: "Observational Memory",
+		helpText: "Max tokens in observation pool before dropper prunes (fold pressure)" },
+	{ key: "observationsPoolTargetTokens", label: "Observation pool target", type: "number", section: "Observational Memory",
+		helpText: "Target tokens after dropper prunes (defaults to half of pool max)" },
+	{ key: "reflectorInputMaxTokens", label: "Reflector input max", type: "number", section: "Observational Memory",
+		helpText: "Max prompt tokens for reflector model input (rolling window cap)" },
+	{ key: "dropperInputMaxTokens", label: "Dropper input max", type: "number", section: "Observational Memory",
+		helpText: "Max prompt tokens for dropper model input (rolling window cap)" },
+	{ key: "observerChunkMaxTokens", label: "Observer chunk max", type: "number", section: "Observational Memory",
+		helpText: "Max source entry tokens sent to observer per chunk" },
+	{ key: "observerPreambleMaxTokens", label: "Observer preamble max", type: "number", section: "Observational Memory",
+		helpText: "Preamble budget in noAutoCompact mode (0=auto-compute 30% of chunk)" },
+	{ key: "agentMaxTurns", label: "Max turns per agent", type: "number", section: "Observational Memory",
+		helpText: "Shared turn cap for background memory agents" },
 
 	// ── Debug ──
-	{ key: "debug", label: "Debug snapshots", type: "boolean", section: "Debug" },
-	{ key: "debugLog", label: "Debug JSONL logging", type: "boolean", section: "Debug" },
+	{ key: "debug", label: "Debug snapshots", type: "boolean", section: "Debug",
+		helpText: "Write detailed debug snapshots to /tmp/pi-blackhole-debug.json" },
+	{ key: "debugLog", label: "Debug JSONL logging", type: "boolean", section: "Debug",
+		helpText: "Write structured JSONL debug logs to agent directory" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -131,31 +153,36 @@ export function createConfigureOverlay(
 		try { tui.requestRender(); } catch { /* no-op */ }
 	}
 
-	function save(): void {
-		const updated = { ...raw };
-		for (const f of fields) {
-			const val = f.value;
-			if (val === "" && !(f.def.key in raw)) continue;
-			switch (f.def.type) {
-				case "boolean":
-					updated[f.def.key] = val === "on";
-					break;
-				case "number": {
-					const num = Number(val);
-					updated[f.def.key] = (val && !isNaN(num)) ? num : raw[f.def.key];
-					break;
+	function save(): boolean {
+		try {
+			const updated = { ...raw };
+			for (const f of fields) {
+				const val = f.value;
+				if (val === "" && !(f.def.key in raw)) continue;
+				switch (f.def.type) {
+					case "boolean":
+						updated[f.def.key] = val === "on";
+						break;
+					case "number": {
+						const num = Number(val);
+						updated[f.def.key] = (val && !isNaN(num)) ? num : raw[f.def.key];
+						break;
+					}
+					case "enum":
+						updated[f.def.key] = val;
+						break;
+					default:
+						updated[f.def.key] = val;
+						break;
 				}
-				case "enum":
-					updated[f.def.key] = val;
-					break;
-				default:
-					updated[f.def.key] = val;
-					break;
 			}
+			mkdirSync(dirname(configPath), { recursive: true });
+			writeFileSync(configPath, JSON.stringify(updated, null, 2) + "\n");
+			raw = updated;
+			return true;
+		} catch {
+			return false;
 		}
-		mkdirSync(dirname(configPath), { recursive: true });
-		writeFileSync(configPath, JSON.stringify(updated, null, 2) + "\n");
-		raw = updated;
 	}
 
 	function handleInput(data: string): void {
@@ -193,7 +220,7 @@ export function createConfigureOverlay(
 				invalidate();
 				return;
 			}
-			if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) <= 126) {
+			if (data.length === 1 && data >= "0" && data <= "9") {
 				cur.value = cur.value.slice(0, cur.cursor) + data + cur.value.slice(cur.cursor);
 				cur.cursor++;
 				invalidate();
@@ -205,8 +232,8 @@ export function createConfigureOverlay(
 
 		// Ctrl+S → save and close
 		if (matchKey(data, "ctrl+s")) {
-			save();
-			done({ saved: true, path: configPath });
+			const saved = save();
+			done({ saved, path: configPath });
 			return;
 		}
 
@@ -279,7 +306,7 @@ export function createConfigureOverlay(
 				if (i > 0) {
 					lines.push(fg("border", `│${" ".repeat(w - 2)}│`));
 				}
-				lines.push(fg("border", `│ ${fg("dim", `── ${currentSection} ──`)}${" ".repeat(innerW + 1 - currentSection.length - 6)}│`));
+				lines.push(fg("border", `│ ${fg("dim", `── ${currentSection} ──`)}${" ".repeat(Math.max(0, innerW + 1 - currentSection.length - 6))}│`));
 			}
 
 			// Field label

@@ -59,8 +59,12 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 					(tui, theme, _kb, done) => createConfigureOverlay(configPath(), theme, tui, done),
 					{ overlay: true },
 				);
-				if (result?.saved) {
-					ctx.ui.notify("Configuration saved.", "info");
+				if (result) {
+					if (result.saved) {
+						ctx.ui.notify("Configuration saved.", "info");
+					} else {
+						ctx.ui.notify("Failed to save configuration — the config file may be read-only (e.g., managed by Nix).", "warning");
+					}
 				}
 				return;
 			}

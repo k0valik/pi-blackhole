@@ -94,6 +94,18 @@ describe("createConfigureOverlay", () => {
     expect(lines).toContain("off");
   });
 
+  test("helpText shows when field is selected", () => {
+    const overlay = createConfigureOverlay(configPath, mockTheme, makeTui(), () => {});
+    // Default selection is first field (compaction mode), should show its helpText
+    const lines = overlay.render(80).join("\n");
+    expect(lines).toContain("auto=trigger on threshold");
+    // Navigate to tailBehavior field (index 2)
+    overlay.handleInput("\x1b[B");
+    overlay.handleInput("\x1b[B");
+    const lines2 = overlay.render(80).join("\n");
+    expect(lines2).toContain("pi-default=keep Pi");
+  });
+
   test("escape closes without saving", () => new Promise<void>((done) => {
     createConfigureOverlay(configPath, mockTheme, makeTui(), (result) => {
       expect(result).toBeUndefined();

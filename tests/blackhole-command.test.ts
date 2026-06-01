@@ -178,7 +178,7 @@ describe("/blackhole command", () => {
 
 	it("flush pending entries when noAutoCompact is active and pending data exists", async () => {
 		const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
-		runtime.config.noAutoCompact = true;
+		runtime.config.compaction = "manual";
 		registerPiVccCommand(pi as any, runtime as any);
 
 		// Write a pending state file — name pattern is <sessionId>-pending.json
