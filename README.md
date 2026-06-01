@@ -1,14 +1,14 @@
 # pi-blackhole
 
 > [!IMPORTANT]
-> **Blackhole is the default compaction engine** (`compactionEngine: "blackhole"`, `compaction: "auto"`). Auto-compaction fires at the configured threshold using blackhole's pipeline — both auto-trigger and Pi's `/compact` command use it. No additional setup needed.
+> **Blackhole is the default compaction engine** (`compactionEngine: "blackhole"`, `compaction: "auto"`). Auto-compaction fires at the configured threshold using blackhole's pipeline — both auto-trigger and Pi's `/compact` command use it. No additional setup needed. To work automatically, blackhole needs to register its hook so it overrides /compact with the `blackhole` compaction engine. Opting out or opting for manual compaction with blackhole can be done as below:
 >
-> | Setting | Auto-trigger | `/compact` (Pi built-in) | `/blackhole` |
-> |---|---|---|---|---|
-> | `"auto"` + `"blackhole"` (default) | blackhole handles ✓ | blackhole handles | blackhole handles |
-> | `"auto"` + `"pi-default"` | Pi handles | Pi handles | blackhole handles |
-> | `"manual"` + any | skipped | Pi handles ✓ | blackhole handles |
-> | `"off"` + any | skipped (Pi handles) | Pi handles ✓ | blackhole handles |
+> | Setting | Auto-trigger after threshold | `/compact` (Pi built-in) |
+> |---|---|---|
+> | `"auto"` + `"blackhole"` (default) | blackhole handles ✓ | blackhole handles |
+> | `"auto"` + `"pi-default"` | Pi handles | Pi handles |
+> | `"manual"` + any | skipped | Pi handles ✓ |
+> | `"off"` + any | skipped (Pi handles) | Pi handles ✓ |
 >
 > The `/blackhole` command always uses blackhole's pipeline regardless of settings.
 >
@@ -62,9 +62,13 @@ pi-blackhole tracks both upstream repositories via a [lockstep audit system](.pi
 
 ## Demo
 
-`/blackhole` collapses ~94k tokens of conversation into a ~7.8k structured summary (YMMV based on your settings). `/blackhole-memory` shows pipeline status. `/blackhole-recall` searches history the agent can also reach via its `recall` tool.
+`/blackhole` collapses ~143k tokens of conversation into a ~6.3k structured summary (YMMV based on your settings). `/blackhole-memory` shows pipeline status. `/blackhole-recall` searches history the agent can also reach via its `recall` tool and incrementally search previous conversation history.
 
-https://github.com/user-attachments/assets/ab7c5787-1bbd-466f-a231-0818e68e9f39
+
+
+https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
+
+
 
 
 ---
@@ -82,28 +86,6 @@ The two upstream projects each solve one half:
 
 **pi-blackhole** puts vcc in the compaction slot and OM in the memory layer, where each does what it's designed for.
 
-
----
-
-## Feature comparison
-
-| | pi-blackhole | pi-vcc | pi-obs-memory | Pi default |
-|---|---|---|---|---|
-| Algorithmic compaction (no LLM cost) | ✓ | ✓ | — | — |
-| Deterministic output | ✓ | ✓ | — | — |
-| Structured summary sections | ✓ | ✓ | — | — |
-| Observations + reflections | ✓ | — | ✓ | — |
-| Context survives across compactions | ✓ | — | ✓ | — |
-| Background memory workers | ✓ | — | ✓ | — |
-| Searchable history after compaction | ✓ | ✓ | partial | — |
-| Per-worker model config | ✓ | — | — | — |
-| Fallback model chains + persisted cooldowns | ✓ | — | — | — |
-| Manual flush mode (`compaction: "manual"`) | ✓ | — | — | — |
-| Memory toggle (`/blackhole om-off`) | ✓ | — | — | — |
-| Unified single-file config | ✓ | — | — | — |
-| Per-session pending state | ✓ | — | — | — |
-
-
 ---
 
 ## How it works
@@ -117,7 +99,7 @@ The agent receives a deterministic recap of recent work *plus* durable facts fro
 
 ### The three memory workers
 
-Three background workers run automatically during the session (when `memory: true`, which is the default):
+Three background workers (separate LLM calls) run automatically during the session (when `memory: true`, which is the default):
 
 - **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` newest-first to prevent context blowup on long sessions. Runs most frequently.
 - **Reflector** — distills new observations into durable reflections: stable facts, patterns, and constraints that survive future compactions. Runs less often.
@@ -199,7 +181,7 @@ When exact source context is needed for precision or traceability, use the `reca
 ----
 ```
 
-> **Note:** The OM injection format uses `## Reflections` and `## Observations` Markdown headers with a preamble and footer. Each observation and reflection has a 12-char hex identifier you can use with the `recall` tool to recover source evidence.
+> **Note:** The OM injection format uses `## Reflections` and `## Observations` Markdown headers with a preamble and footer. Each observation and reflection has a 12-char hex identifier you can use with the `recall` tool to recover source evidence, as well as the agent can search based on them and get relevant context back.
 
 ---
 
@@ -284,7 +266,7 @@ Quick start — just set custom models (if you want):
 }
 ```
 
-That's it. Everything else has sensible defaults.
+Everything else has sensible defaults.
 
 ### Settings at a glance
 
@@ -499,6 +481,28 @@ Results are shown as a collapsible message and auto-fed to the agent as context.
 **File drill-down** reads the raw session JSONL to extract file content from tool call operations. Supports offset/limit paging so you can browse long files. Note: edit diffs are not indexed for text search — drill-down reads them from the raw session as original full-file writes.
 
 **Touched mode** (`mode:touched`) aggregates all files written, edited, or read across the session, grouped by path. Each entry shows which tool operation touched the file and the line count. Useful for getting a lay of the land after a long session.
+
+---
+
+## Feature comparison
+
+| | pi-blackhole | pi-vcc | pi-obs-memory | Pi default |
+|---|---|---|---|---|
+| Algorithmic compaction (no LLM cost) | ✓ | ✓ | — | — |
+| Deterministic output | ✓ | ✓ | — | — |
+| Structured summary sections | ✓ | ✓ | — | — |
+| Observations + reflections | ✓ | — | ✓ | — |
+| Context survives across compactions | ✓ | — | ✓ | — |
+| Background memory workers | ✓ | — | ✓ | — |
+| Searchable history after compaction | ✓ | ✓ | partial | — |
+| Per-worker model config | ✓ | — | — | — |
+| Fallback model chains + persisted cooldowns | ✓ | — | — | — |
+| Manual flush mode (`compaction: "manual"`) | ✓ | — | — | — |
+| Memory toggle (`/blackhole om-off`) | ✓ | — | — | — |
+| Unified single-file config | ✓ | — | — | — |
+| Per-session pending state | ✓ | — | — | — |
+
+---
 
 ## Uninstall
 
