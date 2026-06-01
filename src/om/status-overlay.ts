@@ -97,10 +97,19 @@ export function createStatusOverlay(
 		{ label: "Close", value: "close" as const },
 	];
 
-	const configSectionEnd = configItems.length;
-	const pipelineSectionEnd = configSectionEnd + (pipelineItems.length > 0 ? pipelineItems.length + 1 : 0); // +1 for section header
-	const errorSectionEnd = pipelineSectionEnd + (errorItems.length > 0 ? errorItems.length + 1 : 0);
-	const actionStart = errorSectionEnd + (errorItems.length > 0 ? 1 : 0); // +1 for separator
+	// Contiguous selectable item model: no section headers in nav indices
+	const selectableConfigCount = configItems.length;
+	const selectablePipelineCount = pipelineItems.length;
+	const selectableErrorCount = errorItems.length;
+	const selectableActionCount = actionItems.length;
+	const totalSelectable = selectableConfigCount + selectablePipelineCount + selectableErrorCount + selectableActionCount;
+
+	// Render helpers: map a contiguous nav index to the display positions
+	// (section headers are inserted at render time, not in the nav model)
+	const navIsConfig = (idx: number) => idx < selectableConfigCount;
+	const navIsPipeline = (idx: number) => idx >= selectableConfigCount && idx < selectableConfigCount + selectablePipelineCount;
+	const navIsError = (idx: number) => idx >= selectableConfigCount + selectablePipelineCount && idx < selectableConfigCount + selectablePipelineCount + selectableErrorCount;
+	const navIsAction = (idx: number) => idx >= selectableConfigCount + selectablePipelineCount + selectableErrorCount;
 
 	let selectedIndex = 0;
 	let cachedLines: string[] | undefined;
@@ -117,8 +126,9 @@ export function createStatusOverlay(
 		}
 
 		if (matchKey(data, "enter") || matchKey(data, "space")) {
-			if (selectedIndex >= actionStart && selectedIndex < actionStart + actionItems.length) {
-				const action = actionItems[selectedIndex - actionStart]!;
+			if (navIsAction(selectedIndex)) {
+				const actionIdx = selectedIndex - selectableConfigCount - selectablePipelineCount - selectableErrorCount;
+				const action = actionItems[actionIdx]!;
 				done({ action: action.value });
 				return;
 			}
@@ -131,8 +141,7 @@ export function createStatusOverlay(
 			return;
 		}
 		if (matchKey(data, "down")) {
-			const total = actionStart + actionItems.length;
-			selectedIndex = Math.min(total - 1, selectedIndex + 1);
+			selectedIndex = Math.min(totalSelectable - 1, selectedIndex + 1);
 			invalidate();
 			return;
 		}
@@ -188,8 +197,7 @@ export function createStatusOverlay(
 			lines.push(border(line(` ${dim("─── Pipeline ───")}`)));
 			for (let i = 0; i < pipelineItems.length; i++) {
 				const item = pipelineItems[i]!;
-				const idx = configSectionEnd + 1 + i;
-				const isSelected = selectedIndex === idx;
+				const isSelected = selectedIndex === selectableConfigCount + i;
 				const prefix = isSelected ? accent(" ›") : "  ";
 				const label = isSelected ? accent(`${item.label}:`) : `${item.label}:`;
 				const value = item.value === "yes" ? warning("yes") : dim("no");
@@ -202,8 +210,7 @@ export function createStatusOverlay(
 			lines.push(border(line(` ${dim("─── Last Errors ───")}`)));
 			for (let i = 0; i < errorItems.length; i++) {
 				const item = errorItems[i]!;
-				const idx = pipelineSectionEnd + 1 + i;
-				const isSelected = selectedIndex === idx;
+				const isSelected = selectedIndex === selectableConfigCount + selectablePipelineCount + i;
 				const prefix = isSelected ? accent(" ›") : "  ";
 				const label = isSelected ? accent(`${item.label}:`) : `${item.label}:`;
 				const truncated = item.value.length > 40
@@ -219,8 +226,7 @@ export function createStatusOverlay(
 		// Action items
 		for (let i = 0; i < actionItems.length; i++) {
 			const item = actionItems[i]!;
-			const idx = actionStart + i;
-			const isSelected = selectedIndex === idx;
+			const isSelected = selectedIndex === selectableConfigCount + selectablePipelineCount + selectableErrorCount + i;
 			const prefix = isSelected ? accent(" ▶") : "   ";
 			const text = isSelected ? accent(item.label) : dim(item.label);
 			lines.push(border(line(`${prefix} ${text}`)));

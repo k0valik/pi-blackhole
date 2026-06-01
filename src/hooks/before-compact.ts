@@ -118,8 +118,19 @@ export function buildOwnCut(
           compactAll: false,
         };
       }
-      // liveCutIdx === 0: Pi wants to keep all live messages — cancel compaction
-      return { ok: false, reason: "too_few_live_messages" };
+      // liveCutIdx === 0: Pi's cut is at first live message.
+      // Pi wants to keep everything, so only compact-all is acceptable (summarizes
+      // everything for a fresh page).  If minimal path would aggressively cut
+      // (multiple user messages), cancel to respect Pi's guidance.
+      let lastUserIdx = liveMessages.length - 1;
+      while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+        lastUserIdx--;
+      }
+      if (lastUserIdx > 0) {
+        // Multiple user messages — minimal would aggressively cut, violating Pi
+        return { ok: false, reason: "too_few_live_messages" };
+      }
+      // Single user message — fall through to minimal path (will compact-all)
     }
     // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
   }

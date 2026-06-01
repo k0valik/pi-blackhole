@@ -94,8 +94,8 @@ describe("buildOwnCut", () => {
     expect(r.messages).toHaveLength(2);
   });
 
-  test("T26: tailBehavior pi-default with Pi cut at first message — cancels (Pi wants all preserved)", () => {
-    // Pi cut at first message → Pi wants nothing compiled → cancel
+  test("T26: tailBehavior pi-default with Pi cut at first message + single user — compactAll", () => {
+    // Pi cut at first message but only one user → compact-all summarizes everything
     const r = buildOwnCut(
       [
         msg("m1", "user", "go"),
@@ -106,9 +106,10 @@ describe("buildOwnCut", () => {
       "m1",    // Pi cut at first message
       "pi-default",
     );
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.reason).toBe("too_few_live_messages");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.compactAll).toBe(true);
+    expect(r.firstKeptEntryId).toBe("");
   });
 
   test("T27: tailBehavior pi-default with Pi cut at first live message — cancels compaction", () => {

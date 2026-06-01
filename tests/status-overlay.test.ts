@@ -99,8 +99,8 @@ describe("createStatusOverlay", () => {
       expect(result).toEqual({ action: "configure" });
       done();
     });
-    // Navigate to "Open configure overlay" action (index 8 in selection model)
-    for (let i = 0; i < 8; i++) overlay.handleInput("\x1b[B");
+    // Navigate to "Open configure overlay" action (contiguous nav index 7)
+    for (let i = 0; i < 7; i++) overlay.handleInput("\x1b[B");
     overlay.handleInput("\r"); // enter
   }));
 
