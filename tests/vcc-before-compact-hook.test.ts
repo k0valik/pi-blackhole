@@ -215,25 +215,26 @@ describe("registerBeforeCompactHook: new config key guards", () => {
     if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
   });
 
-  test("T28: compaction:off + /blackhole → { cancel: true } (blocks even manual)", () => {
+  test("T28: compaction:off + /blackhole → proceeds (blackhole pipeline)", () => {
     const { pi, invoke, omRuntime } = createMockPi({ compaction: "off" });
     registerBeforeCompactHook(pi, omRuntime);
 
     const entries = [msg("m1", "user"), msg("m2", "assistant"), msg("m3", "user"), msg("m4", "assistant")];
     const result = invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION));
 
-    // compaction: "off" should block everything, even /blackhole
-    expect(result).toEqual({ cancel: true });
+    // compaction: "off" allows explicit /blackhole through blackhole's pipeline
+    expect(result.cancel).toBeUndefined();
+    expect(result.compaction).toBeDefined();
   });
 
-  test("T29: compaction:off + auto → { cancel: true }", () => {
+  test("T29: compaction:off + auto → returns early, Pi handles", () => {
     const { pi, invoke, omRuntime } = createMockPi({ compaction: "off" });
     registerBeforeCompactHook(pi, omRuntime);
 
     const entries = [msg("m1", "user"), msg("m2", "assistant"), msg("m3", "user"), msg("m4", "assistant")];
     const result = invoke(makeEvent(entries, undefined));
 
-    expect(result).toEqual({ cancel: true });
+    expect(result).toBeUndefined();
   });
 
   test("T30: compaction:manual + /blackhole → proceeds (allows manual)", () => {

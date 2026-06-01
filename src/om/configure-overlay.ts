@@ -37,7 +37,7 @@ interface FieldState {
 const FIELDS: FieldDef[] = [
 	// ── Compaction ──
 	{ key: "compaction", label: "Compaction mode", type: "enum", section: "Compaction", enumValues: ["auto", "manual", "off"],
-		helpText: "auto=trigger on threshold, manual=only /blackhole, off=never" },
+		helpText: "auto=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline" },
 	{ key: "compactionEngine", label: "Compaction engine", type: "enum", section: "Compaction", enumValues: ["blackhole", "pi-default"],
 		helpText: "blackhole=structured summary+OM, pi-default=built-in Pi summarization" },
 	{ key: "tailBehavior", label: "Visible tail", type: "enum", section: "Compaction", enumValues: ["pi-default", "minimal"],
@@ -66,6 +66,8 @@ const FIELDS: FieldDef[] = [
 		helpText: "Preamble budget in noAutoCompact mode (0=auto-compute 30% of chunk)" },
 	{ key: "agentMaxTurns", label: "Max turns per agent", type: "number", section: "Observational Memory",
 		helpText: "Shared turn cap for background memory agents" },
+	{ key: "agentLoopReserve", label: "Agent loop reserve", type: "number", section: "Observational Memory",
+		helpText: "Tokens reserved in context window for agent loop overhead" },
 
 	// ── Debug ──
 	{ key: "debug", label: "Debug snapshots", type: "boolean", section: "Debug",

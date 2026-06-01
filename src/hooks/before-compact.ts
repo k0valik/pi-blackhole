@@ -183,10 +183,10 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
 
     // NEW: Unified compaction guards
-    // compaction "off" blocks everything, even /blackhole
-    if (omRuntime.config.compaction === "off") {
-      trace("before_compact.cancel", { reason: "compaction_off" });
-      return { cancel: true };
+    // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
+    if (omRuntime.config.compaction === "off" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compaction_off" });
+      return;
     }
 
     // compactionEngine "pi-default" means let Pi handle auto-triggered compactions

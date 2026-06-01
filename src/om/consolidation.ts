@@ -16,6 +16,7 @@ import type { ConfiguredModel } from "./config.js";
 import { debugLog, withDebugLogContext } from "./debug-log.js";
 import { type ResolveResult, type Runtime } from "./runtime.js";
 import { isRetryableError } from "./cooldown.js";
+import { effectiveContextWindow } from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
 import {
 	readPendingState,
@@ -367,6 +368,17 @@ async function runObserverStage(
 
 		// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
 		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "observer"), stageFallbacks: stageFallbackModels(runtime, "observer") });
+
+		// Check if estimated input fits in model's context window
+		const effectiveObsCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
+		const observerEstimatedInput = runtime.config.observerChunkMaxTokens + runtime.config.agentLoopReserve;
+		if (observerEstimatedInput > effectiveObsCtx) {
+			debugLog("observer.context_window_exceeded", { estimatedInput: observerEstimatedInput, effectiveCtx: effectiveObsCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
+			runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveObsCtx} too small for estimated input ${observerEstimatedInput}`), "observer");
+			if (ctx.hasUI && ctx.ui) ctx.ui.notify(`Observational memory: observer skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveObsCtx.toLocaleString()} too small for ~${observerEstimatedInput.toLocaleString()}-token input)`, "info");
+			continue;
+		}
+
 		try {
 			const result = await runObserver({
 				model: resolved.model as any,
@@ -501,6 +513,17 @@ async function runReflectorStage(
 
 		// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
 		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "reflector"), stageFallbacks: stageFallbackModels(runtime, "reflector") });
+
+		// Check if estimated input fits in model's context window
+		const effectiveRefCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
+		const reflectorEstimatedInput = runtime.config.reflectorInputMaxTokens + runtime.config.agentLoopReserve;
+		if (reflectorEstimatedInput > effectiveRefCtx) {
+			debugLog("reflector.context_window_exceeded", { estimatedInput: reflectorEstimatedInput, effectiveCtx: effectiveRefCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
+			runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveRefCtx} too small for estimated input ${reflectorEstimatedInput}`), "reflector");
+			if (ctx.hasUI && ctx.ui) ctx.ui.notify(`Observational memory: reflector skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveRefCtx.toLocaleString()} too small for ~${reflectorEstimatedInput.toLocaleString()}-token input)`, "info");
+			continue;
+		}
+
 		try {
 			// Existing memory summaries for context (capped).
 			// In noAutoCompact, merge accumulated pending batches with
@@ -647,6 +670,17 @@ async function runDropperStage(
 
 			// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
 			const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "dropper"), stageFallbacks: stageFallbackModels(runtime, "dropper") });
+
+			// Check if estimated input fits in model's context window
+			const effectiveDropCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
+			const dropperEstimatedInput = runtime.config.dropperInputMaxTokens + runtime.config.agentLoopReserve;
+			if (dropperEstimatedInput > effectiveDropCtx) {
+				debugLog("dropper.context_window_exceeded", { estimatedInput: dropperEstimatedInput, effectiveCtx: effectiveDropCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
+				runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveDropCtx} too small for estimated input ${dropperEstimatedInput}`), "dropper");
+				if (ctx.hasUI && ctx.ui) ctx.ui.notify(`Observational memory: dropper skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveDropCtx.toLocaleString()} too small for ~${dropperEstimatedInput.toLocaleString()}-token input)`, "info");
+				continue;
+			}
+
 			const droppedIds = await runDropper({
 				model: resolved.model as any,
 				apiKey: resolved.apiKey,

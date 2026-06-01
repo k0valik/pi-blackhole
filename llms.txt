@@ -25,7 +25,7 @@ the concepts, parameters, and defaults you need:
   tools, settings at a glance, configuration presets (low/medium/high context)
 - **CONFIG.md** — detailed explanation of every setting: worker models, token
   thresholds, rolling window caps, behavior flags, full example config
-- **example-config.json** — the annotated example with comments explaining
+- **example-config-v2.json** — the annotated example with comments explaining
   each model choice, fallback chain rationale, and thinking levels
 
 Key things to understand from reading:
@@ -33,7 +33,7 @@ Key things to understand from reading:
 - Three workers: **Observer** (extracts facts — most frequent, needs speed),
   **Reflector** (synthesizes durable reflections — needs reasoning),
   **Dropper** (prunes observations — needs judgment)
-- Behavior flags: `noAutoCompact`, `passive`, `memory`, `overrideDefaultCompaction`, `debug`, `debugLog`
+- Behavior flags: `compaction`, `compactionEngine`, `tailBehavior`, `memory`, `debug`, `debugLog`
 - Token thresholds vs budget caps: thresholds trigger *when* a worker runs,
   budget caps limit *how much* data is sent
 - Three presets: low (32-64k), medium/128k default, high (200k+)
@@ -107,14 +107,14 @@ user can make an informed decision.
 
 ```text
 Three modes:
-- **Auto** (noAutoCompact: false) — workers append observations as invisible
+- **Auto** (compaction: "auto") — workers append observations as invisible
   markers, compaction fires automatically at token threshold. Install and
   forget.
-- **Manual** (noAutoCompact: true) — observations go to disk, compaction only
+- **Manual** (compaction: "manual") — observations go to disk, compaction only
   on `/blackhole`. Cleaner conversation, you control when to compact.
   This is the maintainer's setup.
-- **Passive** (passive: true) — all workers off, no auto-compact. Only
-  explicit `/blackhole` compaction works. Pure pi-vcc, no memory layer.
+- **Off** (compaction: "off" + memory: false) — all workers off, no auto-compact. Only
+  explicit `/blackhole` compaction works. Pure compaction, no memory layer.
 ```
 
 Ask: "Which mode fits how you work? Manual gives you control and a clean
@@ -162,9 +162,9 @@ would you like to add fallback models? I can suggest free alternatives."
 Explain the chain: primary -> fallbacks -> base model -> session model
 (last resort, never cooled down).
 
-### 4e. Override default compaction
+### 4e. Compaction engine
 
-Explain: `overrideDefaultCompaction: true` makes blackhole handle ALL
+Explain: `compactionEngine: "blackhole"` makes blackhole handle ALL
 compactions (including Pi's auto-compaction), not just `/blackhole`. Only
 set this if you want the algorithmic summary format everywhere.
 
@@ -176,7 +176,7 @@ Based on the interview answers, build the config object.
 
 ### Structural rules
 
-- If `noAutoCompact: true`, use manual mode config. This is the recommended
+- If `compaction: "manual"`, use manual mode config. This is the recommended
   setup if the user wants control.
 - Set `observerModel` to the fastest capable model from the user's available
   providers.
@@ -294,7 +294,7 @@ still have stale cooldowns for old models — harmless but can be cleaned up.
 
 ### Per-session pending files
 
-In `noAutoCompact` mode, each session gets its own pending file at
+In `compaction: "manual"` mode, each session gets its own pending file at
 `~/.pi/agent/pi-blackhole/<sessionId>-pending.json`. This isolates state
 between concurrent Pi sessions. The batch arrays (`observationBatches`,
 `reflectionBatches`, `droppedBatches`) accumulate across pipeline runs so
@@ -353,7 +353,7 @@ if they ask about internals, but don't read the full codebase.
 | File | What it does |
 |---|---|
 | `src/core/unified-config.ts` | Config loading, scaffolding, defaults, env var overrides (`PI_BLACKHOLE_PASSIVE`), legacy fallback merge |
-| `src/core/settings.ts` | Pi-vcc settings loading (overrideDefaultCompaction, debug) |
+| `src/core/settings.ts` | Pi-vcc settings loading (compactionEngine, debug) |
 | `src/om/consolidation.ts` | Worker orchestration (observer → reflector → dropper) |
 | `src/om/ledger/types.ts` | OM data types: Observation, Reflection, coverage-marker entry schemas |
 | `src/om/ledger/recall.ts` | Ledger index for reverse recall lookup |
@@ -378,7 +378,7 @@ From `DEFAULTS` in `unified-config.ts`:
 | `reflectorInputMaxTokens` | 80,000 | Max reflector prompt budget |
 | `dropperInputMaxTokens` | 80,000 | Max dropper prompt budget |
 | `observerChunkMaxTokens` | 40,000 | Max observer chunk size (newest-first) |
-| `observerPreambleMaxTokens` | 0 (auto) | Soft safety valve: caps `noAutoCompact` observer preamble (30% of chunk). Only trims when exceeded; high-relevance observations always kept. |
+| `observerPreambleMaxTokens` | 0 (auto) | Soft safety valve: caps `compaction: "manual"` observer preamble (30% of chunk). Only trims when exceeded; high-relevance observations always kept. |
 | `agentMaxTurns` | 16 | Max agent-loop turns per worker. Lower for small models (e.g., 8) to prevent wasteful extraction turns. |
 
 Scaling formula for custom context sizes (actual defaults are hand-tuned; use formulas as approximate minimums):
