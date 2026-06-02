@@ -165,10 +165,11 @@ describe("normalizeSourceEntryIds", () => {
 		expect(normalizeSourceEntryIds(["entry-b", "entry-b", "entry-a"], allowed)).toEqual(["entry-a", "entry-b"]);
 	});
 
-	it("rejects missing, empty, or hallucinated source ids", () => {
+	it("filters missing, empty, or hallucinated source ids (no longer rejects whole batch)", () => {
 		expect(normalizeSourceEntryIds(undefined, allowed)).toBeUndefined();
 		expect(normalizeSourceEntryIds([], allowed)).toBeUndefined();
-		expect(normalizeSourceEntryIds(["entry-a", "not-in-the-chunk"], allowed)).toBeUndefined();
+		// Hallucinated IDs are filtered out; valid IDs are kept
+		expect(normalizeSourceEntryIds(["entry-a", "not-in-the-chunk"], allowed)).toEqual(["entry-a"]);
 		expect(normalizeSourceEntryIds(["entry-a"], [])).toBeUndefined();
 	});
 });

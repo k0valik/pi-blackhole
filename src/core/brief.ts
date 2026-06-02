@@ -94,22 +94,27 @@ const truncateTokens = (text: string, limit: number): string => {
 // ── bash command compression ──
 
 const BASH_CAP = 120;
-const PIPE_TAIL_RE = /\s*\|\s*(?:head|tail|sort|wc|column|tr|cut|awk|uniq|python3|node|bun)(?:\s[^|]*)?$/;
+// Only strip pure-formatting pipe tails (head/tail for truncation, sort/wc/column for display).
+// awk/python3/node/bun are data-processing commands — their output carries semantic meaning.
+const PIPE_TAIL_RE = /\s*\|\s*(?:head|tail|sort|wc|column|tr|cut|uniq)(?:\s[^|]*)?$/;
 
 /** Semantic compression: strip cd prefix, pipe tail formatting, cap length */
 const compressBash = (raw: string): string => {
-  // Flatten multi-line: take first meaningful line
-  let cmd = raw.split("\n").map(l => l.trim()).filter(Boolean)[0] ?? raw;
+  // Flatten multi-line: join lines with semicolons
+  let cmd = raw.split("\n").map(l => l.trim()).filter(Boolean).join("; ");
   // Strip cd <path> && prefix
   cmd = cmd.replace(/^cd\s+\S+\s*&&\s*/, "");
-  // Strip pipe tail formatting commands (up to 3 times)
-  for (let i = 0; i < 3; i++) {
+  // Strip pipe tail formatting commands (up to 10 iterations, stop when stable)
+  for (let i = 0; i < 10; i++) {
     const stripped = cmd.replace(PIPE_TAIL_RE, "");
     if (stripped === cmd) break;
     cmd = stripped;
   }
   if (cmd.length > BASH_CAP) {
-    return cmd.slice(0, BASH_CAP - 3) + "...";
+    // Cut at word boundary to avoid mid-word truncation
+    const cut = cmd.lastIndexOf(" ", BASH_CAP - 2);
+    const end = cut > BASH_CAP * 0.6 ? cut : BASH_CAP - 3;
+    return cmd.slice(0, end).trimEnd() + "...";
   }
   return cmd;
 };
@@ -118,7 +123,7 @@ const compressBash = (raw: string): string => {
 
 const TOOL_SUMMARY_FIELDS: Record<string, string> = {
   Read: "file_path", Edit: "file_path", Write: "file_path",
-  read: "file_path", edit: "file_path", write: "file_path",
+  read: "path", edit: "path", write: "path",
   Glob: "pattern", Grep: "pattern",
 };
 
@@ -318,17 +323,17 @@ export const buildBriefSections = (blocks: NormalizedBlock[]): BriefLine[] => {
  */
 export const stringifyBrief = (sections: BriefLine[]): string => {
 
-  // Emit sections -- suppress blank lines between consecutive tool summaries
+  // Emit sections -- suppress blank lines between consecutive tool/error summaries
   const out: string[] = [];
   for (let i = 0; i < sections.length; i++) {
     const sec = sections[i];
     if (i > 0) {
       const prev = sections[i - 1];
-      const prevIsTools = prev.header === "[assistant]" &&
-        prev.lines.every((l) => l.startsWith("* "));
-      const curIsTools = sec.header === "[assistant]" &&
-        sec.lines.every((l) => l.startsWith("* "));
-      if (!(prevIsTools && curIsTools)) {
+      const prevIsToolLike = (prev.header === "[assistant]" && prev.lines.every((l) => l.startsWith("* "))) ||
+        prev.header.startsWith("[tool_error]");
+      const curIsToolLike = (sec.header === "[assistant]" && sec.lines.every((l) => l.startsWith("* "))) ||
+        sec.header.startsWith("[tool_error]");
+      if (!(prevIsToolLike && curIsToolLike)) {
         out.push("");
       }
     }

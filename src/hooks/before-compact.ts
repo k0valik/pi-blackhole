@@ -289,9 +289,10 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     }
 
     // Determine effective tail behavior for buildOwnCut
+    // /blackhole defaults to "minimal" (aggressive cut); auto-triggered defaults to "pi-default" (gentler cut).
     const effectiveTailBehavior = isPiVcc
       ? (omRuntime.config.tailBehavior ?? "minimal")   // /blackhole: minimal by default
-      : (omRuntime.config.tailBehavior ?? "minimal");
+      : (omRuntime.config.tailBehavior ?? "pi-default"); // auto-triggered: gentler by default
 
     trace("before_compact.tail_behavior", {
       effectiveTailBehavior,

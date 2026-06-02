@@ -24,14 +24,8 @@ const formatTokens = (n: number): string => {
 };
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
-	const fuzzyMatch = (value: string, prefix: string): boolean => {
-		const q = prefix.toLowerCase();
-		let qi = 0;
-		for (const ch of value) {
-			if (qi < q.length && ch === q[qi]) qi++;
-			if (qi === q.length) return true;
-		}
-		return false;
+	const prefixMatch = (value: string, prefix: string): boolean => {
+		return value.toLowerCase().startsWith(prefix.toLowerCase());
 	};
 
 	pi.registerCommand("blackhole", {
@@ -46,7 +40,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 				{ value: "om-on", label: "Enable observational memory [om-on]" },
 			];
 			if (!prefix) return subcommands;
-			return subcommands.filter((s) => fuzzyMatch(s.value, prefix));
+			return subcommands.filter((s) => prefixMatch(s.value, prefix));
 		},
 		handler: async (args, ctx) => {
 			const sessionId = ctx.sessionManager.getSessionId();

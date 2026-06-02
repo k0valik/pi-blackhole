@@ -82,7 +82,7 @@ export function findReflectionsForEntryIds(
 
 export function formatRelatedObservations(
 	observations: RelatedObservation[],
-	_reflections: RelatedReflection[],
+	reflections: RelatedReflection[],
 ): string {
 	const parts: string[] = [];
 
@@ -94,6 +94,14 @@ export function formatRelatedObservations(
 				? ` (${obs.matchedEntryIds.join(", ")})`
 				: "";
 			parts.push(`  [${obs.memoryId}]${dropped} ${obs.timestamp} [${obs.relevance}] ${obs.content}${entryRefs}`);
+		}
+	}
+
+	if (reflections.length > 0) {
+		if (parts.length > 0) parts.push("");
+		parts.push("Related reflections:");
+		for (const ref of reflections) {
+			parts.push(`  [${ref.memoryId}] ${ref.content}`);
 		}
 	}
 

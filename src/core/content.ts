@@ -1,4 +1,5 @@
 import type { Message } from "@earendil-works/pi-ai";
+import { PATH_KEYS } from "./tool-args.js";
 
 export const clip = (text: string, max = 200): string => {
   if (text.length <= max) return text;
@@ -57,14 +58,16 @@ export const textOf = (content: Message["content"]): string =>
  */
 export const isContentBearing = (args: Record<string, unknown>): boolean => {
   if (!args || typeof args !== "object") return false;
-  // Must have a path in one of the known keys
-  const hasPath = ["path", "filePath", "file_path", "file"].some((k) => typeof args[k] === "string");
+  // Must have a path in one of the known keys (from tool-args.ts)
+  const hasPath = PATH_KEYS.some((k) => typeof args[k] === "string");
   if (!hasPath) return false;
   // Must have at least one content-bearing field
   if (typeof args.content === "string" && args.content.length > 0) return true;
-  if (Array.isArray(args.edits) && args.edits.length > 0) return true;
-  if (typeof args.oldText === "string" && args.oldText.length > 0 && !Array.isArray(args.edits)) return true;
-  if (typeof args.newText === "string" && args.newText.length > 0 && !Array.isArray(args.edits)) return true;
+  // edits must be a non-empty array of objects (each with oldText/newText)
+  if (Array.isArray(args.edits) && args.edits.length > 0 && args.edits.every((e) => typeof e === "object" && e !== null)) return true;
+  // oldText/newText without edits are content-bearing
+  if (typeof args.oldText === "string" && args.oldText.length > 0 && args.edits === undefined) return true;
+  if (typeof args.newText === "string" && args.newText.length > 0 && args.edits === undefined) return true;
   return false;
 };
 

@@ -138,7 +138,11 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 
 	// Merge expanded entries into full result set BEFORE pagination
 	// so pagination counts and positioning stay consistent
+	let appendedExpandCount = 0;
 	if (expandedFullEntries) {
+		// Track expand-only entries that don't match the query so the header can distinguish them
+		const existingIndices = new Set(allResults.map((r) => r.index));
+		appendedExpandCount = expandedFullEntries.filter((fe) => !existingIndices.has(fe.index)).length;
 		allResults = mergeExpandedIntoSearchResults(allResults, expandedFullEntries);
 	}
 
@@ -148,9 +152,10 @@ async function vccRecall(params: { query?: string; expand?: number[]; page?: num
 		const pageResults: SearchHit[] = allResults.slice(start, start + PAGE_SIZE);
 		const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
 		const scopeSuffix = scope === "all" ? " (scope: all)" : "";
+		const matchCount = allResults.length - appendedExpandCount;
 		const header = totalPages > 1
-			? `Page ${page}/${totalPages} (${allResults.length} total matches${scopeSuffix})`
-			: `${allResults.length} matches${scopeSuffix}`;
+			? `Page ${page}/${totalPages} (${matchCount} matches${appendedExpandCount > 0 ? ` + ${appendedExpandCount} expanded` : ""}${scopeSuffix})`
+			: `${matchCount} matches${appendedExpandCount > 0 ? ` (+ ${appendedExpandCount} expanded)` : ""}${scopeSuffix}`;
 		const footer = page < totalPages
 			? `\n--- Use page:${page + 1}${scope === "all" ? " with scope:'all'" : ""} for more results ---`
 			: "";

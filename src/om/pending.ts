@@ -106,7 +106,7 @@ function readSessionState(sessionId: string): PendingOMState {
 
 	try {
 		const raw = JSON.parse(readFileSync(path, "utf-8"));
-		if (isPendingOMState(raw)) return raw;
+		if (isPendingOMState(raw)) return sanitizePendingState(raw);
 		return defaultState();
 	} catch {
 		return defaultState();
@@ -150,16 +150,49 @@ function writeSessionState(sessionId: string, state: PendingOMState): void {
 	}
 }
 
-/**
- * Validate that an unknown value is a valid PendingOMState.
- */
+/** Validate that unknown value is shape-compatible with PendingOMState. */
 function isPendingOMState(value: unknown): value is PendingOMState {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
 	const hasObs = !!(v.observation && typeof v.observation === "object" && typeof (v.observation as any).coversUpToId === "string");
 	const hasRef = !!(v.reflection && typeof v.reflection === "object" && typeof (v.reflection as any).coversUpToId === "string");
 	const hasDrop = !!(v.dropped && typeof v.dropped === "object" && typeof (v.dropped as any).coversUpToId === "string");
-	return hasObs || hasRef || hasDrop;
+	// Also accept states with only batch arrays (no singular fields)
+	const hasBatches = Array.isArray(v.observationBatches) || Array.isArray(v.reflectionBatches) || Array.isArray(v.droppedBatches);
+	return hasObs || hasRef || hasDrop || hasBatches;
+}
+
+/**
+ * Sanitize pending state: filter out corrupted batch entries (missing required fields).
+ * Returns a clean copy; does not mutate the input.
+ */
+function sanitizePendingState(raw: PendingOMState): PendingOMState {
+	const sanitized: PendingOMState = {
+		...raw,
+		observation: raw.observation ?? undefined,
+		reflection: raw.reflection ?? undefined,
+		dropped: raw.dropped ?? undefined,
+	};
+	// Filter batch arrays to only include valid entries with the required shape
+	if (Array.isArray(raw.observationBatches)) {
+		sanitized.observationBatches = raw.observationBatches.filter(
+			(b): b is PendingObservation =>
+				!!b && typeof b === "object" && typeof (b as any).coversUpToId === "string" && (b as any).data !== undefined,
+		);
+	}
+	if (Array.isArray(raw.reflectionBatches)) {
+		sanitized.reflectionBatches = raw.reflectionBatches.filter(
+			(b): b is PendingReflection =>
+				!!b && typeof b === "object" && typeof (b as any).coversUpToId === "string" && (b as any).data !== undefined,
+		);
+	}
+	if (Array.isArray(raw.droppedBatches)) {
+		sanitized.droppedBatches = raw.droppedBatches.filter(
+			(b): b is PendingDropped =>
+				!!b && typeof b === "object" && typeof (b as any).coversUpToId === "string" && (b as any).data !== undefined,
+		);
+	}
+	return sanitized;
 }
 
 // ── API ─────────────────────────────────────────────────────────────────────

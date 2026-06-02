@@ -13,15 +13,13 @@ const NOISE_STRINGS = [
 
 const XML_WRAPPER_RE = /<(system-reminder|ide_opened_file|command-message|context-window-usage)[^>]*>[\s\S]*?<\/\1>/g;
 
-const isNoiseUserBlock = (text: string): boolean => {
+/** Return cleaned user text, or null if the block is noise. Cleans once. */
+const cleanOrNull = (text: string): string | null => {
   const trimmed = text.trim();
-  if (NOISE_STRINGS.some((s) => trimmed.includes(s))) return true;
-  const stripped = trimmed.replace(XML_WRAPPER_RE, "").trim();
-  return stripped.length === 0;
+  if (NOISE_STRINGS.some((s) => trimmed.includes(s))) return null;
+  const cleaned = trimmed.replace(XML_WRAPPER_RE, "").trim();
+  return cleaned.length > 0 ? cleaned : null;
 };
-
-const cleanUserText = (text: string): string =>
-  text.replace(XML_WRAPPER_RE, "").trim();
 
 export const filterNoise = (blocks: NormalizedBlock[]): NormalizedBlock[] => {
   const out: NormalizedBlock[] = [];
@@ -30,10 +28,9 @@ export const filterNoise = (blocks: NormalizedBlock[]): NormalizedBlock[] => {
     if (b.kind === "tool_call" && NOISE_TOOLS.has(b.name)) continue;
     if (b.kind === "tool_result" && NOISE_TOOLS.has(b.name)) continue;
     if (b.kind === "user") {
-      if (isNoiseUserBlock(b.text)) continue;
-      const cleaned = cleanUserText(b.text);
+      const cleaned = cleanOrNull(b.text);
       if (!cleaned) continue;
-      out.push({ kind: "user", text: cleaned });
+      out.push({ ...b, text: cleaned }); // preserve sourceIndex and any future fields
       continue;
     }
     out.push(b);

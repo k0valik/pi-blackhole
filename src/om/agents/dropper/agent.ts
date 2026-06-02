@@ -7,6 +7,7 @@
  */
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { createBridgeStreamFn } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { Static } from "typebox";
@@ -287,13 +288,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
 
 	const loop = args.agentLoop ?? agentLoop;
 	// ── Bridge stream function ──
-	const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
-	const bridgeStreamFn = (model: any, ctx: any, opts: any) => {
-		const providerStreams: Map<string, Function> | undefined = (globalThis as any)[PROVIDER_STREAMS_KEY];
-		if (!providerStreams) return streamSimple(model, ctx, opts);
-		const customFn = model?.api ? providerStreams.get(model.api) : undefined;
-		return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
-	};
+	const bridgeStreamFn = createBridgeStreamFn(streamSimple);
 	const streamFn = args.streamFn ?? bridgeStreamFn;
 	const stream = loop(prompts, context, config, signal, streamFn);
 	let agentError: string | undefined;

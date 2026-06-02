@@ -15,6 +15,7 @@ import {
 	type Observation,
 	type Reflection,
 } from "./types.js";
+import { debugLog } from "../debug-log.js";
 
 export type FoldLedgerOptions = {
 	/** Fold entries from branch root through this entry id, inclusive. Omit to fold through branch tip. */
@@ -88,6 +89,13 @@ export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): F
 			for (const observationId of entry.data.observationIds) {
 				droppedObservationIds.add(observationId);
 			}
+			continue;
+		}
+
+		// Log unknown custom entry types — they are silently skipped, but
+		// should be visible when debugging extension compatibility issues.
+		if (entry.type === "custom" && entry.customType) {
+			debugLog("fold.unknown_custom_type", { customType: entry.customType, entryId: entry.id });
 		}
 	}
 

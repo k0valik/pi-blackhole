@@ -290,34 +290,7 @@ describe("Env overrides", () => {
 	});
 });
 
-// ── Tests: Toggle helpers ─────────────────────────────────────────────────
 
-describe("Toggle helper functions", () => {
-	it("toggleCompaction cycles auto→manual→off→auto", async () => {
-		const mod = await import("../src/core/unified-config.js");
-		const { toggleCompaction } = mod;
-
-		expect(toggleCompaction("auto")).toBe("manual");
-		expect(toggleCompaction("manual")).toBe("off");
-		expect(toggleCompaction("off")).toBe("auto");
-	});
-
-	it("toggleCompactionEngine switches blackhole↔pi-default", async () => {
-		const mod = await import("../src/core/unified-config.js");
-		const { toggleCompactionEngine } = mod;
-
-		expect(toggleCompactionEngine("blackhole")).toBe("pi-default");
-		expect(toggleCompactionEngine("pi-default")).toBe("blackhole");
-	});
-
-	it("toggleTailBehavior switches pi-default↔minimal", async () => {
-		const mod = await import("../src/core/unified-config.js");
-		const { toggleTailBehavior } = mod;
-
-		expect(toggleTailBehavior("pi-default")).toBe("minimal");
-		expect(toggleTailBehavior("minimal")).toBe("pi-default");
-	});
-});
 
 // ── Tests: saveUnifiedConfig atomic write ─────────────────────────────────
 

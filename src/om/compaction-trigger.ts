@@ -2,14 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { rawTokensSinceLastCompaction, type Entry } from "./ledger/index.js";
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
-
-/**
- * Regex matching Pi's internal retryable error detection.
- * When the last assistant message in agent_end has stopReason "error" matching this pattern,
- * Pi will auto-retry — we must not trigger compaction between attempts.
- */
-const RETRYABLE_ERROR_RE =
-	/overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
+import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
 
 export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): void {
 	pi.on("agent_end", (event: any, ctx: any) => {

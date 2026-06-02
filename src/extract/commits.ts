@@ -6,8 +6,9 @@ interface CommitInfo {
 }
 
 const COMMIT_MSG_RE = /git\s+commit[^\n]*?-m\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\$?'((?:[^'\\]|\\.)*)')/;
-// Match short hash from git output: "[branch hash]" or "main hash" or 7-12 hex
-const HASH_RE = /\b([0-9a-f]{7,12})\b/;
+// Match short hash from git output — only as fallback after bracket/range patterns fail.
+// Requires 8+ hex chars to reduce false positives from random hex in tool output.
+const HASH_RE = /(?:^|\s)([0-9a-f]{8,12})(?:\s|$)/;
 
 const firstLineOf = (text: string): string => {
   const line = text.split(/\\n|\n/)[0] ?? "";

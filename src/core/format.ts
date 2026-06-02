@@ -9,8 +9,13 @@ const section = (title: string, items: string[]): string => {
 const BRIEF_MAX_LINES = 120;
 const TUI_SAFE_LINE_CHARS = 120;
 
+// Strip ANSI escape sequences which can corrupt mid-word split calculations
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
 const wrapLine = (line: string, maxChars: number): string[] => {
-  if (line.length <= maxChars) return [line];
+  // Use cleaned (ANSI-free) text for length calculations to avoid splitting escape sequences
+  const clean = line.replace(ANSI_RE, "");
+  if (clean.length <= maxChars) return [line];
 
   const indent = line.match(/^\s*(?:[-*]\s+|\d+\.\s+)?/)?.[0] ?? "";
   const continuationIndent = indent ? " ".repeat(Math.min(indent.length, 8)) : "";
@@ -41,7 +46,13 @@ export const capBrief = (text: string): string => {
   const omitted = lines.length - BRIEF_MAX_LINES;
   const kept = lines.slice(-BRIEF_MAX_LINES);
   // Find first section header to avoid cutting mid-section
-  const firstHeader = kept.findIndex((l) => /^\[.+\]/.test(l));
+  let firstHeader = kept.findIndex((l) => /^\[.+\]/.test(l));
+  if (firstHeader < 0) {
+    // No header in the kept window — scan for any bracket-delimited anchor
+    // (e.g., tool name, inline reference) to avoid starting mid-paragraph.
+    const anyAnchor = kept.findIndex((l) => /^\[[^\]]+\]/.test(l));
+    if (anyAnchor > 0) firstHeader = anyAnchor;
+  }
   const clean = firstHeader > 0 ? kept.slice(firstHeader) : kept;
   return `...(${omitted} earlier lines omitted)\n\n${clean.join("\n")}`;
 };
