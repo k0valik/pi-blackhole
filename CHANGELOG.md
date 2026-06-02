@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.4] - 2026-06-02
+
+### Added
+
+- **`cooldownHours: 0` disables cooldown without disk writes.** Previously `cooldownHours: 0` was rejected by the positive-int validator and silently replaced with a 1-hour cooldown. Now 0 is a valid value that disables cooldown entirely — no disk writes, no persistent state. Failed models are tracked in-memory within each consolidation stage (via `failedInCycle` set) so the fallback chain still advances past them. ([#16](https://github.com/k0valik/pi-blackhole/issues/16), [#18](https://github.com/k0valik/pi-blackhole/pull/18))
+- **Kitty CSI-u keyboard protocol support for overlays.** The configure and status overlays use pi-tui's `matchesKey` (which handles both legacy terminal sequences and Kitty's CSI-u protocol) instead of the homegrown `matchKey`. Digit input uses `decodeKittyPrintable` to decode CSI-u encoded characters. ([#17](https://github.com/k0valik/pi-blackhole/issues/17), [#19](https://github.com/k0valik/pi-blackhole/pull/19))
+- **Per-stage failure notification isolation.** When cooldown is disabled, each consolidation stage (observer, reflector, dropper) now shows its own failure notification — observer failure no longer suppresses reflector/dropper notifications. ([#19](https://github.com/k0valik/pi-blackhole/pull/19))
+
+### Fixed
+
+- **Keyboard freeze in `/blackhole configure` on Kitty terminal.** The homegrown `matchKey` function did not recognize Kitty's CSI-u keyboard protocol sequences (used by Kitty, WezTerm, and other modern terminals). Switched to pi-tui's `matchesKey` which supports both legacy and CSI-u input. ([#17](https://github.com/k0valik/pi-blackhole/issues/17), [#19](https://github.com/k0valik/pi-blackhole/pull/19))
+- **Config error notifications no longer downgraded to info.** When a session model has no API key configured, the notification correctly shows a "warning" level message instead of the misleading "info" message previously shown when `failedInCycle` was non-empty. ([#16](https://github.com/k0valik/pi-blackhole/issues/16), [#18](https://github.com/k0valik/pi-blackhole/pull/18))
+
+### Changed
+
+- **Removed `key-matcher.ts` `matchKey` export** (replaced by pi-tui's `matchesKey`). The `visibleWidth` export is retained.
+
 ## [0.3.3] - 2026-06-02
 
 ### Added
