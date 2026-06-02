@@ -117,6 +117,10 @@ export interface UnifiedConfig {
 	/** Fallback models for dropper, tried in order after primary model fails. */
 	dropperFallbackModels?: OmModelConfig[];
 
+	/** When false, skip session model fallback when all OM model candidates are exhausted.
+	 *  Default true for backward compatibility. */
+	sessionFallback?: boolean;
+
 	/** @deprecated Use compaction instead. */
 	noAutoCompact?: boolean;
 	/** @deprecated Use compaction + memory instead. */
@@ -131,6 +135,7 @@ export interface UnifiedConfig {
 
 export const DEFAULTS: UnifiedConfig = {
 	debug: false,
+	sessionFallback: true,
 
 	// New config surface
 	compaction: "auto",
@@ -225,6 +230,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.debug === "boolean") c.debug = raw.debug;
 
 	// Booleans — om
+	if (typeof raw.sessionFallback === "boolean") c.sessionFallback = raw.sessionFallback;
 	if (typeof raw.noAutoCompact === "boolean") c.noAutoCompact = raw.noAutoCompact;
 	if (typeof raw.passive === "boolean") c.passive = raw.passive;
 	if (typeof raw.memory === "boolean") c.memory = raw.memory;

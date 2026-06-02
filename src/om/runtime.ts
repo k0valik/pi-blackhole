@@ -94,13 +94,17 @@ export class Runtime {
 	 * Tries the candidate list in order:
 	 * 1. Primary stage model → 2. Stage fallbacks → 3. Base config.model → 4. Session model.
 	 *
+	 * Session model fallback can be disabled via config.sessionFallback: false.
+	 * When disabled, returns { ok: false } instead of using the session model,
+	 * allowing the stage to be skipped entirely when all configured OM models fail.
+	 *
 	 * Skips models that are currently in a cooldown window.
 	 * On retryable error (after the agent runs), the model that failed is cooled down
 	 * and the next candidate is tried.  The caller must call `recordRetryableError`
 	 * after the API attempt to mark the failed model.
 	 *
 	 * Returns `ok: true` with the resolved model, or `ok: false` with a reason
-	 * if all candidates (including session model) are exhausted or unavailable.
+	 * if all candidates (including session model, if enabled) are exhausted or unavailable.
 	 */
 	async resolveModel(ctx: ResolveCtx): Promise<ResolveResult> {
 		const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
@@ -162,25 +166,40 @@ export class Runtime {
 			};
 		}
 
-		// Fall back to session model
-		const sessionModel = ctx.model;
-		if (!sessionModel) {
-			return { ok: false, reason: `no model available for ${stageName} (all candidates exhausted, no session model)` };
+		// Fall back to session model (if enabled)
+		if (this.config.sessionFallback !== false) {
+			const sessionModel = ctx.model;
+			if (!sessionModel) {
+				return { ok: false, reason: `no model available for ${stageName} (all candidates exhausted, no session model)` };
+			}
+
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
+			if (!auth.ok || !auth.apiKey) {
+				const provider = (sessionModel as { provider?: string }).provider ?? "unknown";
+				return { ok: false, reason: `no API key for session model provider "${provider}"` };
+			}
+
+			return {
+				ok: true,
+				model: sessionModel,
+				apiKey: auth.apiKey as string,
+				headers: auth.headers as Record<string, string> | undefined,
+				cooldownApplied: false,
+			};
 		}
 
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
-		if (!auth.ok || !auth.apiKey) {
-			const provider = (sessionModel as { provider?: string }).provider ?? "unknown";
-			return { ok: false, reason: `no API key for session model provider "${provider}"` };
+		// All configured candidates exhausted and session fallback disabled —
+		// skip the stage entirely.  Info-level to match cooldown-disabled pattern.
+		// Set resolveFailureNotified so the consolidation layer doesn't duplicate.
+		if (ctx.hasUI && ctx.ui) {
+			ctx.ui.notify(
+				`Observational memory: ${stageName} skipped — all candidates failed (sessionFallback disabled, won't use main model)`,
+				"info",
+			);
 		}
+		this.resolveFailureNotified = true;
 
-		return {
-			ok: true,
-			model: sessionModel,
-			apiKey: auth.apiKey as string,
-			headers: auth.headers as Record<string, string> | undefined,
-			cooldownApplied: false,
-		};
+		return { ok: false, reason: `no model available for ${stageName} (all candidates exhausted, sessionFallback disabled)` };
 	}
 
 	/**

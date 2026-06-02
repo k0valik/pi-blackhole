@@ -8,6 +8,7 @@
 
 import { visibleWidth } from "./key-matcher.js";
 import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
+import { DEFAULTS } from "../core/unified-config.js";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -49,6 +50,8 @@ const FIELDS: FieldDef[] = [
 	// ── Observational Memory ──
 	{ key: "memory", label: "Observational memory", type: "boolean", section: "Observational Memory",
 		helpText: "Enable OM workers (observer, reflector, dropper) and content injection" },
+	{ key: "sessionFallback", label: "Session model fallback", type: "boolean", section: "Observational Memory",
+		helpText: "off=skip stage when all OM models fail, instead of falling back to the main coding model" },
 	{ key: "observeAfterTokens", label: "Observer threshold", type: "number", section: "Observational Memory",
 		helpText: "Tokens accumulated since last observer run before triggering next observe" },
 	{ key: "reflectAfterTokens", label: "Reflect + dropper threshold", type: "number", section: "Observational Memory",
@@ -139,9 +142,10 @@ export function createConfigureOverlay(
 		raw = {};
 	}
 
+	const defaults = DEFAULTS as unknown as Record<string, unknown>;
 	const fields: FieldState[] = FIELDS.map((def) => ({
 		def,
-		value: formatValue(def, raw[def.key]),
+		value: formatValue(def, def.key in raw ? raw[def.key] : defaults[def.key]),
 		editing: false,
 		cursor: 0,
 	}));
