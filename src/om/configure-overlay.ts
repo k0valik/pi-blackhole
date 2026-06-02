@@ -8,6 +8,7 @@
 
 import { visibleWidth } from "./key-matcher.js";
 import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
+import { DEFAULTS } from "../core/unified-config.js";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -141,9 +142,10 @@ export function createConfigureOverlay(
 		raw = {};
 	}
 
+	const defaults = DEFAULTS as unknown as Record<string, unknown>;
 	const fields: FieldState[] = FIELDS.map((def) => ({
 		def,
-		value: formatValue(def, raw[def.key]),
+		value: formatValue(def, def.key in raw ? raw[def.key] : defaults[def.key]),
 		editing: false,
 		cursor: 0,
 	}));
