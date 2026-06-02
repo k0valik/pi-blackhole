@@ -6,7 +6,8 @@
  * Navigation: ↑↓  Edit: Enter  Save: Ctrl+S  Cancel: Esc
  */
 
-import { matchKey, visibleWidth } from "./key-matcher.js";
+import { visibleWidth } from "./key-matcher.js";
+import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -191,18 +192,18 @@ export function createConfigureOverlay(
 
 		// While editing a number field
 		if (cur.editing) {
-			if (matchKey(data, "escape")) {
+			if (matchesKey(data, "escape")) {
 				cur.value = formatValue(cur.def, raw[cur.def.key]);
 				cur.editing = false;
 				invalidate();
 				return;
 			}
-			if (matchKey(data, "enter") || matchKey(data, "tab")) {
+			if (matchesKey(data, "enter") || matchesKey(data, "tab")) {
 				cur.editing = false;
 				invalidate();
 				return;
 			}
-			if (matchKey(data, "backspace")) {
+			if (matchesKey(data, "backspace")) {
 				if (cur.cursor > 0) {
 					cur.value = cur.value.slice(0, cur.cursor - 1) + cur.value.slice(cur.cursor);
 					cur.cursor--;
@@ -210,18 +211,19 @@ export function createConfigureOverlay(
 				}
 				return;
 			}
-			if (matchKey(data, "left")) {
+			if (matchesKey(data, "left")) {
 				cur.cursor = Math.max(0, cur.cursor - 1);
 				invalidate();
 				return;
 			}
-			if (matchKey(data, "right")) {
+			if (matchesKey(data, "right")) {
 				cur.cursor = Math.min(cur.value.length, cur.cursor + 1);
 				invalidate();
 				return;
 			}
-			if (data.length === 1 && data >= "0" && data <= "9") {
-				cur.value = cur.value.slice(0, cur.cursor) + data + cur.value.slice(cur.cursor);
+			const digit = decodeKittyPrintable(data) ?? data;
+			if (digit.length === 1 && digit >= "0" && digit <= "9") {
+				cur.value = cur.value.slice(0, cur.cursor) + digit + cur.value.slice(cur.cursor);
 				cur.cursor++;
 				invalidate();
 			}
@@ -231,20 +233,20 @@ export function createConfigureOverlay(
 		// Not editing — global navigation
 
 		// Ctrl+S → save and close
-		if (matchKey(data, "ctrl+s")) {
+		if (matchesKey(data, "ctrl+s")) {
 			const saved = save();
 			done({ saved, path: configPath });
 			return;
 		}
 
 		// Esc → close without saving
-		if (matchKey(data, "escape")) {
+		if (matchesKey(data, "escape")) {
 			done(undefined);
 			return;
 		}
 
 		// Enter/space → edit/toggle
-		if (matchKey(data, "enter") || matchKey(data, "space")) {
+		if (matchesKey(data, "enter") || matchesKey(data, "space")) {
 			switch (cur.def.type) {
 				case "boolean":
 					cur.value = cur.value === "on" ? "off" : "on";
@@ -268,12 +270,12 @@ export function createConfigureOverlay(
 		}
 
 		// ↑↓ navigation
-		if (matchKey(data, "up")) {
+		if (matchesKey(data, "up")) {
 			selectedIndex = Math.max(0, selectedIndex - 1);
 			invalidate();
 			return;
 		}
-		if (matchKey(data, "down")) {
+		if (matchesKey(data, "down")) {
 			selectedIndex = Math.min(fields.length - 1, selectedIndex + 1);
 			invalidate();
 			return;

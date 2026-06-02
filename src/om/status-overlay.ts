@@ -7,7 +7,8 @@
  * Esc to close.
  */
 
-import { matchKey, visibleWidth } from "./key-matcher.js";
+import { visibleWidth } from "./key-matcher.js";
+import { matchesKey } from "@earendil-works/pi-tui";
 
 // ---------------------------------------------------------------------------
 // Theme shape (duck-typed from what pi provides)
@@ -117,12 +118,12 @@ export function createStatusOverlay(
 	}
 
 	function handleInput(data: string): void {
-		if (matchKey(data, "escape")) {
+		if (matchesKey(data, "escape")) {
 			done({ action: "close" });
 			return;
 		}
 
-		if (matchKey(data, "enter") || matchKey(data, "space")) {
+		if (matchesKey(data, "enter") || matchesKey(data, "space")) {
 			if (navIsAction(selectedIndex)) {
 				const actionIdx = selectedIndex - selectableConfigCount - selectablePipelineCount - selectableErrorCount;
 				const action = actionItems[actionIdx]!;
@@ -132,12 +133,12 @@ export function createStatusOverlay(
 			return;
 		}
 
-		if (matchKey(data, "up")) {
+		if (matchesKey(data, "up")) {
 			selectedIndex = Math.max(0, selectedIndex - 1);
 			invalidate();
 			return;
 		}
-		if (matchKey(data, "down")) {
+		if (matchesKey(data, "down")) {
 			selectedIndex = Math.min(totalSelectable - 1, selectedIndex + 1);
 			invalidate();
 			return;

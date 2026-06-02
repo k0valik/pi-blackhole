@@ -75,8 +75,13 @@ function writeCooldownMap(map: CooldownMap): void {
 /**
  * Check whether a model is currently cooled down.
  * Expired entries are cleaned up lazily.
+ *
+ * When cooldownHours is explicitly 0, cooldown is disabled — always returns false.
  */
 export function isCooldownActive(model: OmModelConfig, now: Date = new Date()): boolean {
+	// cooldownHours === 0 means cooldown disabled
+	if (model.cooldownHours === 0) return false;
+
 	const map = readCooldownMap();
 	const key = modelKey(model);
 	const entry = map[key];
@@ -97,11 +102,16 @@ export function isCooldownActive(model: OmModelConfig, now: Date = new Date()): 
 /**
  * Record a cooldown for a model after a retryable error.
  *
+ * When cooldownHours is explicitly 0, cooldown is disabled — no-op.
+ *
  * @param model   The model that failed.
  * @param reason  Human-readable error reason (e.g. "429 Too Many Requests").
  * @param stage   Which pipeline stage failed ("observer" | "reflector" | "dropper").
  */
 export function recordCooldown(model: OmModelConfig, reason: string, stage: string): void {
+	// cooldownHours === 0 means cooldown disabled
+	if (model.cooldownHours === 0) return;
+
 	const hours = model.cooldownHours ?? 1;
 	const until = new Date(Date.now() + hours * 3_600_000).toISOString();
 	const map = readCooldownMap();

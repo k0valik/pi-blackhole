@@ -163,6 +163,19 @@ describe("Config with model IDs containing slashes and colons", () => {
 		expect(config.observerModel!.cooldownHours).toBe(12);
 	});
 
+	it("parses cooldownHours: 0 as valid (cooldown disabled)", async () => {
+		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+		writeConfig({
+			observerModel: {
+				provider: "openrouter",
+				id: "some-model:free",
+				cooldownHours: 0,
+			},
+		});
+		const config = loadUnifiedConfig(testDir);
+		expect(config.observerModel!.cooldownHours).toBe(0);
+	});
+
 	it("parses fallback model arrays", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({

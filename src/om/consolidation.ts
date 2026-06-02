@@ -59,9 +59,9 @@ import {
 	type Reflection,
 } from "./ledger/index.js";
 
-type ResolvedModel = Extract<ResolveResult, { ok: true }>;
+export type ResolvedModel = Extract<ResolveResult, { ok: true }>;
 
-type ConsolidationCtx = {
+export type ConsolidationCtx = {
 	cwd: string;
 	hasUI: boolean;
 	ui?: { notify: (message: string, type?: "warning" | "info" | "error") => void };
@@ -182,15 +182,16 @@ function stageThinkingLevel(runtime: Runtime, stage: "observer" | "reflector" | 
 	return stageModel?.thinking ?? runtime.config.model?.thinking ?? "low";
 }
 
-function makeModelResolver(runtime: Runtime, ctx: ConsolidationCtx): (stage: "observer" | "reflector" | "dropper") => Promise<ResolvedModel | undefined> {
+export function makeModelResolver(runtime: Runtime, ctx: ConsolidationCtx): (stage: "observer" | "reflector" | "dropper") => Promise<ResolvedModel | undefined> {
 	return async (stage) => {
+		const stageFallbacks = stageFallbackModels(runtime, stage);
 		const resolved = await runtime.resolveModel({
 			model: ctx.model,
 			modelRegistry: ctx.modelRegistry,
 			hasUI: ctx.hasUI,
 			ui: ctx.ui,
 			stageModel: stageModelConfig(runtime, stage),
-			stageFallbacks: stageFallbackModels(runtime, stage),
+			stageFallbacks,
 		});
 		if (resolved.ok) {
 			runtime.resolveFailureNotified = false;
@@ -198,7 +199,17 @@ function makeModelResolver(runtime: Runtime, ctx: ConsolidationCtx): (stage: "ob
 		}
 		debugLog(`${stage}.model_unavailable`, { reason: resolved.reason });
 		if (!runtime.resolveFailureNotified && ctx.hasUI && ctx.ui) {
-			ctx.ui.notify(`Observational memory: ${stage} skipped — ${resolved.reason}`, "warning");
+			if (runtime.failedInCycle.size > 0 && resolved.reason.includes("all candidates exhausted")) {
+				const fallbackMsg = stageFallbacks.length === 0
+					? "no fallbacks configured"
+					: "no available fallbacks";
+				ctx.ui.notify(
+					`Observational memory: ${stage} skipped — model unavailable (cooldown set to 0, ${fallbackMsg}, will retry next run)`,
+					"info",
+				);
+			} else {
+				ctx.ui.notify(`Observational memory: ${stage} skipped — ${resolved.reason}`, "warning");
+			}
 			runtime.resolveFailureNotified = true;
 		}
 		return undefined;
@@ -254,6 +265,8 @@ export async function runConsolidationPipeline(
 	const resolveModel = makeModelResolver(runtime, ctx);
 
 	runtime.consolidationPhase = "observer";
+	runtime.failedInCycle.clear();
+	runtime.resolveFailureNotified = false;
 	try {
 		const observerOutcome = await runObserverStage(pi, runtime, ctx, resolveModel);
 		if (observerOutcome === "abort") return;
@@ -263,6 +276,8 @@ export async function runConsolidationPipeline(
 	}
 
 	runtime.consolidationPhase = "reflector";
+	runtime.failedInCycle.clear();
+	runtime.resolveFailureNotified = false;
 	let reflectorResult: ReflectorStageResult;
 	try {
 		reflectorResult = await runReflectorStage(pi, runtime, ctx, resolveModel);
@@ -273,6 +288,8 @@ export async function runConsolidationPipeline(
 	}
 
 	runtime.consolidationPhase = "dropper";
+	runtime.failedInCycle.clear();
+	runtime.resolveFailureNotified = false;
 	try {
 		await runDropperStage(pi, runtime, ctx, resolveModel, reflectorResult.sameRunReflections, reflectorResult.effectiveReflectionCoverageId);
 	} catch (error) {
