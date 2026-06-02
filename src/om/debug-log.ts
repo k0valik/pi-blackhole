@@ -74,11 +74,9 @@ async function flushBuffer(): Promise<void> {
 	}
 }
 
-// Flush remaining buffer on exit
-process.on("beforeExit", () => {
-	if (buffer.length > 0) {
-		flushBuffer().catch(() => {});
-	}
+// Flush remaining buffer on exit — synchronous to work with process.exit() too
+process.on("exit", () => {
+	flushDebugLog();
 });
 
 export function debugLog(event: string, data: Record<string, unknown> = {}, forceEnabled?: boolean): void {

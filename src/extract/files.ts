@@ -29,7 +29,7 @@ const longestCommonDirPrefix = (paths: string[]): string => {
   const normalized = paths.map((p) => p.replace(/\\/g, "/"));
   const abs = normalized.filter((p) => p.startsWith("/") || /^[A-Za-z]:\//.test(p));
   if (abs.length < 2) return "";
-  const split = abs.map((p) => p.replace(/^[A-Za-z]:\//, "/").split("/"));
+  const split = abs.map((p) => p.split("/"));
   const min = Math.min(...split.map((s) => s.length));
   let i = 0;
   while (i < min - 1) {

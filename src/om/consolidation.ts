@@ -111,9 +111,9 @@ function capSourceEntriesToTokens(entries: Entry[], maxTokens: number): Entry[] 
 			}
 		} else if (entry.type === "custom" && (entry.customType === OM_OBSERVATIONS_RECORDED || entry.customType === OM_REFLECTIONS_RECORDED || entry.customType === OM_OBSERVATIONS_DROPPED)) {
 			// Custom entries carry structured data — estimate from JSON serialization
-			chars = JSON.stringify(entry.data ?? {}).length;
+			chars = String(JSON.stringify(entry.data ?? {})).length;
 		} else if (entry.summary) {
-			chars = entry.summary.length;
+			chars = String(entry.summary).length;
 		}
 		const estTokens = Math.ceil(chars / 4);
 		if (totalTokens + estTokens > maxTokens && kept.length > 0) break;
@@ -545,8 +545,7 @@ async function runReflectorStage(
 		// Adjust accumulated for pending coverage in noAutoCompact mode
 		let effectiveReflectionTokens = reflectionTokens;
 		if (runtime.config.noAutoCompact) {
-			const pending = readPendingState(sessionId);
-			if (pending.reflection?.coversUpToId) {
+			if (pending?.reflection?.coversUpToId) {
 				const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
 				if (idx >= 0) effectiveReflectionTokens = rawTokensAfterIndex(entries, idx);
 			}
@@ -684,8 +683,7 @@ async function runDropperStage(
 		// Adjust accumulated for pending coverage in noAutoCompact mode
 		let effectiveDropTokens = dropTokens;
 		if (runtime.config.noAutoCompact) {
-			const pending = readPendingState(sessionId);
-			if (pending.dropped?.coversUpToId) {
+			if (pending?.dropped?.coversUpToId) {
 				const idx = entryIndexForId(entries, pending.dropped.coversUpToId);
 				if (idx >= 0) effectiveDropTokens = rawTokensAfterIndex(entries, idx);
 			}
