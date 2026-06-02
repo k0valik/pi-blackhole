@@ -98,7 +98,7 @@ minimal (last user at m5):
 |------------|:--------------------:|:---------:|
 | Manual `/blackhole` | not set | `"minimal"` (aggressive) |
 | Manual `/blackhole` | `"pi-default"` | `"pi-default"` |
-| Auto-triggered | not set | `"pi-default"` (gentle) |
+| Auto-triggered | not set | `"minimal"` (aggressive) |
 | Auto-triggered | `"minimal"` | `"minimal"` |
 
 **Examples:**

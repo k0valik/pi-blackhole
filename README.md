@@ -228,7 +228,7 @@ This is a lighter alternative to `compaction: "off"`: workers are off but blackh
 
 | Command | What it does |
 |---|---|
-| `/blackhole` | Compact the conversation. Subcommands: `om-off` / `om-on` toggle observational memory. |
+| `/blackhole` | Compact the conversation. Subcommands: `configure` (settings overlay), `om-off` / `om-on` toggle observational memory. |
 | `/blackhole-memory` (or `status`) | Pipeline status: token progress, observation/reflection counts, pending data, last errors |
 | `/blackhole-memory view` | Show visible observations and reflections (after compaction trimming), copied to clipboard |
 | `/blackhole-memory full` | Show ALL recorded memory (including dropped observations), copied to clipboard |
