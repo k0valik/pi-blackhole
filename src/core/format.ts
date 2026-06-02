@@ -10,8 +10,22 @@ const section = (title: string, items: string[]): string => {
 const BRIEF_MAX_LINES = 120;
 const TUI_SAFE_LINE_CHARS = 120;
 
+/**
+ * Wrap a single line of text, preserving list-item continuation indent.
+ * Detects leading bullets (-, *, N.) and indents continuation lines
+ * to match, so wrapped list items remain visually grouped.
+ */
+function wrapLineWithContinuation(line: string, maxChars: number): string[] {
+  const wrapped = wrapTextWithAnsi(line, maxChars);
+  if (wrapped.length <= 1) return wrapped;
+  const indent = line.match(/^\s*(?:[-*]\s+|\d+\.\s+)?/)?.[0] ?? "";
+  const continuationIndent = indent ? " ".repeat(Math.min(indent.length, 8)) : "";
+  if (!continuationIndent) return wrapped;
+  return [wrapped[0], ...wrapped.slice(1).map((l) => continuationIndent + l)];
+}
+
 export const wrapLongLines = (text: string, maxChars = TUI_SAFE_LINE_CHARS): string =>
-  text.split("\n").flatMap((line) => wrapTextWithAnsi(line, maxChars)).join("\n");
+  text.split("\n").flatMap((line) => wrapLineWithContinuation(line, maxChars)).join("\n");
 
 export const capBrief = (text: string): string => {
   const lines = text.split("\n");

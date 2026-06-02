@@ -1,9 +1,11 @@
 /**
- * Shared retryable-error utilities.
+ * Shared retryable-error regex and detection function.
  *
- * Combines blackhole's retryable error patterns with Pi's context-overflow
- * detection from @earendil-works/pi-ai, to avoid duplicating provider-specific
- * overflow patterns.
+ * Extracted from compaction-trigger.ts and cooldown.ts which had diverging
+ * copies of the same logic. This is the single source of truth.
+ *
+ * Now also re-exports Pi's context-overflow detection from @earendil-works/pi-ai,
+ * avoiding the need to duplicate 20+ provider-specific overflow patterns.
  */
 
 /** Regex matching retryable API error messages. */
@@ -18,7 +20,7 @@ export function isRetryableError(error: unknown): boolean {
 
 /**
  * Re-export Pi's context-overflow detection so blackhole callers use one
- * authoritative source instead of rolling their own provider-specific regexes.
+ * authoritative source instead of maintaining their own provider-specific patterns.
  * @see @earendil-works/pi-ai/dist/utils/overflow.d.ts
  */
 export { isContextOverflow } from "@earendil-works/pi-ai";

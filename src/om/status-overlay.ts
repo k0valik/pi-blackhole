@@ -7,7 +7,8 @@
  * Esc to close.
  */
 
-import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "./key-matcher.js";
+import { matchesKey } from "@earendil-works/pi-tui";
 
 // ---------------------------------------------------------------------------
 // Theme shape (duck-typed from what pi provides)

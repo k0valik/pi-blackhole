@@ -6,7 +6,8 @@
  * Navigation: ↑↓  Edit: Enter  Save: Ctrl+S  Cancel: Esc
  */
 
-import { matchesKey, decodeKittyPrintable, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "./key-matcher.js";
+import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
 import { DEFAULTS } from "../core/unified-config.js";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";

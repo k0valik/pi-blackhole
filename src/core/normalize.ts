@@ -34,7 +34,7 @@ const normalizeOne = (msg: Message, msgIndex: number): NormalizedBlock[] => {
 
   if ((msg as any).role === "bashExecution") {
     const bashMsg = msg as unknown as LocalBashMessage;
-    return [{ kind: "bash", command: bashMsg.command, output: bashMsg.output, exitCode: bashMsg.exitCode, sourceIndex: msgIndex }];
+    return [{ kind: "bash", command: bashMsg.command ?? "", output: bashMsg.output ?? "", exitCode: bashMsg.exitCode, sourceIndex: msgIndex }];
   }
 
   if (msg.role === "toolResult") {
