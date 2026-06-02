@@ -49,6 +49,8 @@ const FIELDS: FieldDef[] = [
 	// ── Observational Memory ──
 	{ key: "memory", label: "Observational memory", type: "boolean", section: "Observational Memory",
 		helpText: "Enable OM workers (observer, reflector, dropper) and content injection" },
+	{ key: "sessionFallback", label: "Session model fallback", type: "boolean", section: "Observational Memory",
+		helpText: "off=skip stage when all OM models fail, instead of falling back to the main coding model" },
 	{ key: "observeAfterTokens", label: "Observer threshold", type: "number", section: "Observational Memory",
 		helpText: "Tokens accumulated since last observer run before triggering next observe" },
 	{ key: "reflectAfterTokens", label: "Reflect + dropper threshold", type: "number", section: "Observational Memory",

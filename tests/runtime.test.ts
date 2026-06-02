@@ -189,6 +189,37 @@ describe("Runtime.resolveModel — fallback chain", () => {
 		}
 	});
 
+	it("skips session model fallback when sessionFallback is false", async () => {
+		writeConfig({
+			observerModel: { provider: "openrouter", id: "primary:free" },
+			sessionFallback: false,
+		});
+
+		const { recordCooldown } = await import("../src/om/cooldown.js");
+		recordCooldown({ provider: "openrouter", id: "primary:free" }, "429", "observer");
+
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.ensureConfig(testDir);
+
+		const registry = makeRegistry([
+			makeModel("primary:free", "openrouter"),
+		]);
+
+		const result = await runtime.resolveModel({
+			model: makeModel("session-model", "openrouter"),
+			modelRegistry: registry,
+			hasUI: false,
+			stageModel: { provider: "openrouter", id: "primary:free" },
+		});
+
+		// Should NOT fall through to session model — returns ok: false
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.reason).toContain("sessionFallback disabled");
+		}
+	});
+
 	it("skips model in failedInCycle (cooldown 0, failed this cycle), uses fallback", async () => {
 		writeConfig({
 			observerModel: { provider: "openrouter", id: "primary:free", cooldownHours: 0 },
@@ -547,6 +578,45 @@ describe("Runtime — recordRetryableError", () => {
 
 		// NOT in in-memory set
 		expect(runtime.failedInCycle.has("openrouter/persist:free")).toBe(false);
+	});
+});
+
+describe("Runtime — sessionFallback notification", () => {
+	it("fires info notification when sessionFallback disabled and cooldown-disabled models exhausted chain", async () => {
+		writeConfig({
+			observerModel: { provider: "openrouter", id: "primary:free", cooldownHours: 0 },
+			sessionFallback: false,
+		});
+
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.ensureConfig(testDir);
+
+		// Simulate: primary model failed → added to failedInCycle
+		runtime.recordRetryableError(
+			{ provider: "openrouter", id: "primary:free", cooldownHours: 0 },
+			new Error("connection error"),
+			"observer",
+		);
+
+		const notify = vi.fn();
+		const registry = makeRegistry([]);
+
+		const result = await runtime.resolveModel({
+			model: makeModel("session-model", "openrouter"),
+			modelRegistry: registry,
+			hasUI: true,
+			ui: { notify },
+			stageModel: { provider: "openrouter", id: "primary:free" },
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.reason).toContain("sessionFallback disabled");
+		expect(notify).toHaveBeenCalledTimes(2);
+		expect(notify.mock.calls[1]).toEqual([
+			expect.stringContaining("sessionFallback disabled"),
+			"info",
+		]);
 	});
 });
 
