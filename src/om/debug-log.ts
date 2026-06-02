@@ -8,7 +8,8 @@
  * Modified: path changed from observational-memory/ to pi-blackhole/; async buffered.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, appendFile, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, appendFileSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
@@ -51,6 +52,7 @@ async function flushBuffer(): Promise<void> {
 	if (flushing) return;
 	if (buffer.length === 0) return;
 	flushing = true;
+	// Drain the buffer atomically so flushDebugLog doesn't split entries
 	const batch = buffer;
 	buffer = [];
 	try {
@@ -59,8 +61,6 @@ async function flushBuffer(): Promise<void> {
 		rotateIfNeeded(path);
 		await appendFile(path, batch.join(""), "utf-8");
 	} catch (error) {
-		// Debug logging must never affect memory behavior, but surface the issue
-		// so it's not silently swallowed during development.
 		console.error("blackhole: debug log write failed", error);
 	}
 	flushing = false;
@@ -91,17 +91,17 @@ export function debugLog(event: string, data: Record<string, unknown> = {}, forc
 
 /**
  * Synchronously flush the buffer to disk. Used by tests to verify written content.
+ * Skips if an async flush is in progress to avoid splitting the buffer.
  * In production, the background timer handles flushing automatically.
  */
 export function flushDebugLog(): void {
-	if (buffer.length === 0) return;
+	if (flushing || buffer.length === 0) return;
 	const batch = buffer;
 	buffer = [];
 	try {
 		const path = join(getAgentDir(), DEBUG_LOG_RELATIVE_PATH);
 		mkdirSync(dirname(path), { recursive: true });
 		rotateIfNeeded(path);
-		// Use synchronous write for flush — this is intentional (test/integration use)
 		appendFileSync(path, batch.join(""), "utf-8");
 	} catch (error) {
 		console.error("blackhole: debug log flush failed", error);
