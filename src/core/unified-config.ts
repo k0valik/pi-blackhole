@@ -187,6 +187,11 @@ function positiveInt(v: unknown): number | undefined {
 	return Number.isInteger(v) && typeof v === "number" && v > 0 ? v : undefined;
 }
 
+/** Like positiveInt but allows 0. Used for cooldownHours where 0 means "disabled". */
+function nonNegativeInt(v: unknown): number | undefined {
+	return Number.isInteger(v) && typeof v === "number" && v >= 0 ? v : undefined;
+}
+
 function parseModel(v: unknown): OmModelConfig | undefined {
 	if (!isRecord(v)) return undefined;
 	const provider = nonEmptyString(v.provider);
@@ -194,7 +199,7 @@ function parseModel(v: unknown): OmModelConfig | undefined {
 	if (!provider || !id) return undefined;
 	const model: OmModelConfig = { provider, id };
 	if (isThinkingLevel(v.thinking)) model.thinking = v.thinking;
-	const cooldown = positiveInt(v.cooldownHours);
+	const cooldown = nonNegativeInt(v.cooldownHours);
 	if (cooldown !== undefined) model.cooldownHours = cooldown;
 	const ctxWindow = positiveInt(v.contextWindow);
 	if (ctxWindow !== undefined) model.contextWindow = ctxWindow;

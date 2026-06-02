@@ -45,6 +45,13 @@ export class Runtime {
 	consolidationInFlight = false;
 	consolidationPromise: Promise<void> | null = null;
 	consolidationPhase: ConsolidationPhase | undefined;
+	/**
+	 * Models that failed in the current consolidation stage (in-memory only).
+	 * Used when cooldownHours is 0 — avoids disk writes while still letting
+	 * the retry loop advance past the failed model within this stage.
+	 * Cleared between stages at the pipeline level.
+	 */
+	failedInCycle: Set<string> = new Set();
 	compactInFlight = false;
 	compactHookInFlight = false;
 	resolveFailureNotified = false;
@@ -101,10 +108,23 @@ export class Runtime {
 
 		// Try configured candidates
 		for (const candidate of candidates) {
+			const key = modelKey(candidate);
+
+			// In-memory skip: model failed earlier in this stage with cooldownHours 0
+			if (this.failedInCycle.has(key)) {
+				if (ctx.hasUI && ctx.ui) {
+					ctx.ui.notify(
+						`Observational memory: ${stageName} skipping ${key} (failed this cycle, cooldown disabled)`,
+						"info",
+					);
+				}
+				continue;
+			}
+
 			if (isCooldownActive(candidate)) {
 				if (ctx.hasUI && ctx.ui) {
 					ctx.ui.notify(
-						`Observational memory: ${stageName} skipping ${modelKey(candidate)} (cooldown active)`,
+						`Observational memory: ${stageName} skipping ${key} (cooldown active)`,
 						"info",
 					);
 				}
@@ -179,9 +199,19 @@ export class Runtime {
 	/**
 	 * Record a retryable error for a model.  The model must be one of the candidates
 	 * (not the session model).  If it's the session model we don't cool it down.
+	 *
+	 * When cooldownHours is explicitly 0, the model is tracked in-memory for the
+	 * current consolidation stage (no disk writes). Otherwise a persisted cooldown
+	 * is recorded.
 	 */
 	recordRetryableError(modelConfig: ConfiguredModel | undefined, error: unknown, stage: ConsolidationPhase): void {
 		if (!modelConfig) return;
+		if (modelConfig.cooldownHours === 0) {
+			// In-memory only: skip this model for the rest of this stage.
+			// No disk writes, no persistent cooldown.
+			this.failedInCycle.add(modelKey(modelConfig));
+			return;
+		}
 		const reason = error instanceof Error ? error.message : String(error || "unknown error");
 		recordCooldown(modelConfig, reason, stage);
 	}

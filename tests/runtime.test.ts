@@ -188,6 +188,84 @@ describe("Runtime.resolveModel — fallback chain", () => {
 			expect(result.model.id).toBe("session-model");
 		}
 	});
+
+	it("skips model in failedInCycle (cooldown 0, failed this cycle), uses fallback", async () => {
+		writeConfig({
+			observerModel: { provider: "openrouter", id: "primary:free", cooldownHours: 0 },
+			observerFallbackModels: [{ provider: "openrouter", id: "fallback:free", cooldownHours: 6 }],
+		});
+
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.ensureConfig(testDir);
+
+		// Simulate: primary model failed this cycle → tracked in-memory
+		runtime.recordRetryableError(
+			{ provider: "openrouter", id: "primary:free", cooldownHours: 0 },
+			new Error("connection error"),
+			"observer",
+		);
+
+		const registry = makeRegistry([
+			makeModel("primary:free", "openrouter"),
+			makeModel("fallback:free", "openrouter"),
+		]);
+
+		const result = await runtime.resolveModel({
+			model: undefined,
+			modelRegistry: registry,
+			hasUI: false,
+			stageModel: { provider: "openrouter", id: "primary:free" },
+			stageFallbacks: [{ provider: "openrouter", id: "fallback:free", cooldownHours: 6 }],
+		});
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			// Should skip primary (in failedInCycle) and use fallback
+			expect(result.model.id).toBe("fallback:free");
+		}
+		// No cooldown was written to disk for the primary model
+		const data = readCooldownFile();
+		expect(data["openrouter/primary:free"]).toBeUndefined();
+	});
+
+	it("clears failedInCycle between stages so model retried fresh", async () => {
+		writeConfig({
+			observerModel: { provider: "openrouter", id: "primary:free", cooldownHours: 0 },
+		});
+
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.ensureConfig(testDir);
+
+		// Simulate failure in observer stage
+		runtime.recordRetryableError(
+			{ provider: "openrouter", id: "primary:free", cooldownHours: 0 },
+			new Error("observer error"),
+			"observer",
+		);
+		expect(runtime.failedInCycle.has("openrouter/primary:free")).toBe(true);
+
+		// Clear as pipeline does between stages
+		runtime.failedInCycle.clear();
+
+		const registry = makeRegistry([
+			makeModel("primary:free", "openrouter"),
+		]);
+
+		// After clear, primary should be available again
+		const result = await runtime.resolveModel({
+			model: undefined,
+			modelRegistry: registry,
+			hasUI: false,
+			stageModel: { provider: "openrouter", id: "primary:free" },
+		});
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.model.id).toBe("primary:free");
+		}
+	});
 });
 
 // ── Phase 9: Consolidation trigger guards ─────────────────────────────────
@@ -318,6 +396,24 @@ describe("Runtime — cooldown persistence", () => {
 		// Should be expired now
 		expect(isCooldownActive({ provider: "openrouter", id: "expiring:free" })).toBe(false);
 	});
+
+	it("recordCooldown with cooldownHours: 0 writes nothing to disk", async () => {
+		const { recordCooldown } = await import("../src/om/cooldown.js");
+		recordCooldown({ provider: "openrouter", id: "noop-model:free", cooldownHours: 0 }, "any error", "observer");
+		const data = readCooldownFile();
+		expect(data["openrouter/noop-model:free"]).toBeUndefined();
+		expect(Object.keys(data)).toHaveLength(0);
+	});
+
+	it("isCooldownActive with cooldownHours: 0 returns false without disk read", async () => {
+		const { isCooldownActive } = await import("../src/om/cooldown.js");
+		// No cooldown file exists yet
+		expect(isCooldownActive({ provider: "openrouter", id: "disabled:free", cooldownHours: 0 })).toBe(false);
+		// Even with a stale cooldown file, cooldownHours: 0 short-circuits
+		const { recordCooldown } = await import("../src/om/cooldown.js");
+		recordCooldown({ provider: "openrouter", id: "other:free", cooldownHours: 5 }, "error", "observer");
+		expect(isCooldownActive({ provider: "openrouter", id: "disabled:free", cooldownHours: 0 })).toBe(false);
+	});
 });
 
 describe("Runtime — retry gating", () => {
@@ -413,6 +509,44 @@ describe("Runtime — recordRetryableError", () => {
 		// Should not throw or write
 		runtime.recordRetryableError(undefined, new Error("429"), "observer");
 		expect(readCooldownFile()).toEqual({});
+	});
+
+	it("cooldownHours: 0 tracks in failedInCycle, does not write to disk", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.ensureConfig(testDir);
+
+		runtime.recordRetryableError(
+			{ provider: "openrouter", id: "no-persist:free", cooldownHours: 0 },
+			new Error("connection refused"),
+			"observer",
+		);
+
+		// No disk write
+		const data = readCooldownFile();
+		expect(data["openrouter/no-persist:free"]).toBeUndefined();
+
+		// But tracked in-memory
+		expect(runtime.failedInCycle.has("openrouter/no-persist:free")).toBe(true);
+	});
+
+	it("cooldownHours > 0 persists to disk and does NOT add to failedInCycle", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.ensureConfig(testDir);
+
+		runtime.recordRetryableError(
+			{ provider: "openrouter", id: "persist:free", cooldownHours: 6 },
+			new Error("rate limited"),
+			"observer",
+		);
+
+		// Disk write happened
+		const data = readCooldownFile();
+		expect(data["openrouter/persist:free"]).toBeDefined();
+
+		// NOT in in-memory set
+		expect(runtime.failedInCycle.has("openrouter/persist:free")).toBe(false);
 	});
 });
 
