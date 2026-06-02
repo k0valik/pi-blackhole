@@ -59,9 +59,9 @@ import {
 	type Reflection,
 } from "./ledger/index.js";
 
-type ResolvedModel = Extract<ResolveResult, { ok: true }>;
+export type ResolvedModel = Extract<ResolveResult, { ok: true }>;
 
-type ConsolidationCtx = {
+export type ConsolidationCtx = {
 	cwd: string;
 	hasUI: boolean;
 	ui?: { notify: (message: string, type?: "warning" | "info" | "error") => void };
@@ -182,7 +182,7 @@ function stageThinkingLevel(runtime: Runtime, stage: "observer" | "reflector" | 
 	return stageModel?.thinking ?? runtime.config.model?.thinking ?? "low";
 }
 
-function makeModelResolver(runtime: Runtime, ctx: ConsolidationCtx): (stage: "observer" | "reflector" | "dropper") => Promise<ResolvedModel | undefined> {
+export function makeModelResolver(runtime: Runtime, ctx: ConsolidationCtx): (stage: "observer" | "reflector" | "dropper") => Promise<ResolvedModel | undefined> {
 	return async (stage) => {
 		const stageFallbacks = stageFallbackModels(runtime, stage);
 		const resolved = await runtime.resolveModel({
@@ -266,6 +266,7 @@ export async function runConsolidationPipeline(
 
 	runtime.consolidationPhase = "observer";
 	runtime.failedInCycle.clear();
+	runtime.resolveFailureNotified = false;
 	try {
 		const observerOutcome = await runObserverStage(pi, runtime, ctx, resolveModel);
 		if (observerOutcome === "abort") return;
@@ -276,6 +277,7 @@ export async function runConsolidationPipeline(
 
 	runtime.consolidationPhase = "reflector";
 	runtime.failedInCycle.clear();
+	runtime.resolveFailureNotified = false;
 	let reflectorResult: ReflectorStageResult;
 	try {
 		reflectorResult = await runReflectorStage(pi, runtime, ctx, resolveModel);
@@ -287,6 +289,7 @@ export async function runConsolidationPipeline(
 
 	runtime.consolidationPhase = "dropper";
 	runtime.failedInCycle.clear();
+	runtime.resolveFailureNotified = false;
 	try {
 		await runDropperStage(pi, runtime, ctx, resolveModel, reflectorResult.sameRunReflections, reflectorResult.effectiveReflectionCoverageId);
 	} catch (error) {
