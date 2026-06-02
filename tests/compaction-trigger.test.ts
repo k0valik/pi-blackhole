@@ -32,6 +32,10 @@ function captureHandler(args: {
 	compactInFlight?: boolean;
 	noAutoCompact?: boolean;
 	memory?: boolean;
+	/** NEW: Unified compaction control */
+	compaction?: "auto" | "manual" | "off";
+	/** NEW: Which engine handles compaction */
+	compactionEngine?: "blackhole" | "pi-default";
 } = {}) {
 	let handler: ((event: unknown, ctx: unknown) => void) | undefined;
 	const pi = {
@@ -48,6 +52,10 @@ function captureHandler(args: {
 			passive: args.passive ?? false,
 			noAutoCompact: args.noAutoCompact ?? false,
 			memory: args.memory ?? true,
+			/** NEW: Unified compaction control */
+			compaction: args.compaction,
+			/** NEW: Which engine handles compaction */
+			compactionEngine: args.compactionEngine,
 		},
 		compactInFlight: args.compactInFlight ?? false,
 	};
@@ -124,8 +132,19 @@ describe("V3 compaction trigger (blackhole)", () => {
 		);
 	});
 
-	it("skips when overrideDefaultCompaction is false (default)", async () => {
-		const { handler, runtime } = captureHandler({ overrideDefaultCompaction: false });
+	it("compaction:auto + compactionEngine:pi-default skips trigger (pi-default means Pi handles timing too)", async () => {
+		const { handler, runtime } = captureHandler({ compaction: "auto", compactionEngine: "pi-default", compactAfterTokens: 3 });
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		expect(runtime.compactInFlight).toBe(false);
+		await flushAll();
+
+		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("LEGACY-BACKWARD: overrideDefaultCompaction:false with no new keys — legacy guard fires, no trigger", async () => {
+		const { handler, runtime } = captureHandler({ overrideDefaultCompaction: false, compaction: undefined, compactionEngine: undefined });
 		const ctx = fakeCtx([dueBranch]);
 
 		handler(agentEnd(), ctx);
@@ -136,8 +155,8 @@ describe("V3 compaction trigger (blackhole)", () => {
 		expect(ctx.compact).not.toHaveBeenCalled();
 	});
 
-	it("skips passive mode", async () => {
-		const { handler, runtime } = captureHandler({ passive: true });
+	it("LEGACY-BACKWARD: passive:true with no new keys — legacy guard fires, no trigger", async () => {
+		const { handler, runtime } = captureHandler({ passive: true, compaction: undefined, compactionEngine: undefined });
 		const ctx = fakeCtx([dueBranch]);
 
 		handler(agentEnd(), ctx);
@@ -215,5 +234,93 @@ describe("V3 compaction trigger (blackhole)", () => {
 		await flushAll();
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
+	});
+
+	// ── Phase 7: New config key guards ─────────────────────────────────
+
+	it("T13: compaction:auto calls compact when threshold reached", async () => {
+		const { handler } = captureHandler({
+			compaction: "auto",
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+	});
+
+	it("T14: compaction:auto does nothing below threshold", async () => {
+		const { handler, runtime } = captureHandler({
+			compaction: "auto",
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([belowBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("T15: compaction:manual skips threshold check entirely", async () => {
+		const { handler, runtime } = captureHandler({
+			compaction: "manual",
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
+		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("T16: compaction:off skips threshold check entirely", async () => {
+		const { handler, runtime } = captureHandler({
+			compaction: "off",
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
+		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("T17: memory:false + compaction:auto still compacts when threshold reached", async () => {
+		const { handler, runtime } = captureHandler({
+			compaction: "auto",
+			memory: false,
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+	});
+
+	it("T18: compaction:manual with retryable error skips before threshold check", async () => {
+		const { handler, runtime } = captureHandler({
+			compaction: "manual",
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd("fetch failed: connection lost"), ctx);
+		await flushAll();
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
+		expect(ctx.compact).not.toHaveBeenCalled();
 	});
 });

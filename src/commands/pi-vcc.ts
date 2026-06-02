@@ -8,9 +8,10 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
-import { PI_VCC_COMPACT_INSTRUCTION } from "../hooks/before-compact";
-import { saveUnifiedConfig } from "../core/unified-config.js";
+import { PI_VCC_COMPACT_INSTRUCTION, notifyMigrationReminder } from "../hooks/before-compact";
+import { saveUnifiedConfig, configPath } from "../core/unified-config.js";
 import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
+import { createConfigureOverlay } from "../om/configure-overlay.js";
 import {
 	OM_OBSERVATIONS_DROPPED,
 	OM_OBSERVATIONS_RECORDED,
@@ -23,15 +24,50 @@ const formatTokens = (n: number): string => {
 };
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
+	const fuzzyMatch = (value: string, prefix: string): boolean => {
+		const q = prefix.toLowerCase();
+		let qi = 0;
+		for (const ch of value) {
+			if (qi < q.length && ch === q[qi]) qi++;
+			if (qi === q.length) return true;
+		}
+		return false;
+	};
+
 	pi.registerCommand("blackhole", {
 		description:
 			"Compact conversation — structured summary (with observational memory when enabled). " +
-			"Subcommands: /blackhole om-off (disable memory), /blackhole om-on (re-enable memory).",
+			"Subcommands: /blackhole configure (open settings overlay), " +
+			"/blackhole om-off (disable memory), /blackhole om-on (re-enable memory).",
+		getArgumentCompletions: (prefix: string) => {
+			const subcommands = [
+				{ value: "configure", label: "Open configuration overlay to edit settings [configure]" },
+				{ value: "om-off", label: "Disable observational memory [om-off]" },
+				{ value: "om-on", label: "Enable observational memory [om-on]" },
+			];
+			if (!prefix) return subcommands;
+			return subcommands.filter((s) => fuzzyMatch(s.value, prefix));
+		},
 		handler: async (args, ctx) => {
 			const sessionId = ctx.sessionManager.getSessionId();
 
-			// Handle om-off / om-on subcommands
+			// Handle subcommands
 			const trimmed = (typeof args === "string" ? args : "").trim();
+			if (trimmed === "configure") {
+				// Open the config overlay
+				const result = await ctx.ui.custom<{ saved: boolean; path: string } | undefined>(
+					(tui, theme, _kb, done) => createConfigureOverlay(configPath(), theme, tui, done),
+					{ overlay: true },
+				);
+				if (result) {
+					if (result.saved) {
+						ctx.ui.notify("Configuration saved.", "info");
+					} else {
+						ctx.ui.notify("Failed to save configuration — the config file may be read-only (e.g., managed by Nix).", "warning");
+					}
+				}
+				return;
+			}
 			if (trimmed === "om-off") {
 				const saved = saveUnifiedConfig({ memory: false });
 				runtime.config.memory = false;
@@ -61,9 +97,9 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 				return;
 			}
 
-			// If noAutoCompact: flush pending OM entries into the branch
-			// before compacting so the summary includes accumulated memory.
-			if (runtime.config.noAutoCompact && hasPendingData(sessionId)) {
+			// If compaction is manual (or legacy noAutoCompact): flush pending OM entries
+			// into the branch before compacting so the summary includes accumulated memory.
+			if (runtime.config.compaction === "manual" && hasPendingData(sessionId)) {
 				const pending = readPendingState(sessionId);
 				// Write all accumulated observation batches (or latest single batch
 				// as fallback for legacy pending.json without batch arrays).
@@ -105,6 +141,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
 					} else {
 						ctx.ui.notify("Compacted with blackhole", "info");
 					}
+					notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level as any));
 				},
 				onError: (err) => {
 					if (err.message === "Compaction cancelled" || err.message === "Already compacted") {

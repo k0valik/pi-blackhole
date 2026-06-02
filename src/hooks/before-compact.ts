@@ -15,8 +15,33 @@ import type { PiVccCompactionDetails } from "../details";
 import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
+import { configFileNeedsMigration } from "../core/unified-config.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
+
+// ── Migration reminder ────────────────────────────────────────────────────────
+
+/** Per-session notification count for migration reminder (max 2). */
+const migrationNotifyCount = new Map<string, number>();
+
+/**
+ * Show migration reminder notification if user's on-disk config still has legacy keys.
+ * At most 2 notifications per session. Call after compaction completes.
+ */
+export function notifyMigrationReminder(
+	sessionId: string,
+	notify: (msg: string, level: string) => void,
+): void {
+	const count = migrationNotifyCount.get(sessionId) ?? 0;
+	if (count >= 2) return;
+	if (!configFileNeedsMigration()) return;
+	migrationNotifyCount.set(sessionId, count + 1);
+	notify(
+		"blackhole: Use `/blackhole configure` to save your updated configuration.",
+		"info",
+	);
+}
+
 
 const formatTokens = (n: number): string => {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -58,7 +83,13 @@ export type OwnCutResult =
   | { ok: true; messages: any[]; firstKeptEntryId: string; compactAll: boolean }
   | { ok: false; reason: OwnCutCancelReason };
 
-export function buildOwnCut(branchEntries: any[]): OwnCutResult {
+export function buildOwnCut(
+  branchEntries: any[],
+  /** Pi's firstKeptEntryId from preparation (undefined = don't use Pi's cut). */
+  piFirstKeptEntryId?: string,
+  /** "pi-default" = use Pi's cut, "minimal" = keep only last user message (current). */
+  tailBehavior?: "pi-default" | "minimal",
+): OwnCutResult {
   // Find the last compaction entry and its firstKeptEntryId
   let lastCompactionIdx = -1;
   let lastKeptId: string | undefined;
@@ -99,6 +130,74 @@ export function buildOwnCut(branchEntries: any[]): OwnCutResult {
     }
   }
 
+  // ── Pi's cut path: use Pi's firstKeptEntryId instead of last-user cut ──
+  if (tailBehavior === "pi-default" && piFirstKeptEntryId) {
+    const cutInBranch = branchEntries.findIndex((e: any) => e.id === piFirstKeptEntryId);
+    if (cutInBranch >= 0) {
+      const liveCutIdx = liveMessages.findIndex((lm) => lm.entry.id === piFirstKeptEntryId);
+      if (liveCutIdx > 0) {
+        return {
+          ok: true,
+          messages: liveMessages.slice(0, liveCutIdx).map((e) => e.message),
+          firstKeptEntryId: piFirstKeptEntryId,
+          compactAll: false,
+        };
+      }
+      if (liveCutIdx === 0) {
+        // Pi's cut is at first live message.
+        // Pi wants to keep everything, so only compact-all is acceptable (summarizes
+        // everything for a fresh page).  If minimal path would aggressively cut
+        // (multiple user messages), cancel to respect Pi's guidance.
+        let lastUserIdx = liveMessages.length - 1;
+        while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+          lastUserIdx--;
+        }
+        if (lastUserIdx > 0) {
+          // Multiple user messages — minimal would aggressively cut, violating Pi
+          return { ok: false, reason: "too_few_live_messages" };
+        }
+        // Single user message — fall through to minimal path (will compact-all)
+      }
+      // liveCutIdx === -1: piFirstKeptEntryId not found in liveMessages
+      // (e.g., refers to a non-message entry like type:"custom" OM metadata or
+      // type:"compaction"). Resolve to the next message entry after pi's cut point.
+      if (liveCutIdx < 0) {
+        const nextMsgEntry = branchEntries.find(
+          (e: any, i: number) => i > cutInBranch && e.type === "message" && e.message,
+        );
+        if (nextMsgEntry) {
+          const resolvedId: string = nextMsgEntry.id;
+          const resolvedLiveIdx = liveMessages.findIndex(
+            (lm) => lm.entry.id === resolvedId,
+          );
+          if (resolvedLiveIdx > 0) {
+            return {
+              ok: true,
+              messages: liveMessages.slice(0, resolvedLiveIdx).map((e) => e.message),
+              firstKeptEntryId: resolvedId,
+              compactAll: false,
+            };
+          }
+          if (resolvedLiveIdx === 0) {
+            let lastUserIdx = liveMessages.length - 1;
+            while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
+              lastUserIdx--;
+            }
+            if (lastUserIdx > 0) {
+              return { ok: false, reason: "too_few_live_messages" };
+            }
+            // Single user message — fall through to minimal (will compact-all)
+          }
+          // resolvedLiveIdx === -1: resolved message not in liveMessages
+          // (shouldn't happen since liveMessages starts from prior firstKeptEntryId
+          // which should be before or at pi's cut), but fall through if it does.
+        }
+        // No message found after pi's cut point in branch — fall through
+      }
+    }
+    // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
+  }
+
   if (liveMessages.length === 0) return { ok: false, reason: "no_live_messages" };
   if (liveMessages.length <= 2) return { ok: false, reason: "too_few_live_messages" };
 
@@ -135,7 +234,7 @@ export function buildOwnCut(branchEntries: any[]): OwnCutResult {
 
 const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
   no_live_messages: "blackhole: Nothing to compact (no live messages)",
-  too_few_live_messages: "blackhole: Too few messages to compact",
+  too_few_live_messages: "blackhole: Too few live messages — Pi's default logic preserves visible context. Set tailBehavior to \"minimal\" in config to force compaction with fewer messages.",
 };
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
@@ -156,18 +255,56 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // Always handle explicit /blackhole marker.
     // Otherwise, only handle when user opted in via settings.
     const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
-    if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
-      trace("before_compact.return_early", { reason: "overrideDefaultCompaction=false and not /blackhole" });
+
+    // NEW: Unified compaction guards
+    // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
+    if (omRuntime.config.compaction === "off" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compaction_off" });
       return;
     }
 
-    // When noAutoCompact is active, only /blackhole can trigger compaction
-    if (omRuntime.config.noAutoCompact && !isPiVcc) {
-      trace("before_compact.cancel", { reason: "noAutoCompact and not /blackhole" });
-      return { cancel: true };
+    // compactionEngine "pi-default" means let Pi handle auto-triggered compactions
+    if (omRuntime.config.compactionEngine === "pi-default" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compactionEngine_pi_default" });
+      return;
     }
 
-    const ownCut = buildOwnCut(branchEntries as any[]);
+    // compaction "manual": /compact falls through to Pi, /blackhole still works
+    if (omRuntime.config.compaction === "manual" && !isPiVcc) {
+      trace("before_compact.return_early", { reason: "compaction_manual" });
+      return;
+    }
+
+    // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
+    if (omRuntime.config.compaction === undefined && omRuntime.config.compactionEngine === undefined) {
+      if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
+        trace("before_compact.return_early", { reason: "overrideDefaultCompaction=false and not /blackhole" });
+        return;
+      }
+
+      if (omRuntime.config.noAutoCompact && !isPiVcc) {
+        trace("before_compact.cancel", { reason: "noAutoCompact and not /blackhole" });
+        return { cancel: true };
+      }
+    }
+
+    // Determine effective tail behavior for buildOwnCut
+    const effectiveTailBehavior = isPiVcc
+      ? (omRuntime.config.tailBehavior ?? "minimal")   // /blackhole: minimal by default
+      : (omRuntime.config.tailBehavior ?? "minimal");
+
+    trace("before_compact.tail_behavior", {
+      effectiveTailBehavior,
+      configTailBehavior: omRuntime.config.tailBehavior,
+      isPiVcc,
+      piFirstKeptEntryId: preparation.firstKeptEntryId,
+    });
+
+    const ownCut = buildOwnCut(
+      branchEntries as any[],
+      preparation.firstKeptEntryId,
+      effectiveTailBehavior,
+    );
     if (!ownCut.ok) {
       const lastComp = [...branchEntries].reverse().find((e: any) => e.type === "compaction");
       const lastCompIdx = lastComp ? (branchEntries as any[]).indexOf(lastComp) : -1;
@@ -344,12 +481,14 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     if (omRuntime.compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
     const stats = omRuntime.compactionStats;
     if (!stats) return;
+    const sessionId = ctx.sessionManager.getSessionId();
     setTimeout(() => {
       try {
         ctx?.ui?.notify?.(
           `blackhole: ${stats.summarized} source entries processed; tail kept ${stats.kept} (~${formatTokens(stats.keptTokensEst)} tok).`,
           "info",
         );
+        notifyMigrationReminder(sessionId, (msg, level) => ctx?.ui?.notify?.(msg, level as any));
       } catch {}
     }, 500);
   });

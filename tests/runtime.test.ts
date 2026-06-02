@@ -11,6 +11,7 @@ const testDir = join(tmpdir(), `pi-blackhole-runtime-test-${Date.now()}`);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
 	getAgentDir: () => testDir,
+	estimateTokens: () => 250, // ~1 token per 4 chars
 }));
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -186,6 +187,102 @@ describe("Runtime.resolveModel — fallback chain", () => {
 		if (result.ok) {
 			expect(result.model.id).toBe("session-model");
 		}
+	});
+});
+
+// ── Phase 9: Consolidation trigger guards ─────────────────────────────────
+
+describe("Consolidation trigger — guards with new config keys", () => {
+	function createConsolidationContext(configOverrides: Record<string, unknown> = {}) {
+		let agentStartHandler: ((event: any, ctx: any) => void) | undefined;
+		let turnEndHandler: ((event: any, ctx: any) => void) | undefined;
+		const pi = {
+			on: vi.fn((name: string, cb: any) => {
+				if (name === "agent_start") agentStartHandler = cb;
+				if (name === "turn_end") turnEndHandler = cb;
+			}),
+		};
+		const launchConsolidationTask = vi.fn();
+		const runtime = {
+			ensureConfig: vi.fn(),
+			config: {
+				memory: true,
+				observeAfterTokens: 1, // always due
+				reflectAfterTokens: 999999, // never due
+				compactAfterTokens: 1000,
+				passive: false,
+				noAutoCompact: false,
+				debugLog: true,
+				observerChunkMaxTokens: 10000,
+				observerPreambleMaxTokens: 500,
+				observationsPoolMaxTokens: 50000,
+				reflectorInputMaxTokens: 10000,
+				dropperInputMaxTokens: 10000,
+				agentMaxTurns: 5,
+				model: undefined,
+				observerModel: undefined,
+				observerFallbackModels: [],
+				reflectorModel: undefined,
+				reflectorFallbackModels: [],
+				dropperModel: undefined,
+				dropperFallbackModels: [],
+				...configOverrides,
+			},
+			consolidationInFlight: false,
+			isConsolidationRetryGated: vi.fn(() => false),
+			launchConsolidationTask,
+		};
+		const ctx = {
+			cwd: testDir,
+			hasUI: false,
+			sessionManager: {
+				getBranch: vi.fn(() => [
+					{ id: "m1", type: "message", message: { role: "user", content: [{ type: "text", text: "x".repeat(1000) }] } },
+					{ id: "m2", type: "message", message: { role: "assistant", content: [{ type: "text", text: "y".repeat(1000) }] } },
+				]),
+				getSessionId: vi.fn(() => "test-session"),
+			},
+		};
+		return { pi, runtime, ctx, agentStartHandler: () => agentStartHandler!({}, ctx) };
+	}
+
+	it("T38: memory:false skips consolidation even with sufficient tokens", async () => {
+		const { pi, runtime, ctx, agentStartHandler } = createConsolidationContext({
+			memory: false,
+		});
+		const { registerConsolidationTrigger } = await import("../src/om/consolidation.js");
+		registerConsolidationTrigger(pi as any, runtime as any);
+
+		agentStartHandler();
+
+		expect(runtime.launchConsolidationTask).not.toHaveBeenCalled();
+	});
+
+	it("T39: memory:true + compaction:off runs consolidation", async () => {
+		const { pi, runtime, ctx, agentStartHandler } = createConsolidationContext({
+			memory: true,
+			compaction: "off",
+		});
+		const { registerConsolidationTrigger } = await import("../src/om/consolidation.js");
+		registerConsolidationTrigger(pi as any, runtime as any);
+
+		agentStartHandler();
+
+		expect(runtime.launchConsolidationTask).toHaveBeenCalled();
+	});
+
+	it("T40: passive:true (legacy, no new keys) blocks consolidation via legacy guard", async () => {
+		const { pi, runtime, ctx, agentStartHandler } = createConsolidationContext({
+			passive: true,
+			compaction: undefined,
+			compactionEngine: undefined,
+		});
+		const { registerConsolidationTrigger } = await import("../src/om/consolidation.js");
+		registerConsolidationTrigger(pi as any, runtime as any);
+
+		agentStartHandler();
+
+		expect(runtime.launchConsolidationTask).not.toHaveBeenCalled();
 	});
 });
 

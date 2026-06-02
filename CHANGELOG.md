@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.4.0] - 2026-06-02
+
+### Added
+
+- **New config surface:** `compaction` (`"auto"` | `"manual"` | `"off"`), `compactionEngine` (`"blackhole"` | `"pi-default"`), `tailBehavior` (`"pi-default"` | `"minimal"`). These replace the old `overrideDefaultCompaction`, `noAutoCompact`, and `passive` keys. See [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) for the full mapping. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Config overlay (`/blackhole configure`):** interactive TUI with ↑↓ navigation, Enter to edit/toggle, Ctrl+S to save. 17 fields across 3 sections (Compaction, Observational Memory, Debug) with inline help text. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Status overlay (`/blackhole-memory`):** new render with compaction config readout, OM pipeline state, and inline actions (configure, om-off/on). ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Tail behavior control:** `tailBehavior: "minimal"` keeps only the last user message (aggressive pi-vcc cut, default); `tailBehavior: "pi-default"` keeps Pi's ~20k token tail visible (opt-in). Both auto-triggered and `/blackhole` now default to `"minimal"`. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **12 permutation tests** covering all compaction × memory × threshold combinations for the new config keys. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Documentation:** CONFIG.md (new reference), OLD_CONFIG.md (legacy docs), MIGRATION-GUIDE.md (migration path from old keys), README.md and llms.txt updated for the new surface. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Per-model context window override:** `OmModelConfig` now supports an optional `contextWindow` field. When set on any stage model or fallback, it overrides Pi's model registry value for the context window check. Unset models inherit from Pi normally. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Context window pre-check:** before calling each OM stage agent (observer, reflector, dropper), the estimated input tokens (stage cap + 8K reserve for system prompt/tools/turns) are checked against the model's effective context window. If the input exceeds the window, the model is skipped and the next fallback is tried. If all models are exhausted, a warning is shown. Strictly opt-in — with default caps (40K–80K) and typical models (128K+), the check is a no-op unless a `contextWindow` override is explicitly set. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **8 tests** covering context window parsing from config, priority resolution, rejection of invalid values, and `effectiveContextWindow` logic. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+
+### Changed
+
+- **`memory: false` no longer blocks auto-compaction.** Memory and compaction are now truly independent — `memory: false` stops OM workers but compaction still runs. Use `compaction: "manual"` or `compaction: "off"` to control compaction separately. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **`compaction: "off"` semantics refined:** blocks blackhole's auto-trigger and returns early from the before-compact hook for auto-triggered compactions (letting Pi handle them), but explicit `/blackhole` still uses blackhole's pipeline. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Config migration is automatic:** old keys (`overrideDefaultCompaction`, `noAutoCompact`, `passive`) are migrated to new keys in memory at load time. The on-disk file is never mutated. New keys take priority when present. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Permutation tests updated** to reflect the new behavior: `overrideDefaultCompaction` now gates the legacy trigger path, `memory` no longer gates the trigger, and the 16-permutation matrix uses the correct formula. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+
+### Fixed
+
+- **Save error handling:** `save()` returns boolean and wraps writes in try/catch — read-only filesystems (e.g., Nix-managed config) no longer crash with an unhandled exception. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Number input restriction:** configure overlay now only accepts digits for number fields, preventing garbage values from being entered. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Defensive bounds:** section header pads in configure-overlay and status-overlay use `Math.max(0, ...)` / `Math.max(2, ...)` to prevent negative `.repeat()` counts on tiny terminals. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Config save failure warning:** `/blackhole configure` now shows a "warning" notification when the config file can't be written instead of a misleading "info" notification. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **Legacy config tests:** updated `config.test.ts` to check new config keys (`compaction`, `compactionEngine`, `memory`) instead of deleted legacy fields (`passive`, `overrideDefaultCompaction`), fixing 10 pre-existing test failures. ([#14](https://github.com/k0valik/pi-blackhole/pull/14))
+- **pi-default non-message firstKeptEntryId resolution:** when Pi's `firstKeptEntryId` points to a non-message entry (e.g., OM metadata or compaction), `buildOwnCut` now resolves to the next actual message entry instead of falling through to the minimal cut. ([#15](https://github.com/k0valik/pi-blackhole/pull/15))
+- **Array micro-optimization in buildOwnCut:** replaced `branchEntries.slice(cutInBranch + 1).find()` with `branchEntries.find()` using an index check, avoiding a temporary array allocation. ([#15](https://github.com/k0valik/pi-blackhole/pull/15))
+
 ## [0.3.2] - 2026-06-01
 
 ### Fixed

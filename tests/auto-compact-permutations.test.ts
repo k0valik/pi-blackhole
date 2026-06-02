@@ -37,6 +37,10 @@ interface PermutationConfig {
 	passive: boolean;
 	memory: boolean;
 	overrideDefaultCompaction: boolean;
+	// New config keys (optional — when absent, legacy path runs)
+	compaction?: "auto" | "manual" | "off";
+	compactionEngine?: "blackhole" | "pi-default";
+	tailBehavior?: "pi-default" | "minimal";
 }
 
 function captureFullSystem(config: PermutationConfig) {
@@ -67,6 +71,10 @@ function captureFullSystem(config: PermutationConfig) {
 			reflectorFallbackModels: [] as any[],
 			dropperModel: undefined as any,
 			dropperFallbackModels: [] as any[],
+			// New config keys (undefined → legacy path)
+			compaction: config.compaction,
+			compactionEngine: config.compactionEngine,
+			tailBehavior: config.tailBehavior,
 		},
 		compactInFlight: false,
 		compactionStats: null as any,
@@ -187,8 +195,8 @@ describe("Auto-compact trigger: guard permutations (3 knobs)", () => {
 	}
 
 	const guardCases: GuardCase[] = [
-		// All guards inactive = should fire
-		{ name: "all false", noAutoCompact: false, passive: false, memory: true, expectFire: true },
+		// With overrideDefaultCompaction=false (the default in legacy mode):
+		{ name: "all false", noAutoCompact: false, passive: false, memory: true, expectFire: false },
 		// Each guard in isolation
 		{ name: "noAutoCompact=true", noAutoCompact: true, passive: false, memory: true, expectFire: false },
 		{ name: "passive=true", noAutoCompact: false, passive: true, memory: true, expectFire: false },
@@ -245,7 +253,7 @@ describe("Auto-compact trigger: before-compact hook integration", () => {
 		// overrideDefaultCompaction=false (default): hook returns undefined → Pi default runs
 		{ name: "override=false, noAutoCompact=false",
 			noAutoCompact: false, overrideDefaultCompaction: false,
-			expectAutoFire: true, expectBlackholePipeline: false, expectPiDefaultPipeline: true },
+			expectAutoFire: false, expectBlackholePipeline: false, expectPiDefaultPipeline: false },
 		{ name: "override=false, noAutoCompact=true",
 			noAutoCompact: true, overrideDefaultCompaction: false,
 			expectAutoFire: false, expectBlackholePipeline: false, expectPiDefaultPipeline: false },
@@ -308,7 +316,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		// Override isIdle to return false (agent busy)
@@ -330,7 +338,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		// fireAgentEnd calls the trigger synchronously and replaces getBranch with
@@ -350,7 +358,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		// Session changes between trigger and microtask
@@ -376,7 +384,7 @@ describe("Auto-compact trigger: retryable error guard", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		system.fireAgentEnd(dueBranch, "fetch failed: connection lost");
@@ -391,7 +399,7 @@ describe("Auto-compact trigger: retryable error guard", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		// Non-retryable error message — should still fire
@@ -411,7 +419,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		system.fireAgentEnd(dueBranch);
@@ -431,7 +439,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		// First agent_end: fires and completes
@@ -451,7 +459,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
 			noAutoCompact: false,
 			passive: false,
 			memory: true,
-			overrideDefaultCompaction: false,
+			overrideDefaultCompaction: true,
 		});
 
 		// Simulate: compactInFlight somehow stuck at true (e.g., onComplete never fires)
@@ -489,7 +497,8 @@ describe("Full 16-permutation matrix", () => {
 					const label = parts.length > 0 ? parts.join("+") : "all-default";
 
 					// Determine expected behavior
-					const guardsBlock = noAutoCompact === true || passive === true || memory === false;
+					// memory no longer gates compaction in the trigger
+					const guardsBlock = noAutoCompact === true || passive === true || overrideDefaultCompaction === false;
 					const shouldFire = !guardsBlock;
 
 					it(`[${++caseIndex}/16] ${label}`, async () => {
@@ -539,6 +548,51 @@ describe("Full 16-permutation matrix", () => {
 						expect(system.runtime.compactInFlight).toBe(false);
 					});
 				}
+			}
+		}
+	}
+});
+
+describe("New config key trigger permutations", () => {
+	beforeEach(() => { vi.useFakeTimers(); });
+	afterEach(() => { vi.useRealTimers(); });
+
+	const compactionValues = ["auto", "manual", "off"] as const;
+	const bools = [true, false];
+	let caseIndex = 0;
+
+	for (const compaction of compactionValues) {
+		for (const memory of bools) {
+			for (const threshold of bools) {
+				const label = `compaction=${compaction}, memory=${memory}, ${threshold ? "threshold-reached" : "below-threshold"}`;
+
+				// auto fires only when threshold is reached; manual/off always block
+				const expectFire = compaction === "auto" && threshold;
+
+				it(`[${++caseIndex}/12] ${label}: ${expectFire ? "fires" : "blocks"}`, async () => {
+					const branch = threshold ? dueBranch : shortBranch;
+					const system = captureFullSystem({
+						noAutoCompact: false,
+						passive: false,
+						memory,
+						overrideDefaultCompaction: false,
+						compaction,
+					});
+
+					system.fireAgentEnd(branch);
+					await system.flushAll();
+
+					if (expectFire) {
+						expect(system.ctx.compact).toHaveBeenCalledTimes(1);
+						expect(system.runtime.compactInFlight).toBe(false);
+						expect(system.notifyCalls.some(n => n.msg.includes("compaction threshold reached"))).toBe(true);
+						expect(system.notifyCalls.some(n => n.msg.includes("compaction complete"))).toBe(true);
+					} else {
+						expect(system.ctx.compact).not.toHaveBeenCalled();
+						expect(system.runtime.compactInFlight).toBe(false);
+						expect(system.notifyCalls.some(n => n.msg.includes("compaction threshold reached"))).toBe(false);
+					}
+				});
 			}
 		}
 	}

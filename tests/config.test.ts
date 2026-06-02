@@ -44,19 +44,25 @@ describe("Config defaults", () => {
 	it("uses all defaults when no config file exists", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		const config = loadUnifiedConfig(testDir);
-		expect(config.overrideDefaultCompaction).toBe(false);
+		// New config surface defaults
+		expect(config.compaction).toBe("auto");
+		expect(config.compactionEngine).toBe("blackhole");
+		expect(config.tailBehavior).toBe("minimal");
 		expect(config.debug).toBe(false);
-		expect(config.observeAfterTokens).toBe(15_000); // blackhole default (upstream is 10_000)
-		expect(config.reflectAfterTokens).toBe(25_000); // blackhole default (upstream is 20_000)
+		expect(config.observeAfterTokens).toBe(15_000);
+		expect(config.reflectAfterTokens).toBe(25_000);
 		expect(config.compactAfterTokens).toBe(81_000);
 		expect(config.observationsPoolMaxTokens).toBe(20_000);
 		expect(config.agentMaxTurns).toBe(16);
-		expect(config.passive).toBe(false);
+		expect(config.memory).toBe(true);
 		expect(config.debugLog).toBe(false);
 		expect(config.model).toBeUndefined();
 		expect(config.observerModel).toBeUndefined();
 		expect(config.reflectorModel).toBeUndefined();
 		expect(config.dropperModel).toBeUndefined();
+		// Legacy fields are deleted during migration so not present
+		expect((config as any).overrideDefaultCompaction).toBeUndefined();
+		expect((config as any).passive).toBeUndefined();
 	});
 });
 
@@ -197,27 +203,30 @@ describe("Config with model IDs containing slashes and colons", () => {
 });
 
 describe("Legacy config fallback", () => {
-	it("loads from legacy pi-vcc-config.json if unified file doesn't exist", async () => {
+	it("loads from legacy pi-vcc-config.json and migrates to new keys", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-		// Only write legacy pi-vcc config, not unified
 		writeConfig({ overrideDefaultCompaction: true, debug: true }, "pi-vcc-config.json");
 		const config = loadUnifiedConfig(testDir);
-		expect(config.overrideDefaultCompaction).toBe(true);
+		// Legacy overrideDefaultCompaction:true → compactionEngine:blackhole + tailBehavior:minimal
+		expect(config.compactionEngine).toBe("blackhole");
+		expect(config.tailBehavior).toBe("minimal");
 		expect(config.debug).toBe(true);
+		expect((config as any).overrideDefaultCompaction).toBeUndefined();
 	});
 
 	it("prefers unified config over legacy", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-		// Write legacy file
-		writeConfig({ overrideDefaultCompaction: true, debug: true }, "pi-vcc-config.json");
-		// Write unified file
-		writeConfig({ overrideDefaultCompaction: false, debug: false }, "pi-blackhole/pi-blackhole-config.json");
+		// Write legacy file with just debug (new keys would block migration)
+		writeConfig({ debug: true }, "pi-vcc-config.json");
+		// Write unified file — new keys present so no migration runs
+		writeConfig({ compaction: "off", compactionEngine: "pi-default", debug: false }, "pi-blackhole/pi-blackhole-config.json");
 		const config = loadUnifiedConfig(testDir);
-		expect(config.overrideDefaultCompaction).toBe(false);
+		expect(config.compaction).toBe("off");
+		expect(config.compactionEngine).toBe("pi-default");
 		expect(config.debug).toBe(false);
 	});
 
-	it("loads legacy om config from settings.json under pi-blackhole key", async () => {
+	it("loads legacy om config from settings.json under pi-blackhole key and migrates", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({
 			"pi-blackhole": {
@@ -227,12 +236,14 @@ describe("Legacy config fallback", () => {
 			},
 		}, "settings.json");
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(true);
+		expect(config.compaction).toBe("off");
+		expect(config.memory).toBe(false);
 		expect(config.debugLog).toBe(true);
 		expect(config.observeAfterTokens).toBe(5_000);
+		expect((config as any).passive).toBeUndefined();
 	});
 
-	it("loads from observational-memory legacy key", async () => {
+	it("loads from observational-memory legacy key and migrates", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({
 			"observational-memory": {
@@ -240,7 +251,9 @@ describe("Legacy config fallback", () => {
 			},
 		}, "settings.json");
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(true);
+		expect(config.compaction).toBe("off");
+		expect(config.memory).toBe(false);
+		expect((config as any).passive).toBeUndefined();
 	});
 });
 
@@ -250,20 +263,23 @@ describe("Env overrides", () => {
 		delete process.env.PI_OBSERVATIONAL_MEMORY_PASSIVE;
 	});
 
-	it("env PI_VCC_OM_PASSIVE=true forces passive mode", async () => {
+	it("env PI_VCC_OM_PASSIVE=true forces compaction:off + memory:false", async () => {
 		process.env.PI_VCC_OM_PASSIVE = "true";
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ passive: false });
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(true);
+		expect(config.compaction).toBe("off");
+		expect(config.memory).toBe(false);
 	});
 
-	it("env PI_VCC_OM_PASSIVE=false leaves passive=false", async () => {
+	it("env PI_VCC_OM_PASSIVE=false undoes passive migration", async () => {
 		process.env.PI_VCC_OM_PASSIVE = "false";
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ passive: true });
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(false);
+		// Falsy env override undoes the passive migration, falling back to defaults
+		expect(config.compaction).toBe("auto");
+		expect(config.memory).toBe(true);
 	});
 
 	it("env PI_OBSERVATIONAL_MEMORY_PASSIVE also works (legacy)", async () => {
@@ -271,7 +287,8 @@ describe("Env overrides", () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
 		writeConfig({ passive: false });
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(true);
+		expect(config.compaction).toBe("off");
+		expect(config.memory).toBe(false);
 	});
 });
 
@@ -293,20 +310,21 @@ describe("Integer fields are validated as positive integers", () => {
 describe("saveUnifiedConfig", () => {
 	it("writes config to disk", async () => {
 		const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
-		const result = saveUnifiedConfig({ passive: true, debug: true });
+		const result = saveUnifiedConfig({ compaction: "manual", debug: true });
 		expect(result).toBe(true);
 
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(true);
+		expect(config.compaction).toBe("manual");
 		expect(config.debug).toBe(true);
 	});
 
 	it("preserves existing keys when saving partial config", async () => {
 		const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
-		writeConfig({ passive: true, debug: true });
-		saveUnifiedConfig({ passive: false });
+		writeConfig({ compaction: "off", memory: false });
+		saveUnifiedConfig({ memory: true });
 		const config = loadUnifiedConfig(testDir);
-		expect(config.passive).toBe(false);
-		expect(config.debug).toBe(true); // preserved
+		expect(config.compaction).toBe("off");
+		expect(config.memory).toBe(true);
+		expect(config.debug).toBe(false);
 	});
 });
