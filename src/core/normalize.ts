@@ -9,6 +9,14 @@ import type { NormalizedBlock } from "../types";
 import { textOf } from "./content";
 import { sanitize } from "./sanitize";
 
+// Mirrors @earendil-works/pi-coding-agent's BashExecutionMessage (not re-exported from index)
+interface LocalBashMessage {
+  role: "bashExecution";
+  command: string;
+  output: string;
+  exitCode: number | undefined;
+}
+
 const normalizeOne = (msg: Message, msgIndex: number): NormalizedBlock[] => {
   if (msg.role === "user") {
     const blocks: NormalizedBlock[] = [];
@@ -25,10 +33,8 @@ const normalizeOne = (msg: Message, msgIndex: number): NormalizedBlock[] => {
   }
 
   if ((msg as any).role === "bashExecution") {
-    const cmd = (msg as any).command ?? "";
-    const out = (msg as any).output ?? "";
-    const exit = (msg as any).exitCode;
-    return [{ kind: "bash", command: cmd, output: out, exitCode: exit, sourceIndex: msgIndex }];
+    const bashMsg = msg as unknown as LocalBashMessage;
+    return [{ kind: "bash", command: bashMsg.command, output: bashMsg.output, exitCode: bashMsg.exitCode, sourceIndex: msgIndex }];
   }
 
   if (msg.role === "toolResult") {

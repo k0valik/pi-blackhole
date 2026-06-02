@@ -9,6 +9,13 @@ import type { RenderedEntry } from "./render-entries";
 import { textOf, toolCallArgsText, isContentBearing } from "./content";
 import type { RecallMode } from "./recall-scope";
 
+// Mirrors @earendil-works/pi-coding-agent's BashExecutionMessage (not re-exported from index)
+interface LocalBashExec {
+  role: "bashExecution";
+  command: string;
+  output: string;
+}
+
 export interface FileMatch {
   /** Name of the tool (write, edit, hex_edit) */
   toolName: string;
@@ -183,7 +190,8 @@ const lineSnippet = (text: string, regex: RegExp, contextLines = 2): string | un
 const fullText = (msg: Message, mode?: RecallMode): string => {
   if ((msg as any).role === "bashExecution") {
     if (mode === "file") return ""; // bash is not file content
-    return `${(msg as any).command ?? ""} ${(msg as any).output ?? ""}`;
+    const bashMsg = msg as unknown as LocalBashExec;
+    return `${bashMsg.command ?? ""} ${bashMsg.output ?? ""}`;
   }
   if (mode === "file") {
     return toolCallArgsText(msg.content);
