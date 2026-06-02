@@ -21,11 +21,10 @@ const CACHE_TTL_MS = 2_000;
 const cache = new Map<string, CacheEntry>();
 
 function cacheKey(sessionFile: string, full: boolean, allowedEntryIds: Set<string> | undefined): string {
-  // allowedEntryIds is iterated — use size + first few entries for the hash
   let hash = `${sessionFile}::${full}`;
-  if (allowedEntryIds) {
-    // Use a simple size-based hash: iterating the full set could be expensive
-    hash += `::${allowedEntryIds.size}`;
+  if (allowedEntryIds && allowedEntryIds.size > 0) {
+    // Include the full set as sorted JSON for collision-free caching
+    hash += `::${JSON.stringify([...allowedEntryIds].sort())}`;
   }
   return hash;
 }
