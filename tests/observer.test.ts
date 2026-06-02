@@ -172,4 +172,12 @@ describe("normalizeSourceEntryIds", () => {
 		expect(normalizeSourceEntryIds(["entry-a", "not-in-the-chunk"], allowed)).toEqual(["entry-a"]);
 		expect(normalizeSourceEntryIds(["entry-a"], [])).toBeUndefined();
 	});
+
+	it("partially accepts mixed valid and hallucinated source ids", () => {
+		// When some IDs are valid and some are hallucinated, only valid ones survive
+		expect(normalizeSourceEntryIds(
+			["entry-a", "hallucinated-1", "entry-b", "hallucinated-2", "entry-c"],
+			allowed,
+		)).toEqual(["entry-a", "entry-b", "entry-c"]);
+	});
 });

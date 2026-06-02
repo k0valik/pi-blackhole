@@ -274,7 +274,7 @@ Everything else has sensible defaults.
 |---|---|---|
 | `compaction` | `"auto"` | When compaction triggers: `"auto"` (blackhole auto-fires), `"manual"` (only `/blackhole`), `"off"` (Pi handles auto + `/compact`, `/blackhole` still works) |
 | `compactionEngine` | `"blackhole"` | Which engine handles auto-compaction: `"blackhole"` or `"pi-default"`. Only meaningful when `compaction: "auto"` — for `"manual"`/`"off"` the hook lets Pi handle everything except `/blackhole` |
-| `tailBehavior` | depends on trigger | How much stays visible after compaction: `"minimal"` (last user message only) or `"pi-default"` (gentle, ~20k tokens). `/blackhole` defaults to `"minimal"`; auto-triggered defaults to `"pi-default"` |
+| `tailBehavior` | `"minimal"` | How much stays visible after compaction: `"minimal"` (last user message only, default) or `"pi-default"` (gentle, ~20k tokens). Both `/blackhole` and auto-triggered default to `"minimal"`; set explicitly to opt into gentler cut |
 | `memory` | `true` | `false` = OM workers off + no memory injection (compaction still runs) |
 | `model` | — | Base fallback model for all workers (last resort before session model) |
 | `observerModel` / `observerFallbackModels` | — / `[]` | Primary + fallback models for observer (extracts facts) |

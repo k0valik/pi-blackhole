@@ -32,14 +32,21 @@ export function withDebugLogContext<T>(context: DebugLogContext, fn: () => T): T
 // ── Async buffer ────────────────────────────────────────────────────────────
 
 const BUFFER_FLUSH_MS = 1_000;
+const FLUSH_IDLE_MS = 10_000;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
-let flushScheduled = false;
 let flushing = false;
+let lastWriteMs = 0;
 
 function ensureFlushTimer(): void {
 	if (flushTimer) return;
 	flushTimer = setInterval(() => {
+		// Stop the timer if buffer has been empty for a while
+		if (buffer.length === 0 && lastWriteMs > 0 && Date.now() - lastWriteMs > FLUSH_IDLE_MS) {
+			clearInterval(flushTimer!);
+			flushTimer = null;
+			return;
+		}
 		flushBuffer();
 	}, BUFFER_FLUSH_MS);
 	// Don't prevent process exit
@@ -62,8 +69,9 @@ async function flushBuffer(): Promise<void> {
 		await appendFile(path, batch.join(""), "utf-8");
 	} catch (error) {
 		console.error("blackhole: debug log write failed", error);
+	} finally {
+		flushing = false;
 	}
-	flushing = false;
 }
 
 // Flush remaining buffer on exit
@@ -86,6 +94,7 @@ export function debugLog(event: string, data: Record<string, unknown> = {}, forc
 		data,
 	};
 	buffer.push(JSON.stringify(payload) + "\n");
+	lastWriteMs = Date.now();
 	ensureFlushTimer();
 }
 
