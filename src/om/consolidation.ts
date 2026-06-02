@@ -199,7 +199,7 @@ export function makeModelResolver(runtime: Runtime, ctx: ConsolidationCtx): (sta
 		}
 		debugLog(`${stage}.model_unavailable`, { reason: resolved.reason });
 		if (!runtime.resolveFailureNotified && ctx.hasUI && ctx.ui) {
-			if (runtime.failedInCycle.size > 0) {
+			if (runtime.failedInCycle.size > 0 && resolved.reason.includes("all candidates exhausted")) {
 				const fallbackMsg = stageFallbacks.length === 0
 					? "no fallbacks configured"
 					: "no available fallbacks";
