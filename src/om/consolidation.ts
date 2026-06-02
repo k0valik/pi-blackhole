@@ -111,9 +111,9 @@ function capSourceEntriesToTokens(entries: Entry[], maxTokens: number): Entry[] 
 			}
 		} else if (entry.type === "custom" && (entry.customType === OM_OBSERVATIONS_RECORDED || entry.customType === OM_REFLECTIONS_RECORDED || entry.customType === OM_OBSERVATIONS_DROPPED)) {
 			// Custom entries carry structured data — estimate from JSON serialization
-			chars = JSON.stringify(entry.data ?? {}).length;
+			chars = String(JSON.stringify(entry.data ?? {})).length;
 		} else if (entry.summary) {
-			chars = entry.summary.length;
+			chars = String(entry.summary).length;
 		}
 		const estTokens = Math.ceil(chars / 4);
 		if (totalTokens + estTokens > maxTokens && kept.length > 0) break;

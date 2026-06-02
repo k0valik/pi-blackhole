@@ -16,11 +16,12 @@ const TUI_SAFE_LINE_CHARS = 120;
  * to match, so wrapped list items remain visually grouped.
  */
 function wrapLineWithContinuation(line: string, maxChars: number): string[] {
-  const wrapped = wrapTextWithAnsi(line, maxChars);
-  if (wrapped.length <= 1) return wrapped;
   const indent = line.match(/^\s*(?:[-*]\s+|\d+\.\s+)?/)?.[0] ?? "";
   const continuationIndent = indent ? " ".repeat(Math.min(indent.length, 8)) : "";
-  if (!continuationIndent) return wrapped;
+  // Wrap at reduced width so prepending continuationIndent doesn't exceed maxChars
+  const safeMaxChars = continuationIndent ? maxChars - continuationIndent.length : maxChars;
+  const wrapped = wrapTextWithAnsi(line, safeMaxChars);
+  if (wrapped.length <= 1 || !continuationIndent) return wrapped;
   return [wrapped[0], ...wrapped.slice(1).map((l) => continuationIndent + l)];
 }
 
