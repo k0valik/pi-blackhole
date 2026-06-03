@@ -47,7 +47,7 @@ function ensureFlushTimer(): void {
 			flushTimer = null;
 			return;
 		}
-		flushBuffer();
+		flushBuffer().catch(() => {});
 	}, BUFFER_FLUSH_MS);
 	// Don't prevent process exit
 	if (flushTimer && typeof flushTimer === "object" && "unref" in flushTimer) {
