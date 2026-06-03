@@ -43,6 +43,26 @@ export interface OmModelConfig {
 	contextWindow?: number;
 }
 
+export interface QualityGateConfig {
+	enabled: boolean;
+	/** Minimum score (0-10) to accept a summary. */
+	judgeThreshold: number;
+	/**
+	 * Model override for the judge call.
+	 * null = use the session's active model.
+	 * "provider/modelId" = use a specific model.
+	 */
+	judgeModel: string | null;
+	/** Allow a single repair pass when the judge rejects. */
+	repairEnabled: boolean;
+	/**
+	 * What to do when the gate rejects:
+	 * - "warn": accept the summary with a notification (default).
+	 * - "reject": cancel compaction (falls through to Pi default).
+	 */
+	onRejected: "warn" | "reject";
+}
+
 export interface UnifiedConfig {
 	/** @deprecated Use compactionEngine instead. */
 	overrideDefaultCompaction?: boolean;
@@ -121,6 +141,9 @@ export interface UnifiedConfig {
 	 *  Default true for backward compatibility. */
 	sessionFallback?: boolean;
 
+	/** Optional quality gate — validates VCC+OM output before adoption. */
+	qualityGate?: QualityGateConfig;
+
 	/** @deprecated Use compaction instead. */
 	noAutoCompact?: boolean;
 	/** @deprecated Use compaction + memory instead. */
@@ -132,6 +155,14 @@ export interface UnifiedConfig {
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
+
+export const QUALITY_GATE_DEFAULTS: QualityGateConfig = {
+	enabled: false,
+	judgeThreshold: 7,
+	judgeModel: null,
+	repairEnabled: true,
+	onRejected: "warn",
+};
 
 export const DEFAULTS: UnifiedConfig = {
 	debug: false,
@@ -155,6 +186,8 @@ export const DEFAULTS: UnifiedConfig = {
 
 	memory: true,
 	debugLog: false,
+
+	qualityGate: { ...QUALITY_GATE_DEFAULTS },
 };
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
@@ -235,6 +268,21 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.passive === "boolean") c.passive = raw.passive;
 	if (typeof raw.memory === "boolean") c.memory = raw.memory;
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
+
+	// ── qualityGate config group ──
+	if (isRecord(raw.qualityGate)) {
+		const qg = raw.qualityGate;
+		const parsedQg: QualityGateConfig = { ...QUALITY_GATE_DEFAULTS };
+		if (typeof qg.enabled === "boolean") parsedQg.enabled = qg.enabled;
+		const threshold = positiveInt(qg.judgeThreshold);
+		if (threshold !== undefined) parsedQg.judgeThreshold = threshold;
+		if (qg.judgeModel === null || typeof qg.judgeModel === "string") {
+			parsedQg.judgeModel = qg.judgeModel;
+		}
+		if (typeof qg.repairEnabled === "boolean") parsedQg.repairEnabled = qg.repairEnabled;
+		if (qg.onRejected === "warn" || qg.onRejected === "reject") parsedQg.onRejected = qg.onRejected;
+		c.qualityGate = parsedQg;
+	}
 
 	// Positive integers
 	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;

@@ -16,6 +16,9 @@ import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js"
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
 import { configFileNeedsMigration } from "../core/unified-config.js";
+import { completeSimple } from "@earendil-works/pi-ai";
+import { runQualityGate, formatGateNotification } from "../quality-gate/index.js";
+import type { SourceEvidence } from "../quality-gate/judge.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -237,8 +240,178 @@ const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
   too_few_live_messages: "blackhole: Too few live messages — Pi's default logic preserves visible context. Set tailBehavior to \"minimal\" in config to force compaction with fewer messages.",
 };
 
+// ── Quality gate helpers ──────────────────────────────────────────────────
+
+/**
+ * Build structured source evidence for the quality gate judge.
+ * Extracts message excerpts, file paths, errors, decisions, and constraints
+ * from the agent messages — analogous to pi-slipstream-compact's SnapshotManifest
+ * but operating directly on raw messages instead of a pre-built snapshot.
+ */
+function buildSourceEvidence(messages: any[], maxChars: number): SourceEvidence {
+	const excerpts: string[] = [];
+	const filesModified = new Set<string>();
+	const unresolvedErrors: string[] = [];
+	const userDecisions: string[] = [];
+	const constraints: string[] = [];
+	let totalChars = 0;
+
+	// Iterate newest-first so we capture the most recent context
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		const role: string = msg.role ?? "unknown";
+		let text = "";
+
+		if (typeof msg.content === "string") {
+			text = msg.content;
+		} else if (Array.isArray(msg.content)) {
+			text = msg.content
+				.map((block: any) => {
+					if (block.type === "text") return block.text;
+					if (block.type === "toolCall") return `[toolCall: ${block.name}]`;
+					if (block.type === "toolResult") {
+						return `[toolResult: ${typeof block.content === "string" ? block.content.slice(0, 300) : JSON.stringify(block.content ?? "").slice(0, 300)}]`;
+					}
+					return "";
+				})
+				.filter(Boolean)
+				.join("\n");
+		}
+
+		if (!text) continue;
+
+		// Extract structured facts from the text
+		// File paths: look for patterns like path/to/file.ts or File: path/to/file
+		for (const match of text.matchAll(/["'`]?(?:[\w.-]+\/)+[\w.-]+\.[a-z]+["'`]?/gi)) {
+			const path = match[0].replace(/["'`]/g, "");
+			if (path.length > 10 && !path.startsWith("node_modules/") && !path.startsWith(".git/")) {
+				filesModified.add(path);
+			}
+		}
+
+		// Errors: lines containing error/exception/failed/failure
+		for (const line of text.split("\n")) {
+			const lower = line.toLowerCase();
+			if (/error|exception|failed|failure|exit code \d+/i.test(lower) && !lower.includes("no error")) {
+				const cleaned = line.replace(/^\s*[\[\(]?\d+[\]\)]?\s*/, "").slice(0, 200).trim();
+				if (cleaned && !unresolvedErrors.includes(cleaned)) {
+					unresolvedErrors.push(cleaned);
+				}
+			}
+		}
+
+		// User decisions and constraints: look for patterns in user messages
+		if (role === "user") {
+			for (const line of text.split("\n")) {
+				const lower = line.toLowerCase().trim();
+				if (!lower) continue;
+				// User preferences / constraints
+				if (/^(?:please |can you |make sure |ensure |remember |don't |do not |always |never )/i.test(lower)) {
+					const cleaned = line.trim().slice(0, 150);
+					if (!constraints.includes(cleaned)) constraints.push(cleaned);
+				}
+				// Explicit decisions
+				if (/^(?:let's |i (?:decided|chose|pick|want|prefer|think|believe) )/i.test(lower)) {
+					const cleaned = line.trim().slice(0, 150);
+					if (!userDecisions.includes(cleaned)) userDecisions.push(cleaned);
+				}
+			}
+		}
+
+		const excerpt = `[${role}] ${text.slice(0, 3000)}`;
+		if (totalChars + excerpt.length > maxChars) break;
+
+		excerpts.unshift(excerpt); // maintain chronological order
+		totalChars += excerpt.length;
+	}
+
+	return {
+		messageExcerpts: excerpts,
+		filesModified: [...filesModified].slice(0, 30),
+		unresolvedErrors: unresolvedErrors.slice(0, 15),
+		userDecisions: userDecisions.slice(0, 10),
+		constraints: constraints.slice(0, 10),
+	};
+}
+
+/**
+ * Create a completeText callback for the quality gate by resolving the judge
+ * model and wiring up Pi's LLM infrastructure.
+ *
+ * Returns null if the model cannot be resolved (caller should skip the gate).
+ */
+async function makeQualityGateCompleter(
+	ctx: any,
+	qgConfig: { judgeModel?: string | null },
+): Promise<((prompt: string, signal?: AbortSignal) => Promise<string>) | null> {
+	try {
+		let model: any;
+		let apiKey: string;
+		let headers: Record<string, string> | undefined;
+
+		const registry = ctx.modelRegistry;
+		const judgeModelStr = qgConfig.judgeModel;
+
+		if (judgeModelStr && typeof judgeModelStr === "string") {
+			// Parse "provider/modelId"
+			const slashIdx = judgeModelStr.indexOf("/");
+			if (slashIdx < 0) {
+				console.warn(`blackhole: quality gate: invalid judgeModel "${judgeModelStr}" (expected "provider/modelId")`);
+				return null;
+			}
+			const provider = judgeModelStr.slice(0, slashIdx);
+			const modelId = judgeModelStr.slice(slashIdx + 1);
+			model = registry?.find?.(provider, modelId);
+			if (!model) {
+				console.warn(`blackhole: quality gate: judge model "${judgeModelStr}" not found in registry`);
+				return null;
+			}
+			const auth = await registry?.getApiKeyAndHeaders?.(model);
+			if (!auth?.ok) {
+				console.warn(`blackhole: quality gate: no auth for judge model "${judgeModelStr}"`);
+				return null;
+			}
+			apiKey = auth.apiKey as string;
+			headers = auth.headers as Record<string, string> | undefined;
+		} else {
+			// Use session's active model
+			model = ctx.model;
+			if (!model) {
+				console.warn("blackhole: quality gate: no session model available");
+				return null;
+			}
+			const auth = await registry?.getApiKeyAndHeaders?.(model);
+			if (!auth?.ok) {
+				console.warn("blackhole: quality gate: no API key for session model");
+				return null;
+			}
+			apiKey = auth.apiKey as string;
+			headers = auth.headers as Record<string, string> | undefined;
+		}
+
+		return async (prompt: string, signal?: AbortSignal): Promise<string> => {
+			const result = await completeSimple(model, {
+				messages: [{ role: "user", content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() }],
+			}, {
+				apiKey,
+				headers,
+				signal,
+				maxTokens: 2000,
+			});
+			const textBlock = result.content.find(
+				(b: any): b is { type: "text"; text: string } => b.type === "text",
+			);
+			return textBlock?.text ?? "";
+		};
+	} catch (err) {
+		console.warn(`blackhole: quality gate: failed to resolve model: ${err instanceof Error ? err.message : String(err)}`);
+		return null;
+	}
+}
+
+
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
-  pi.on("session_before_compact", (event, ctx) => {
+  pi.on("session_before_compact", async (event, ctx) => {
     const { preparation, branchEntries, customInstructions } = event;
     omRuntime.ensureConfig(ctx.cwd ?? process.cwd());
     const trace = (ev: string, d?: Record<string, unknown>) => debugLog(ev, d, omRuntime.config.debugLog === true);
@@ -464,10 +637,69 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       omDetails = projection.details;
     }
 
+    // ── Build the combined summary ──
+    const combinedSummary = omContent ? summary + "\n\n" + omContent : summary;
+
+    // ── Optional quality gate ──
+    let finalSummary = combinedSummary;
+    let qualityGateDetails: Record<string, unknown> | undefined;
+    const qgConfig = omRuntime.config.qualityGate;
+    if (
+      qgConfig?.enabled &&
+      omRuntime.config.compactionEngine !== "pi-default"
+    ) {
+      const sourceEvidence = buildSourceEvidence(agentMessages, 8000);
+      const traceInfo: Record<string, unknown> = {
+        sourceMessageCount: agentMessages.length,
+        excerptChars: sourceEvidence.messageExcerpts.reduce((s, e) => s + e.length, 0),
+        filesFound: sourceEvidence.filesModified.length,
+        errorsFound: sourceEvidence.unresolvedErrors.length,
+      };
+
+      try {
+        const completeText = await makeQualityGateCompleter(ctx, qgConfig);
+        if (completeText) {
+          const gateResult = await runQualityGate({
+            candidate: combinedSummary,
+            sourceEvidence,
+            completeText,
+            config: qgConfig,
+            signal: event.signal,
+          });
+
+          finalSummary = gateResult.summary;
+          qualityGateDetails = {
+            accepted: gateResult.accepted,
+            repaired: gateResult.repaired,
+            score: gateResult.score,
+            diagnosis: gateResult.diagnosis,
+            repairCount: gateResult.repairCount,
+          };
+
+          Object.assign(traceInfo, qualityGateDetails);
+
+          // Apply onRejected policy
+          if (!gateResult.accepted) {
+            if (qgConfig.onRejected === "reject") {
+              ctx?.ui?.notify?.(formatGateNotification(gateResult), "warning");
+              return { cancel: true };
+            }
+            // "warn" (default): accept with notification
+            ctx?.ui?.notify?.(formatGateNotification(gateResult), "info");
+          }
+        }
+      } catch (err) {
+        // Gate failure: fall through to accept the original summary
+        traceInfo.gateError = err instanceof Error ? err.message : String(err);
+      }
+
+      trace("before_compact.quality_gate", traceInfo);
+    }
+
     return {
       compaction: {
-        summary: omContent ? summary + "\n\n" + omContent : summary,
-        details: { ...details, "om.folded": omDetails },
+        summary: finalSummary,
+        details: { ...details, "om.folded": omDetails, ...(qualityGateDetails ? { "quality-gate": qualityGateDetails } : {}) },
         tokensBefore: preparation.tokensBefore,
         firstKeptEntryId,
       },
