@@ -82,8 +82,7 @@ describe("compile", () => {
     const r = compile({
       messages: [userMsg("check final summary wrapping")],
     });
-    // RECALL_NOTE is now appended by the before-compact hook render-summary,
-    // not by compile() itself, so we only check line wrapping.
+    // RECALL_NOTE is appended by compile() itself (wrapped with the rest).
     const maxLineLength = Math.max(...r.split("\n").map((line) => line.length));
     expect(maxLineLength).toBeLessThanOrEqual(120);
   });

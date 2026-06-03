@@ -154,9 +154,7 @@ export const compile = (input: CompileInput): string => {
   prev = prev ? stripOMContent(prev) : undefined;
   const merged = prev ? mergePrevious(prev, fresh) : fresh;
   if (!merged) return "";
-  return wrapLongLines(merged);
-  // RECALL_NOTE is now part of OM_FOOTER in render-summary.ts, appended
-  // by the before-compact hook after observations/reflections.
+  return wrapLongLines(merged + SEPARATOR + RECALL_NOTE);
 };
 
 const stripRecallNote = (text: string): string => {

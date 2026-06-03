@@ -47,8 +47,9 @@ export const capBrief = (text: string): string => {
 };
 
 export const RECALL_NOTE =
-  "Use `recall` to search for prior work, decisions, and context from before this summary. " +
-  "Do not redo work already completed.";
+  "The conversation before this point has been compacted into the summary above. " +
+  "Details not captured here — exact code, error messages, file paths — are only recoverable via `recall`. " +
+  "Use `recall` to search the session history. Do not redo work already completed.";
 
 export const formatSummary = (data: SectionData): string => {
   const headerParts = [
@@ -69,7 +70,7 @@ export const formatSummary = (data: SectionData): string => {
 
   if (parts.length === 0) return "";
 
-  // NOTE: RECALL_NOTE is intentionally NOT appended here.
+  // NOTE: RECALL_NOTE is appended by compile(), not here.
   // It is appended once by `compile()` at the very end, after merge-with-previous,
   // to avoid the note compounding inside the brief transcript across compactions.
   return wrapLongLines(parts.join("\n\n---\n\n"));
