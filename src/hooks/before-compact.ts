@@ -453,7 +453,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     omRuntime.compactWasPiVcc = isPiVcc;
 
     // ── Inject observational-memory content ───────────────────────────
-    let omContent = "";
+    let omContent: string;
     let omDetails: Record<string, unknown> | undefined;
     trace("before_compact.om_injection", { memoryEnabled: omRuntime.config.memory !== false });
     if (omRuntime.config.memory !== false) {
@@ -464,11 +464,13 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     );
       omContent = renderSummary(projection.reflections, projection.observations);
       omDetails = projection.details;
+    } else {
+      omContent = renderSummary([], []);
     }
 
     return {
       compaction: {
-        summary: omContent ? summary + "\n\n" + omContent : summary,
+        summary: summary + "\n\n" + omContent,
         details: { ...details, "om.folded": omDetails },
         tokensBefore: preparation.tokensBefore,
         firstKeptEntryId,

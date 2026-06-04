@@ -176,12 +176,15 @@ const stripRecallNote = (text: string): string => {
 };
 
 /**
- * Strip OM content (## Reflections, ## Observations, and the
- * CONTEXT_USAGE_INSTRUCTIONS preamble) from a previous compaction summary.
+ * Strip OM content and recall-guidance footers from a previous compaction summary.
  *
- * OM content is appended after compile() by the before-compact hook, so it
- * must be stripped from the previous summary to prevent compounding across
- * compactions. The fresh OM projection is re-rendered each time.
+ * OM content (## Reflections / ## Observations + instructions) is appended after
+ * compile() by the before-compact hook, so it must be stripped from the previous
+ * summary to prevent compounding across compactions. The fresh OM projection is
+ * re-rendered each time.
+ *
+ * Also strips the basic recall-guidance footer that is always appended when OM
+ * is off or has no entries.
  */
 const stripOMContent = (text: string): string => {
   // Remove everything from "## Reflections" or "## Observations" onward,
@@ -192,6 +195,9 @@ const stripOMContent = (text: string): string => {
   const reflIdx = reflMatch ? reflMatch.index! : -1;
   const obsMatch = text.match(/^## Observations/m);
   const obsIdx = obsMatch ? obsMatch.index! : -1;
+
+  // Also detect the basic recall-guidance footer (no observation preamble)
+  const basicFooterIdx = text.indexOf("Use `recall` with an id to retrieve original context, or `#N:path` drill-down");
 
   // Find the start of OM content: either the instructions preamble or the first section header
   let stripFrom = -1;
@@ -208,6 +214,9 @@ const stripOMContent = (text: string): string => {
     } else if (minSectionIdx < Infinity) {
       stripFrom = minSectionIdx;
     }
+  } else if (basicFooterIdx >= 0) {
+    // Strip the basic recall-guidance footer (no observations/reflections present)
+    stripFrom = basicFooterIdx;
   }
 
   if (stripFrom < 0) return text;

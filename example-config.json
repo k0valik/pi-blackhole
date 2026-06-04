@@ -1,10 +1,12 @@
 {
-  "_comment": "blackhole unified configuration — ~/.pi/agent/pi-blackhole/pi-blackhole-config.json",
+  "_comment": "blackhole unified configuration v2 — ~/.pi/agent/pi-blackhole/pi-blackhole-config.json",
   "_all_settings_in_one_file": true,
+  "_new_keys": "compaction, compactionEngine, tailBehavior, sessionFallback — new config surface",
+  "_renamed": "was example-config-v2.json; old example-config.json → example-config-old.json",
 
-  "overrideDefaultCompaction": false,
-  "noAutoCompact": false,
-  "debug": false,
+  "compaction": "auto",
+  "compactionEngine": "blackhole",
+  "tailBehavior": "minimal",
 
   "model": {
     "_comment": "Base model (last fallback before session model).",
@@ -98,33 +100,23 @@
   "agentMaxTurns": 16,
 
   "memory": true,
-  "passive": false,
-  "noAutoCompact": false,
+  "sessionFallback": true,
+  "debug": false,
   "debugLog": false,
 
   "_notes": [
-    "Model fallback chains per worker:",
-    "  Observer: qwen3-next-80b → gemma4:31b-cloud → google/gemma-4-31b-it:free → base model → session",
-    "  Reflector: gpt-oss-120b (cerebras) → glm-4.7 (z.ai) → openai/gpt-oss-120b:free → base model → session",
-    "  Dropper:  gpt-oss-120b (cerebras) → glm-4.7 (z.ai) → openai/gpt-oss-120b:free → base model → session",
+    "v2 config surface:",
+    "  compaction (auto|manual|off) — how compaction triggers",
+    "  compactionEngine (blackhole|pi-default) — who handles it",
+    "  tailBehavior (pi-default|minimal) — how much stays visible",
+    "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
     "",
-    "On retryable error (429, 5xx, timeout), the model is cooled down for cooldownHours.",
-    "Cooled-down models are skipped on subsequent consolidation attempts until cooldown expires.",
-    "After all candidates exhausted, the stage aborts. 30s retry gate prevents spam.",
-    "Cooldowns persist in ~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json (survives pi restarts).",
-    "Valid thinking values: off, minimal, low, medium, high, xhigh.",
-    "Env override for passive mode: PI_BLACKHOLE_PASSIVE=true.",
+    "Backward compat: old keys (overrideDefaultCompaction, noAutoCompact, passive)",
+    "are migrated to new keys at load time.",
     "",
-    "noAutoCompact mode accumulates observationBatches/reflectionBatches in",
-    "<sessionId>-pending.json (per-session) across pipeline runs.",
-    "On /blackhole flush, all accumulated batches are written to the branch and the file is cleared.",
-    "The observer preamble (CURRENT OBSERVATIONS)",
-    "is capped to observerPreambleMaxTokens (default 0 = auto 30% of observerChunkMaxTokens).",
-    "This is a soft safety valve — it only trims when accumulated observations exceed",
-    "the budget. High-relevance observations are always kept. Reflections are never trimmed.",
-    "",
-    "agentMaxTurns controls how many agent-loop turns each worker gets per chunk.",
-    "Lower-context models can reduce this (e.g., 8) so the observer doesn't waste",
-    "turns trying to extract more than it can reliably handle per run."
+    "Env overrides:",
+    "  PI_BLACKHOLE_PASSIVE=1  → compaction:off + memory:false",
+    "  PI_BLACKHOLE_COMPACTION  → override compaction setting",
+    "  PI_BLACKHOLE_COMPACTION_ENGINE → override compactionEngine setting"
   ]
 }

@@ -160,6 +160,11 @@ Root cause is a missing token refresh...
 
 ---
 
+---
+The conversation before this point has been compacted into the summary above.
+Details not captured here — exact code, error messages, file paths — are only recoverable via `recall`.
+Use `recall` to search the session history. Do not redo work already completed.
+
 ## Reflections
 [c3d4e5f6a1b2] User is building Acme Dashboard on Next.js 15 with Supabase auth.
 
@@ -168,20 +173,14 @@ Root cause is a missing token refresh...
 [b2c3d4e5f6a1] 2026-05-23 [medium] GraphQL migration completed; user confirmed working.
 
 ----
-Use `recall` to search for prior work, decisions, and context from before this summary. Do not redo work already completed.
-
-These are condensed memories from earlier in this session.
-
-- Reflections: stable, long-lived facts about the user, project, decisions, and constraints.
-- Observations: timestamped events from the conversation history, in chronological order.
-
-Treat these as past records. When entries conflict, the most recent observation reflects the latest known state. Work that prior observations describe as completed should not be redone unless the user explicitly asks to revisit it.
-
-When exact source context is needed for precision or traceability, use the `recall` tool with the relevant observation or reflection id.
+Bracketed ids in reflections and observations connect to their source session entries. These are condensed memories from earlier in this session.
+When entries conflict, the most recent observation reflects the latest known state.
+Use `recall` with an id to retrieve original context, or `#N:path` drill-down to explore file content from referenced entries.
+When exact source context is needed for precision or traceability, use the `recall` tool with the relevant observation or reflection id. This is especially useful when a reflection materially affects a decision or is too compressed to continue confidently.
 ----
 ```
 
-> **Note:** The OM injection format uses `## Reflections` and `## Observations` Markdown headers with a preamble and footer. Each observation and reflection has a 12-char hex identifier you can use with the `recall` tool to recover source evidence, as well as the agent can search based on them and get relevant context back.
+> **Note:** The OM injection format uses `## Reflections` and `## Observations` Markdown headers followed by a brief footer. Each observation and reflection has a 12-char hex identifier you can use with the `recall` tool to recover source evidence, as well as the agent can search based on them and get relevant context back. When no observations or reflections exist, only a short recall-guidance footer is appended.
 
 ---
 
@@ -254,7 +253,7 @@ The agent gets a unified `recall` tool that handles three types of input:
 
 ## Configuration
 
-All settings in a single JSON file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — auto-created with defaults on first startup. See [`CONFIG.md`](CONFIG.md) for the full reference with detailed explanations for every knob. An annotated example config with the new config surface is at [`example-config-v2.json`](example-config-v2.json). The legacy example is at [`example-config.json`](example-config.json).
+All settings in a single JSON file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — auto-created with defaults on first startup. See [`CONFIG.md`](CONFIG.md) for the full reference with detailed explanations for every knob. An annotated example config is at [`example-config.json`](example-config.json).
 
 Quick start — just set custom models (if you want):
 
@@ -280,6 +279,7 @@ Everything else has sensible defaults.
 | `observerModel` / `observerFallbackModels` | — / `[]` | Primary + fallback models for observer (extracts facts) |
 | `reflectorModel` / `reflectorFallbackModels` | — / `[]` | Primary + fallback models for reflector (synthesizes reflections) |
 | `dropperModel` / `dropperFallbackModels` | — / `[]` | Primary + fallback models for dropper (prunes observations) |
+| `sessionFallback` | `true` | When false, skip session model fallback when all OM model candidates are exhausted. Default true for backward compatibility. |
 | *(per model)* `thinking` | `"low"` | Thinking/reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | *(per model)* `cooldownHours` | `1` | How long to skip this model after a retryable error |
 | *(per model)* `contextWindow` | *(inherited from Pi)* | Override context window for this model. If unset, inherits from Pi's model registry. When set, the OM pipeline checks if the estimated input fits before calling the model — if not, the next fallback is tried. |

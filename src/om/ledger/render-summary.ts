@@ -6,16 +6,16 @@
  */
 import type { Observation, Reflection } from "./types.js";
 
-const CONTEXT_USAGE_INSTRUCTIONS = `These are condensed memories from earlier in this session.
+const OM_INSTRUCTIONS_FULL = `Bracketed ids in reflections and observations connect to their source session entries. These are condensed memories from earlier in this session.
+When entries conflict, the most recent observation reflects the latest known state.
+Use \`recall\` with an id to retrieve original context, or \`#N:path\` drill-down to explore file content from referenced entries.
+When exact source context is needed for precision or traceability, use the \`recall\` tool with the relevant observation or reflection id. This is especially useful when a reflection materially affects a decision or is too compressed to continue confidently.`;
 
-- Reflections: stable, long-lived facts about the user, project, decisions, and constraints. New reflection lines may include ids in brackets.
-- Observations: timestamped events from the conversation history, in chronological order. Observation lines include ids in brackets.
+const OM_INSTRUCTIONS_BASIC = `Use \`recall\` with an id to retrieve original context, or \`#N:path\` drill-down to explore file content from referenced entries.
+When entries conflict, the most recent entry reflects the latest known state.`;
 
-Treat these as past records. When entries conflict, the most recent observation reflects the latest known state. Work that prior observations describe as completed should not be redone unless the user explicitly asks to revisit it.
-
-When exact source context is needed for precision or traceability, use the \`recall\` tool with the relevant observation or reflection id. This is especially useful when a reflection materially affects a decision or is too compressed to continue confidently. Do not use \`recall\` as broad search or inject raw source unless it is needed.`;
-
-export const OM_FOOTER = `----\n${CONTEXT_USAGE_INSTRUCTIONS}\n----`;
+export const OM_FOOTER_FULL = `----\n${OM_INSTRUCTIONS_FULL}\n----`;
+export const OM_FOOTER_BASIC = `----\n${OM_INSTRUCTIONS_BASIC}\n----`;
 
 export function observationToSummaryLine(observation: Observation): string {
 	return `[${observation.id}] ${observation.timestamp} [${observation.relevance}] ${observation.content}`;
@@ -77,7 +77,7 @@ export function reflectionToSummaryLine(reflection: Reflection): string {
 }
 
 export function renderSummary(reflections: Reflection[], observations: Observation[]): string {
-	if (reflections.length === 0 && observations.length === 0) return "";
+	const hasContent = reflections.length > 0 || observations.length > 0;
 
 	const parts: string[] = [];
 	if (reflections.length > 0) {
@@ -86,6 +86,11 @@ export function renderSummary(reflections: Reflection[], observations: Observati
 	if (observations.length > 0) {
 		parts.push(`## Observations\n${observations.map(observationToSummaryLine).join("\n")}`);
 	}
-	parts.push(OM_FOOTER);
-	return parts.join("\n\n");
+
+	const footer = hasContent ? OM_FOOTER_FULL : OM_FOOTER_BASIC;
+	if (parts.length > 0) {
+		parts.push(footer);
+		return parts.join("\n\n");
+	}
+	return footer;
 }

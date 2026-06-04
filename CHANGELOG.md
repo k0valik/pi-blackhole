@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.3.5] - 2026-06-04
+
+### Added
+
+- **`sessionFallback` config option.** When `false`, skip the main session model as last-resort fallback when all OM-specific model candidates are exhausted. Default `true` for backward compatibility. Useful for keeping OM workers on cheaper/faster models. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Session-file LRU cache.** `loadAllMessages` now caches up to 3 session files with mtime + TTL (2s) invalidation. Reduces redundant I/O on repeated recall searches in the same session. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Pending state sanitization.** `readSessionState` now filters corrupted batch entries (missing `coversUpToId` or `data` fields) instead of returning them as-is. Prevents crashes from edge cases like a partial write to `pending.json`. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Shared `isRetryableError` / `RETRYABLE_ERROR_RE`.** Extracted from `cooldown.ts` and `compaction-trigger.ts` into `retryable-error.ts` — single source of truth, re-exports Pi's `isContextOverflow` for provider-specific overflow detection. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Shared provider-stream bridge.** `createBridgeStreamFn` extracted from all three OM agents (observer, reflector, dropper) into `provider-stream.ts`. Custom providers registered by other extensions (e.g., claude-bridge) continue working through jiti-loaded consolidation agents. ([#21](https://github.com/k0valik/pi-blackhole/pull/21))
+- **Async buffered debug logging.** `debugLog()` now buffers JSONL writes in memory and flushes on a 1-second background timer, with synchronous flush on `exit`. Reduces event-loop blocking during high-frequency debug events. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Windows path support in file extraction.** `longestCommonDirPrefix` normalizes backslashes and recognizes `C:\`-style drive letters. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+
+### Fixed
+
+- **Context window check uses actual input size, not configured cap.** Observer/reflector/dropper now compute `observerEstimatedInput` from the actual chunk tokens after capping, not from `observerChunkMaxTokens`. More accurate — fewer false "context window exceeded" rejections on smaller-than-cap inputs. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **`coversUpToId` now points past capping, not before.** Observer stage captured the last entry ID before capping source entries to `maxChunkTokens`, so the coverage marker could point to an entry that was dropped. Now captured after capping. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **`capSourceEntriesToTokens` counts all entry types.** Previously only `"message"` entries counted toward the token budget — custom OM entries (`observations_recorded`, `reflections_recorded`, etc.) and summary-bearing entries were invisible, risking context overflow in the observer. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Reflector/dropper avoid redundant disk reads.** Both stages now use the outer-scope `pending` variable (already read in the `noAutoCompact` block) instead of calling `readPendingState(sessionId)` again inside the for loop. Neutral correctness win. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Observer rejects invalid observation IDs gracefully.** `normalizeSourceEntryIds` now filters out unknown/duplicate IDs instead of returning `undefined` and discarding the entire observation batch. One hallucinated ID from the LLM no longer loses valid observations. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **`pendingObservationsCreatedAfter` properly typed.** Changed from `pending: any` to `pending: PendingOMState` — catches type mismatches at compile time. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Section headers in summaries use line-boundary regex.** `sectionOf` and `stripOMContent` now match `## Reflections` / `## Observations` at the start of a line instead of using bare `indexOf`. Prevents false positives when those phrases appear inside file paths or conversation text. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Read+same-path-Modified dedup in file summaries.** `mergeFileLines` now removes a path from `Read` if it also appears in `Modified` — a file that was read then edited shouldn't show twice. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **`reverse-recall` outputs related reflections.** The `_reflections` dead parameter is now used — related reflections are shown alongside observations when expanding session entries. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Cooldown reason in UI notification.** The `getCooldownEntry` function now returns the actual entry (with reason), so the status notification shows *why* a model was cooled down, not just "cooldown active". ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Env override validation.** Invalid `PI_BLACKHOLE_COMPACTION` / `PI_BLACKHOLE_COMPACTION_ENGINE` values now print a warning instead of being silently ignored. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **`observerPreambleMaxTokens` accepts 0.** Now uses `nonNegativeInt` validator instead of `positiveInt` — 0 means "auto-compute", which was the intended semantics. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+
+### Changed
+
+- **Replaced hand-rolled text wrapping with `wrapTextWithAnsi` from pi-tui.** The custom `wrapLine` function was replaced with `wrapLineWithContinuation` using pi-tui's ANSI-aware wrapping. Handles list continuation indentation and ANSI mid-sequence splits correctly. ([#21](https://github.com/k0valik/pi-blackhole/pull/21))
+- **`visibleWidth` re-exported from pi-tui.** The local CJK-width implementation in `key-matcher.ts` was replaced with a re-export from `@earendil-works/pi-tui`. Fallback note retained if the import fails in overlay context. ([#21](https://github.com/k0valik/pi-blackhole/pull/21))
+- **Bash command compression improved.** Multi-line commands joined with semicolons instead of first-line-only. Pipe tails strip `awk`/`python3`/`node`/`bun` excluded (their output carries semantic meaning). Word-boundary truncation instead of mid-word cut. Up to 10 tail-strip iterations with stability guard. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **`fuzzyMatch` → `prefixMatch`.** The `/blackhole` subcommand filter changed from fuzzy/subsequence matching to simple prefix matching. Predictable narrowing: typing "om" matches "om-on" and "om-off". ([#21](https://github.com/k0valik/pi-blackhole/pull/21))
+- **`read` tool summary field corrected.** `TOOL_SUMMARY_FIELDS` now maps lowercase `read` → `"path"` (not `"file_path"`), matching the actual tool argument. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Tool error blank-line suppression.** `stringifyBrief` now suppresses blank lines between consecutive tool/error summaries (previously only between consecutive tool summaries). ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Recall header distinguishes matches vs expands.** The search result header now shows `"X matches (+ Y expanded)"` when entries were pulled in via `#N` expand rather than matching the query. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Compaction output instructions split into full/basic variants.** `CONTEXT_USAGE_INSTRUCTIONS` shortened to 4 lines (previously 10). When observations/reflections are present, the full version includes the bracketed-ids preamble + recall footer. When none exist (or OM is off), a basic 2-line recall-guidance footer is appended instead. `renderSummary` always returns a footer, and `stripOMContent` handles both variants to prevent compounding. ([#23](https://github.com/k0valik/pi-blackhole/pull/23))
+
+### Removed
+
+- **Dead `loadSettings()` / `PiVccSettings`.** Config loading unified in `unified-config.ts` — the `settings.ts` wrapper had zero callers. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Dead `transcriptEntries` from `SectionData`.** Removed from `sections.ts` and `build-sections.ts`. (dead since v0.3.3) ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Dead toggle helpers.** `toggleCompaction`, `toggleCompactionEngine`, `toggleTailBehavior` removed from `unified-config.ts` (zero callers — toggling is handled by the configure overlay). ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Dead `vcc-report.test.ts`.** Test file was testing a non-existent `src/core/report.js` module. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Dead `config-simplification.test.ts`.** Tested old config migration that's been stable since v0.3.3. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+
+### Docs
+
+- **Renamed example configs.** `example-config-v2.json` → canonical `example-config.json` (new config surface). Old `example-config.json` → `example-config-old.json` (legacy keys). ([#21](https://github.com/k0valik/pi-blackhole/pull/21))
+- **README: updated "What the agent sees" example** to match actual output ordering and expanded RECALL_NOTE text. ([#21](https://github.com/k0valik/pi-blackhole/pull/21))
+- **README: added `sessionFallback` to settings table.** ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **example-config.json: added `sessionFallback` field.** ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **README: updated "What the agent sees" example** to match the new shorter CONTEXT_USAGE_INSTRUCTIONS text and note about basic footer when OM is off. ([#23](https://github.com/k0valik/pi-blackhole/pull/23))
+
 ## [0.3.4] - 2026-06-02
 
 ### Added

@@ -64,10 +64,13 @@ describe("reflectionToSummaryLine", () => {
 });
 
 describe("renderSummary", () => {
-	it("returns empty string when both lists are empty", async () => {
+	it("returns basic recall footer when both lists are empty", async () => {
 		const { renderSummary } = await import("../src/om/ledger/render-summary.js");
 		const result = renderSummary([], []);
-		expect(result).toBe("");
+		expect(result).toContain("Use `recall` with an id");
+		expect(result).toContain("most recent entry");
+		expect(result).not.toContain("## Reflections");
+		expect(result).not.toContain("## Observations");
 	});
 
 	it("includes reflections section when reflections present", async () => {
@@ -95,14 +98,16 @@ describe("renderSummary", () => {
 		const result = renderSummary([ref], [obs]);
 		expect(result).toContain("## Reflections");
 		expect(result).toContain("## Observations");
+		expect(result).toContain("Bracketed ids in reflections and observations");
 	});
 
-	it("includes context instructions at the top", async () => {
+	it("includes full context instructions when observations/reflections present", async () => {
 		const { renderSummary } = await import("../src/om/ledger/render-summary.js");
 		const ref = makeReflection("ref00000000aa");
 		const result = renderSummary([ref], []);
-		expect(result).toContain("These are condensed memories");
+		expect(result).toContain("Bracketed ids in reflections and observations");
 		expect(result).toContain("## Reflections");
+		expect(result).toContain("most recent observation");
 	});
 
 	it("handles multiple reflections and observations in order", async () => {
