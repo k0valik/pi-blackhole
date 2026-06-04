@@ -13,6 +13,7 @@
  *   requires the entire query to be the drill-down pattern.
  */
 import { isContentBearing } from "./content.js";
+import { extractPath } from "./tool-args.js";
 import { loadAllMessages } from "./load-messages.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -28,14 +29,6 @@ interface ContentBearingCall {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-/** Extract the file path from tool call args, checking all known keys. */
-function extractPathFromArgs(args: Record<string, unknown>): string | null {
-  for (const key of ["path", "filePath", "file_path", "file"]) {
-    if (typeof args[key] === "string") return args[key] as string;
-  }
-  return null;
-}
-
 /**
  * Find content-bearing tool calls that have a `path` argument and at least
  * one content field (content, edits, oldText, newText).
@@ -48,7 +41,7 @@ function findContentBearingCalls(content: unknown[]): ContentBearingCall[] {
     if (!part || (part as any).type !== "toolCall") continue;
     const args = (part as any).arguments ?? {};
     if (!isContentBearing(args)) continue;
-    const path = extractPathFromArgs(args);
+    const path = extractPath(args);
     if (!path) continue;
     const entry: ContentBearingCall = { name: (part as any).name ?? "", path };
     if (typeof args.content === "string") entry.content = args.content;

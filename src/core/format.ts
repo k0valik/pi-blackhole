@@ -1,4 +1,5 @@
 import type { SectionData } from "../sections";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const section = (title: string, items: string[]): string => {
   if (items.length === 0) return "";
@@ -9,36 +10,23 @@ const section = (title: string, items: string[]): string => {
 const BRIEF_MAX_LINES = 120;
 const TUI_SAFE_LINE_CHARS = 120;
 
-// Strip ANSI escape sequences which can corrupt mid-word split calculations
-const ANSI_RE = /\x1b\[[0-9;]*m/g;
-
-const wrapLine = (line: string, maxChars: number): string[] => {
-  // Use cleaned (ANSI-free) text for length calculations to avoid splitting escape sequences
-  const clean = line.replace(ANSI_RE, "");
-  if (clean.length <= maxChars) return [line];
-
+/**
+ * Wrap a single line of text, preserving list-item continuation indent.
+ * Detects leading bullets (-, *, N.) and indents continuation lines
+ * to match, so wrapped list items remain visually grouped.
+ */
+function wrapLineWithContinuation(line: string, maxChars: number): string[] {
   const indent = line.match(/^\s*(?:[-*]\s+|\d+\.\s+)?/)?.[0] ?? "";
   const continuationIndent = indent ? " ".repeat(Math.min(indent.length, 8)) : "";
-  const wrapped: string[] = [];
-  let remaining = line;
-  let prefix = "";
-
-  while (prefix.length + remaining.length > maxChars) {
-    const available = Math.max(20, maxChars - prefix.length);
-    let splitAt = remaining.lastIndexOf(" ", available);
-    if (splitAt < Math.floor(available * 0.5)) splitAt = available;
-
-    wrapped.push(prefix + remaining.slice(0, splitAt).trimEnd());
-    remaining = remaining.slice(splitAt).trimStart();
-    prefix = continuationIndent;
-  }
-
-  if (remaining) wrapped.push(prefix + remaining);
-  return wrapped;
-};
+  // Wrap at reduced width so prepending continuationIndent doesn't exceed maxChars
+  const safeMaxChars = continuationIndent ? maxChars - continuationIndent.length : maxChars;
+  const wrapped = wrapTextWithAnsi(line, safeMaxChars);
+  if (wrapped.length <= 1 || !continuationIndent) return wrapped;
+  return [wrapped[0], ...wrapped.slice(1).map((l) => continuationIndent + l)];
+}
 
 export const wrapLongLines = (text: string, maxChars = TUI_SAFE_LINE_CHARS): string =>
-  text.split("\n").flatMap((line) => wrapLine(line, maxChars)).join("\n");
+  text.split("\n").flatMap((line) => wrapLineWithContinuation(line, maxChars)).join("\n");
 
 export const capBrief = (text: string): string => {
   const lines = text.split("\n");
