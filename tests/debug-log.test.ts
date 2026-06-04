@@ -21,6 +21,7 @@ import {
 	DEBUG_LOG_MAX_BYTES,
 	DEBUG_LOG_RELATIVE_PATH,
 	debugLog,
+	flushDebugLog,
 	withDebugLogContext,
 } from "../src/om/debug-log.js";
 
@@ -45,6 +46,7 @@ describe("debug-log", () => {
 
 	it("does not write when context is not enabled", () => {
 		debugLog("test.event", { key: "value" });
+		flushDebugLog();
 		expect(readLog()).toEqual([]);
 	});
 
@@ -52,6 +54,7 @@ describe("debug-log", () => {
 		withDebugLogContext({ enabled: true, cwd: "/tmp/project", runId: "run-1" }, () => {
 			debugLog("test.event", { reason: "something" });
 		});
+		flushDebugLog();
 
 		const entries = readLog();
 		expect(entries).toHaveLength(1);
@@ -67,6 +70,7 @@ describe("debug-log", () => {
 			debugLog("obs.start");
 			debugLog("ref.start");
 		});
+		flushDebugLog();
 
 		const entries = readLog();
 		expect(entries).toHaveLength(2);
@@ -81,6 +85,7 @@ describe("debug-log", () => {
 				debugLog("inner");
 			});
 		});
+		flushDebugLog();
 
 		const entries = readLog();
 		expect(entries).toHaveLength(2);
@@ -93,16 +98,20 @@ describe("debug-log", () => {
 		withDebugLogContext({ enabled: true }, () => {
 			debugLog("check.path");
 		});
+		flushDebugLog();
 		expect(existsSync(join(agentDir, "pi-blackhole", "debug.ndjson"))).toBe(true);
 	});
 
 	it("never throws on write failure", () => {
+		// debugLog now buffers writes asynchronously; the sync flush path
+		// still uses appendFileSync internally.
 		const spy = vi.spyOn(fs, "appendFileSync").mockImplementation(() => {
 			throw new Error("Write failure");
 		});
 		expect(() => {
 			withDebugLogContext({ enabled: true }, () => {
 				debugLog("test.event");
+				flushDebugLog();
 			});
 		}).not.toThrow();
 		spy.mockRestore();

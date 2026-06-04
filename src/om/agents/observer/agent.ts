@@ -8,6 +8,7 @@
  */
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { createBridgeStreamFn } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { Static } from "typebox";
@@ -85,13 +86,19 @@ export function normalizeSourceEntryIds(
 	const allowedOrder = new Map<string, number>();
 	for (let i = 0; i < allowedSourceEntryIds.length; i++) allowedOrder.set(allowedSourceEntryIds[i], i);
 
+	// Filter out invalid/unknown IDs instead of rejecting the entire batch.
+	// Matches the dropper's normalizeDropObservationIds pattern: one hallucinated
+	// ID from the LLM should not discard valid observations.
 	const seen = new Set<string>();
+	const valid: string[] = [];
 	for (const id of sourceEntryIds) {
-		if (!allowedOrder.has(id)) return undefined;
+		if (!allowedOrder.has(id)) continue;
+		if (seen.has(id)) continue;
 		seen.add(id);
+		valid.push(id);
 	}
-	if (seen.size === 0) return undefined;
-	return Array.from(seen).sort((a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0));
+	if (valid.length === 0) return undefined;
+	return valid.sort((a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0));
 }
 
 /** Result returned by runObserver when no observations are recorded. */
@@ -226,16 +233,7 @@ ${conversation}`;
 	// Consolidation agents run via jiti (moduleCache: false) which creates a separate
 	// pi-ai instance whose apiProviderRegistry lacks custom providers registered by
 	// other extensions (e.g., claude-bridge). The bridge looks up streamSimple functions
-	// from a Symbol.for() global that index.ts populates during provider registration.
-	// If no custom provider is found, it falls back to the jiti-loaded streamSimple
-	// which handles all built-in providers correctly.
-	const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
-	const bridgeStreamFn = (model: any, ctx: any, opts: any) => {
-		const providerStreams: Map<string, Function> | undefined = (globalThis as any)[PROVIDER_STREAMS_KEY];
-		if (!providerStreams) return streamSimple(model, ctx, opts);
-		const customFn = model?.api ? providerStreams.get(model.api) : undefined;
-		return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
-	};
+	const bridgeStreamFn = createBridgeStreamFn(streamSimple);
 	const streamFn = args.streamFn ?? bridgeStreamFn;
 	const stream = loop(prompts, context, config, signal, streamFn);
 	let agentError: string | undefined;

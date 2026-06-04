@@ -236,10 +236,12 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.memory === "boolean") c.memory = raw.memory;
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
-	// Positive integers
+	// Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
 	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
 	for (const k of numKeys) {
-		const v = positiveInt(raw[k]);
+		// observerPreambleMaxTokens accepts 0 (auto-compute); everything else must be > 0
+		const validator = k === "observerPreambleMaxTokens" ? nonNegativeInt : positiveInt;
+		const v = validator(raw[k]);
 		if (v !== undefined) (c as Record<string, unknown>)[k] = v;
 	}
 
@@ -268,8 +270,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 
 /**
  * Migrate legacy config knobs to new unified surface.
- * Runs once at load time; old keys are removed from the parsed object.
- * Does NOT mutate the on-disk config file.
+ * Operates on the in-memory parsed object each time loadUnifiedConfig() is called;
+ * old keys are removed from this copy. Does NOT mutate the on-disk config file.
+ * Idempotent — safe to call repeatedly.
  */
 function migrateOldKnobs(parsed: Record<string, unknown>): void {
 	// Only run if new keys are absent AND old keys are present
@@ -367,13 +370,23 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 
 	// Env override — new compaction surface
 	const envCompaction = process.env.PI_BLACKHOLE_COMPACTION;
-	if (envCompaction !== undefined && isCompaction(envCompaction.trim().toLowerCase())) {
-		parsed.compaction = envCompaction.trim().toLowerCase() as "auto" | "manual" | "off";
+	if (envCompaction !== undefined) {
+		const trimmed = envCompaction.trim().toLowerCase();
+		if (isCompaction(trimmed)) {
+			parsed.compaction = trimmed as "auto" | "manual" | "off";
+		} else {
+			console.warn(`blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`);
+		}
 	}
 
 	const envCompactionEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
-	if (envCompactionEngine !== undefined && isCompactionEngine(envCompactionEngine.trim().toLowerCase())) {
-		parsed.compactionEngine = envCompactionEngine.trim().toLowerCase() as "blackhole" | "pi-default";
+	if (envCompactionEngine !== undefined) {
+		const trimmed = envCompactionEngine.trim().toLowerCase();
+		if (isCompactionEngine(trimmed)) {
+			parsed.compactionEngine = trimmed as "blackhole" | "pi-default";
+		} else {
+			console.warn(`blackhole: invalid PI_BLACKHOLE_COMPACTION_ENGINE value "${envCompactionEngine}"; ignoring`);
+		}
 	}
 
 	// Merge defaults then override
@@ -451,24 +464,7 @@ export function scaffoldConfig(): void {
 	}
 }
 
-// ── Toggle helpers ───────────────────────────────────────────────────────────
 
-/** Cycle compaction: auto → manual → off → auto */
-export function toggleCompaction(current: "auto" | "manual" | "off"): "auto" | "manual" | "off" {
-	const cycle: Array<"auto" | "manual" | "off"> = ["auto", "manual", "off"];
-	const idx = cycle.indexOf(current);
-	return cycle[(idx + 1) % cycle.length];
-}
-
-/** Toggle compactionEngine: blackhole ↔ pi-default */
-export function toggleCompactionEngine(current: "blackhole" | "pi-default"): "blackhole" | "pi-default" {
-	return current === "blackhole" ? "pi-default" : "blackhole";
-}
-
-/** Toggle tailBehavior: pi-default ↔ minimal */
-export function toggleTailBehavior(current: "pi-default" | "minimal"): "pi-default" | "minimal" {
-	return current === "pi-default" ? "minimal" : "pi-default";
-}
 
 // ── Migration detection ───────────────────────────────────────────────────────
 

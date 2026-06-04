@@ -79,24 +79,32 @@ function writeCooldownMap(map: CooldownMap): void {
  * When cooldownHours is explicitly 0, cooldown is disabled — always returns false.
  */
 export function isCooldownActive(model: OmModelConfig, now: Date = new Date()): boolean {
+	return getCooldownEntry(model, now) !== undefined;
+}
+
+/**
+ * Returns the active cooldown entry for a model, or undefined if not cooled down.
+ * Expired entries are cleaned up lazily.
+ */
+export function getCooldownEntry(model: OmModelConfig, now: Date = new Date()): CooldownEntry | undefined {
 	// cooldownHours === 0 means cooldown disabled
-	if (model.cooldownHours === 0) return false;
+	if (model.cooldownHours === 0) return undefined;
 
 	const map = readCooldownMap();
 	const key = modelKey(model);
 	const entry = map[key];
-	if (!entry) return false;
+	if (!entry) return undefined;
 
 	const until = new Date(entry.until);
-	if (isNaN(until.getTime())) return false;
+	if (isNaN(until.getTime())) return undefined;
 
 	if (now >= until) {
 		// Expired — clean up
 		delete map[key];
 		writeCooldownMap(map);
-		return false;
+		return undefined;
 	}
-	return true;
+	return entry;
 }
 
 /**
@@ -137,11 +145,6 @@ export function expireCooldowns(): void {
 	if (changed) writeCooldownMap(map);
 }
 
-/** Regex matching retryable API error messages. */
-const RETRYABLE_ERROR_RE = /(?:\b|^)(?:overloaded|provider|rate\s*limit|too\s+many\s+requests|429|500|502|503|504|timeout|timed?\s*out|network\s*error|connection\s*error|service\s*unavailable|server\s*error|internal\s*error|fetch\s*failed|upstream|websocket\s*closed|retry)(?:\b|$)/i;
+import { isRetryableError } from "./retryable-error.js";
 
-/** Check whether an error string or Error indicates a retryable error. */
-export function isRetryableError(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : String(error || "");
-	return RETRYABLE_ERROR_RE.test(message);
-}
+export { isRetryableError };

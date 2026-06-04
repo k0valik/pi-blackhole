@@ -12,7 +12,7 @@ export const OM_FOLDED = "om.folded";
 export const RELEVANCE_VALUES = ["low", "medium", "high", "critical"] as const;
 export type Relevance = (typeof RELEVANCE_VALUES)[number];
 
-export const MEMORY_ID_PATTERN = /^[a-f0-9]{12}$/;
+export const MEMORY_ID_PATTERN = /^[a-f0-9]{12}$/i;
 
 export type Entry = {
 	type: string;

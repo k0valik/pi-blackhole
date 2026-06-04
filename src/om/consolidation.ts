@@ -15,7 +15,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConfiguredModel } from "./config.js";
 import { debugLog, withDebugLogContext } from "./debug-log.js";
 import { type ResolveResult, type Runtime } from "./runtime.js";
-import { isRetryableError } from "./cooldown.js";
+import { isRetryableError } from "./retryable-error.js";
 import { effectiveContextWindow } from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
 
@@ -27,6 +27,7 @@ import {
 	savePendingReflection,
 	savePendingDropped,
 	isObservationChunkPending,
+	PendingOMState,
 } from "./pending.js";
 import {
 	OM_OBSERVATIONS_DROPPED,
@@ -98,6 +99,8 @@ function capSourceEntriesToTokens(entries: Entry[], maxTokens: number): Entry[] 
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
 		let chars = 0;
+		// Tokenize all entry types, not just "message": custom_message and
+		// branch_summary entries also consume observer context window.
 		if (entry.type === "message" && entry.message) {
 			const msg = entry.message as any;
 			if (typeof msg.content === "string") chars = msg.content.length;
@@ -106,9 +109,25 @@ function capSourceEntriesToTokens(entries: Entry[], maxTokens: number): Entry[] 
 					if (block.text) chars += block.text.length;
 				}
 			}
+		} else if (entry.type === "custom" && (entry.customType === OM_OBSERVATIONS_RECORDED || entry.customType === OM_REFLECTIONS_RECORDED || entry.customType === OM_OBSERVATIONS_DROPPED)) {
+			// Custom entries carry structured data — estimate from JSON serialization
+			chars = String(JSON.stringify(entry.data ?? {})).length;
+		} else if (entry.summary) {
+			chars = String(entry.summary).length;
 		}
 		const estTokens = Math.ceil(chars / 4);
 		if (totalTokens + estTokens > maxTokens && kept.length > 0) break;
+		// Remove the `kept.length > 0` guard? No — keep the guard but allow
+		// the first entry to be dropped only if it exceeds maxTokens alone.
+		// (The guard against empty kept list prevents dropping the first entry
+		// when later entries are small; but a single oversized entry should
+		// still be included to avoid losing the newest data entirely.)
+		if (totalTokens + estTokens > maxTokens && kept.length === 0) {
+			// First (newest) entry exceeds maxTokens alone — include it anyway
+			// to avoid data loss, but don't add more.
+			kept.unshift(entry);
+			break;
+		}
 		kept.unshift(entry);
 		totalTokens += estTokens;
 	}
@@ -140,7 +159,7 @@ function mergeReflections(existing: Reflection[], additional: Reflection[]): Ref
  * should still be served as "new" on subsequent runs.
  */
 function pendingObservationsCreatedAfter(
-	pending: any,
+	pending: PendingOMState,
 	entries: Entry[],
 	afterCoversUpToId: string | undefined,
 ): Observation[] {
@@ -315,14 +334,16 @@ async function runObserverStage(
 	// of processing everything including the compaction summary.
 	const effectiveStart = lastCoverageIdx >= 0 ? lastCoverageIdx : findLastCompactionIndex(entries);
 	let chunkEntries = sourceEntriesAfter(entries, effectiveStart);
-	const coversUpToId = chunkEntries.at(-1)?.id;
-	if (!coversUpToId) return "continue";
 
 	// Cap observer input to observerChunkMaxTokens (newest-to-oldest)
 	const maxChunkTokens = runtime.config.observerChunkMaxTokens;
 	if (tokens > maxChunkTokens) {
 		chunkEntries = capSourceEntriesToTokens(chunkEntries, maxChunkTokens);
 	}
+
+	// coversUpToId must point to the LAST entry AFTER capping, not before
+	const coversUpToId = chunkEntries.at(-1)?.id;
+	if (!coversUpToId) return "continue";
 
 	const { text: chunk, sourceEntryIds } = serializeSourceAddressedBranchEntries(chunkEntries);
 	if (!chunk.trim() || sourceEntryIds.length === 0) return "continue";
@@ -390,8 +411,9 @@ async function runObserverStage(
 		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "observer"), stageFallbacks: stageFallbackModels(runtime, "observer") });
 
 		// Check if estimated input fits in model's context window
+		// Use actual chunk tokens (already computed) instead of the configured cap
 		const effectiveObsCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-		const observerEstimatedInput = runtime.config.observerChunkMaxTokens + AGENT_LOOP_RESERVE;
+		const observerEstimatedInput = chunkTokens + AGENT_LOOP_RESERVE;
 		if (observerEstimatedInput > effectiveObsCtx) {
 			debugLog("observer.context_window_exceeded", { estimatedInput: observerEstimatedInput, effectiveCtx: effectiveObsCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
 			runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveObsCtx} too small for estimated input ${observerEstimatedInput}`), "observer");
@@ -474,7 +496,7 @@ async function runReflectorStage(
 ): Promise<ReflectorStageResult> {
 	const sessionId = ctx.sessionManager.getSessionId();
 	const entries = ctx.sessionManager.getBranch() as Entry[];
-	let reflectionTokens: number;
+	let reflectionTokens = 0;
 	let observationCoverageId: string | undefined;
 	if (runtime.config.noAutoCompact) {
 		const pending = readPendingState(sessionId);
@@ -523,8 +545,7 @@ async function runReflectorStage(
 		// Adjust accumulated for pending coverage in noAutoCompact mode
 		let effectiveReflectionTokens = reflectionTokens;
 		if (runtime.config.noAutoCompact) {
-			const pending = readPendingState(sessionId);
-			if (pending.reflection?.coversUpToId) {
+			if (pending?.reflection?.coversUpToId) {
 				const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
 				if (idx >= 0) effectiveReflectionTokens = rawTokensAfterIndex(entries, idx);
 			}
@@ -535,8 +556,9 @@ async function runReflectorStage(
 		const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "reflector"), stageFallbacks: stageFallbackModels(runtime, "reflector") });
 
 		// Check if estimated input fits in model's context window
+		// Use actual computed input size (new items + summary budget) instead of cap
 		const effectiveRefCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-		const reflectorEstimatedInput = runtime.config.reflectorInputMaxTokens + AGENT_LOOP_RESERVE;
+		const reflectorEstimatedInput = reflectorInputTokens + AGENT_LOOP_RESERVE;
 		if (reflectorEstimatedInput > effectiveRefCtx) {
 			debugLog("reflector.context_window_exceeded", { estimatedInput: reflectorEstimatedInput, effectiveCtx: effectiveRefCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
 			runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveRefCtx} too small for estimated input ${reflectorEstimatedInput}`), "reflector");
@@ -614,7 +636,7 @@ async function runDropperStage(
 ): Promise<StageOutcome> {
 	const sessionId = ctx.sessionManager.getSessionId();
 	const entries = ctx.sessionManager.getBranch() as Entry[];
-	let dropTokens: number;
+	let dropTokens = 0;
 	let observationCoverageId: string | undefined;
 	if (runtime.config.noAutoCompact) {
 		const pending = readPendingState(sessionId);
@@ -661,8 +683,7 @@ async function runDropperStage(
 		// Adjust accumulated for pending coverage in noAutoCompact mode
 		let effectiveDropTokens = dropTokens;
 		if (runtime.config.noAutoCompact) {
-			const pending = readPendingState(sessionId);
-			if (pending.dropped?.coversUpToId) {
+			if (pending?.dropped?.coversUpToId) {
 				const idx = entryIndexForId(entries, pending.dropped.coversUpToId);
 				if (idx >= 0) effectiveDropTokens = rawTokensAfterIndex(entries, idx);
 			}
@@ -692,8 +713,9 @@ async function runDropperStage(
 			const stageModelForThinking = runtime.findCandidateConfig(resolved.model, { model: ctx.model, modelRegistry: ctx.modelRegistry, hasUI: ctx.hasUI, ui: ctx.ui, stageModel: stageModelConfig(runtime, "dropper"), stageFallbacks: stageFallbackModels(runtime, "dropper") });
 
 			// Check if estimated input fits in model's context window
+			// Use actual computed input size (new observations + summary budget) instead of cap
 			const effectiveDropCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-			const dropperEstimatedInput = runtime.config.dropperInputMaxTokens + AGENT_LOOP_RESERVE;
+			const dropperEstimatedInput = dropperInputTokens + AGENT_LOOP_RESERVE;
 			if (dropperEstimatedInput > effectiveDropCtx) {
 				debugLog("dropper.context_window_exceeded", { estimatedInput: dropperEstimatedInput, effectiveCtx: effectiveDropCtx, model: `${(resolved.model as any).provider}/${(resolved.model as any).id}` });
 				runtime.recordRetryableError(stageModelForThinking, new Error(`context window ${effectiveDropCtx} too small for estimated input ${dropperEstimatedInput}`), "dropper");

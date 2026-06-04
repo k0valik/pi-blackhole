@@ -1,5 +1,8 @@
+/** Canonical list of path-like argument keys across all Pi tools. */
+export const PATH_KEYS = ["path", "file_path", "filePath", "file"] as const;
+
 export const extractPath = (args: Record<string, unknown>): string | null => {
-  for (const key of ["path", "file_path", "filePath", "file"]) {
+  for (const key of PATH_KEYS) {
     if (typeof args[key] === "string") return args[key] as string;
   }
   return null;

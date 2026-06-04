@@ -11,7 +11,7 @@ import { extractGoals } from "../extract/goals";
 import { extractFiles } from "../extract/files";
 import { extractPreferences, dedupPreferencesAgainstGoals } from "../extract/preferences";
 import { extractCommits, formatCommits } from "../extract/commits";
-import { buildBriefSections, sectionsToTranscript, stringifyBrief } from "./brief";
+import { buildBriefSections, stringifyBrief } from "./brief";
 
 export interface BuildSectionsInput {
   blocks: NormalizedBlock[];
@@ -80,6 +80,5 @@ export const buildSections = (input: BuildSectionsInput): SectionData => {
     commits: formatCommits(extractCommits(blocks)),
     userPreferences,
     briefTranscript: stringifyBrief(briefSections),
-    transcriptEntries: sectionsToTranscript(briefSections),
   };
 };

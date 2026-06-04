@@ -27,11 +27,19 @@ const sectionOf = (text: string, header: string): string => {
   const start = text.indexOf(tag);
   if (start < 0) return "";
   const after = text.slice(start);
-  // Find next section header or separator
+  // Find next section header (must start at line boundary to avoid matching in content)
   const nextSection = HEADER_NAMES
     .filter((h) => h !== header)
-    .map((h) => after.indexOf(`[${h}]`))
-    .filter((n) => n > 0);
+    .map((h) => {
+      // Escape the header name for regex safety
+      const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(?:^|\\n)\\[${escaped}\\]`);
+      const m = after.match(re);
+      if (!m) return -1;
+      // m.index points to \n (or 0); advance past it to the [
+      return m.index! + (m[0].startsWith("\n") ? 1 : 0);
+    })
+    .filter((n) => n >= 0);
   const nextSep = after.indexOf("\n\n---\n\n");
   const candidates = [...nextSection, ...(nextSep > 0 ? [nextSep] : [])].sort((a, b) => a - b);
   const end = candidates[0];
@@ -93,6 +101,8 @@ const mergeFileLines = (prev: string, fresh: string): string => {
 
   // Dedup: if already in Modified, drop from Created (file existed before)
   for (const p of merged.Modified) merged.Created.delete(p);
+  // Also remove Read entries that also appear in Modified (same file read+edited)
+  for (const p of merged.Modified) merged.Read.delete(p);
 
   const cap = (set: Set<string>, limit: number) => {
     const arr = [...set];
@@ -177,8 +187,11 @@ const stripOMContent = (text: string): string => {
   // Remove everything from "## Reflections" or "## Observations" onward,
   // plus the instructions preamble that precedes them.
   // The preamble starts with "These are condensed memories from earlier in this session."
-  const reflIdx = text.indexOf("## Reflections");
-  const obsIdx = text.indexOf("## Observations");
+  // Use line-start anchoring to avoid matching inside conversation content
+  const reflMatch = text.match(/^## Reflections/m);
+  const reflIdx = reflMatch ? reflMatch.index! : -1;
+  const obsMatch = text.match(/^## Observations/m);
+  const obsIdx = obsMatch ? obsMatch.index! : -1;
 
   // Find the start of OM content: either the instructions preamble or the first section header
   let stripFrom = -1;

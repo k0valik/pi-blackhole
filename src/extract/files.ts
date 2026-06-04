@@ -16,16 +16,18 @@ const FILE_WRITE_TOOLS = new Set([
   "MultiEdit",
 ]);
 
-const FILE_CREATE_TOOLS = new Set([
-  "Write", "write", "write_file",
-]);
+// Pi never exposes a "createdFiles" field — Write operations are tracked as modified.
+// FILE_CREATE_TOOLS kept as empty set for forward-compat if Pi adds a creation signal.
+const FILE_CREATE_TOOLS = new Set<string>();
 
 /**
  * Find the longest common directory prefix among absolute paths.
  * Returns "" if fewer than 2 absolute paths or no meaningful common prefix.
  */
 const longestCommonDirPrefix = (paths: string[]): string => {
-  const abs = paths.filter((p) => p.startsWith("/"));
+  // Normalize backslashes (Windows) to forward slashes for uniform comparison
+  const normalized = paths.map((p) => p.replace(/\\/g, "/"));
+  const abs = normalized.filter((p) => p.startsWith("/") || /^[A-Za-z]:\//.test(p));
   if (abs.length < 2) return "";
   const split = abs.map((p) => p.split("/"));
   const min = Math.min(...split.map((s) => s.length));

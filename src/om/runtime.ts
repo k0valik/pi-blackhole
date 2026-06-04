@@ -10,7 +10,7 @@
  * - markConsolidationError sets 30s retry gate for failed runs.
  */
 import { type Config, type ConfiguredModel, DEFAULTS, loadConfig } from "./config.js";
-import { isCooldownActive, recordCooldown, expireCooldowns, modelKey } from "./cooldown.js";
+import { isCooldownActive, getCooldownEntry, recordCooldown, expireCooldowns, modelKey } from "./cooldown.js";
 
 export type ResolveResult =
 	| { ok: true; model: any; apiKey: string; headers?: Record<string, string>; cooldownApplied?: boolean }
@@ -127,8 +127,10 @@ export class Runtime {
 
 			if (isCooldownActive(candidate)) {
 				if (ctx.hasUI && ctx.ui) {
+					const entry = getCooldownEntry(candidate);
+					const reason = entry ? `: ${entry.reason}` : "";
 					ctx.ui.notify(
-						`Observational memory: ${stageName} skipping ${key} (cooldown active)`,
+						`Observational memory: ${stageName} skipping ${key} (cooldown${reason})`,
 						"info",
 					);
 				}
