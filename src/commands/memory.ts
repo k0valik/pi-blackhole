@@ -36,7 +36,7 @@ function firstArg(args: unknown): string | undefined {
 }
 
 function pct(current: number, total: number): number {
-	return total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+	return total > 0 ? Math.round((current / total) * 100) : 0;
 }
 
 function tokenSum(items: { tokenCount: number }[]): number {
