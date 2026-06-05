@@ -25,29 +25,29 @@ Option B: Manually extract only the safe parts (thinking removal + dead code cle
 
 ---
 
-## pi-observational-memory `bf79ff7` + `52b5844` — pool refactor and budgetTokens→targetTokens rename
+## pi-observational-memory — OM pool refactor
 
-**Date**: 2026-05-27
+### `bf79ff7` — Extract pool metrics into `pool.ts`
+
+Extracts pool metric functions (observationPoolFullness, dropUrgencyForFullness, maxDropCountForPool) from agent.ts into a new pool.ts module. Replaces inline calculations with observationPoolMetrics() call.
+
+**Date**: 2026-05-27 (re-evaluated 2026-06-05)
 **Status**: ⏳ Deferred
-**Commits**:
-- `bf79ff7` Use active ledger pressure for dropper
-- `52b5844` Gate dropper on target tokens after reflection
+**Blocking**: Previously blocked by `noautocompact-reflector-dropper` branch (now stale/dropped). Still deferred — touches heavily diverged files (`consolidation.ts`, `runtime.ts`).
+**Risk**: HIGH — our `consolidation.ts` and `runtime.ts` have fundamentally different architecture (fallback chains, cooldowns, pending.json).
+**Mitigation applied**: `observationsPoolTargetTokens` added as forward-compat no-op config entry in `unified-config.ts`.
+**Re-evaluate**: When upstream makes further pool-related changes, or if we refactor our consolidation pipeline.
 
-### What they do
-- `bf79ff7`: Extracts pool metric functions (observationPoolFullness, dropUrgencyForFullness, maxDropCountForPool) from `agent.ts` into a new `pool.ts` module. Replaces inline calculations with `observationPoolMetrics()` call.
-- `52b5844`: Renames `budgetTokens` → `targetTokens` in the RunDropperArgs interface, removes `dropUrgencyForFullness` export, adds `tokensOverTarget` metric. Changes the pool algorithm from ratio-based (fullness% → urgency → % of pool) to over-budget-based (tokensOverTarget / avgObservationTokens).
+### `52b5844` — `budgetTokens` → `targetTokens` rename + over-budget algorithm
 
-### Why deferred
-These commits touch heavily modified ground:
-1. The pool refactor extracts shared functions that our `consolidation.ts` call site also uses — porting would conflict with our existing `budgetTokens` call at consolidation.ts:654
-2. The rename (`budgetTokens` → `targetTokens`) percolates to `consolidation.ts` which is also modified by local branches (fix/noautocompact-reflector-dropper)
-3. The pool algorithm change (ratio-based → over-budget-based) is a behavioral change that needs careful testing against our noAutoCompact mode
-4. We have unique features (`existingObservationsSummary`, `observerPreambleMaxTokens`) that interact with the dropper interface
+Renames `budgetTokens` → `targetTokens` in RunDropperArgs interface. Changes pool algorithm from ratio-based (fullness% → urgency → % of pool) to over-budget-based (tokensOverTarget / avgObservationTokens).
 
-### Mitigation applied
-Added `observationsPoolTargetTokens` as a forward-compat no-op config entry (`unified-config.ts`) so the config shape is aligned with upstream even though our code doesn't use it yet. This prevents downstream lockstep divergence on the config schema.
+**Date**: 2026-05-27 (re-evaluated 2026-06-05)
+**Status**: ⏳ Deferred
+**Blocking**: Same as `bf79ff7`.
+**Risk**: HIGH — field renames would propagate through our custom `unified-config.ts` schema, `consolidation.ts` call site at line 654, and all callers.
 
-### Decision needed
-Option A: Port both commits when we can also update consolidation.ts (requires coordination with fix/noautocompact-reflector-dropper branch)
-Option B: Skip permanently — our ratio-based algorithm works, and the rename is cosmetic
-Option C: Port the rename only (adapt consolidation.ts call sites) but keep our pool algorithm
+### Decision needed (for both)
+Option A: Port both commits when consolidation.ts can also be updated (requires coordination)
+Option B: Skip permanently — our ratio-based algorithm works, rename is cosmetic
+Option C: Port rename only (adapt consolidation.ts call sites) but keep our pool algorithm
