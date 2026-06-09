@@ -4,9 +4,24 @@ import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
 
+function isStaleExtensionContextError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.includes("extension ctx is stale") || message.includes("ctx is stale");
+}
+
 export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): void {
 	pi.on("agent_end", (event: any, ctx: any) => {
-		runtime.ensureConfig(ctx.cwd);
+		try {
+			handleAgentEnd(event, ctx, runtime);
+		} catch (error) {
+			if (isStaleExtensionContextError(error)) return;
+			throw error;
+		}
+	});
+}
+
+function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
+	runtime.ensureConfig(ctx.cwd);
 
 		// Pass the config flag explicitly — this handler runs outside ALS context
 		// (agent_end events don't flow through consolidation's withDebugLogContext),
@@ -161,9 +176,12 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 			} catch (error) {
 				runtime.compactInFlight = false;
 				const msg = error instanceof Error ? error.message : String(error);
+				if (isStaleExtensionContextError(error)) {
+					dbg("compaction_trigger.microtask.bail", { reason: "stale_ctx", message: msg });
+					return;
+				}
 				dbg("compaction_trigger.microtask.error", { message: msg });
 				if (hasUI) ui?.notify(`Observational memory: compact threw: ${msg}`, "error");
 			}
-		}, 0);
-	});
+	}, 0);
 }
