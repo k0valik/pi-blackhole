@@ -194,7 +194,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 		const { handler, runtime } = captureHandler();
 		const staleCtx = {
 			get cwd() {
-				throw new Error("This extension ctx is stale after session replacement or reload.");
+				throw { message: "This extension ctx is stale after session replacement or reload." };
 			},
 		};
 
@@ -218,6 +218,28 @@ describe("V3 compaction trigger (blackhole)", () => {
 
 		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("ignores stale notification errors in async compaction callbacks", async () => {
+		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+		const compactOptions = ctx.compact.mock.calls[0][0];
+		ctx.ui.notify.mockImplementation(() => {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
+		});
+
+		runtime.compactInFlight = true;
+		expect(() => compactOptions.onComplete({})).not.toThrow();
+		expect(runtime.compactInFlight).toBe(false);
+
+		runtime.compactInFlight = true;
+		expect(() => compactOptions.onError({ message: "test failure" })).not.toThrow();
+		expect(runtime.compactInFlight).toBe(false);
 	});
 
 	it("defers compaction if context is no longer idle", async () => {
