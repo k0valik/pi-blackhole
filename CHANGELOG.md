@@ -1,12 +1,27 @@
 # Changelog
 
-## [unreleased]
+## [0.3.6] - 2026-06-10
 
-### Lockstep sync — 2026-06-05
+### Recall tool simplification (#27)
 
-- Ported [pi-observational-memory/58f05fa](https://github.com/elpapi42/pi-observational-memory/commit/58f05fa): remove `Math.min(100)` cap from `pct()` helper so overfull observation pool (>100%) is displayed accurately instead of silently capping at 100%. ([#classification: bugfix])
-- Skipped [pi-observational-memory/58f05fa](https://github.com/elpapi42/pi-observational-memory/commit/58f05fa) command renames (`/om-status`→`/om:status`, `/om-view`→`/om:view`) — our equivalent commands (`/blackhole-memory`) already use a different naming scheme. ([#classification: not-applicable])
-- Deferred [pi-observational-memory/bf79ff7](https://github.com/elpapi42/pi-observational-memory/commit/bf79ff7) and [pi-observational-memory/52b5844](https://github.com/elpapi42/pi-observational-memory/commit/52b5844): pool metrics extraction + `budgetTokens`→`targetTokens` rename. Blocking branch (`noautocompact-reflector-dropper`) is now stale/dropped, but changes touch heavily diverged files. ([#classification: deferred])
+- Dropped `mode:transcript` — strict subset of `mode:hybrid` with no unique capability. (#27)
+- Consolidated 5 scattered `promptGuidelines` into 2 focused entries; removed "NOT semantic" redundancy and JSONL implementation leak. (#27)
+- Removed internal taxonomy from mode descriptions ("transcript + file indicators" → "all session content"). (#27)
+- Added `mode:touched` support to `/blackhole-recall` command (previously only worked via agent tool). (#27)
+- Collapsed drill-down examples to `#N:path with optional :offset:limit or :full`. (#27)
+
+### Stale context crash protection (#26)
+
+- Added `getErrorMessage()` to normalize cross-process error serialization (Error objects, plain objects with `message`, arbitrary thrown values). (#26)
+- Added `isStaleExtensionContextError()` to detect stale-context error patterns. (#26)
+- Added `notifySafely()` wrapper around `ui.notify()` calls to prevent stale-context notification errors from propagating. (#26)
+- Wrapped `agent_end` handler, async compaction callbacks (`onComplete`, `onError`), and deferred timer callback to silently bail on stale-context errors. (#26)
+
+### Lockstep sync — 2026-06-05 (#25)
+
+- Ported [pi-observational-memory/58f05fa](https://github.com/elpapi42/pi-observational-memory/commit/58f05fa): remove `Math.min(100)` cap from `pct()` helper so overfull observation pool (>100%) is displayed accurately instead of silently capping at 100%. (#25)
+- Skipped [pi-observational-memory/58f05fa](https://github.com/elpapi42/pi-observational-memory/commit/58f05fa) command renames (`/om-status`→`/om:status`, `/om-view`→`/om:view`) — our equivalent commands (`/blackhole-memory`) already use a different naming scheme. (#25)
+- Deferred [pi-observational-memory/bf79ff7](https://github.com/elpapi42/pi-observational-memory/commit/bf79ff7) and [pi-observational-memory/52b5844](https://github.com/elpapi42/pi-observational-memory/commit/52b5844): pool metrics extraction + `budgetTokens`→`targetTokens` rename. Blocking branch (`noautocompact-reflector-dropper`) is now stale/dropped, but changes touch heavily diverged files. (#25)
 
 ## [0.3.5] - 2026-06-04
 
