@@ -7,7 +7,7 @@ Full file topology mapping between upstream repos and pi-blackhole.
 | Upstream | Fork commit | Version | Evidence |
 |---|---|---|---|
 | pi-vcc | `1994b2611e9` | v0.3.15 | Our normalize.ts matches VCC at this commit (the next commit `a156870` removed `thinking` blocks and `isError` which we still have) |
-| pi-observational-memory | `677764327948` | current HEAD | Our prompts, fold.ts, types.ts match upstream HEAD. Pipeline refactors already integrated differently in `consolidation.ts`. |
+| pi-observational-memory | `a41048bd7e9` | last audited: June 5, 2026 — ported `pct()` fix (remove Math.min(100,...) cap). Pipeline refactors (budgetTokens, pool.ts) still deferred. |
 
 The VCC marker is at the fork point so `lockstep.js` shows un-reviewed commits. The OM marker is at HEAD because there's nothing to port.
 
