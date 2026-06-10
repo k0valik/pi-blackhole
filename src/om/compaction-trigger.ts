@@ -4,9 +4,41 @@ import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
 
+function getErrorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	if (error && typeof error === "object" && "message" in error) {
+		return String((error as { message: unknown }).message);
+	}
+	return String(error);
+}
+
+function isStaleExtensionContextError(error: unknown): boolean {
+	const message = getErrorMessage(error);
+	return message.includes("extension ctx is stale") || message.includes("ctx is stale");
+}
+
+function notifySafely(hasUI: boolean, ui: any, message: string, level: "info" | "warning" | "error"): void {
+	if (!hasUI) return;
+	try {
+		ui?.notify(message, level);
+	} catch (error) {
+		if (!isStaleExtensionContextError(error)) throw error;
+	}
+}
+
 export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): void {
 	pi.on("agent_end", (event: any, ctx: any) => {
-		runtime.ensureConfig(ctx.cwd);
+		try {
+			handleAgentEnd(event, ctx, runtime);
+		} catch (error) {
+			if (isStaleExtensionContextError(error)) return;
+			throw error;
+		}
+	});
+}
+
+function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
+	runtime.ensureConfig(ctx.cwd);
 
 		// Pass the config flag explicitly — this handler runs outside ALS context
 		// (agent_end events don't flow through consolidation's withDebugLogContext),
@@ -93,7 +125,9 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 
 		dbg("compaction_trigger.threshold_reached", { tokens, sessionId, hasUI });
 
-		if (hasUI) ui?.notify(
+		notifySafely(
+			hasUI,
+			ui,
 			`Observational memory: compaction threshold reached (~${tokens.toLocaleString()} tokens); triggering compaction`,
 			"info",
 		);
@@ -110,7 +144,9 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 				if (currentSessionId !== sessionId) {
 					runtime.compactInFlight = false;
 					dbg("compaction_trigger.microtask.bail", { reason: "session_changed" });
-					if (hasUI) ui?.notify(
+					notifySafely(
+						hasUI,
+						ui,
 						"Observational memory: compaction cancelled — session changed before compaction",
 						"info",
 					);
@@ -122,7 +158,9 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 				if (!isIdle) {
 					runtime.compactInFlight = false;
 					dbg("compaction_trigger.microtask.bail", { reason: "not_idle" });
-					if (hasUI) ui?.notify(
+					notifySafely(
+						hasUI,
+						ui,
 						"Observational memory: compaction deferred — agent became busy before compaction",
 						"info",
 					);
@@ -134,7 +172,9 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 				if (currentTokens < runtime.config.compactAfterTokens) {
 					runtime.compactInFlight = false;
 					dbg("compaction_trigger.microtask.bail", { reason: "pressure_relieved", currentTokens, threshold: runtime.config.compactAfterTokens });
-					if (hasUI) ui?.notify(
+					notifySafely(
+						hasUI,
+						ui,
 						"Observational memory: compaction skipped — another compaction already ran before deferred compaction",
 						"info",
 					);
@@ -146,7 +186,7 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 					onComplete: (result: any) => {
 						runtime.compactInFlight = false;
 						dbg("compaction_trigger.onComplete", { result: !!result });
-						if (hasUI) ui?.notify("Observational memory: compaction complete", "info");
+						notifySafely(hasUI, ui, "Observational memory: compaction complete", "info");
 					},
 					onError: (error: { message: string }) => {
 						runtime.compactInFlight = false;
@@ -155,15 +195,18 @@ export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): v
 							// We already notified the user with the real reason before returning { cancel: true }.
 							return;
 						}
-						if (hasUI) ui?.notify(`Observational memory: ${error.message}`, "error");
+						notifySafely(hasUI, ui, `Observational memory: ${error.message}`, "error");
 					},
 				});
 			} catch (error) {
 				runtime.compactInFlight = false;
-				const msg = error instanceof Error ? error.message : String(error);
+				const msg = getErrorMessage(error);
+				if (isStaleExtensionContextError(error)) {
+					dbg("compaction_trigger.microtask.bail", { reason: "stale_ctx", message: msg });
+					return;
+				}
 				dbg("compaction_trigger.microtask.error", { message: msg });
-				if (hasUI) ui?.notify(`Observational memory: compact threw: ${msg}`, "error");
+				notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
 			}
-		}, 0);
-	});
+	}, 0);
 }

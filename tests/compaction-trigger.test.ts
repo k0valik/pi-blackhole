@@ -190,6 +190,58 @@ describe("V3 compaction trigger (blackhole)", () => {
 		expect(ctx.compact).not.toHaveBeenCalled();
 	});
 
+	it("ignores stale extension ctx during agent_end", async () => {
+		const { handler, runtime } = captureHandler();
+		const staleCtx = {
+			get cwd() {
+				throw { message: "This extension ctx is stale after session replacement or reload." };
+			},
+		};
+
+		expect(() => handler(agentEnd(), staleCtx)).not.toThrow();
+		await flushAll();
+
+		expect(runtime.ensureConfig).not.toHaveBeenCalled();
+		expect(runtime.compactInFlight).toBe(false);
+	});
+
+	it("cancels deferred compaction if ctx becomes stale before the timer fires", async () => {
+		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		expect(runtime.compactInFlight).toBe(true);
+		ctx.sessionManager.getSessionId.mockImplementation(() => {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
+		});
+		await flushAll();
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("ignores stale notification errors in async compaction callbacks", async () => {
+		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		const ctx = fakeCtx([dueBranch]);
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+		const compactOptions = ctx.compact.mock.calls[0][0];
+		ctx.ui.notify.mockImplementation(() => {
+			throw new Error("This extension ctx is stale after session replacement or reload.");
+		});
+
+		runtime.compactInFlight = true;
+		expect(() => compactOptions.onComplete({})).not.toThrow();
+		expect(runtime.compactInFlight).toBe(false);
+
+		runtime.compactInFlight = true;
+		expect(() => compactOptions.onError({ message: "test failure" })).not.toThrow();
+		expect(runtime.compactInFlight).toBe(false);
+	});
+
 	it("defers compaction if context is no longer idle", async () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch], { isIdle: vi.fn(() => false) });
