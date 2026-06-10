@@ -6,8 +6,8 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages.js";
-import { searchEntries } from "../core/search-entries.js";
-import { formatRecallOutput } from "../core/format-recall.js";
+import { searchEntries, getTouchedFiles } from "../core/search-entries.js";
+import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall.js";
 import { getActiveLineageEntryIds } from "../core/lineage.js";
 import { parseRecallScope } from "../core/recall-scope.js";
 import {
@@ -41,7 +41,7 @@ async function augmentWithObservations(
 export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 	pi.registerCommand("blackhole-recall", {
 		description:
-			"Search session history. Defaults to active lineage. Usage: /blackhole-recall <query> [page:N] [scope:all] [mode:file|transcript]",
+			"Search session history. Defaults to active lineage. Usage: /blackhole-recall <query> [page:N] [scope:all] [mode:file|touched]",
 		handler: async (args: string, ctx) => {
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			if (!sessionFile) {
@@ -56,6 +56,19 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 					? getActiveLineageEntryIds(ctx.sessionManager)
 					: undefined;
 			const mode = parsed.mode;
+
+			if (mode === "touched") {
+				const pageMatch = raw.match(/\bpage:(\d+)\b/i);
+				const page = pageMatch ? Math.max(1, parseInt(pageMatch[1], 10)) : 1;
+				const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
+				const touched = getTouchedFiles(rawMessages, rendered);
+				const text = formatTouchedOutput(touched, page);
+				pi.sendMessage(
+					{ customType: "blackhole-recall", content: text, display: true },
+					{ triggerTurn: true },
+				);
+				return;
+			}
 
 			if (!parsed.text) {
 				// No query: show recent entries

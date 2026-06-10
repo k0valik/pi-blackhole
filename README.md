@@ -244,7 +244,6 @@ The agent gets a unified `recall` tool that handles three types of input:
 | `#N:path` | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows next 30; `#42:auth.ts:full` shows everything) |
 | Free text | BM25-ranked OR search across transcript and/or file content. Rare terms weighted higher. |
 | `mode:file` | Search only write/edit file content |
-| `mode:transcript` | Search only conversation text |
 | `mode:touched` | Aggregate all files written/edited, grouped by path with entry indices |
 | Regex | Pattern search (e.g. `fork.*pi-vcc`, `hook|inject`) |
 | `scope:all` | Search across all session lineages, not just the active one |
@@ -453,7 +452,6 @@ The agent gets one unified tool that searches session history, expands entries, 
 | `#N:path` | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows next 30; `#42:auth.ts:full` shows everything) |
 | Free text | BM25-ranked OR search across transcript + file indicators. Rare terms weighted higher. |
 | `mode:file` | Search only write/edit file content |
-| `mode:transcript` | Search only conversation text |
 | `mode:touched` | Aggregate all files written/edited across the session, grouped by path with entry indices |
 | Regex | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`) |
 | `scope:all` | Search across all session lineages (default: active lineage only) |
@@ -470,7 +468,6 @@ Results are shown as a collapsible message and auto-fed to the agent as context.
 /blackhole-recall hook|inject                       # regex
 /blackhole-recall fail.*build scope:all             # regex across all lineages
 /blackhole-recall mode:file                         # search only write/edit file content
-/blackhole-recall mode:transcript                   # search only conversation
 /blackhole-recall mode:touched                      # aggregate view of all files touched
 /blackhole-recall                                   # recent 25 entries
 ```
