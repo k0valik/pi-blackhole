@@ -1,10 +1,10 @@
 export type RecallScope = "lineage" | "all";
-export type RecallMode = "hybrid" | "file" | "transcript" | "touched";
+export type RecallMode = "hybrid" | "file" | "touched";
 
 const SCOPE_RE = /\bscope:(lineage|all)\b/i;
-const MODE_RE = /\bmode:(hybrid|file|transcript|touched)\b/i;
+const MODE_RE = /\bmode:(hybrid|file|touched)\b/i;
 
-const VALID_MODES = new Set(["hybrid", "file", "transcript", "touched"]);
+const VALID_MODES = new Set(["hybrid", "file", "touched"]);
 
 export const normalizeRecallScope = (scope?: unknown): RecallScope =>
   typeof scope === "string" && scope.toLowerCase() === "all" ? "all" : "lineage";

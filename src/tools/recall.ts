@@ -238,13 +238,10 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 			"Search session history and earlier lines omitted, file write/edit content by text/regex. " +
 			"Expand entries (#N), drill-down file content (#N:path) with paging, or aggregate touched files (mode:touched).",
 		promptSnippet:
-			"recall: Search session history + file write/edit content by text/regex. #N expand, #N:path drill-down with offset/limit paging, mode:file/transcript/touched.",
+			"recall: Search session history + file write/edit content by text/regex. #N expand, #N:path drill-down with optional :offset:limit or :full, mode:file/touched.",
 		promptGuidelines: [
-			"Use recall — search is literal text/regex matching, NOT semantic. If no results, try different terms or a regex pattern. Set scope:'all' to search the full session.",
-			"Use recall — mode:file to search only write/edit file content, mode:transcript for conversation-only, mode:touched for aggregate view of all files written/edited across the session.",
-			"Use recall — drill-down supports paging: #42:auth.ts shows first 30 lines, #42:auth.ts:30 shows next 30, #42:auth.ts:full shows everything. Note: edit diffs are not indexed for text search — drill-down reads them from raw JSONL.",
-			"Use recall — when a drill-down path matches multiple files, options are listed. Narrow with a more specific path substring.",
-			"Use recall — hex observation/reflection ids (12-char hex) link memory evidence to session entries with cross-references for navigation.",
+			"Use recall — literal text/regex search across session history and file write/edit content. #N expands an entry; #N:path with optional :offset:limit or :full drills file content; 12-char hex ids recover observation/reflection sources. mode:file for file-content-only, mode:touched for aggregated files-by-path. scope:'all' to search the full session. If no results, try fewer terms or a regex pattern.",
+			"Use recall — when a drill-down path matches multiple files, options are listed. Narrow with a more specific path substring. Only full-file writes are indexed for text search (edit diffs are not).",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
@@ -260,7 +257,7 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 				StringEnum(["lineage", "all"] as const, { description: "Search scope. lineage = active lineage (default), all = entire session." }),
 			),
 			mode: Type.Optional(
-				StringEnum(["hybrid", "file", "transcript", "touched"] as const, { description: "What content to search. hybrid (default) = transcript + file indicators. file = write/edit file content only. transcript = conversation only. touched = aggregate files grouped by path (not per-entry search)." }),
+				StringEnum(["hybrid", "file", "touched"] as const, { description: "What content to search. hybrid (default) = all session content. file = file content only. touched = files-by-path summary with entry indices." }),
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

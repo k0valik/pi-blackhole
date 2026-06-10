@@ -41,7 +41,7 @@ async function augmentWithObservations(
 export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 	pi.registerCommand("blackhole-recall", {
 		description:
-			"Search session history. Defaults to active lineage. Usage: /blackhole-recall <query> [page:N] [scope:all] [mode:file|transcript]",
+			"Search session history. Defaults to active lineage. Usage: /blackhole-recall <query> [page:N] [scope:all] [mode:file]",
 		handler: async (args: string, ctx) => {
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			if (!sessionFile) {

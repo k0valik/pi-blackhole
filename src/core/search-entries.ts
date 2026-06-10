@@ -196,10 +196,7 @@ const fullText = (msg: Message, mode?: RecallMode): string => {
   if (mode === "file") {
     return toolCallArgsText(msg.content);
   }
-  if (mode === "transcript") {
-    return textOf(msg.content);
-  }
-  // hybrid (default): both
+  // hybrid (default): both transcript text + tool call args
   const text = textOf(msg.content);
   const toolArgs = toolCallArgsText(msg.content);
   return toolArgs ? `${text}\n${toolArgs}` : text;
@@ -330,7 +327,7 @@ export const searchEntries = (
       const hay = `${e.role} ${text} ${filePart}`;
       if (regex.test(hay)) {
         const snip = lineSnippet(text, regex);
-        const fileMatches = mode === "transcript" ? [] : computeFileMatches(msg, rawQuery);
+        const fileMatches = computeFileMatches(msg, rawQuery);
         const extra = fileMatches.length > 0 ? { fileMatches } : {};
         hits.push({ ...e, snippet: snip, matchCount: 1, ...extra });
       }
@@ -366,7 +363,7 @@ export const searchEntries = (
     const score = bm25Score(hay, terms, ctx);
     const text = fullTextCache[i];
     const snip = lineSnippet(text, snipRe);
-    const fileMatches = mode === "transcript" ? [] : computeFileMatches(messages[i], rawQuery);
+    const fileMatches = computeFileMatches(messages[i], rawQuery);
     const extra = fileMatches.length > 0 ? { fileMatches } : {};
     scored.push({
       hit: { ...e, snippet: snip, matchCount: mc, ...extra },
