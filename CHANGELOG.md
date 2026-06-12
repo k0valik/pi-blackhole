@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.6] - 2026-06-10
+## [0.3.7] - 2026-06-10
 
 ### Recall tool simplification (#27)
 
