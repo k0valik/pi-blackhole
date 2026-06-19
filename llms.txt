@@ -380,6 +380,7 @@ From `DEFAULTS` in `unified-config.ts`:
 | `observationsPoolTargetTokens` | 10,000 | Target size dropper aims for after pruning (auto: half of pool max) |
 | `reflectorInputMaxTokens` | 80,000 | Max reflector prompt budget |
 | `dropperInputMaxTokens` | 80,000 | Max dropper prompt budget |
+| `dropperPressureThreshold` | 0.70 | Pressure relief valve: fraction of `reflectorInputMaxTokens` where dropper runs even without new data |
 | `observerChunkMaxTokens` | 40,000 | Max observer chunk size (newest-first) |
 | `observerPreambleMaxTokens` | 0 (auto) | Soft safety valve: caps `compaction: "manual"` observer preamble (30% of chunk). Only trims when exceeded; high-relevance observations always kept. |
 | `agentMaxTurns` | 16 | Max agent-loop turns per worker. Lower for small models (e.g., 8) to prevent wasteful extraction turns. |
@@ -396,4 +397,5 @@ observationsPoolMaxTokens:      compactAfterTokens / 4
 observationsPoolTargetTokens:   observationsPoolMaxTokens / 2
 reflectorInputMaxTokens:        compactAfterTokens * 1.0
 dropperInputMaxTokens:          compactAfterTokens * 1.0
+dropperPressureThreshold:       0.70 (fixed, user-tunable relief valve)
 ```

@@ -21,3 +21,4 @@ docs/
 # All skills are local-only except lockstep (which is committed)
 .pi/skills/*
 !.pi/skills/lockstep/
+AGENTS.md

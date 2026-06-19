@@ -1,3 +1,83 @@
+## [0.3.8] - YYYY-MM-DD
+
+### Pipeline progress cursors - fix re-run loop (#28, #29)
+
+The pipeline previously coupled progress tracking to output markers: if a stage
+produced empty output or errored, no marker was written, causing the stage to
+re-process the same data on every `agent_start`/`turn_end` trigger. In real-world
+logs the dropper ran 8,350× vs observer 1,124×, with zero drops selected.
+
+- **Per-stage progress cursors** decouple progress from output. Each stage
+  (observer, reflector, dropper) gets a cursor entry ID that advances whenever
+  the stage runs - regardless of whether it produced output. "I looked and
+  found nothing" is a valid answer that blocks re-processing.
+- **Cursor `state` field** (`recorded` | `empty` | `error` | `skipped` | `not_due` | `initial`)
+  distinguishes empty runs from skipped stages from actual output.
+- **Reflector gates on new data.** If no new `OM_OBSERVATIONS_RECORDED` batches
+  exist since the reflector cursor, and `reflectAfterTokens` threshold not met,
+  skip entirely - no LLM call.
+- **Dropper gates on pressure or new data.** Runs only when pool ≥ 10% fullness AND
+  (new data exists OR pool ≥ `dropperPressureThreshold` × `reflectorInputMaxTokens`).
+  Previously always returned `not_over_target` with 0 drops - now correctly skipped.
+- **Cursor storage:** in-memory primary (zero-I/O gating), async flush to
+  `{sessionId}-pending.json` for durability across restarts. Degrades gracefully
+  on read-only filesystems.
+- **Stale cursor recovery:** if a cursor's entry ID disappears (fork, navigation,
+  compaction), falls back to coverage-marker logic for one run, then writes fresh cursors.
+
+### New config key: `dropperPressureThreshold`
+
+- Fraction of `reflectorInputMaxTokens` at which the dropper fires even without
+  new data (pressure relief valve). Default `0.70` (70%). Set to `1.0` to disable
+  pressure-driven dropper entirely.
+
+### Debug log additions
+
+- `observer.skip`, `reflector.start`, `reflector.skip`, `dropper.start`,
+  `dropper.skip`, `cursor.loaded`, `cursor.saved`
+
+### Deferred pipeline concerns (pre-merge review)
+
+Audit surfaced 7 correctness/performance edge cases in the cursor pipeline.
+Four were fixed; three were deferred as harmless or cosmetic.
+
+**Fixed:**
+- **Session fork cursor bleed (#2).** `cursorsLoaded` was a one-shot boolean
+  — on session fork, stale cursors bled into the new branch because
+  `validateCursors` was never re-invoked. Now keyed by `cursorsLoadedSessionId`
+  so cursors are re-loaded and re-validated whenever the session ID changes.
+- **Manual-mode pool fullness underestimation (#1).** `anyStageDue` had no
+  visibility into pending observations in `compaction: "manual"` mode (branch
+  has no OM markers). Reflector and dropper due checks now accept an optional
+  `PendingOMState` so pending batches contribute to new-data scans and pool
+  token counts. Prevents the pipeline from stalling after the first run in
+  manual mode.
+- **foldLedger on every agent_start/turn_end (#3).** `dropperDue` called
+  `foldLedger` (O(n) on branch) unconditionally — even when the observer or
+  reflector alone made the pipeline due. Now short-circuits: the fold is
+  only computed when both observer and reflector are not due.
+- **Observer cursor to non-source entry (#6).** When the observer skipped
+  (not due), the cursor advanced to `entries.at(-1)` which could be a custom
+  OM marker rather than a conversation source entry. Now advances to the
+  last source entry (`findLast(isSourceEntry)`).
+
+**Deferred:**
+- **"unknown" magic entry ID (#4).** Functional but cosmetic — the sentinel
+  triggers fallback on next load. 9 call sites; zero behavioral change.
+- **Observer re-checks tokens (#5).** Harmless — only reached when pipeline
+  launched for a different stage. Correctly advances cursor to `not_due`.
+- **Dropper cursor fallback cascade (#7).** The 4-step `coversUpToId ??`
+  `observationCoverageId ?? entries.at(-1)?.id` cascade is already reasonable
+  fallback ordering.
+
+### Tests
+
+- 17 new tests for cursor gating, persistence, stale recovery, and debug log events
+- 3 new tests for manual-mode pending awareness (reflector, dropper, post-first-run)
+- `dropperPressureThreshold` added to config validation tests
+
+
+
 # Changelog
 
 ## [0.3.7] - 2026-06-10

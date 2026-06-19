@@ -16,6 +16,7 @@ Pi-blackhole's configuration lives at `~/.pi/agent/pi-blackhole/pi-blackhole-con
   "memory": true,                 // Enable OM workers + content injection
   "observeAfterTokens": 15000,    // Token threshold for observer runs
   "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
+  "dropperPressureThreshold": 0.70, // Pressure relief: fraction of reflectorInputMaxTokens
   "agentMaxTurns": 16,            // Max turns per memory agent
 
   // ── Debug ──
@@ -145,6 +146,19 @@ Controls whether observational memory workers run and whether OM content is inje
 ### `observeAfterTokens`, `reflectAfterTokens`, `agentMaxTurns`
 
 These control the OM pipeline thresholds. Unchanged from the previous config.
+
+### `dropperPressureThreshold`
+
+Fraction of `reflectorInputMaxTokens` at which the dropper runs even without new observation or reflection data. This is a relief valve: the reflector needs all active observations to fit within `reflectorInputMaxTokens`. If the pool grows past that, the reflector fails with "prompt is too long". The dropper at this threshold fires *before* hitting the danger zone.
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | 0.70 | (0, 1] |
+
+- **0.70** (default): dropper fires when pool reaches 70% of `reflectorInputMaxTokens` — leaves 30% headroom for system prompts, tool scaffolding, and reflection summaries
+- **Higher** (e.g. 0.90): less aggressive pruning, more headroom needed from your model
+- **Lower** (e.g. 0.50): more aggressive pruning, useful with smaller models or free-tier context windows
+- **1.0**: disable pressure-driven dropper entirely — dropper only runs when new observation/reflection data exists AND the pool is ≥10% full
 
 ## Debug Section
 

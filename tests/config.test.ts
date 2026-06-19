@@ -66,6 +66,35 @@ describe("Config defaults", () => {
 	});
 });
 
+describe("dropperPressureThreshold", () => {
+	it("defaults to 0.70 when no config file exists", async () => {
+		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+		const config = loadUnifiedConfig(testDir);
+		expect(config.dropperPressureThreshold).toBe(0.70);
+	});
+
+	it("can be overridden via config file", async () => {
+		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+		writeConfig({ dropperPressureThreshold: 0.50 });
+		const config = loadUnifiedConfig(testDir);
+		expect(config.dropperPressureThreshold).toBe(0.50);
+	});
+
+	it("falls back to default for invalid values", async () => {
+		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+		writeConfig({ dropperPressureThreshold: 1.5 });  // > 1
+		const config = loadUnifiedConfig(testDir);
+		expect(config.dropperPressureThreshold).toBe(0.70);
+	});
+
+	it("accepts 1.0 to disable pressure-driven dropper", async () => {
+		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+		writeConfig({ dropperPressureThreshold: 1.0 });
+		const config = loadUnifiedConfig(testDir);
+		expect(config.dropperPressureThreshold).toBe(1.0);
+	});
+});
+
 describe("Config with model IDs containing slashes and colons", () => {
 	it("parses OpenRouter-style model IDs (slash + colon)", async () => {
 		const { loadUnifiedConfig } = await import("../src/core/unified-config.js");

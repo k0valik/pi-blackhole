@@ -1,20 +1,6 @@
 # pi-blackhole
 
-> [!IMPORTANT]
-> **Blackhole is the default compaction engine** (`compactionEngine: "blackhole"`, `compaction: "auto"`). Auto-compaction fires at the configured threshold using blackhole's pipeline — both auto-trigger and Pi's `/compact` command use it. No additional setup needed. To work automatically, blackhole needs to register its hook so it overrides /compact with the `blackhole` compaction engine. Opting out or opting for manual compaction with blackhole can be done as below:
->
-> | Setting | Auto-trigger after threshold | `/compact` (Pi built-in) |
-> |---|---|---|
-> | `"auto"` + `"blackhole"` (default) | blackhole handles ✓ | blackhole handles |
-> | `"auto"` + `"pi-default"` | Pi handles | Pi handles |
-> | `"manual"` + any | skipped | Pi handles ✓ |
-> | `"off"` + any | skipped (Pi handles) | Pi handles ✓ |
->
-> The `/blackhole` command always uses blackhole's pipeline regardless of settings.
->
-> **Upgrading from an older version?** This version replaces legacy keys (`passive`, `noAutoCompact`, `overrideDefaultCompaction`) with `compaction`, `compactionEngine`, and `tailBehavior`. Automatic migration runs at startup — old configs continue to work. Best effort was made to preserve existing behavior, but review [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) if something behaves differently.
->
-> See [`CONFIG.md`](CONFIG.md) for the full reference.
+
 
 **Algorithmic compaction + session-aware observational memory for [Pi](https://github.com/badlogic/pi-mono) — in one unified extension.**
 
@@ -291,6 +277,7 @@ Everything else has sensible defaults.
 | `observationsPoolTargetTokens` | `10000` | Target size dropper aims for after pruning (derived: half of pool max) |
 | `reflectorInputMaxTokens` | `80000` | Max reflector input budget |
 | `dropperInputMaxTokens` | `80000` | Max dropper input budget |
+| `dropperPressureThreshold` | `0.70` | Fraction of `reflectorInputMaxTokens` at which dropper runs even without new data (pressure relief valve) |
 | `agentMaxTurns` | `16` | Max agent-loop turns per worker per run |
 | `debug` | `false` | Pre-compaction snapshot to `/tmp/pi-blackhole-debug.json` |
 | `debugLog` | `false` | Continuous JSONL debug log to `~/.pi/agent/pi-blackhole/debug.ndjson` |
@@ -313,7 +300,8 @@ Paste the appropriate block into your config to match your main session model's 
   "observerPreambleMaxTokens": 0,
   "observationsPoolMaxTokens": 8000,
   "reflectorInputMaxTokens": 30000,
-  "dropperInputMaxTokens": 30000
+  "dropperInputMaxTokens": 30000,
+  "dropperPressureThreshold": 0.70
 }
 ```
 
@@ -330,7 +318,8 @@ These are the built-in defaults. If you reset your config, these are what you ge
   "observerPreambleMaxTokens": 0,
   "observationsPoolMaxTokens": 20000,
   "reflectorInputMaxTokens": 80000,
-  "dropperInputMaxTokens": 80000
+  "dropperInputMaxTokens": 80000,
+  "dropperPressureThreshold": 0.70
 }
 ```
 
@@ -345,7 +334,8 @@ These are the built-in defaults. If you reset your config, these are what you ge
   "observerPreambleMaxTokens": 0,
   "observationsPoolMaxTokens": 40000,
   "reflectorInputMaxTokens": 160000,
-  "dropperInputMaxTokens": 160000
+  "dropperInputMaxTokens": 160000,
+  "dropperPressureThreshold": 0.70
 }
 ```
 
