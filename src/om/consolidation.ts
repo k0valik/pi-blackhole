@@ -207,6 +207,11 @@ export function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
 		if (idx < 0) {
 			return rawTokensSinceReflectionCoverage(entries) >= config.reflectAfterTokens;
 		}
+		// Must have enough accumulated tokens before considering reflector
+		const tokensSince = rawTokensAfterIndex(entries, idx);
+		if (tokensSince < config.reflectAfterTokens) {
+			return false;
+		}
 		// Check for new observation batches after the cursor
 		for (let i = idx + 1; i < entries.length; i++) {
 			const e = entries[i];

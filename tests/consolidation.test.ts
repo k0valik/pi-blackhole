@@ -66,13 +66,13 @@ describe("anyStageDue with cursors", () => {
 		const runtime = new Runtime();
 		// Fake config - observe threshold is 100 tokens
 		runtime.config.observeAfterTokens = 100;
-		runtime.config.reflectAfterTokens = 10;
+		runtime.config.reflectAfterTokens = 100000;  // keep reflector/dropper from being due
 		runtime.config.observationsPoolMaxTokens = 1000;
 		runtime.config.dropperPressureThreshold = 0.70;
 		runtime.config.reflectorInputMaxTokens = 500;
 		// Cursor has advanced past all entries → observer should NOT be due
 		const entries = [
-			{ type: "message", id: "msg-1", message: { content: "hello world this is a long message that should be over 100 tokens worth of characters" } },
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "hello world this is a long message that should be over 100 tokens worth of characters" }] } },
 		];
 		runtime.advanceCursor("observer", "msg-1", "empty");
 		expect(anyStageDue(entries, runtime)).toBe(false);
@@ -89,7 +89,7 @@ describe("anyStageDue with cursors", () => {
 		runtime.config.reflectorInputMaxTokens = 500;
 		// No cursor, tokens over threshold → observer should be due
 		const entries = [
-			{ type: "message", id: "msg-1", message: { content: "hello world this is a long message that should be over 100 tokens worth of characters and more stuff to make it longer and longer and longer" } },
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "hello world this is a long message that should be over 100 tokens worth of characters and more stuff to make it longer and longer and longer" }] } },
 		];
 		expect(anyStageDue(entries, runtime)).toBe(false);  // no observer markers → raw tokens counted from scratch
 	});
@@ -111,7 +111,7 @@ describe("anyStageDue with cursors", () => {
 		expect(anyStageDue(entries, runtime)).toBe(false);
 	});
 
-	test("reflector due when new observation batches exist after cursor", async () => {
+	test("reflector due when new observation batches exist AND token threshold met", async () => {
 		const { Runtime } = await import("../src/om/runtime.js");
 		const { anyStageDue } = await import("../src/om/consolidation.js");
 		const runtime = new Runtime();
@@ -120,12 +120,32 @@ describe("anyStageDue with cursors", () => {
 		runtime.config.observationsPoolMaxTokens = 100_000;
 		runtime.config.dropperPressureThreshold = 0.70;
 		runtime.config.reflectorInputMaxTokens = 500;
-		// Cursor at obs-1, new obs batch at obs-2 → reflector should be due
+		// Cursor at msg-1, enough tokens after cursor (msg-2 has 200 chars ~50 tokens) + new obs batch → reflector due
 		const entries = [
-			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { observations: [] } },
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "cursor here" }] } },
+			{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
 			{ type: "custom", id: "obs-2", customType: "om.observations.recorded", data: { observations: [] } },
 		];
-		runtime.advanceCursor("reflector", "obs-1", "recorded");
+		runtime.advanceCursor("reflector", "msg-1", "recorded");
 		expect(anyStageDue(entries, runtime)).toBe(true);
+	});
+
+	test("reflector NOT due when new obs batch exists but token threshold NOT met", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 500;  // need 500 tokens
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+		// Cursor at msg-1, only 50 chars (~12 tokens) after cursor (msg-2) → below 500 threshold
+		const entries = [
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "cursor here" }] } },
+			{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "tiny" }] } },
+			{ type: "custom", id: "obs-2", customType: "om.observations.recorded", data: { observations: [] } },
+		];
+		runtime.advanceCursor("reflector", "msg-1", "recorded");
+		expect(anyStageDue(entries, runtime)).toBe(false);
 	});
 });
