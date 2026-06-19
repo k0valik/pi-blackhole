@@ -81,8 +81,8 @@ export class Runtime {
 	compactWasPiVcc = false;
 	/** In‑memory pipeline cursors — authoritative copy for gating decisions. */
 	cursors: PipelineCursors = {};
-	/** Whether cursors have been loaded/validated from the pending file this session. */
-	cursorsLoaded = false;
+	/** Session ID for which cursors have been loaded/validated.  Undefined until first load. */
+	cursorsLoadedSessionId: string | undefined = undefined;
 
 	ensureConfig(cwd: string): void {
 		if (this.configLoaded) return;

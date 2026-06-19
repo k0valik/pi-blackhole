@@ -75,7 +75,7 @@ describe("anyStageDue with cursors", () => {
 			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "hello world this is a long message that should be over 100 tokens worth of characters" }] } },
 		];
 		runtime.advanceCursor("observer", "msg-1", "empty");
-		expect(anyStageDue(entries, runtime)).toBe(false);
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
 	});
 
 	test("observer IS due when no cursor and tokens exceed threshold", async () => {
@@ -91,7 +91,7 @@ describe("anyStageDue with cursors", () => {
 		const entries = [
 			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "hello world this is a long message that should be over 100 tokens worth of characters and more stuff to make it longer and longer and longer" }] } },
 		];
-		expect(anyStageDue(entries, runtime)).toBe(false);  // no observer markers → raw tokens counted from scratch
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);  // no observer markers → raw tokens counted from scratch
 	});
 
 	test("dropper NOT due when cursor advanced and no new data, no pressure", async () => {
@@ -99,7 +99,7 @@ describe("anyStageDue with cursors", () => {
 		const { anyStageDue } = await import("../src/om/consolidation.js");
 		const runtime = new Runtime();
 		runtime.config.observeAfterTokens = 100000;
-		runtime.config.reflectAfterTokens = 10;
+		runtime.config.reflectAfterTokens = 5;
 		runtime.config.observationsPoolMaxTokens = 100_000;
 		runtime.config.dropperPressureThreshold = 0.70;
 		runtime.config.reflectorInputMaxTokens = 500;
@@ -108,7 +108,7 @@ describe("anyStageDue with cursors", () => {
 			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { observations: [{ id: "o1", content: "a".repeat(100), tokenCount: 25 }] } },
 		];
 		runtime.advanceCursor("dropper", "obs-1", "skipped");
-		expect(anyStageDue(entries, runtime)).toBe(false);
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
 	});
 
 	test("reflector due when new observation batches exist AND token threshold met", async () => {
@@ -127,7 +127,7 @@ describe("anyStageDue with cursors", () => {
 			{ type: "custom", id: "obs-2", customType: "om.observations.recorded", data: { observations: [] } },
 		];
 		runtime.advanceCursor("reflector", "msg-1", "recorded");
-		expect(anyStageDue(entries, runtime)).toBe(true);
+		expect(anyStageDue(entries, runtime, undefined)).toBe(true);
 	});
 
 	test("reflector NOT due when new obs batch exists but token threshold NOT met", async () => {
@@ -146,6 +146,83 @@ describe("anyStageDue with cursors", () => {
 			{ type: "custom", id: "obs-2", customType: "om.observations.recorded", data: { observations: [] } },
 		];
 		runtime.advanceCursor("reflector", "msg-1", "recorded");
-		expect(anyStageDue(entries, runtime)).toBe(false);
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
 	});
 });
+
+	describe("anyStageDue with pending state (manual mode)", () => {
+		test("reflector due when pending observation batch exists after cursor", async () => {
+			const { Runtime } = await import("../src/om/runtime.js");
+			const { anyStageDue } = await import("../src/om/consolidation.js");
+			const runtime = new Runtime();
+			runtime.config.observeAfterTokens = 100000;
+			runtime.config.reflectAfterTokens = 10;
+			runtime.config.observationsPoolMaxTokens = 100_000;
+			runtime.config.dropperPressureThreshold = 0.70;
+			runtime.config.reflectorInputMaxTokens = 500;
+			const entries = [
+				{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+				{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			];
+			runtime.advanceCursor("reflector", "msg-1", "recorded");
+			const pending: any = {
+				observationBatches: [{ coversUpToId: "msg-2", data: { observations: [] } }],
+			};
+			expect(anyStageDue(entries, runtime, pending)).toBe(true);
+		});
+
+
+
+		test("dropper due when pending pool exceeds threshold (manual mode)", async () => {
+			const { Runtime } = await import("../src/om/runtime.js");
+			const { anyStageDue } = await import("../src/om/consolidation.js");
+			const runtime = new Runtime();
+			runtime.config.observeAfterTokens = 100000;
+			runtime.config.reflectAfterTokens = 100000;
+			runtime.config.observationsPoolMaxTokens = 1000;
+			runtime.config.dropperPressureThreshold = 0.99;
+			runtime.config.reflectorInputMaxTokens = 1000;
+			// Branch has conversation entries (normal manual mode), no OM markers.
+			const entries = [
+				{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			];
+			const pending: any = {
+				observationBatches: [{
+					coversUpToId: "msg-1",
+					data: { observations: [{ id: "o1", content: "x".repeat(500), tokenCount: 125 }] },
+				}],
+			};
+			// No cursors → rawTokensSinceDropCoverage on entries with conversation
+			// → some tokens > 0.  Pool from pending: 125/1000 = 12.5% > 10%.
+			// Both gates pass → dropper due.
+			expect(anyStageDue(entries, runtime, pending)).toBe(true);
+		});
+
+		test("pipeline launches when observer not due but pending has new data for reflector", async () => {
+			const { Runtime } = await import("../src/om/runtime.js");
+			const { anyStageDue } = await import("../src/om/consolidation.js");
+			const runtime = new Runtime();
+			runtime.config.observeAfterTokens = 100000;
+			runtime.config.reflectAfterTokens = 5;
+			runtime.config.observationsPoolMaxTokens = 100_000;
+			runtime.config.dropperPressureThreshold = 0.99;
+			runtime.config.reflectorInputMaxTokens = 500;
+			// Observer cursor advanced past all entries → not due
+			// Reflector cursor is behind (at msg-1), new batch at msg-2
+			const entries = [
+				{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "old" }] } },
+				{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "new message after reflector cursor" }] } },
+			];
+			runtime.advanceCursor("observer", "msg-2", "recorded");  // advanced past all
+			runtime.advanceCursor("reflector", "msg-1", "recorded");  // still at msg-1
+			// Pending has a NEW batch (coversUpToId after the reflector cursor)
+			const pending: any = {
+				observationBatches: [
+					{ coversUpToId: "msg-1", data: { observations: [] } },  // old, cursor is here
+					{ coversUpToId: "msg-2", data: { observations: [{ id: "o2", content: "fresh", tokenCount: 10 }] } },  // new!
+				],
+			};
+			// Reflector should see the new batch at msg-2 (after cursor at msg-1)
+			expect(anyStageDue(entries, runtime, pending)).toBe(true);
+		});
+	});

@@ -179,8 +179,12 @@ function pendingObservationsCreatedAfter(
 }
 
 /** Cursor-aware stage-due check.  Uses cursors when available; falls back to
- *  legacy coverage markers when cursors are absent (cold start, fork recovery). */
-export function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
+ *  legacy coverage markers when cursors are absent (cold start, fork recovery).
+ *
+ *  In compaction: "manual" mode, the branch has no OM markers — observations
+ *  live in the per‑session pending file.  `pending` provides the pool fullness
+ *  and new‑data visibility that the reflector/dropper checks need. */
+export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: PendingOMState): boolean {
 	const config = runtime.config;
 	const cursors = runtime.cursors ?? {};
 
@@ -219,17 +223,39 @@ export function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
 				return true;
 			}
 		}
+		// In manual mode, also check pending observation batches that arrived
+		// after the cursor (since branch has no OM markers).
+		if (pending && cursor.state !== "initial") {
+			const pendingBatches = pending.observationBatches ?? [];
+			for (const batch of pendingBatches) {
+				if (batch.coversUpToId) {
+					const batchIdx = entryIndexForId(entries, batch.coversUpToId);
+					if (batchIdx >= 0 && batchIdx > idx) return true;
+				}
+			}
+		}
 		return false;
 	})();
 
 	// ── Dropper ───────────────────────────────────────────────────────────
-	const dropperDue = (() => {
-		// Compute active observation pool tokens
+	// Short‑circuit: only compute dropperDue when observer and reflector are
+	// both not due — if either is due, the pipeline launches anyway.
+	const dropperDue = observerDue || reflectorDue ? false : (() => {
+		// Compute active observation pool tokens (branch + pending in manual mode)
 		const folded = foldLedger(entries);
-		const poolTokens = folded.activeObservations.reduce(
+		let poolTokens = folded.activeObservations.reduce(
 			(s: number, o: Observation) => s + (o.tokenCount ?? 0),
 			0,
 		);
+		// In manual mode, include pending observation batches
+		if (pending) {
+			const pendingBatches = pending.observationBatches ?? [];
+			for (const batch of pendingBatches) {
+				poolTokens += ((batch.data as any)?.observations ?? []).reduce(
+					(s: number, o: any) => s + (o.tokenCount ?? 0), 0,
+				);
+			}
+		}
 		const fullnessVsPool = config.observationsPoolMaxTokens > 0
 			? poolTokens / config.observationsPoolMaxTokens
 			: 0;
@@ -244,6 +270,12 @@ export function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
 		// New data check: new obs or ref batches after dropper cursor
 		const cursor = cursors.dropper;
 		if (!cursor) {
+			// In manual mode, pending batches are the only source of new‑data
+			// visibility (branch has no OM markers).
+			const hasPendingNewData = pending
+				? (pending.observationBatches?.length ?? 0) > 0 || (pending.reflectionBatches?.length ?? 0) > 0
+				: false;
+			if (hasPendingNewData) return true;
 			return rawTokensSinceDropCoverage(entries) >= config.reflectAfterTokens;
 		}
 		const idx = entryIndexForId(entries, cursor.entryId);
@@ -254,6 +286,17 @@ export function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
 			const e = entries[i];
 			if (e.type === "custom" && (e.customType === OM_OBSERVATIONS_RECORDED || e.customType === OM_REFLECTIONS_RECORDED)) {
 				return true;
+			}
+		}
+		// In manual mode, also check pending batches after the cursor
+		if (pending && cursor.state !== "initial") {
+			const pendingObs = pending.observationBatches ?? [];
+			const pendingRef = pending.reflectionBatches ?? [];
+			for (const batch of [...pendingObs, ...pendingRef]) {
+				if (batch.coversUpToId) {
+					const batchIdx = entryIndexForId(entries, batch.coversUpToId);
+					if (batchIdx >= 0 && batchIdx > idx) return true;
+				}
 			}
 		}
 		return false;
@@ -371,15 +414,15 @@ function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
 	if (runtime.consolidationInFlight) return;
 	if (runtime.isConsolidationRetryGated()) return;
 
-	// Load and validate cursors from pending file (first invocation per session)
-	if (!runtime.cursorsLoaded) {
-		const sessionId = ctx.sessionManager.getSessionId();
+	// Load and validate cursors from pending file (once per session; re-load on fork)
+	const sessionId = ctx.sessionManager.getSessionId();
+	if (runtime.cursorsLoadedSessionId !== sessionId) {
 		if (typeof runtime.loadCursorsFromPending === "function") {
 			runtime.loadCursorsFromPending(sessionId);
 		}
 		const entries = ctx.sessionManager.getBranch() as Entry[];
 		validateCursors(entries, runtime);
-		runtime.cursorsLoaded = true;
+		runtime.cursorsLoadedSessionId = sessionId;
 		const c = runtime.cursors ?? {};
 		debugLog("cursor.loaded", {
 			observer: c.observer ?? null,
@@ -389,7 +432,10 @@ function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
 	}
 
 	const entries = ctx.sessionManager.getBranch() as Entry[];
-	if (!anyStageDue(entries, runtime)) return;
+	// In manual mode, the branch has no OM markers — pending state provides
+	// pool fullness and new‑data visibility for reflector/dropper checks.
+	const pending = runtime.config.noAutoCompact ? readPendingState(sessionId) : undefined;
+	if (!anyStageDue(entries, runtime, pending)) return;
 
 	const runId = `consolidation-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
 	const consolidationCtx: ConsolidationCtx = {
@@ -482,9 +528,9 @@ async function runObserverStage(
 
 	const tokens = effectiveStart >= 0 ? rawTokensAfterIndex(entries, effectiveStart) : 0;
 	if (tokens < runtime.config.observeAfterTokens) {
-		// Not due — advance cursor with not_due state so we don't re-check immediately
-		const lastEntryId = entries.at(-1)?.id;
-		if (lastEntryId) runtime.advanceCursor("observer", lastEntryId, "not_due");
+		// Not due — advance cursor to last source entry so we don't re-check immediately
+		const lastSourceId = entries.findLast((e: Entry) => isSourceEntry(e))?.id;
+		if (lastSourceId) runtime.advanceCursor("observer", lastSourceId, "not_due");
 		return "continue";
 	}
 
