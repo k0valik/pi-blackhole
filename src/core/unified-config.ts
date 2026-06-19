@@ -90,6 +90,11 @@ export interface UnifiedConfig {
 	reflectorInputMaxTokens: number;
 	/** Max prompt tokens for dropper model input (rolling window cap). */
 	dropperInputMaxTokens: number;
+	/** Pressure threshold for dropper.  When active observation pool tokens exceed
+	 *  this fraction of reflectorInputMaxTokens, the dropper runs even without new
+	 *  observations/reflections (to keep the pool pruned).
+	 *  Default 0.70 (70%). Must be in range (0, 1]. */
+	dropperPressureThreshold: number;
 	/** Max source entries tokens sent to observer per chunk. */
 	observerChunkMaxTokens: number;
 	/** Max preamble tokens (CURRENT REFLECTIONS / OBSERVATIONS) in the observer prompt.
@@ -149,6 +154,7 @@ export const DEFAULTS: UnifiedConfig = {
 	observationsPoolTargetTokens: 10_000,
 	reflectorInputMaxTokens: 80_000,
 	dropperInputMaxTokens: 80_000,
+	dropperPressureThreshold: 0.70,
 	observerChunkMaxTokens: 40_000,
 	observerPreambleMaxTokens: 0,
 	agentMaxTurns: 16,
@@ -238,6 +244,11 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 
 	// Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
 	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
+
+	// dropperPressureThreshold: fractional, must be in (0, 1]
+	if (typeof raw.dropperPressureThreshold === "number" && Number.isFinite(raw.dropperPressureThreshold) && raw.dropperPressureThreshold > 0 && raw.dropperPressureThreshold <= 1) {
+		c.dropperPressureThreshold = raw.dropperPressureThreshold;
+	}
 	for (const k of numKeys) {
 		// observerPreambleMaxTokens accepts 0 (auto-compute); everything else must be > 0
 		const validator = k === "observerPreambleMaxTokens" ? nonNegativeInt : positiveInt;
@@ -413,6 +424,11 @@ export function loadUnifiedConfig(cwd: string): UnifiedConfig {
 	}
 
 
+
+	// Validate dropperPressureThreshold — must be in (0, 1]
+	if (typeof merged.dropperPressureThreshold !== "number" || !Number.isFinite(merged.dropperPressureThreshold) || merged.dropperPressureThreshold <= 0 || merged.dropperPressureThreshold > 1) {
+		merged.dropperPressureThreshold = DEFAULTS.dropperPressureThreshold;
+	}
 
 	// Derive observationsPoolTargetTokens if still unset or invalid (must be < max)
 	if (

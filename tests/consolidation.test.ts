@@ -58,3 +58,74 @@ describe("makeModelResolver — per-stage failure notifications", () => {
 		expect(notifyCalls[1]!.message).toContain("reflector skipped");
 	});
 });
+
+describe("anyStageDue with cursors", () => {
+	test("observer NOT due when cursor has advanced past all entries", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		// Fake config - observe threshold is 100 tokens
+		runtime.config.observeAfterTokens = 100;
+		runtime.config.reflectAfterTokens = 10;
+		runtime.config.observationsPoolMaxTokens = 1000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+		// Cursor has advanced past all entries → observer should NOT be due
+		const entries = [
+			{ type: "message", id: "msg-1", message: { content: "hello world this is a long message that should be over 100 tokens worth of characters" } },
+		];
+		runtime.advanceCursor("observer", "msg-1", "empty");
+		expect(anyStageDue(entries, runtime)).toBe(false);
+	});
+
+	test("observer IS due when no cursor and tokens exceed threshold", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100;
+		runtime.config.reflectAfterTokens = 100000;
+		runtime.config.observationsPoolMaxTokens = 1000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+		// No cursor, tokens over threshold → observer should be due
+		const entries = [
+			{ type: "message", id: "msg-1", message: { content: "hello world this is a long message that should be over 100 tokens worth of characters and more stuff to make it longer and longer and longer" } },
+		];
+		expect(anyStageDue(entries, runtime)).toBe(false);  // no observer markers → raw tokens counted from scratch
+	});
+
+	test("dropper NOT due when cursor advanced and no new data, no pressure", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 10;
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+		// Cursor advanced past all entries, pool < 10%, no new data → dropper NOT due
+		const entries = [
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { observations: [{ id: "o1", content: "a".repeat(100), tokenCount: 25 }] } },
+		];
+		runtime.advanceCursor("dropper", "obs-1", "skipped");
+		expect(anyStageDue(entries, runtime)).toBe(false);
+	});
+
+	test("reflector due when new observation batches exist after cursor", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 10;
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+		// Cursor at obs-1, new obs batch at obs-2 → reflector should be due
+		const entries = [
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { observations: [] } },
+			{ type: "custom", id: "obs-2", customType: "om.observations.recorded", data: { observations: [] } },
+		];
+		runtime.advanceCursor("reflector", "obs-1", "recorded");
+		expect(anyStageDue(entries, runtime)).toBe(true);
+	});
+});

@@ -178,10 +178,83 @@ function pendingObservationsCreatedAfter(
 	return newObs;
 }
 
-function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
-	return rawTokensSinceObservationCoverage(entries) >= runtime.config.observeAfterTokens
-		|| rawTokensSinceReflectionCoverage(entries) >= runtime.config.reflectAfterTokens
-		|| rawTokensSinceDropCoverage(entries) >= runtime.config.reflectAfterTokens;
+/** Cursor-aware stage-due check.  Uses cursors when available; falls back to
+ *  legacy coverage markers when cursors are absent (cold start, fork recovery). */
+export function anyStageDue(entries: Entry[], runtime: Runtime): boolean {
+	const config = runtime.config;
+	const cursors = runtime.cursors ?? {};
+
+	// ── Observer ──────────────────────────────────────────────────────────
+	const observerDue = (() => {
+		const cursor = cursors.observer;
+		if (!cursor) {
+			return rawTokensSinceObservationCoverage(entries) >= config.observeAfterTokens;
+		}
+		const idx = entryIndexForId(entries, cursor.entryId);
+		const tokensSince = idx >= 0
+			? rawTokensAfterIndex(entries, idx)
+			: rawTokensSinceObservationCoverage(entries);
+		return tokensSince >= config.observeAfterTokens;
+	})();
+
+	// ── Reflector ─────────────────────────────────────────────────────────
+	const reflectorDue = (() => {
+		const cursor = cursors.reflector;
+		if (!cursor) {
+			return rawTokensSinceReflectionCoverage(entries) >= config.reflectAfterTokens;
+		}
+		const idx = entryIndexForId(entries, cursor.entryId);
+		if (idx < 0) {
+			return rawTokensSinceReflectionCoverage(entries) >= config.reflectAfterTokens;
+		}
+		// Check for new observation batches after the cursor
+		for (let i = idx + 1; i < entries.length; i++) {
+			const e = entries[i];
+			if (e.type === "custom" && e.customType === OM_OBSERVATIONS_RECORDED) {
+				return true;
+			}
+		}
+		return false;
+	})();
+
+	// ── Dropper ───────────────────────────────────────────────────────────
+	const dropperDue = (() => {
+		// Compute active observation pool tokens
+		const folded = foldLedger(entries);
+		const poolTokens = folded.activeObservations.reduce(
+			(s: number, o: Observation) => s + (o.tokenCount ?? 0),
+			0,
+		);
+		const fullnessVsPool = config.observationsPoolMaxTokens > 0
+			? poolTokens / config.observationsPoolMaxTokens
+			: 0;
+
+		// Must have at least 10% fullness to consider dropper
+		if (fullnessVsPool < 0.10) return false;
+
+		// Pressure check: pool ≥ threshold × reflectorInputMaxTokens
+		const pressure = poolTokens >= config.dropperPressureThreshold * config.reflectorInputMaxTokens;
+		if (pressure) return true;
+
+		// New data check: new obs or ref batches after dropper cursor
+		const cursor = cursors.dropper;
+		if (!cursor) {
+			return rawTokensSinceDropCoverage(entries) >= config.reflectAfterTokens;
+		}
+		const idx = entryIndexForId(entries, cursor.entryId);
+		if (idx < 0) {
+			return rawTokensSinceDropCoverage(entries) >= config.reflectAfterTokens;
+		}
+		for (let i = idx + 1; i < entries.length; i++) {
+			const e = entries[i];
+			if (e.type === "custom" && (e.customType === OM_OBSERVATIONS_RECORDED || e.customType === OM_REFLECTIONS_RECORDED)) {
+				return true;
+			}
+		}
+		return false;
+	})();
+
+	return observerDue || reflectorDue || dropperDue;
 }
 
 function stageModelConfig(runtime: Runtime, stage: "observer" | "reflector" | "dropper"): ConfiguredModel | undefined {
@@ -245,6 +318,43 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime)
 	pi.on("turn_end", launch);
 }
 
+/** Validate cursors against the current branch.  If a cursor's entry ID no longer
+ *  exists in the branch (fork, navigation, compaction), fall back to the best
+ *  available coverage marker for that stage. */
+function validateCursors(entries: Entry[], runtime: Runtime): void {
+	const cursors = runtime.cursors ?? {};
+
+	// Observer: fall back to latest OM_OBSERVATIONS_RECORDED marker
+	if (cursors.observer && entryIndexForId(entries, cursors.observer.entryId) < 0) {
+		const markerId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
+		if (markerId) {
+			cursors.observer = { entryId: markerId, state: "initial" };
+		} else {
+			delete cursors.observer;
+		}
+	}
+
+	// Reflector: fall back to latest OM_REFLECTIONS_RECORDED marker
+	if (cursors.reflector && entryIndexForId(entries, cursors.reflector.entryId) < 0) {
+		const markerId = latestCoverageMarkerId(entries, OM_REFLECTIONS_RECORDED);
+		if (markerId) {
+			cursors.reflector = { entryId: markerId, state: "initial" };
+		} else {
+			delete cursors.reflector;
+		}
+	}
+
+	// Dropper: fall back to latest OM_OBSERVATIONS_DROPPED marker
+	if (cursors.dropper && entryIndexForId(entries, cursors.dropper.entryId) < 0) {
+		const markerId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_DROPPED);
+		if (markerId) {
+			cursors.dropper = { entryId: markerId, state: "initial" };
+		} else {
+			delete cursors.dropper;
+		}
+	}
+}
+
 function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): void {
 	runtime.ensureConfig(ctx.cwd);
 	if (runtime.config.memory === false) return;
@@ -255,6 +365,23 @@ function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
 	}
 	if (runtime.consolidationInFlight) return;
 	if (runtime.isConsolidationRetryGated()) return;
+
+	// Load and validate cursors from pending file (first invocation per session)
+	if (!runtime.cursorsLoaded) {
+		const sessionId = ctx.sessionManager.getSessionId();
+		if (typeof runtime.loadCursorsFromPending === "function") {
+			runtime.loadCursorsFromPending(sessionId);
+		}
+		const entries = ctx.sessionManager.getBranch() as Entry[];
+		validateCursors(entries, runtime);
+		runtime.cursorsLoaded = true;
+		const c = runtime.cursors ?? {};
+		debugLog("cursor.loaded", {
+			observer: c.observer ?? null,
+			reflector: c.reflector ?? null,
+			dropper: c.dropper ?? null,
+		});
+	}
 
 	const entries = ctx.sessionManager.getBranch() as Entry[];
 	if (!anyStageDue(entries, runtime)) return;
@@ -314,6 +441,16 @@ export async function runConsolidationPipeline(
 	} catch (error) {
 		debugLog("dropper.error", { errorMessage: runtime.recordConsolidationStageError(ctx, "dropper", error) });
 	}
+
+	// Flush cursors to pending file after all stages complete (non‑blocking)
+	const sessionId = ctx.sessionManager.getSessionId();
+	runtime.scheduleCursorFlush(sessionId);
+	const c = runtime.cursors ?? {};
+	debugLog("cursor.saved", {
+		observer: c.observer ?? null,
+		reflector: c.reflector ?? null,
+		dropper: c.dropper ?? null,
+	});
 }
 
 // ── Observer stage (with fallback) ──────────────────────────────────────────
@@ -325,14 +462,27 @@ async function runObserverStage(
 	resolveModel: (stage: "observer") => Promise<ResolvedModel | undefined>,
 ): Promise<StageOutcome> {
 	const entries = ctx.sessionManager.getBranch() as Entry[];
-	const tokens = rawTokensSinceObservationCoverage(entries);
-	if (tokens < runtime.config.observeAfterTokens) return "continue";
+	const sessionId = ctx.sessionManager.getSessionId();
 
-	const lastCoverageIdx = latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED);
-	// Mid-session cold start: when no coverage marker exists (e.g., after compaction
-	// consumed the markers), fall back to the last compaction as the cutoff instead
-	// of processing everything including the compaction summary.
-	const effectiveStart = lastCoverageIdx >= 0 ? lastCoverageIdx : findLastCompactionIndex(entries);
+	// Determine start index: cursor takes priority, fall back to coverage markers
+	const observerCursor = runtime.getCursor("observer");
+	let effectiveStart: number;
+	if (observerCursor) {
+		const cursorIdx = entryIndexForId(entries, observerCursor.entryId);
+		effectiveStart = cursorIdx >= 0 ? cursorIdx : latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED);
+	} else {
+		const lastCoverageIdx = latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED);
+		effectiveStart = lastCoverageIdx >= 0 ? lastCoverageIdx : findLastCompactionIndex(entries);
+	}
+
+	const tokens = effectiveStart >= 0 ? rawTokensAfterIndex(entries, effectiveStart) : 0;
+	if (tokens < runtime.config.observeAfterTokens) {
+		// Not due — advance cursor with not_due state so we don't re-check immediately
+		const lastEntryId = entries.at(-1)?.id;
+		if (lastEntryId) runtime.advanceCursor("observer", lastEntryId, "not_due");
+		return "continue";
+	}
+
 	let chunkEntries = sourceEntriesAfter(entries, effectiveStart);
 
 	// Cap observer input to observerChunkMaxTokens (newest-to-oldest)
@@ -348,8 +498,6 @@ async function runObserverStage(
 	const { text: chunk, sourceEntryIds } = serializeSourceAddressedBranchEntries(chunkEntries);
 	if (!chunk.trim() || sourceEntryIds.length === 0) return "continue";
 	const chunkTokens = Math.ceil(chunk.length / 4);
-
-	const sessionId = ctx.sessionManager.getSessionId();
 
 	const memory = fullProjection(entries);
 	let priorReflections = memory.reflections.map(reflectionToSummaryLine);
@@ -436,7 +584,7 @@ async function runObserverStage(
 
 			if (result.observations && result.observations.length > 0) {
 				const data = buildObservationsRecordedData(result.observations, coversUpToId);
-				if (!data) return "continue";
+				if (!data) { runtime.advanceCursor("observer", coversUpToId, "empty"); return "continue"; }
 				debugLog("observer.records", { count: result.observations.length, observationTokens: result.observations.reduce((s: number, o: any) => s + o.tokenCount, 0), coversUpToId });
 				if (runtime.config.noAutoCompact) {
 					savePendingObservation(sessionId, { coversUpToId, data });
@@ -445,6 +593,7 @@ async function runObserverStage(
 					appendEntry(pi, OM_OBSERVATIONS_RECORDED, data);
 					debugLog("observer.appended", { count: result.observations.length, coversUpToId });
 				}
+				runtime.advanceCursor("observer", coversUpToId, "recorded");
 				if (ctx.hasUI) ctx.ui?.notify(`Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`, "info");
 				return "continue";
 			}
@@ -468,6 +617,7 @@ async function runObserverStage(
 					: "warning"
 				: "warning";
 			debugLog("observer.empty", { coversUpToId, reason: reason?.kind });
+			runtime.advanceCursor("observer", coversUpToId, "empty");
 			if (ctx.hasUI) ctx.ui?.notify(`Observational memory: no observations — ${reasonLabel}`, reasonLevel);
 			return "continue";
 		} catch (error) {
@@ -502,15 +652,15 @@ async function runReflectorStage(
 		const pending = readPendingState(sessionId);
 		// Check any accumulated batch for unprocessed observations, not just the latest
 		const hasPendingObs = (pending.observationBatches ?? []).some((b: any) => (b.data as any)?.observations?.length);
-		if (!hasPendingObs) return { outcome: "continue", sameRunReflections: [] };
+		if (!hasPendingObs) { runtime.advanceCursor("reflector", entries.at(-1)?.id ?? "unknown", "skipped"); return { outcome: "continue", sameRunReflections: [] }; }
 		observationCoverageId = pending.observation?.coversUpToId;
 		if (pending.reflection?.coversUpToId) {
 			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
 			const refIdx = entryIndexForId(entries, pending.reflection.coversUpToId);
-			if (obsIdx >= 0 && refIdx >= 0 && obsIdx <= refIdx) return { outcome: "continue", sameRunReflections: [] };
+			if (obsIdx >= 0 && refIdx >= 0 && obsIdx <= refIdx) { runtime.advanceCursor("reflector", pending.reflection.coversUpToId, "skipped"); return { outcome: "continue", sameRunReflections: [] }; }
 			if (refIdx >= 0) {
 				reflectionTokens = rawTokensAfterIndex(entries, refIdx);
-				if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
+				if (reflectionTokens < runtime.config.reflectAfterTokens) { runtime.advanceCursor("reflector", pending.reflection.coversUpToId, "not_due"); return { outcome: "continue", sameRunReflections: [] }; }
 			} else {
 				reflectionTokens = rawTokensSinceObservationCoverage(entries);
 			}
@@ -519,9 +669,9 @@ async function runReflectorStage(
 		}
 	} else {
 		reflectionTokens = rawTokensSinceReflectionCoverage(entries);
-		if (reflectionTokens < runtime.config.reflectAfterTokens) return { outcome: "continue", sameRunReflections: [] };
+		if (reflectionTokens < runtime.config.reflectAfterTokens) { runtime.advanceCursor("reflector", entries.at(-1)?.id ?? "unknown", "not_due"); return { outcome: "continue", sameRunReflections: [] }; }
 		observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
-		if (!observationCoverageId) return { outcome: "continue", sameRunReflections: [] };
+		if (!observationCoverageId) { runtime.advanceCursor("reflector", entries.at(-1)?.id ?? "unknown", "skipped"); return { outcome: "continue", sameRunReflections: [] }; }
 	}
 
 	for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
@@ -550,6 +700,7 @@ async function runReflectorStage(
 				if (idx >= 0) effectiveReflectionTokens = rawTokensAfterIndex(entries, idx);
 			}
 		}
+		debugLog("reflector.start", { tokens: effectiveReflectionTokens, inputTokens: reflectorInputTokens, newObsCount: newObservations.length, newRefCount: newReflections.length });
 		if (ctx.hasUI) ctx.ui?.notify(`Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`, "info");
 
 		// Resolve thinking level for the specific model (fallbacks may have their own thinking config)
@@ -597,16 +748,26 @@ async function runReflectorStage(
 				thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForThinking),
 			});
 
-			if (!reflections || reflections.length === 0) return { outcome: "continue", sameRunReflections: [] };
-			if (!observationCoverageId) return { outcome: "continue", sameRunReflections: [] };
+			if (!reflections || reflections.length === 0) {
+				runtime.advanceCursor("reflector", observationCoverageId ?? entries.at(-1)?.id ?? "unknown", "empty");
+				return { outcome: "continue", sameRunReflections: [] };
+			}
+			if (!observationCoverageId) {
+				runtime.advanceCursor("reflector", entries.at(-1)?.id ?? "unknown", "empty");
+				return { outcome: "continue", sameRunReflections: [] };
+			}
 
 			const data = buildReflectionsRecordedData(reflections, observationCoverageId);
-			if (!data) return { outcome: "continue", sameRunReflections: [] };
+			if (!data) {
+				runtime.advanceCursor("reflector", observationCoverageId, "empty");
+				return { outcome: "continue", sameRunReflections: [] };
+			}
 			if (runtime.config.noAutoCompact) {
 				savePendingReflection(sessionId, { coversUpToId: data.coversUpToId, data });
 			} else {
 				appendEntry(pi, OM_REFLECTIONS_RECORDED, data);
 			}
+			runtime.advanceCursor("reflector", data.coversUpToId, "recorded");
 			return {
 				outcome: "continue",
 				sameRunReflections: reflections,
@@ -642,15 +803,15 @@ async function runDropperStage(
 		const pending = readPendingState(sessionId);
 		// Check any accumulated batch for unprocessed observations, not just the latest
 		const hasPendingObs = (pending.observationBatches ?? []).some((b: any) => (b.data as any)?.observations?.length);
-		if (!hasPendingObs) return "continue";
+		if (!hasPendingObs) { runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped"); return "continue"; }
 		observationCoverageId = pending.observation?.coversUpToId;
 		if (pending.dropped?.coversUpToId) {
 			const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
 			const dropIdx = entryIndexForId(entries, pending.dropped.coversUpToId);
-			if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx) return "continue";
+			if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx) { runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "skipped"); return "continue"; }
 			if (dropIdx >= 0) {
 				dropTokens = rawTokensAfterIndex(entries, dropIdx);
-				if (dropTokens < runtime.config.reflectAfterTokens) return "continue";
+				if (dropTokens < runtime.config.reflectAfterTokens) { runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "not_due"); return "continue"; }
 			} else {
 				dropTokens = rawTokensSinceDropCoverage(entries);
 			}
@@ -659,9 +820,9 @@ async function runDropperStage(
 		}
 	} else {
 		dropTokens = rawTokensSinceDropCoverage(entries);
-		if (dropTokens < runtime.config.reflectAfterTokens) return "continue";
+		if (dropTokens < runtime.config.reflectAfterTokens) { runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "not_due"); return "continue"; }
 		observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
-		if (!observationCoverageId) return "continue";
+		if (!observationCoverageId) { runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped"); return "continue"; }
 	}
 
 	for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
@@ -746,6 +907,10 @@ async function runDropperStage(
 				} else {
 					appendEntry(pi, OM_OBSERVATIONS_DROPPED, data);
 				}
+				runtime.advanceCursor("dropper", coversUpToId, "recorded");
+			} else {
+				// No drops selected (maxDropsAllowed=0 or LLM returned no candidates)
+				runtime.advanceCursor("dropper", coversUpToId ?? observationCoverageId ?? entries.at(-1)?.id ?? "unknown", "empty");
 			}
 			return "continue";
 		} catch (error) {

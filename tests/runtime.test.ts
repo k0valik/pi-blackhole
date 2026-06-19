@@ -648,3 +648,112 @@ describe("Runtime — model not found in registry (falls to next)", () => {
 		}
 	});
 });
+
+describe("Runtime pipeline cursors", () => {
+	it("starts with no cursors", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		expect(runtime.getCursor("observer")).toBeUndefined();
+		expect(runtime.getCursor("reflector")).toBeUndefined();
+		expect(runtime.getCursor("dropper")).toBeUndefined();
+	});
+
+	it("advances cursor and tracks state", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.advanceCursor("observer", "entry-1", "recorded");
+		const cursor = runtime.getCursor("observer");
+		expect(cursor).toBeDefined();
+		expect(cursor!.entryId).toBe("entry-1");
+		expect(cursor!.state).toBe("recorded");
+	});
+
+	it("progresses through states correctly", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		// Empty run advances cursor
+		runtime.advanceCursor("observer", "entry-2", "empty");
+		expect(runtime.getCursor("observer")!.state).toBe("empty");
+		// Next run records output
+		runtime.advanceCursor("observer", "entry-3", "recorded");
+		expect(runtime.getCursor("observer")!.state).toBe("recorded");
+		expect(runtime.getCursor("observer")!.entryId).toBe("entry-3");
+	});
+
+	it("skipped state is tracked", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.advanceCursor("dropper", "entry-4", "skipped");
+		expect(runtime.getCursor("dropper")!.state).toBe("skipped");
+	});
+
+	it("each stage cursor is independent", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.advanceCursor("observer", "obs-1", "recorded");
+		runtime.advanceCursor("reflector", "ref-1", "empty");
+		runtime.advanceCursor("dropper", "drop-1", "skipped");
+		expect(runtime.getCursor("observer")!.entryId).toBe("obs-1");
+		expect(runtime.getCursor("reflector")!.entryId).toBe("ref-1");
+		expect(runtime.getCursor("dropper")!.entryId).toBe("drop-1");
+	});
+});
+
+	it("loads cursors from pending state", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		// Pre-populate a pending file with cursors
+		const pendingDir = join(testDir, "pi-blackhole");
+		mkdirSync(pendingDir, { recursive: true });
+		const pending = {
+			cursors: {
+				observer: { entryId: "obs-loaded", state: "recorded" },
+				reflector: { entryId: "ref-loaded", state: "empty" },
+			},
+		};
+		writeFileSync(join(pendingDir, "test-session-pending.json"), JSON.stringify(pending));
+
+		const runtime = new Runtime();
+		runtime.loadCursorsFromPending("test-session");
+		expect(runtime.getCursor("observer")!.entryId).toBe("obs-loaded");
+		expect(runtime.getCursor("observer")!.state).toBe("recorded");
+		expect(runtime.getCursor("reflector")!.entryId).toBe("ref-loaded");
+		expect(runtime.getCursor("reflector")!.state).toBe("empty");
+		expect(runtime.getCursor("dropper")).toBeUndefined();
+	});
+
+	it("saves cursors to pending state", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.advanceCursor("observer", "obs-save", "recorded");
+		runtime.advanceCursor("dropper", "drop-save", "skipped");
+
+		// Save cursors synchronously (test helper)
+		runtime.saveCursorsToPending("test-session");
+
+		// Read back from file
+		const raw = JSON.parse(readFileSync(join(testDir, "pi-blackhole", "test-session-pending.json"), "utf-8"));
+		expect(raw.cursors.observer.entryId).toBe("obs-save");
+		expect(raw.cursors.observer.state).toBe("recorded");
+		expect(raw.cursors.dropper.entryId).toBe("drop-save");
+		expect(raw.cursors.dropper.state).toBe("skipped");
+		expect(raw.cursors.reflector).toBeUndefined();
+	});
+
+	it("handles corrupt pending file gracefully", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const pendingDir = join(testDir, "pi-blackhole");
+		mkdirSync(pendingDir, { recursive: true });
+		writeFileSync(join(pendingDir, "test-session-pending.json"), "not valid json");
+
+		const runtime = new Runtime();
+		// Should not throw
+		expect(() => runtime.loadCursorsFromPending("test-session")).not.toThrow();
+		expect(runtime.getCursor("observer")).toBeUndefined();
+	});
+
+	it("handles missing pending file gracefully", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		expect(() => runtime.loadCursorsFromPending("nonexistent-session")).not.toThrow();
+		expect(runtime.getCursor("observer")).toBeUndefined();
+	});
