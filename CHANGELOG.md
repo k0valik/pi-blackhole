@@ -1,4 +1,4 @@
-## [0.3.8] - YYYY-MM-DD
+## [0.3.8] - 2026-06-19
 
 ### Pipeline progress cursors - fix re-run loop (#28, #29)
 
