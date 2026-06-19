@@ -1,3 +1,48 @@
+## [0.3.8] - YYYY-MM-DD
+
+### Pipeline progress cursors - fix re-run loop (#28, #29)
+
+The pipeline previously coupled progress tracking to output markers: if a stage
+produced empty output or errored, no marker was written, causing the stage to
+re-process the same data on every `agent_start`/`turn_end` trigger. In real-world
+logs the dropper ran 8,350× vs observer 1,124×, with zero drops selected.
+
+- **Per-stage progress cursors** decouple progress from output. Each stage
+  (observer, reflector, dropper) gets a cursor entry ID that advances whenever
+  the stage runs - regardless of whether it produced output. "I looked and
+  found nothing" is a valid answer that blocks re-processing.
+- **Cursor `state` field** (`recorded` | `empty` | `error` | `skipped` | `not_due` | `initial`)
+  distinguishes empty runs from skipped stages from actual output.
+- **Reflector gates on new data.** If no new `OM_OBSERVATIONS_RECORDED` batches
+  exist since the reflector cursor, and `reflectAfterTokens` threshold not met,
+  skip entirely - no LLM call.
+- **Dropper gates on pressure or new data.** Runs only when pool ≥ 10% fullness AND
+  (new data exists OR pool ≥ `dropperPressureThreshold` × `reflectorInputMaxTokens`).
+  Previously always returned `not_over_target` with 0 drops - now correctly skipped.
+- **Cursor storage:** in-memory primary (zero-I/O gating), async flush to
+  `{sessionId}-pending.json` for durability across restarts. Degrades gracefully
+  on read-only filesystems.
+- **Stale cursor recovery:** if a cursor's entry ID disappears (fork, navigation,
+  compaction), falls back to coverage-marker logic for one run, then writes fresh cursors.
+
+### New config key: `dropperPressureThreshold`
+
+- Fraction of `reflectorInputMaxTokens` at which the dropper fires even without
+  new data (pressure relief valve). Default `0.70` (70%). Set to `1.0` to disable
+  pressure-driven dropper entirely.
+
+### Debug log additions
+
+- `observer.skip`, `reflector.start`, `reflector.skip`, `dropper.start`,
+  `dropper.skip`, `cursor.loaded`, `cursor.saved`
+
+### Tests
+
+- 17 new tests for cursor gating, persistence, stale recovery, and debug log events
+- `dropperPressureThreshold` added to config validation tests
+
+
+
 # Changelog
 
 ## [0.3.7] - 2026-06-10
