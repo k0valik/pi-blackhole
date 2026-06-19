@@ -529,7 +529,7 @@ async function runObserverStage(
 	const tokens = effectiveStart >= 0 ? rawTokensAfterIndex(entries, effectiveStart) : 0;
 	if (tokens < runtime.config.observeAfterTokens) {
 		// Not due — advance cursor to last source entry so we don't re-check immediately
-		const lastSourceId = entries.findLast((e: Entry) => isSourceEntry(e))?.id;
+		const lastSourceId = [...entries].reverse().find((e: Entry) => isSourceEntry(e))?.id;
 		if (lastSourceId) runtime.advanceCursor("observer", lastSourceId, "not_due");
 		return "continue";
 	}
