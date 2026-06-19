@@ -739,6 +739,29 @@ describe("Runtime pipeline cursors", () => {
 		expect(raw.cursors.reflector).toBeUndefined();
 	});
 
+	it("cursor deletion is persisted across save/load", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const runtime = new Runtime();
+		runtime.advanceCursor("observer", "obs-keep", "recorded");
+		runtime.advanceCursor("reflector", "ref-keep", "empty");
+		runtime.advanceCursor("dropper", "drop-del", "skipped");
+		runtime.saveCursorsToPending("test-session");
+
+		// Simulate validateCursors: after a fork, dropper entryId no longer
+		// exists in branch → cursor is deleted from in-memory map.
+		delete (runtime as any).cursors.dropper;
+		runtime.saveCursorsToPending("test-session");
+
+		// Reload: deletion must be persisted - dropper should be absent.
+		// Bug: writePendingCursors does { ...state.cursors, ...cursors }
+		// which preserves deleted keys from the old state on disk.
+		const fresh = new Runtime();
+		fresh.loadCursorsFromPending("test-session");
+		expect(fresh.getCursor("observer")!.entryId).toBe("obs-keep");
+		expect(fresh.getCursor("reflector")!.entryId).toBe("ref-keep");
+		expect(fresh.getCursor("dropper")).toBeUndefined();
+	});
+
 	it("handles corrupt pending file gracefully", async () => {
 		const { Runtime } = await import("../src/om/runtime.js");
 		const pendingDir = join(testDir, "pi-blackhole");

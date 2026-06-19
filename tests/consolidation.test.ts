@@ -78,7 +78,7 @@ describe("anyStageDue with cursors", () => {
 		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
 	});
 
-	test("observer IS due when no cursor and tokens exceed threshold", async () => {
+	test("observer NOT due when no cursor and tokens below threshold (no observation markers)", async () => {
 		const { Runtime } = await import("../src/om/runtime.js");
 		const { anyStageDue } = await import("../src/om/consolidation.js");
 		const runtime = new Runtime();
@@ -225,6 +225,34 @@ describe("anyStageDue with cursors", () => {
 			// Reflector should see the new batch at msg-2 (after cursor at msg-1)
 			expect(anyStageDue(entries, runtime, pending)).toBe(true);
 		});
+
+		test("reflector due when cursor state 'initial' and pending batch exists after cursor", async () => {
+			const { Runtime } = await import("../src/om/runtime.js");
+			const { anyStageDue } = await import("../src/om/consolidation.js");
+			const runtime = new Runtime();
+			runtime.config.observeAfterTokens = 100000;
+			runtime.config.reflectAfterTokens = 10;
+			runtime.config.observationsPoolMaxTokens = 100_000;
+			runtime.config.dropperPressureThreshold = 0.70;
+			runtime.config.reflectorInputMaxTokens = 500;
+
+			// Branch entries - cursor fell back to msg-1 coverage marker (state "initial")
+			const entries = [
+				{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+				{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			];
+			runtime.advanceCursor("reflector", "msg-1", "initial");
+
+			// Pending has a new batch at msg-2 (after cursor at msg-1)
+			const pending: any = {
+				observationBatches: [
+					{ coversUpToId: "msg-2", data: { observations: [{ id: "a1b2c3d4e5f6", content: "fresh", timestamp: "2025-01-01T00:00:00Z", relevance: "medium", sourceEntryIds: ["msg-2"], tokenCount: 10 }] } },
+				],
+			};
+
+			// Reflector should see new pending batch even when cursor.state is "initial"
+			expect(anyStageDue(entries, runtime, pending)).toBe(true);
+		});
 	});
 
 describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
@@ -294,12 +322,13 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
 		const { anyStageDue } = await import("../src/om/consolidation.js");
 		const runtime = new Runtime();
 		runtime.config.observeAfterTokens = 100000;
-		runtime.config.reflectAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 5;  // low enough that 6 tokens (> msg-2) passes the guard
 		runtime.config.observationsPoolMaxTokens = 1000;
 		runtime.config.dropperPressureThreshold = 0.99;
 		runtime.config.reflectorInputMaxTokens = 1000;
 
-		// Cursor at msg-1, but there's a new obs batch at obs-1 with coversUpToId msg-2 (after cursor).
+		// Cursor at msg-1, new obs batch at obs-1 with coversUpToId msg-2 (after cursor).
+		// tokensSince ≈ 6 > reflectAfterTokens(5) → passes token guard.
 		// Pool: 500 tokens / 1000 max = 50% > 10% → dropper due.
 		const entries = [
 			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "old" }] } },
@@ -310,6 +339,28 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
 		expect(anyStageDue(entries, runtime, undefined)).toBe(true);
 	});
 
+
+	test("dropper NOT due: new batches exist after cursor but token threshold not met", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 500;  // need 500 tokens to pass guard
+		runtime.config.observationsPoolMaxTokens = 1000;
+		runtime.config.dropperPressureThreshold = 0.99;
+		runtime.config.reflectorInputMaxTokens = 1000;
+
+		// Cursor at msg-1. New obs batch at obs-1 with coversUpToId msg-2 (truly after cursor).
+		// Pool: 500/1000 = 50% > 10%.
+		// But only ~6 tokens since cursor < reflectAfterTokens(500) → dropper NOT due.
+		const entries = [
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "old" }] } },
+			{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "new data after cursor" }] } },
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { coversUpToId: "msg-2", observations: [{ id: "a1b2c3d4e5f6", content: "x".repeat(2000), timestamp: "2025-01-01T00:00:00Z", relevance: "medium", sourceEntryIds: ["msg-2"], tokenCount: 500 }] } },
+		];
+		runtime.advanceCursor("dropper", "msg-1", "empty");
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+	});
 	test("reflector NOT due when state 'empty' and marker coversUpToId at cursor (exact production scenario)", async () => {
 		const { Runtime } = await import("../src/om/runtime.js");
 		const { anyStageDue } = await import("../src/om/consolidation.js");

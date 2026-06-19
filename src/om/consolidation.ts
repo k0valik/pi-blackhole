@@ -232,7 +232,7 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
 		}
 		// In manual mode, also check pending observation batches that arrived
 		// after the cursor (since branch has no OM markers).
-		if (pending && cursor.state !== "initial") {
+		if (pending) {
 			const pendingBatches = pending.observationBatches ?? [];
 			for (const batch of pendingBatches) {
 				if (batch.coversUpToId) {
@@ -289,6 +289,11 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
 		if (idx < 0) {
 			return rawTokensSinceDropCoverage(entries) >= config.reflectAfterTokens;
 		}
+		// Must have enough accumulated tokens before considering dropper
+		const tokensSince = rawTokensAfterIndex(entries, idx);
+		if (tokensSince < config.reflectAfterTokens) {
+			return false;
+		}
 		for (let i = idx + 1; i < entries.length; i++) {
 			const e = entries[i];
 			if (e.type === "custom" && (e.customType === OM_OBSERVATIONS_RECORDED || e.customType === OM_REFLECTIONS_RECORDED)) {
@@ -301,7 +306,7 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
 			}
 		}
 		// In manual mode, also check pending batches after the cursor
-		if (pending && cursor.state !== "initial") {
+		if (pending) {
 			const pendingObs = pending.observationBatches ?? [];
 			const pendingRef = pending.reflectionBatches ?? [];
 			for (const batch of [...pendingObs, ...pendingRef]) {

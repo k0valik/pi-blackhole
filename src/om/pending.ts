@@ -284,10 +284,11 @@ export function readPendingCursors(sessionId: string): PendingOMState["cursors"]
 	return state.cursors;
 }
 
-/** Write cursors to pending state for a session (merges with existing). */
+/** Write cursors to pending state for a session (replaces existing cursors).
+ *  Uses assignment (not merge) so deletions from validateCursors persist. */
 export function writePendingCursors(sessionId: string, cursors: PendingOMState["cursors"]): void {
 	const state = readSessionState(sessionId);
-	state.cursors = { ...state.cursors, ...cursors };
+	state.cursors = { ...cursors };
 	writeSessionState(sessionId, state);
 }
 
