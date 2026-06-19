@@ -226,3 +226,109 @@ describe("anyStageDue with cursors", () => {
 			expect(anyStageDue(entries, runtime, pending)).toBe(true);
 		});
 	});
+
+describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
+	test("reflector NOT due: marker after cursor but coversUpToId IS the cursor entry", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 10;
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+
+		// Cursor at msg-1. There's an OM_OBSERVATIONS_RECORDED marker AFTER msg-1
+		// in the branch, but its coversUpToId IS msg-1 - data was already processed.
+		const entries = [
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { coversUpToId: "msg-1", observations: [{ id: "o1", content: "test", tokenCount: 10 }] } },
+		];
+		runtime.advanceCursor("reflector", "msg-1", "empty");
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+	});
+
+	test("reflector IS due: marker after cursor with coversUpToId truly past cursor", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 10;
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+
+		// Cursor at msg-1. Marker's coversUpToId is msg-2 (truly after cursor) → new data.
+		const entries = [
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { coversUpToId: "msg-2", observations: [{ id: "o1", content: "test", tokenCount: 10 }] } },
+		];
+		runtime.advanceCursor("reflector", "msg-1", "empty");
+		expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+	});
+
+	test("dropper NOT due: marker after cursor but coversUpToId at cursor, pool too low", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 100000;
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+
+		// Cursor at obs-1. Marker at obs-2 after it, but coversUpToId is obs-1.
+		// Observer + reflector not due → dropper check runs.
+		// Pool is tiny → below 10% → dropper NOT due.
+		const entries = [
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { coversUpToId: "msg-0", observations: [{ id: "o1", content: "a", tokenCount: 1 }] } },
+			{ type: "custom", id: "obs-2", customType: "om.observations.recorded", data: { coversUpToId: "obs-1", observations: [{ id: "o2", content: "b", tokenCount: 1 }] } },
+		];
+		runtime.advanceCursor("dropper", "obs-1", "empty");
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+	});
+
+	test("dropper IS due: marker coversUpToId truly after cursor AND pool above threshold", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 100000;
+		runtime.config.observationsPoolMaxTokens = 1000;
+		runtime.config.dropperPressureThreshold = 0.99;
+		runtime.config.reflectorInputMaxTokens = 1000;
+
+		// Cursor at msg-1, but there's a new obs batch at obs-1 with coversUpToId msg-2 (after cursor).
+		// Pool: 500 tokens / 1000 max = 50% > 10% → dropper due.
+		const entries = [
+			{ type: "message", id: "msg-1", message: { role: "user", content: [{ type: "text", text: "old" }] } },
+			{ type: "message", id: "msg-2", message: { role: "user", content: [{ type: "text", text: "new data after cursor" }] } },
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { coversUpToId: "msg-2", observations: [{ id: "a1b2c3d4e5f6", content: "x".repeat(2000), timestamp: "2025-01-01T00:00:00Z", relevance: "medium", sourceEntryIds: ["msg-2"], tokenCount: 500 }] } },
+		];
+		runtime.advanceCursor("dropper", "msg-1", "empty");
+		expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+	});
+
+	test("reflector NOT due when state 'empty' and marker coversUpToId at cursor (exact production scenario)", async () => {
+		const { Runtime } = await import("../src/om/runtime.js");
+		const { anyStageDue } = await import("../src/om/consolidation.js");
+		const runtime = new Runtime();
+		runtime.config.observeAfterTokens = 100000;
+		runtime.config.reflectAfterTokens = 10;
+		runtime.config.observationsPoolMaxTokens = 100_000;
+		runtime.config.dropperPressureThreshold = 0.70;
+		runtime.config.reflectorInputMaxTokens = 500;
+
+		// Production scenario: cursor at source entry aea5b9b7 (state 'empty'),
+		// observation marker 13c906d0 exists AFTER it but has coversUpToId: aea5b9b7.
+		// The reflector already processed this data → should NOT be due.
+		const entries = [
+			{ type: "message", id: "source-1", message: { role: "user", content: [{ type: "text", text: "x".repeat(200) }] } },
+			{ type: "custom", id: "ref-1", customType: "om.reflections.recorded", data: { coversUpToId: "first-obs", reflections: [] } },
+			{ type: "custom", id: "obs-1", customType: "om.observations.recorded", data: { coversUpToId: "source-1", observations: [{ id: "o1", content: "test", tokenCount: 10 }] } },
+		];
+		runtime.advanceCursor("reflector", "source-1", "empty");
+		expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+	});
+});
