@@ -220,6 +220,13 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
 		for (let i = idx + 1; i < entries.length; i++) {
 			const e = entries[i];
 			if (e.type === "custom" && e.customType === OM_OBSERVATIONS_RECORDED) {
+				// Skip if this marker's coversUpToId is at or before the cursor
+				// — data it covers was already processed.
+				const markerCoversUpTo: string | undefined = (e as any).data?.coversUpToId;
+				if (markerCoversUpTo) {
+					const markerCoversIdx = entryIndexForId(entries, markerCoversUpTo);
+					if (markerCoversIdx >= 0 && markerCoversIdx <= idx) continue;
+				}
 				return true;
 			}
 		}
@@ -285,6 +292,11 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
 		for (let i = idx + 1; i < entries.length; i++) {
 			const e = entries[i];
 			if (e.type === "custom" && (e.customType === OM_OBSERVATIONS_RECORDED || e.customType === OM_REFLECTIONS_RECORDED)) {
+				const markerCoversUpTo: string | undefined = (e as any).data?.coversUpToId;
+				if (markerCoversUpTo) {
+					const markerCoversIdx = entryIndexForId(entries, markerCoversUpTo);
+					if (markerCoversIdx >= 0 && markerCoversIdx <= idx) continue;
+				}
 				return true;
 			}
 		}
