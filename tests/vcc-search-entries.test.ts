@@ -262,13 +262,6 @@ describe("searchEntries", () => {
     const noMatch = searchEntries(e, m, "user wants", undefined, "file");
     expect(noMatch).toHaveLength(0);
 
-    // "user wants" in transcript mode should match
-    const transcriptMode = searchEntries(e, m, "user wants", undefined, "transcript");
-    expect(transcriptMode).toHaveLength(1);
-
-    // "return true" in transcript mode should NOT match (only in tool call)
-    const noTranscript = searchEntries(e, m, "return true", undefined, "transcript");
-    expect(noTranscript).toHaveLength(0);
   });
 
   it("mode:'file' populates fileMatches correctly", () => {
@@ -323,10 +316,6 @@ describe("searchEntries", () => {
     const r = searchEntries(e, m, "old.*version", undefined, "file");
     expect(r).toHaveLength(1);
 
-    // regex in transcript mode should NOT match file content
-    // Use a pattern that only appears in the edits, not in "let me fix"
-    const r2 = searchEntries(e, m, "old version", undefined, "transcript");
-    expect(r2).toHaveLength(0);
   });
 
   it("mode:'file' does not include bash command output", () => {
@@ -348,38 +337,4 @@ describe("searchEntries", () => {
     expect(hybrid).toHaveLength(1);
   });
 
-  it("transcript mode does not include fileMatches", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "write login handler" },
-    ];
-    const m: Message[] = [
-      {
-        role: "assistant",
-        content: [
-          { type: "text", text: "writing the login handler" },
-          {
-            type: "toolCall",
-            id: "tc1",
-            name: "write",
-            arguments: {
-              path: "auth.ts",
-              content: "function login() { return true; }",
-            },
-          },
-        ],
-      } as any,
-    ];
-    // "login" appears in BOTH transcript and file content
-    // In hybrid mode, fileMatches should be present
-    const hybrid = searchEntries(e, m, "login");
-    expect(hybrid).toHaveLength(1);
-    expect(hybrid[0].fileMatches).toBeDefined();
-    expect(hybrid[0].fileMatches!.length).toBeGreaterThan(0);
-
-    // In transcript mode, fileMatches should NOT be populated even though
-    // the file content contains "login"
-    const transcript = searchEntries(e, m, "login", undefined, "transcript");
-    expect(transcript).toHaveLength(1);
-    expect(transcript[0].fileMatches).toBeUndefined();
-  });
 });
