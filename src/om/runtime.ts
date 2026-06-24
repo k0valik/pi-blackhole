@@ -69,6 +69,7 @@ export class Runtime {
 	failedInCycle: Set<string> = new Set();
 	compactInFlight = false;
 	compactHookInFlight = false;
+	autoCompactionController: AbortController | null = null;
 	resolveFailureNotified = false;
 	lastObserverError: string | undefined;
 	lastReflectorError: string | undefined;

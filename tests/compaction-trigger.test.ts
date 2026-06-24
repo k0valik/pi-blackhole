@@ -37,11 +37,12 @@ function captureHandler(args: {
 	/** NEW: Which engine handles compaction */
 	compactionEngine?: "blackhole" | "pi-default";
 } = {}) {
-	let handler: ((event: unknown, ctx: unknown) => void) | undefined;
+	let endHandler: ((event: unknown, ctx: unknown) => void) | undefined;
+	let startHandler: (() => void) | undefined;
 	const pi = {
-		on: vi.fn((name: string, cb: typeof handler) => {
-			expect(name).toBe("agent_end");
-			handler = cb;
+		on: vi.fn((name: string, cb: any) => {
+			if (name === "agent_end") endHandler = cb;
+			if (name === "agent_start") startHandler = cb;
 		}),
 	};
 	const runtime = {
@@ -56,12 +57,15 @@ function captureHandler(args: {
 			compaction: args.compaction,
 			/** NEW: Which engine handles compaction */
 			compactionEngine: args.compactionEngine,
+			debugLog: true,
 		},
 		compactInFlight: args.compactInFlight ?? false,
+		autoCompactionController: null,
 	};
 	registerCompactionTrigger(pi as any, runtime as any);
-	if (!handler) throw new Error("agent_end handler was not registered");
-	return { handler, runtime };
+	if (!endHandler) throw new Error("agent_end handler was not registered");
+	if (!startHandler) throw new Error("agent_start handler was not registered");
+	return { handler: endHandler, startHandler, runtime };
 }
 
 function agentEnd(errorMessage?: string) {
@@ -248,9 +252,15 @@ describe("V3 compaction trigger (blackhole)", () => {
 
 		handler(agentEnd(), ctx);
 		await flushAll();
-		// Exhaust all retries (15 × 200ms = 3000ms)
-		vi.advanceTimersByTime(3000);
+		// Yield to the first setTimeout(..., 0)
+		vi.advanceTimersByTime(0);
 		await Promise.resolve();
+
+		// Now we are in the retry loop. Exhaust all retries (1500 × 200ms = 300,000ms = 5 minutes)
+		for (let i = 0; i < 1500; i++) {
+			vi.advanceTimersByTime(200);
+			await Promise.resolve();
+		}
 
 		expect(ctx.compact).not.toHaveBeenCalled();
 		expect(runtime.compactInFlight).toBe(false);
@@ -272,9 +282,12 @@ describe("V3 compaction trigger (blackhole)", () => {
 		handler(agentEnd(), ctx);
 		expect(runtime.compactInFlight).toBe(true);
 		await flushAll();
+
 		// isIdle: false × 3, then true on 4th check (600ms = 3 × 200ms)
-		vi.advanceTimersByTime(600);
-		await Promise.resolve();
+		for (let i = 0; i < 4; i++) {
+			vi.advanceTimersByTime(200);
+			await Promise.resolve();
+		}
 
 		expect(ctx.compact).toHaveBeenCalledTimes(1);
 	});
@@ -396,5 +409,24 @@ describe("V3 compaction trigger (blackhole)", () => {
 		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
 		expect(ctx.compact).not.toHaveBeenCalled();
+	});
+
+	it("cancels auto-compaction on agent_start", async () => {
+		const { handler, startHandler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		const ctx = fakeCtx([dueBranch], { isIdle: vi.fn(() => false) });
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+		expect(runtime.compactInFlight).toBe(true);
+		expect(runtime.autoCompactionController).not.toBeNull();
+
+		startHandler();
+		expect(runtime.compactInFlight).toBe(false);
+		expect(runtime.autoCompactionController).toBeNull();
+
+		vi.advanceTimersByTime(200);
+		await Promise.resolve();
+		// Should not call isIdle again because it was aborted
+		expect(ctx.isIdle).toHaveBeenCalledTimes(1);
 	});
 });

@@ -54,6 +54,7 @@ function captureFullSystem(config: PermutationConfig) {
 	const sessionId = "test-session-perm-001";
 
 	const runtime = {
+		autoCompactionController: null,
 		ensureConfig: vi.fn(),
 		config: {
 			compactAfterTokens: 3,
@@ -86,7 +87,7 @@ function captureFullSystem(config: PermutationConfig) {
 
 	const pi = {
 		on: vi.fn((name: string, cb: any) => {
-			if (name === "agent_end") triggerHandler = cb;
+			if (name === "agent_end") triggerHandler = cb; if (name === "agent_start") pi.onStart = cb;
 			if (name === "session_before_compact") beforeCompactHandler = cb;
 		}),
 		appendEntry: vi.fn(),
@@ -332,9 +333,11 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 		// No deferral notification yet (still retrying)
 		expect(system.notifyCalls.some(n => n.msg.includes("compaction deferred"))).toBe(false);
 
-		// Exhaust all idle retries (15 × 200ms = 3000ms)
-		vi.advanceTimersByTime(3000);
-		await Promise.resolve();
+		// Exhaust all idle retries (1500 × 200ms = 300,000ms = 5 minutes)
+		for (let i = 0; i <= 1500; i++) {
+			vi.advanceTimersByTime(200);
+			await Promise.resolve();
+		}
 
 		// After max retries, compactInFlight resets and deferral fires
 		expect(system.runtime.compactInFlight).toBe(false);
