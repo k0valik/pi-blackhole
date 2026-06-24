@@ -325,11 +325,19 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 		system.fireAgentEnd(dueBranch);
 		await system.flushAll();
 
-		// Should NOT have called compact
+		// Should NOT have called compact yet
 		expect(system.ctx.compact).not.toHaveBeenCalled();
-		// compactInFlight was reset by the deferral
+		// compactInFlight stays true while retrying idle check
+		expect(system.runtime.compactInFlight).toBe(true);
+		// No deferral notification yet (still retrying)
+		expect(system.notifyCalls.some(n => n.msg.includes("compaction deferred"))).toBe(false);
+
+		// Exhaust all idle retries (15 × 200ms = 3000ms)
+		vi.advanceTimersByTime(3000);
+		await Promise.resolve();
+
+		// After max retries, compactInFlight resets and deferral fires
 		expect(system.runtime.compactInFlight).toBe(false);
-		// Should show deferral notification
 		expect(system.notifyCalls.some(n => n.msg.includes("compaction deferred"))).toBe(true);
 	});
 

@@ -135,8 +135,14 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
 		runtime.compactInFlight = true;
 		dbg("compaction_trigger.scheduled", { compactInFlight: runtime.compactInFlight });
 
-		setTimeout(() => {
-			dbg("compaction_trigger.microtask.enter", {});
+		// Retry config: check every 200ms for up to 3 seconds (15 retries)
+		// before giving up. This handles the race where async agent_end
+		// handlers (e.g. pi-rewind checkpointing) delay ctx.isIdle().
+		const MAX_RETRIES = 15;
+		const RETRY_INTERVAL_MS = 200;
+
+		const attemptCompact = (retryCount: number) => {
+			dbg("compaction_trigger.microtask.enter", { retryCount });
 			try {
 				// Validate session identity — bail if the session was replaced/reloaded.
 				const currentSessionId = ctx.sessionManager.getSessionId();
@@ -154,14 +160,19 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
 				}
 
 				const isIdle = ctx.isIdle();
-				dbg("compaction_trigger.microtask.idle_check", { isIdle });
+				dbg("compaction_trigger.microtask.idle_check", { isIdle, retryCount });
 				if (!isIdle) {
+					if (retryCount < MAX_RETRIES) {
+						dbg("compaction_trigger.microtask.retry", { retryCount, nextDelay: RETRY_INTERVAL_MS });
+						setTimeout(() => attemptCompact(retryCount + 1), RETRY_INTERVAL_MS);
+						return;
+					}
 					runtime.compactInFlight = false;
-					dbg("compaction_trigger.microtask.bail", { reason: "not_idle" });
+					dbg("compaction_trigger.microtask.bail", { reason: "not_idle_max_retries", retryCount });
 					notifySafely(
 						hasUI,
 						ui,
-						"Observational memory: compaction deferred — agent became busy before compaction",
+						"Observational memory: compaction deferred — agent busy; will retry at next agent_end",
 						"info",
 					);
 					return;
@@ -208,5 +219,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
 				dbg("compaction_trigger.microtask.error", { message: msg });
 				notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
 			}
-	}, 0);
+		};
+
+		setTimeout(() => attemptCompact(0), 0);
 }

@@ -242,19 +242,41 @@ describe("V3 compaction trigger (blackhole)", () => {
 		expect(runtime.compactInFlight).toBe(false);
 	});
 
-	it("defers compaction if context is no longer idle", async () => {
+	it("defers compaction if context is never idle after max retries", async () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch], { isIdle: vi.fn(() => false) });
 
 		handler(agentEnd(), ctx);
 		await flushAll();
+		// Exhaust all retries (15 × 200ms = 3000ms)
+		vi.advanceTimersByTime(3000);
+		await Promise.resolve();
 
 		expect(ctx.compact).not.toHaveBeenCalled();
 		expect(runtime.compactInFlight).toBe(false);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
-			"Observational memory: compaction deferred — agent became busy before compaction",
+			"Observational memory: compaction deferred — agent busy; will retry at next agent_end",
 			"info",
 		);
+	});
+
+	it("retries idle check and compacts when agent becomes idle", async () => {
+		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		const isIdle = vi.fn()
+			.mockReturnValueOnce(false)
+			.mockReturnValueOnce(false)
+			.mockReturnValueOnce(false)
+			.mockReturnValue(true);
+		const ctx = fakeCtx([dueBranch], { isIdle });
+
+		handler(agentEnd(), ctx);
+		expect(runtime.compactInFlight).toBe(true);
+		await flushAll();
+		// isIdle: false × 3, then true on 4th check (600ms = 3 × 200ms)
+		vi.advanceTimersByTime(600);
+		await Promise.resolve();
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
 	});
 
 	it("re-checks threshold after deferral and skips if another compaction already reduced pressure", async () => {
