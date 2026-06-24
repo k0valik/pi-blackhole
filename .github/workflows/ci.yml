@@ -19,3 +19,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm lint
+
+  fallow-audit:
+    if: github.event_name == 'pull_request'
+    name: Fallow - changed-code audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: fallow-rs/fallow@v2.99.0
+        continue-on-error: true
+        with:
+          command: audit
+          format: compact
+          comment: true
+          review-comments: true
+          sarif: false

@@ -25,6 +25,16 @@ async function flushAll(): Promise<void> {
 	await Promise.resolve();
 }
 
+/** Advance the auto-compaction retry loop by N ticks. Each tick = 200ms of
+ *  fake-timer time plus a microtask flush, so a pending wait loop will check
+ *  `ctx.isIdle()` again. */
+async function advanceRetryTicks(n: number): Promise<void> {
+	for (let i = 0; i < n; i++) {
+		vi.advanceTimersByTime(200);
+		await Promise.resolve();
+	}
+}
+
 function captureHandler(args: {
 	overrideDefaultCompaction?: boolean;
 	compactAfterTokens?: number;
@@ -37,11 +47,12 @@ function captureHandler(args: {
 	/** NEW: Which engine handles compaction */
 	compactionEngine?: "blackhole" | "pi-default";
 } = {}) {
-	let handler: ((event: unknown, ctx: unknown) => void) | undefined;
+	let agentEndHandler: ((event: unknown, ctx: unknown) => void) | undefined;
+	let agentStartHandler: (() => void) | undefined;
 	const pi = {
-		on: vi.fn((name: string, cb: typeof handler) => {
-			expect(name).toBe("agent_end");
-			handler = cb;
+		on: vi.fn((name: string, cb: any) => {
+			if (name === "agent_end") agentEndHandler = cb;
+			if (name === "agent_start") agentStartHandler = cb;
 		}),
 	};
 	const runtime = {
@@ -58,10 +69,12 @@ function captureHandler(args: {
 			compactionEngine: args.compactionEngine,
 		},
 		compactInFlight: args.compactInFlight ?? false,
+		autoCompactionController: null as AbortController | null,
 	};
 	registerCompactionTrigger(pi as any, runtime as any);
-	if (!handler) throw new Error("agent_end handler was not registered");
-	return { handler, runtime };
+	if (!agentEndHandler) throw new Error("agent_end handler was not registered");
+	if (!agentStartHandler) throw new Error("agent_start handler was not registered");
+	return { handler: agentEndHandler, startHandler: agentStartHandler, runtime };
 }
 
 function agentEnd(errorMessage?: string) {
@@ -220,6 +233,30 @@ describe("V3 compaction trigger (blackhole)", () => {
 		expect(ctx.compact).not.toHaveBeenCalled();
 	});
 
+	it("aborts the wait loop when the session changes mid-wait (e.g. /resume)", async () => {
+		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		// First call (during scheduling) returns the original session; subsequent
+		// calls (during the wait loop) return a different session id.
+		const ctx = fakeCtx([dueBranch]);
+		ctx.sessionManager.getSessionId = vi
+			.fn()
+			.mockReturnValueOnce("test-session-001") // scheduling
+			.mockReturnValue("test-session-002");    // mid-wait (different)
+
+		handler(agentEnd(), ctx);
+		expect(runtime.compactInFlight).toBe(true);
+		await flushAll();
+		await advanceRetryTicks(1);
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(runtime.autoCompactionController).toBeNull();
+		expect(ctx.compact).not.toHaveBeenCalled();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			"Observational memory: compaction cancelled — session changed before compaction",
+			"info",
+		);
+	});
+
 	it("ignores stale notification errors in async compaction callbacks", async () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
 		const ctx = fakeCtx([dueBranch]);
@@ -242,19 +279,50 @@ describe("V3 compaction trigger (blackhole)", () => {
 		expect(runtime.compactInFlight).toBe(false);
 	});
 
-	it("defers compaction if context is no longer idle", async () => {
+	it("waits for the agent to become idle and then compacts (the issue #31 race)", async () => {
 		const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		// isIdle returns false for the first 3 retries (simulating a slow async
+		// agent_end handler from another extension), then true. The trigger must
+		// keep waiting — not bail — until the agent truly settles.
+		const isIdle = vi
+			.fn()
+			.mockReturnValueOnce(false)
+			.mockReturnValueOnce(false)
+			.mockReturnValueOnce(false)
+			.mockReturnValue(true);
+		const ctx = fakeCtx([dueBranch], { isIdle });
+
+		handler(agentEnd(), ctx);
+		expect(runtime.compactInFlight).toBe(true);
+		await flushAll();
+
+		// isIdle was called once during the initial setTimeout(0) check.
+		// After 3 more 200ms ticks, isIdle returns true and compact() fires.
+		await advanceRetryTicks(3);
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+		expect(isIdle).toHaveBeenCalledTimes(4);
+	});
+
+	it("aborts the pending wait when a new agent_start fires (user started a new turn)", async () => {
+		const { handler, startHandler, runtime } = captureHandler({ compactAfterTokens: 3 });
+		// isIdle always false: trigger keeps waiting.
 		const ctx = fakeCtx([dueBranch], { isIdle: vi.fn(() => false) });
 
 		handler(agentEnd(), ctx);
+		expect(runtime.compactInFlight).toBe(true);
 		await flushAll();
+
+		// User starts a new turn while we're still waiting.
+		startHandler();
+		await flushAll();
+
+		// Advance many ticks to confirm the loop really stopped.
+		await advanceRetryTicks(5);
 
 		expect(ctx.compact).not.toHaveBeenCalled();
 		expect(runtime.compactInFlight).toBe(false);
-		expect(ctx.ui.notify).toHaveBeenCalledWith(
-			"Observational memory: compaction deferred — agent became busy before compaction",
-			"info",
-		);
+		expect(runtime.autoCompactionController).toBeNull();
 	});
 
 	it("re-checks threshold after deferral and skips if another compaction already reduced pressure", async () => {

@@ -27,6 +27,17 @@ function notifySafely(hasUI: boolean, ui: any, message: string, level: "info" | 
 }
 
 export function registerCompactionTrigger(pi: ExtensionAPI, runtime: Runtime): void {
+	pi.on("agent_start", () => {
+		// A new turn is starting — abort any pending auto-compaction wait.
+		// The new turn's own agent_end will re-evaluate the threshold and
+		// schedule a fresh wait if compaction is still needed.
+		if (runtime.autoCompactionController) {
+			runtime.autoCompactionController.abort();
+			runtime.autoCompactionController = null;
+			runtime.compactInFlight = false;
+		}
+	});
+
 	pi.on("agent_end", (event: any, ctx: any) => {
 		try {
 			handleAgentEnd(event, ctx, runtime);
@@ -132,17 +143,51 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
 			"info",
 		);
 
-		runtime.compactInFlight = true;
-		dbg("compaction_trigger.scheduled", { compactInFlight: runtime.compactInFlight });
+	runtime.compactInFlight = true;
+	const controller = new AbortController();
+	runtime.autoCompactionController = controller;
+	const signal = controller.signal;
+	dbg("compaction_trigger.scheduled", { compactInFlight: runtime.compactInFlight });
 
-		setTimeout(() => {
-			dbg("compaction_trigger.microtask.enter", {});
-			try {
+	// Issue #31: keep waiting for the agent to become idle instead of bailing
+	// after the first non-idle check. The agent may need a few hundred ms to
+	// finish async work from other extension handlers (e.g. pi-rewind's
+	// checkpoint I/O) before it is truly idle. The only legitimate cancellation
+	// is the agent_start handler above aborting the controller.
+	void (async () => {
+		try {
+			// Yield to the event loop first — matches the historical
+			// setTimeout(0) deferral that lets other agent_end listeners run.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			// Poll isIdle() every 200ms until it returns true. No max-retries
+			// cap: the user can be reading the response for arbitrarily long.
+			// ctx.compact() itself aborts any in-flight agent operation, so we
+			// must wait until the agent is truly idle.
+			let isIdle = false;
+			while (!isIdle) {
+				if (signal.aborted) {
+					dbg("compaction_trigger.microtask.bail", { reason: "aborted_agent_start" });
+					return;
+				}
+
 				// Validate session identity — bail if the session was replaced/reloaded.
-				const currentSessionId = ctx.sessionManager.getSessionId();
+				let currentSessionId: string;
+				try {
+					currentSessionId = ctx.sessionManager.getSessionId();
+				} catch (error) {
+					if (isStaleExtensionContextError(error)) {
+						runtime.compactInFlight = false;
+						runtime.autoCompactionController = null;
+						dbg("compaction_trigger.microtask.bail", { reason: "stale_ctx" });
+						return;
+					}
+					throw error;
+				}
 				dbg("compaction_trigger.microtask.session_check", { currentSessionId, expectedSessionId: sessionId, match: currentSessionId === sessionId });
 				if (currentSessionId !== sessionId) {
 					runtime.compactInFlight = false;
+					runtime.autoCompactionController = null;
 					dbg("compaction_trigger.microtask.bail", { reason: "session_changed" });
 					notifySafely(
 						hasUI,
@@ -153,60 +198,76 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
 					return;
 				}
 
-				const isIdle = ctx.isIdle();
+				isIdle = ctx.isIdle();
 				dbg("compaction_trigger.microtask.idle_check", { isIdle });
 				if (!isIdle) {
-					runtime.compactInFlight = false;
-					dbg("compaction_trigger.microtask.bail", { reason: "not_idle" });
-					notifySafely(
-						hasUI,
-						ui,
-						"Observational memory: compaction deferred — agent became busy before compaction",
-						"info",
-					);
-					return;
-				}
-				const currentEntries = ctx.sessionManager.getBranch() as Entry[];
-				const currentTokens = rawTokensSinceLastCompaction(currentEntries);
-				dbg("compaction_trigger.microtask.recheck_tokens", { currentTokens, threshold: runtime.config.compactAfterTokens, ok: currentTokens >= runtime.config.compactAfterTokens });
-				if (currentTokens < runtime.config.compactAfterTokens) {
-					runtime.compactInFlight = false;
-					dbg("compaction_trigger.microtask.bail", { reason: "pressure_relieved", currentTokens, threshold: runtime.config.compactAfterTokens });
-					notifySafely(
-						hasUI,
-						ui,
-						"Observational memory: compaction skipped — another compaction already ran before deferred compaction",
-						"info",
-					);
-					return;
-				}
-
-				dbg("compaction_trigger.microtask.calling_compact", {});
-				ctx.compact({
-					onComplete: (result: any) => {
-						runtime.compactInFlight = false;
-						dbg("compaction_trigger.onComplete", { result: !!result });
-						notifySafely(hasUI, ui, "Observational memory: compaction complete", "info");
-					},
-					onError: (error: { message: string }) => {
-						runtime.compactInFlight = false;
-						dbg("compaction_trigger.onError", { message: error?.message ?? String(error) });
-						if (error.message === "Compaction cancelled") {
-							// We already notified the user with the real reason before returning { cancel: true }.
+					// Sleep in 50ms slices so agent_start aborts are noticed quickly.
+					// A single 200ms await would let the loop run for 200ms after
+					// the user typed — too long, since we want compaction to wait
+					// only for the agent to settle, not for a full tick.
+					const sliceMs = 50;
+					const end = Date.now() + 200;
+					while (Date.now() < end) {
+						if (signal.aborted) {
+							dbg("compaction_trigger.microtask.bail", { reason: "aborted_agent_start" });
 							return;
 						}
-						notifySafely(hasUI, ui, `Observational memory: ${error.message}`, "error");
-					},
-				});
-			} catch (error) {
-				runtime.compactInFlight = false;
-				const msg = getErrorMessage(error);
-				if (isStaleExtensionContextError(error)) {
-					dbg("compaction_trigger.microtask.bail", { reason: "stale_ctx", message: msg });
-					return;
+						await new Promise((resolve) => setTimeout(resolve, sliceMs));
+					}
 				}
-				dbg("compaction_trigger.microtask.error", { message: msg });
-				notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
 			}
-	}, 0);
+
+			if (signal.aborted) {
+				dbg("compaction_trigger.microtask.bail", { reason: "aborted_agent_start" });
+				return;
+			}
+
+			const currentEntries = ctx.sessionManager.getBranch() as Entry[];
+			const currentTokens = rawTokensSinceLastCompaction(currentEntries);
+			dbg("compaction_trigger.microtask.recheck_tokens", { currentTokens, threshold: runtime.config.compactAfterTokens, ok: currentTokens >= runtime.config.compactAfterTokens });
+			if (currentTokens < runtime.config.compactAfterTokens) {
+				runtime.compactInFlight = false;
+				runtime.autoCompactionController = null;
+				dbg("compaction_trigger.microtask.bail", { reason: "pressure_relieved", currentTokens, threshold: runtime.config.compactAfterTokens });
+				notifySafely(
+					hasUI,
+					ui,
+					"Observational memory: compaction skipped — another compaction already ran before deferred compaction",
+					"info",
+				);
+				return;
+			}
+
+			dbg("compaction_trigger.microtask.calling_compact", {});
+			// Compaction is now actually starting — clear the controller so
+			// agent_start doesn't abort an in-progress compact.
+			runtime.autoCompactionController = null;
+			ctx.compact({
+				onComplete: (result: any) => {
+					runtime.compactInFlight = false;
+					dbg("compaction_trigger.onComplete", { result: !!result });
+					notifySafely(hasUI, ui, "Observational memory: compaction complete", "info");
+				},
+				onError: (error: { message: string }) => {
+					runtime.compactInFlight = false;
+					dbg("compaction_trigger.onError", { message: error?.message ?? String(error) });
+					if (error.message === "Compaction cancelled") {
+						// We already notified the user with the real reason before returning { cancel: true }.
+						return;
+					}
+					notifySafely(hasUI, ui, `Observational memory: ${error.message}`, "error");
+				},
+			});
+		} catch (error) {
+			runtime.compactInFlight = false;
+			runtime.autoCompactionController = null;
+			const msg = getErrorMessage(error);
+			if (isStaleExtensionContextError(error)) {
+				dbg("compaction_trigger.microtask.bail", { reason: "stale_ctx", message: msg });
+				return;
+			}
+			dbg("compaction_trigger.microtask.error", { message: msg });
+			notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
+		}
+	})();
 }

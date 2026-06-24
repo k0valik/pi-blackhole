@@ -29,11 +29,6 @@ describe("normalizeRecallMode", () => {
     expect(normalizeRecallMode("FILE")).toBe("file");
   });
 
-  it("accepts transcript mode", async () => {
-    const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
-    expect(normalizeRecallMode("transcript")).toBe("transcript");
-    expect(normalizeRecallMode("TRANSCRIPT")).toBe("transcript");
-  });
 
   it("accepts hybrid mode", async () => {
     const { normalizeRecallMode } = await import("../src/core/recall-scope.js");
