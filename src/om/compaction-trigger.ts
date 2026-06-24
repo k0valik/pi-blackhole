@@ -154,7 +154,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
 	// finish async work from other extension handlers (e.g. pi-rewind's
 	// checkpoint I/O) before it is truly idle. The only legitimate cancellation
 	// is the agent_start handler above aborting the controller.
-	(async () => {
+	void (async () => {
 		try {
 			// Yield to the event loop first — matches the historical
 			// setTimeout(0) deferral that lets other agent_end listeners run.
