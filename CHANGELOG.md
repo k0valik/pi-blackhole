@@ -1,3 +1,38 @@
+## [0.3.9] - 2026-06-24
+
+### Auto-compaction idle race fix (#31, #33)
+
+The auto-compaction trigger used to bail permanently when `ctx.isIdle()`
+returned `false` at the first `setTimeout(0)` check after `agent_end`.
+When another extension (e.g. pi-rewind) registered an async `agent_end`
+handler whose I/O kept the agent state busy past the next macrotask,
+the trigger logged `"bail: not_idle"` and never retried — auto-compaction
+effectively never fired in this configuration.
+
+**New behavior:** the trigger keeps `compactInFlight = true` and polls
+`isIdle()` every 200ms (in 50ms slices) until the agent truly settles,
+or one of two cancellation signals:
+
+- `agent_start` fires — the user (or another extension) started a new
+  turn. `AbortController.abort()` cancels the wait; the new turn's own
+  `agent_end` will re-evaluate and start a fresh wait if still needed.
+- Session change (e.g. `/resume`) — detected inside the wait loop.
+
+Only the cell `compaction:auto + compactionEngine:blackhole` is affected.
+All other config combinations (off, manual, pi-default) are unchanged.
+
+### CI: fallow audit job
+
+- Added `fallow-audit` CI job (PR only, changed-code audit with compact
+  format, review comments, no SARIF)
+
+### Test cleanup
+
+- Removed stale `transcript-mode` tests left orphaned when the feature
+  was deliberately dropped in v0.3.7 as redundant with hybrid search.
+
+---
+
 ## [0.3.8] - 2026-06-19
 
 ### Pipeline progress cursors - fix re-run loop (#28, #29)
