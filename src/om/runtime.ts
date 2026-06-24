@@ -69,6 +69,10 @@ export class Runtime {
 	failedInCycle: Set<string> = new Set();
 	compactInFlight = false;
 	compactHookInFlight = false;
+	/** AbortController for the pending auto-compaction wait loop, or null if none.
+	 * Set when handleAgentEnd schedules a wait; cleared on abort, success, or terminal bail.
+	 * agent_start handlers read this to abort the pending wait when a new turn starts. */
+	autoCompactionController: AbortController | null = null;
 	resolveFailureNotified = false;
 	lastObserverError: string | undefined;
 	lastReflectorError: string | undefined;
