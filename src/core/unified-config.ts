@@ -80,8 +80,13 @@ export interface UnifiedConfig {
 	observeAfterTokens: number;
 	/** Token threshold for reflector and dropper. */
 	reflectAfterTokens: number;
-	/** Token threshold for proactive auto-compaction. */
+	/** Token threshold for proactive auto-compaction (agent_end / turn-end). */
 	compactAfterTokens: number;
+	/** Token threshold for mid-run compaction (turn_end trigger, fires while the
+	 *  agent is still executing tool loops). When unset, falls back to
+	 *  compactAfterTokens (single shared threshold). Set higher than
+	 *  compactAfterTokens to make mid-run compaction more reluctant than turn-end. */
+	midRunCompactAfterTokens?: number;
 	/** Observation pool token pressure for full fold. */
 	observationsPoolMaxTokens: number;
 	/** Treat every compaction as a full-fold boundary so early reflections/drops
@@ -262,7 +267,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 	if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
 	// Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
-	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
+	const numKeys = ["observeAfterTokens", "reflectAfterTokens", "compactAfterTokens", "midRunCompactAfterTokens", "observationsPoolMaxTokens", "observationsPoolTargetTokens", "reflectorInputMaxTokens", "dropperInputMaxTokens", "observerChunkMaxTokens", "observerPreambleMaxTokens", "agentMaxTurns"] as const;
 
 	// dropperPressureThreshold: fractional, must be in (0, 1]
 	if (typeof raw.dropperPressureThreshold === "number" && Number.isFinite(raw.dropperPressureThreshold) && raw.dropperPressureThreshold > 0 && raw.dropperPressureThreshold <= 1) {

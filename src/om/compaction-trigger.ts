@@ -116,7 +116,8 @@ function handleTurnEnd(ctx: any, runtime: Runtime, pi: ExtensionAPI): void {
 
 	const entries = ctx.sessionManager.getBranch() as Entry[];
 	const tokens = rawTokensSinceLastCompaction(entries);
-	if (tokens < runtime.config.compactAfterTokens) {
+	const midRunThreshold = runtime.config.midRunCompactAfterTokens ?? runtime.config.compactAfterTokens;
+	if (tokens < midRunThreshold) {
 		// Pressure relieved (a compaction ran) — lift any failure suspension.
 		runtime.midRunCompactionSuspended = false;
 		return;
@@ -131,7 +132,7 @@ function handleTurnEnd(ctx: any, runtime: Runtime, pi: ExtensionAPI): void {
 
 	const hasUI = ctx.hasUI;
 	const ui = ctx.ui;
-	dbg("compaction_trigger.turn_end.threshold_reached", { tokens, threshold: runtime.config.compactAfterTokens, mode });
+	dbg("compaction_trigger.turn_end.threshold_reached", { tokens, threshold: midRunThreshold, mode });
 	runtime.tryEmitInfo(hasUI, ui,
 		`Observational memory: compaction threshold reached mid-run (~${tokens.toLocaleString()} tokens); compacting${mode === "resume" ? " and resuming" : ""}`);
 

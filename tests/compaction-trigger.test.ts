@@ -48,6 +48,9 @@ function captureHandler(args: {
 	compactionEngine?: "blackhole" | "pi-default";
 	/** NEW: Mid-run (turn_end) compaction behavior */
 	midRunCompaction?: "resume" | "pause" | "off";
+	/** NEW: Separate token threshold for mid-run (turn_end) compaction.
+	 *  When unset, handleTurnEnd falls back to compactAfterTokens. */
+	midRunCompactAfterTokens?: number;
 } = {}) {
 	let agentEndHandler: ((event: unknown, ctx: unknown) => void) | undefined;
 	let agentStartHandler: (() => void) | undefined;
@@ -80,6 +83,8 @@ function captureHandler(args: {
 			compactionEngine: args.compactionEngine,
 			/** NEW: Mid-run (turn_end) compaction behavior */
 			midRunCompaction: args.midRunCompaction,
+			/** NEW: Separate mid-run threshold (undefined → fallback to compactAfterTokens) */
+			midRunCompactAfterTokens: args.midRunCompactAfterTokens,
 		},
 		compactInFlight: args.compactInFlight ?? false,
 		autoCompactionController: null as AbortController | null,
@@ -688,5 +693,69 @@ describe("mid-run compaction cancellation resilience", () => {
 		ctx.compact.mock.calls[0][0].onError({ message: "Compaction cancelled" });
 
 		expect(pi.sendMessage).not.toHaveBeenCalled();
+	});
+});
+
+describe("mid-run compaction threshold (midRunCompactAfterTokens)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	// 20 chars → ceil(20/4) = 5 tokens; sits above compactAfterTokens (3) and at a
+	// higher midRunCompactAfterTokens (5) so the two thresholds can be told apart.
+	const midRunDueBranch = [textCustomMessage("raw-mid", "aaaaaaaaaaaaaaaaaaaa")];
+
+	it("MR1: when set, turn_end compacts at midRunCompactAfterTokens — not compactAfterTokens", () => {
+		// compactAfterTokens=3 would fire on the 3-token dueBranch at agent_end,
+		// but the mid-run threshold is 5: turn_end must NOT compact at 3 tokens.
+		const { turnHandler, runtime } = captureHandler({
+			compactAfterTokens: 3,
+			midRunCompactAfterTokens: 5,
+		});
+		const belowMidCtx = fakeCtx([dueBranch]); // 3 tokens < 5
+
+		turnHandler(turnEnd(), belowMidCtx);
+
+		expect(runtime.compactInFlight).toBe(false);
+		expect(belowMidCtx.compact).not.toHaveBeenCalled();
+
+		// At the mid-run threshold (5 tokens) turn_end DOES compact.
+		const atMidCtx = fakeCtx([midRunDueBranch]);
+		turnHandler(turnEnd(), atMidCtx);
+
+		expect(runtime.compactInFlight).toBe(true);
+		expect(atMidCtx.compact).toHaveBeenCalledTimes(1);
+	});
+
+	it("MR2: when unset, turn_end falls back to compactAfterTokens", () => {
+		// No midRunCompactAfterTokens → single shared threshold (3).
+		// dueBranch (3 tokens) is at threshold → compacts mid-run.
+		const { turnHandler, runtime } = captureHandler({
+			compactAfterTokens: 3,
+		});
+		const ctx = fakeCtx([dueBranch]);
+
+		turnHandler(turnEnd(), ctx);
+
+		expect(runtime.compactInFlight).toBe(true);
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
+	});
+
+	it("MR3: agent_end always uses compactAfterTokens, ignoring midRunCompactAfterTokens", async () => {
+		// mid-run threshold is higher (5), but agent_end must still fire at 3.
+		const { handler } = captureHandler({
+			compactAfterTokens: 3,
+			midRunCompactAfterTokens: 5,
+		});
+		const ctx = fakeCtx([dueBranch]); // 3 tokens
+
+		handler(agentEnd(), ctx);
+		await flushAll();
+
+		expect(ctx.compact).toHaveBeenCalledTimes(1);
 	});
 });
