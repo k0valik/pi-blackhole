@@ -269,7 +269,13 @@ export class ConfigManager<T extends object> {
     // every untouched key exactly where it was while updating only the
     // fields the user actually changed in this session.
     const merged = { ...existing, ...diff };
-    writeConfig(this.opts.filename, merged as Partial<T>, dir);
+    const wrote = writeConfig(this.opts.filename, merged as Partial<T>, dir);
+    if (!wrote) {
+      throw new Error(
+        `Failed to save ${this.opts.filename} — the config file may be read-only (e.g., managed by Nix). ` +
+        `Runtime state was updated for this session only.`,
+      );
+    }
   }
 
   /**

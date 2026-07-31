@@ -155,7 +155,7 @@ export function writeConfig<T>(filename: string, data: T, configDir?: string): b
     writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
     return true;
   } catch (error) {
-    console.warn(`[pi-base] Failed to write "${path}": ${error}`);
+    console.warn(`[pi-base] Failed to write "${path}": ${String(error)}`);
     return false;
   }
 }

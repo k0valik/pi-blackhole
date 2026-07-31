@@ -24,7 +24,7 @@
  * input would be the wrong kind of input to this editor anyway.
  */
 
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
 
 /** Shared yank buffer for storing killed text. */
 let yankBuffer = "";
@@ -153,7 +153,8 @@ export function deleteInlineRange(editing: InlineEditState, start: number, end: 
 
 /** Heuristic: is `data` a single, plain printable input character? */
 export function isPlainSearchInput(data: string): boolean {
-  return data.length === 1 && data >= " " && data !== "\x7f";
+  const decoded = decodeKittyPrintable(data) ?? data;
+  return decoded.length === 1 && decoded >= " " && decoded !== "\x7f";
 }
 
 /**

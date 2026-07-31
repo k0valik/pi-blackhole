@@ -548,6 +548,7 @@ export function createSettingsModalBody<F extends Field>(
       // to flush microtasks.
       const maybeThenable = result as unknown;
       if (maybeThenable && typeof (maybeThenable as Promise<void>).then === "function") {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
         (await maybeThenable) as Promise<void>;
       }
       args.close();
