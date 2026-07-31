@@ -355,6 +355,7 @@ export class ConfigManager<T extends object> {
       configFilename: this.opts.filename,
       mode: "buffered",
       defaults: this.opts.defaults as unknown as Record<string, unknown>,
+      globalConfigDir: configDir,
       inferDefaultScope: () =>
         existsSync(join(cwd, ".pi", this.opts.filename)) ? "project" : "global",
       fields,
