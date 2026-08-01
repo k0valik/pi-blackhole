@@ -238,7 +238,7 @@ export function registerRecallTool(pi: ExtensionAPI): void {
 			"Search session history and earlier lines omitted, file write/edit content by text/regex. " +
 			"Expand entries (#N), drill-down file content (#N:path) with paging, or aggregate touched files (mode:touched).",
 		promptSnippet:
-			"recall: Search session history + file write/edit content by text/regex. #N expand, #N:path drill-down with optional :offset:limit or :full, mode:file/touched.",
+			"Search session history + file write/edit content by text/regex. #N expand, #N:path drill-down with optional :offset:limit or :full, mode:file/touched.",
 		promptGuidelines: [
 			"Use recall — literal text/regex search across session history and file write/edit content. #N expands an entry; #N:path with optional :offset:limit or :full drills down into file content; 12-char hex ids recover observation/reflection sources. mode:file for file-content-only, mode:touched for aggregated files-by-path. scope:'all' to search the full session. If no results, try fewer terms or a regex pattern.",
 			"Use recall — when a drill-down path matches multiple files, options are listed. Narrow with a more specific path substring. Only full-file writes are indexed for text search (edit diffs are not).",
