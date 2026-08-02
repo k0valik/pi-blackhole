@@ -89,6 +89,17 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
   // Positive integers
   compactAfterTokens: "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
+  // Fractional (0, 1] — custom parser: no default exists (optional field), so
+  // the type-inferred paths above would not apply.
+  compactAfterPercent: {
+    var: "PI_BLACKHOLE_COMPACT_AFTER_PERCENT",
+    parse: (raw: string, current: unknown) => {
+      const parsed = Number.parseFloat(raw);
+      return Number.isFinite(parsed) && parsed > 0 && parsed <= 1
+        ? parsed
+        : current;
+    },
+  },
   observeAfterTokens: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
   reflectAfterTokens: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
   observationsPoolMaxTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS",

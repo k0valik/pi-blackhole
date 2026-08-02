@@ -102,6 +102,12 @@ export interface UnifiedConfig {
   reflectAfterTokens: number;
   /** Token threshold for proactive auto-compaction. */
   compactAfterTokens: number;
+  /** Fraction of the active model's context window at which to auto-compact,
+   *  in (0, 1]. When set and the model's context window is known, this takes
+   *  precedence over compactAfterTokens; compactAfterTokens remains the
+   *  fallback (and the threshold for OM-agent contexts without a model).
+   *  Optional; unset preserves absolute-token behavior. */
+  compactAfterPercent?: number;
   /** Observation pool token pressure for full fold. */
   observationsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
@@ -325,6 +331,16 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "observerPreambleMaxTokens",
     "agentMaxTurns",
   ] as const;
+
+  // compactAfterPercent: fractional, must be in (0, 1]
+  if (
+    typeof raw.compactAfterPercent === "number" &&
+    Number.isFinite(raw.compactAfterPercent) &&
+    raw.compactAfterPercent > 0 &&
+    raw.compactAfterPercent <= 1
+  ) {
+    c.compactAfterPercent = raw.compactAfterPercent;
+  }
 
   // dropperPressureThreshold: fractional, must be in (0, 1]
   if (

@@ -10,7 +10,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { registerCompactionTrigger } from "../src/om/compaction-trigger.js";
+import {
+  registerCompactionTrigger,
+  resolveCompactThreshold,
+} from "../src/om/compaction-trigger.js";
 import {
   compactionEntry,
   textCustomMessage,
@@ -43,6 +46,7 @@ function captureHandler(
   args: {
     overrideDefaultCompaction?: boolean;
     compactAfterTokens?: number;
+    compactAfterPercent?: number;
     passive?: boolean;
     compactInFlight?: boolean;
     noAutoCompact?: boolean;
@@ -81,6 +85,7 @@ function captureHandler(
     config: {
       overrideDefaultCompaction: args.overrideDefaultCompaction ?? true,
       compactAfterTokens: args.compactAfterTokens ?? 3,
+      compactAfterPercent: args.compactAfterPercent,
       passive: args.passive ?? false,
       noAutoCompact: args.noAutoCompact ?? false,
       memory: args.memory ?? true,
@@ -788,5 +793,88 @@ describe("mid-run compaction cancellation resilience", () => {
     ctx.compact.mock.calls[0][0].onError({ message: "Compaction cancelled" });
 
     expect(pi.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("compactAfterPercent (context-window-relative threshold)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolveCompactThreshold uses percent x contextWindow when both known", () => {
+    const runtime = {
+      config: { compactAfterTokens: 81_000, compactAfterPercent: 0.75 },
+    } as any;
+    expect(resolveCompactThreshold(runtime, { contextWindow: 1_000_000 })).toBe(
+      750_000,
+    );
+    expect(resolveCompactThreshold(runtime, { contextWindow: 272_000 })).toBe(
+      204_000,
+    );
+  });
+
+  it("resolveCompactThreshold falls back to compactAfterTokens without a usable window", () => {
+    const runtime = {
+      config: { compactAfterTokens: 81_000, compactAfterPercent: 0.75 },
+    } as any;
+    expect(resolveCompactThreshold(runtime, undefined)).toBe(81_000);
+    expect(resolveCompactThreshold(runtime, {})).toBe(81_000);
+    expect(resolveCompactThreshold(runtime, { contextWindow: 0 })).toBe(81_000);
+  });
+
+  it("resolveCompactThreshold ignores percent when unset", () => {
+    const runtime = { config: { compactAfterTokens: 81_000 } } as any;
+    expect(resolveCompactThreshold(runtime, { contextWindow: 1_000_000 })).toBe(
+      81_000,
+    );
+  });
+
+  it("percent threshold wins over a huge compactAfterTokens (agent_end)", async () => {
+    const { handler, runtime } = captureHandler({
+      compactAfterTokens: 999_999,
+      compactAfterPercent: 0.5,
+    });
+    // window 4 x 0.5 = threshold 2; dueBranch has ~3 tokens
+    const ctx = fakeCtx([dueBranch], { model: { contextWindow: 4 } });
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays below a percent threshold larger than accumulated tokens (agent_end)", async () => {
+    const { handler, runtime } = captureHandler({
+      compactAfterTokens: 1,
+      compactAfterPercent: 0.5,
+    });
+    // window 100 x 0.5 = threshold 50; dueBranch has ~3 tokens.
+    // compactAfterTokens=1 alone would have fired - percent must take precedence.
+    const ctx = fakeCtx([dueBranch], { model: { contextWindow: 100 } });
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).not.toHaveBeenCalled();
+  });
+
+  it("applies the percent threshold on the turn_end (mid-run) path", async () => {
+    const { turnHandler, runtime } = captureHandler({
+      compactAfterTokens: 999_999,
+      compactAfterPercent: 0.5,
+      midRunCompaction: "pause",
+    });
+    const ctx = fakeCtx([dueBranch], { model: { contextWindow: 4 } });
+
+    turnHandler(turnEnd(), ctx);
+
+    expect(runtime.compactInFlight).toBe(true);
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
 });

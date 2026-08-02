@@ -3,6 +3,7 @@ import { rawTokensSinceLastCompaction, type Entry } from "./ledger/index.js";
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
+import { effectiveContextWindow } from "./model-budget.js";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -43,6 +44,30 @@ export const MID_RUN_RESUME_CUSTOM_TYPE = "blackhole-resume";
 export const MID_RUN_RESUME_MESSAGE =
   "Context was auto-compacted mid-task to stay under the token threshold. " +
   "The summary above preserves prior progress. Continue the task from where you left off.";
+
+/**
+ * Resolve the auto-compaction threshold in tokens.
+ *
+ * When compactAfterPercent is configured and the active model's context
+ * window is known, the threshold is percent × contextWindow — so one config
+ * value adapts across models with very different windows. Otherwise the
+ * absolute compactAfterTokens applies unchanged.
+ */
+export function resolveCompactThreshold(
+  runtime: Runtime,
+  model: { contextWindow?: unknown } | undefined,
+): number {
+  const percent = runtime.config.compactAfterPercent;
+  if (
+    percent !== undefined &&
+    model &&
+    typeof model.contextWindow === "number" &&
+    model.contextWindow > 0
+  ) {
+    return Math.floor(effectiveContextWindow(model as any) * percent);
+  }
+  return runtime.config.compactAfterTokens;
+}
 
 /**
  * Shared config gating for auto-compaction (agent_end and turn_end paths).
@@ -133,7 +158,8 @@ function handleTurnEnd(ctx: any, runtime: Runtime, pi: ExtensionAPI): void {
 
   const entries = ctx.sessionManager.getBranch() as Entry[];
   const tokens = rawTokensSinceLastCompaction(entries);
-  if (tokens < runtime.config.compactAfterTokens) {
+  const threshold = resolveCompactThreshold(runtime, ctx.model);
+  if (tokens < threshold) {
     // Pressure relieved (a compaction ran) — lift any failure suspension.
     runtime.midRunCompactionSuspended = false;
     return;
@@ -153,7 +179,7 @@ function handleTurnEnd(ctx: any, runtime: Runtime, pi: ExtensionAPI): void {
   const ui = ctx.ui;
   dbg("compaction_trigger.turn_end.threshold_reached", {
     tokens,
-    threshold: runtime.config.compactAfterTokens,
+    threshold,
     mode,
   });
   runtime.tryEmitInfo(
@@ -247,6 +273,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
     overrideDefaultCompaction: runtime.config.overrideDefaultCompaction,
     compactInFlight: runtime.compactInFlight,
     compactAfterTokens: runtime.config.compactAfterTokens,
+    compactAfterPercent: runtime.config.compactAfterPercent,
   });
 
   // Unified + legacy compaction guards (shared with the turn_end path)
@@ -287,16 +314,17 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   });
 
   const tokens = rawTokensSinceLastCompaction(entries);
+  const threshold = resolveCompactThreshold(runtime, ctx.model);
   dbg("compaction_trigger.tokens", {
     tokens,
-    compactAfterTokens: runtime.config.compactAfterTokens,
+    threshold,
     branchLength: entries.length,
   });
-  if (tokens < runtime.config.compactAfterTokens) {
+  if (tokens < threshold) {
     dbg("compaction_trigger.skip", {
       reason: "below_threshold",
       tokens,
-      threshold: runtime.config.compactAfterTokens,
+      threshold,
     });
     return;
   }
@@ -411,16 +439,16 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       const currentTokens = rawTokensSinceLastCompaction(currentEntries);
       dbg("compaction_trigger.microtask.recheck_tokens", {
         currentTokens,
-        threshold: runtime.config.compactAfterTokens,
-        ok: currentTokens >= runtime.config.compactAfterTokens,
+        threshold,
+        ok: currentTokens >= threshold,
       });
-      if (currentTokens < runtime.config.compactAfterTokens) {
+      if (currentTokens < threshold) {
         runtime.compactInFlight = false;
         runtime.autoCompactionController = null;
         dbg("compaction_trigger.microtask.bail", {
           reason: "pressure_relieved",
           currentTokens,
-          threshold: runtime.config.compactAfterTokens,
+          threshold,
         });
         runtime.tryEmitInfo(
           hasUI,
