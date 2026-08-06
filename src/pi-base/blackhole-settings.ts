@@ -24,35 +24,6 @@ const CONFIG_FILENAME = "pi-blackhole-config.json";
 
 export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
 
-// ── Env-var parsers ──────────────────────────────────────────────────────────
-
-function parseCompactionEnv(
-  raw: string,
-): "auto" | "manual" | "off" | undefined {
-  const trimmed = raw.trim().toLowerCase();
-  return ["auto", "manual", "off"].includes(trimmed)
-    ? (trimmed as "auto" | "manual" | "off")
-    : undefined;
-}
-
-function parseCompactionEngineEnv(
-  raw: string,
-): "blackhole" | "pi-default" | undefined {
-  const trimmed = raw.trim().toLowerCase();
-  return ["blackhole", "pi-default"].includes(trimmed)
-    ? (trimmed as "blackhole" | "pi-default")
-    : undefined;
-}
-
-function parseMidRunCompactionEnv(
-  raw: string,
-): "resume" | "pause" | "off" | undefined {
-  const trimmed = raw.trim().toLowerCase();
-  return ["resume", "pause", "off"].includes(trimmed)
-    ? (trimmed as "resume" | "pause" | "off")
-    : undefined;
-}
-
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
 export const config = new ConfigManager<UnifiedConfig>({
@@ -358,13 +329,11 @@ export const config = new ConfigManager<UnifiedConfig>({
       }
     }
 
-    // ── New compaction env vars ──
+    // ── Warn on invalid enum env vars (application handled by applyEnvOverrides) ──
     const envCompaction = process.env.PI_BLACKHOLE_COMPACTION;
     if (envCompaction !== undefined) {
-      const parsedEnv = parseCompactionEnv(envCompaction);
-      if (parsedEnv) {
-        parsed.compaction = parsedEnv;
-      } else {
+      const trimmed = envCompaction.trim().toLowerCase();
+      if (!["auto", "manual", "off"].includes(trimmed)) {
         console.warn(
           `blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`,
         );
@@ -373,10 +342,8 @@ export const config = new ConfigManager<UnifiedConfig>({
 
     const envCompactionEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
     if (envCompactionEngine !== undefined) {
-      const parsedEnv = parseCompactionEngineEnv(envCompactionEngine);
-      if (parsedEnv) {
-        parsed.compactionEngine = parsedEnv;
-      } else {
+      const trimmed = envCompactionEngine.trim().toLowerCase();
+      if (!["blackhole", "pi-default"].includes(trimmed)) {
         console.warn(
           `blackhole: invalid PI_BLACKHOLE_COMPACTION_ENGINE value "${envCompactionEngine}"; ignoring`,
         );
@@ -385,10 +352,8 @@ export const config = new ConfigManager<UnifiedConfig>({
 
     const envMidRunCompaction = process.env.PI_BLACKHOLE_MID_RUN_COMPACTION;
     if (envMidRunCompaction !== undefined) {
-      const parsedEnv = parseMidRunCompactionEnv(envMidRunCompaction);
-      if (parsedEnv) {
-        parsed.midRunCompaction = parsedEnv;
-      } else {
+      const trimmed = envMidRunCompaction.trim().toLowerCase();
+      if (!["resume", "pause", "off"].includes(trimmed)) {
         console.warn(
           `blackhole: invalid PI_BLACKHOLE_MID_RUN_COMPACTION value "${envMidRunCompaction}"; ignoring`,
         );

@@ -131,4 +131,33 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
         .map((s) => s.trim())
         .filter((s) => s.length > 0),
   },
+  // Enum overrides — custom parsers because canonical only auto-handles
+  // booleans and positive integers.
+  compaction: {
+    var: "PI_BLACKHOLE_COMPACTION",
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase();
+      return ["auto", "manual", "off"].includes(trimmed)
+        ? (trimmed as "auto" | "manual" | "off")
+        : undefined;
+    },
+  },
+  compactionEngine: {
+    var: "PI_BLACKHOLE_COMPACTION_ENGINE",
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase();
+      return ["blackhole", "pi-default"].includes(trimmed)
+        ? (trimmed as "blackhole" | "pi-default")
+        : undefined;
+    },
+  },
+  midRunCompaction: {
+    var: "PI_BLACKHOLE_MID_RUN_COMPACTION",
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase();
+      return ["resume", "pause", "off"].includes(trimmed)
+        ? (trimmed as "resume" | "pause" | "off")
+        : undefined;
+    },
+  },
 };
