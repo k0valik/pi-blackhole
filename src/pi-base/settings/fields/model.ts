@@ -33,8 +33,8 @@ import type {
 import {
   matchesKey,
   SelectList,
-  SelectItem,
   truncateToWidth,
+  type SelectItem,
 } from "@earendil-works/pi-tui";
 import { formatHintLine, type KeyHint } from "../frame";
 import { handleInlineEditInput, type InlineEditState } from "../inline-edit";
@@ -433,7 +433,7 @@ export const modelRenderer: FieldRenderer<ModelField, ModelValue> = {
     // there: opening the submenu. `↑↓` and `←→` only fire **inside**
     // the submenu — emitting them at row level would mislead the
     // user about what the keys do. The submenu has its own footer.
-    return [{ key: "enter", label: "open" }];
+    return [{ key: "enter/space", label: "open" }];
   },
   handleKey(row, data, { ctx }) {
     if (row.field.disabled) return {};

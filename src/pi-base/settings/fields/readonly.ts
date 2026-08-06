@@ -1,14 +1,15 @@
 /**
- * Renderer for non-interactive display rows: `readonly`.
+ * Renderer for non-interactive display rows: `readonly` and `section`.
  *
- * Renders a label + value cell (right-aligned like the other editable
- * fields) with no edit affordance. Enter does nothing, no hints, no
- * inline editing. Used for telemetry/stats views and informational
- * rows inside the modal.
+ *   - `readonly` renders a label + value cell (right-aligned like the other
+ *     editable fields) with no edit affordance. Enter does nothing, no
+ *     hints, no inline editing. Used for telemetry/stats views and
+ *     informational rows inside the modal.
+ *   - `section` renders a full-width dim heading, used to group consecutive
+ *     read-only telemetry rows under a title.
  *
- * `section` rendering is intentionally omitted — body.ts short-circuits
- * section rows before renderer dispatch, so there is no map entry and
- * no renderer to call.
+ * Both types are pure display: `handleKey` always returns `{}` so the
+ * modal's default navigation (↑/↓ move, Esc close) is never suppressed.
  */
 
 import type { FieldRenderer, ReadonlyField } from "../types";

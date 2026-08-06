@@ -25,6 +25,7 @@ export default [
   {
     // Type-aware rules need files that are part of tsconfig.json (src + entry).
     files: ["src/**/*.ts", "index.ts"],
+    ignores: ["src/pi-base/**/*.test.ts"],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

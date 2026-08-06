@@ -17,7 +17,7 @@ export const actionRenderer: FieldRenderer<ActionField, void> = {
   },
   hints(row) {
     if (row.field.disabled) return [];
-    return [{ key: "enter", label: "run" }];
+    return [{ key: "enter/space", label: "run" }];
   },
   handleKey(row, data, { ctx }) {
     if (row.field.disabled) return {};

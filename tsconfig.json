@@ -12,5 +12,6 @@
     "noEmit": true,
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts", "index.ts"]
+  "include": ["src/**/*.ts", "index.ts"],
+  "exclude": ["src/pi-base/**/*.test.ts"]
 }

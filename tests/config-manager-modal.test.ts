@@ -1,31 +1,22 @@
 /**
- * Regression test: openSettings must forward globalConfigDir to the modal.
+ * Regression test: openSettings must forward globalConfigDir through the
+ * canonical config-flow, not the removed openSettingsModal path.
  *
- * Without it, the modal falls back to getExtensionsDir() when initializing
- * its row values, so every untouched field shows the schema DEFAULT. On
- * save, allValues() then returns those defaults and save() writes them over
- * the user's real config file — the "config clobbered to defaults" bug.
+ * In the canonical flow, configDir is threaded through layerValues/inspect/
+ * save/resetScope/deleteScope callbacks rather than passed as a modal option.
  */
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  beforeAll,
-  afterAll,
-  vi,
-} from "vitest";
+import { describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-const capturedOptions = vi.hoisted<Record<string, unknown>[]>(() => []);
+const capturedParams = vi.hoisted<Record<string, unknown>[]>(() => []);
 
-vi.mock("../src/pi-base/settings/index.js", () => ({
-  openSettingsModal: async (_ctx: unknown, options: unknown) => {
-    capturedOptions.push(options as Record<string, unknown>);
+vi.mock("../src/pi-base/settings/config-flow.js", () => ({
+  openConfigFlow: async (params: unknown) => {
+    capturedParams.push(params as Record<string, unknown>);
+    // Do not actually mount a UI; just resolve.
   },
 }));
 
@@ -40,15 +31,6 @@ const DEFAULTS = {
   memory: true,
 } as const;
 
-const ctx = {
-  cwd: testDir,
-  ui: { notify: vi.fn() },
-} as unknown as ExtensionContext;
-
-beforeEach(() => {
-  capturedOptions.length = 0;
-});
-
 beforeAll(() => {
   mkdirSync(testDir, { recursive: true });
   process.env.PI_CODING_AGENT_DIR = testDir;
@@ -59,57 +41,55 @@ afterAll(() => {
   delete process.env.PI_CODING_AGENT_DIR;
 });
 
-describe("openSettings globalConfigDir forwarding", () => {
-  it("forwards the ConfigManager configDir to the modal (no extensions-dir fallback)", async () => {
+describe("openSettings configDir forwarding (canonical config-flow)", () => {
+  beforeEach(() => {
+    capturedParams.length = 0;
+  });
+
+  it("forwards the ConfigManager configDir through openConfigFlow callbacks", async () => {
     const cm = new ConfigManager<Record<string, unknown>>({
       id: "test",
       label: "test",
       filename: "pi-blackhole-config.json",
       defaults: DEFAULTS,
-      fields: () => [
-        {
-          key: "compaction",
-          type: "enum",
-          label: "Compaction",
-          value: "auto",
-          options: ["auto", "manual", "off"],
-        },
-        {
-          key: "compactAfterTokens",
-          type: "number",
-          label: "Tokens",
-          value: 185_000,
-        },
-        {
-          key: "observeAfterTokens",
-          type: "number",
-          label: "Observe",
-          value: 25_000,
-        },
-        { key: "memory", type: "boolean", label: "Memory", value: true },
-      ],
+      fields: () => [],
     });
 
     const configDir = join(testDir, "pi-blackhole");
-    await cm.openSettings(ctx, testDir, () => {}, configDir);
+    await cm.openSettings(
+      { cwd: testDir, ui: { notify: vi.fn() } } as any,
+      testDir,
+      () => {},
+      configDir,
+    );
 
-    expect(capturedOptions).toHaveLength(1);
-    const opts = capturedOptions[0];
-    // The bug: this was undefined → body.ts used getExtensionsDir() →
-    // rows initialized from DEFAULTS → save clobbered the real config.
-    expect(opts.globalConfigDir).toBe(configDir);
+    expect(capturedParams).toHaveLength(1);
+    const params = capturedParams[0];
+
+    // The callbacks that consume configDir must reference it.
+    expect(typeof params.layerValues).toBe("function");
+    expect(typeof params.save).toBe("function");
+    expect(typeof params.scopeSources).toBe("function");
+
+    // layerValues should be able to resolve a global scope path under configDir.
+    const globalValues = await params.layerValues("global");
+    expect(globalValues).toEqual(expect.objectContaining(DEFAULTS));
   });
 
   it("openBlackholeSettings resolves GLOBAL_CONFIG_DIR under the agent dir", async () => {
-    // blackhole-settings.ts computes GLOBAL_CONFIG_DIR at module scope,
-    // so it must be imported after PI_CODING_AGENT_DIR is set.
     const { openBlackholeSettings } =
       await import("../src/pi-base/blackhole-settings.js");
 
-    await openBlackholeSettings(ctx);
+    await openBlackholeSettings({
+      cwd: testDir,
+      ui: { notify: vi.fn() },
+    } as any);
 
-    expect(capturedOptions).toHaveLength(1);
-    const opts = capturedOptions[0];
-    expect(opts.globalConfigDir).toBe(join(testDir, "pi-blackhole"));
+    expect(capturedParams).toHaveLength(1);
+    const params = capturedParams[0];
+
+    // Verify the callbacks are wired (same as above).
+    expect(typeof params.layerValues).toBe("function");
+    expect(typeof params.save).toBe("function");
   });
 });

@@ -4,7 +4,6 @@
  * `ctx.ui.custom`.
  */
 
-import { join } from "node:path";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type {
   Component,
@@ -13,12 +12,6 @@ import type {
   TUI,
 } from "@earendil-works/pi-tui";
 import { createSettingsModalBody } from "./body";
-import {
-  getExtensionsDir,
-  readConfig,
-  writeConfig,
-  deleteConfig,
-} from "../config.ts";
 import type {
   Field,
   SettingsModalFactory,
@@ -77,46 +70,6 @@ export function createSettingsModal<F extends Field>(
     }
     openModals.set(ctx, close);
 
-    // Auto-inject default scope action handlers when configFilename is
-    // set but the callbacks are absent. This ensures that any modal using
-    // scope tabs always has reset/delete actions without requiring every
-    // caller to supply them explicitly.
-    if (options.configFilename) {
-      if (!options.onResetScope) {
-        options.onResetScope = async (scope: "global" | "project") => {
-          const dir =
-            scope === "project"
-              ? join(ctx.cwd, ".pi")
-              : (options.globalConfigDir ?? getExtensionsDir());
-          const knownKeys = new Set(Object.keys(options.defaults ?? {}));
-          const existing = readConfig<Record<string, unknown>>(
-            options.configFilename!,
-            dir,
-          );
-          const unknownKeys: Record<string, unknown> = {};
-          if (existing && typeof existing === "object") {
-            for (const [key, val] of Object.entries(existing)) {
-              if (!knownKeys.has(key)) unknownKeys[key] = val;
-            }
-          }
-          if (Object.keys(unknownKeys).length > 0) {
-            writeConfig(options.configFilename!, unknownKeys, dir);
-          } else {
-            deleteConfig(options.configFilename!, dir);
-          }
-        };
-      }
-      if (!options.onDeleteScope) {
-        options.onDeleteScope = async (scope: "global" | "project") => {
-          const dir =
-            scope === "project"
-              ? join(ctx.cwd, ".pi")
-              : (options.globalConfigDir ?? getExtensionsDir());
-          deleteConfig(options.configFilename!, dir);
-        };
-      }
-    }
-
     return createSettingsModalBody<F>(options, { tui, theme, ctx, close });
   };
 }
@@ -126,8 +79,11 @@ export function createSettingsModal<F extends Field>(
  * when the user closes it. This is the **happy-path** entry point most
  * callers want.
  *
- * Defaults: anchor center, width 92%, maxHeight 85%. Override via
+ * Defaults: anchor center, width 92%, maxHeight 95%. Override via
  * `options.overlayOptions`.
+ *
+ * @deprecated Config flows must use ConfigManager.openSettings(). This entry
+ * point remains for config-agnostic overlays (lists, pickers, custom UI).
  *
  * @example
  * ```ts

@@ -22,6 +22,13 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => join(testRoot, "agent"),
 }));
 
+// Mock the canonical config-flow so openSettings doesn't mount a real UI.
+// The canonical flow renders a scope-selector + modal via ctx.ui.custom,
+// which doesn't exist in these command-level tests.
+vi.mock("../src/pi-base/settings/config-flow.js", () => ({
+  openConfigFlow: vi.fn(async () => {}),
+}));
+
 import { registerPiVccCommand } from "../src/commands/pi-vcc.js";
 
 function createMockEnvironment() {

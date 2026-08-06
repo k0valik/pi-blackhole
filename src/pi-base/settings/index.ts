@@ -1,9 +1,5 @@
 /**
- * @k0valik/pi-base/settings — public entry point for the settings
- * modal feature (originally vendored from wierdbytes/pi-common/settings;
- * since heavily reworked — buffered save mode, scope-aware values,
- * validation, fuzzy filtering).
- *
+ * @k0valik/pi-base/settings — public entry point for the settings *
  * High-level: `openSettingsModal(ctx, opts)` opens a centered popup,
  * persists changes via `opts.onChange`, and resolves on close.
  *
@@ -45,6 +41,16 @@ export { RENDERERS } from "./fields/index";
 
 export { validateFieldValue } from "./validate-field";
 
+export { createConfirm, type ConfirmOptions } from "./confirm.ts";
+
+export {
+  createScopeSelector,
+  type ScopeSelectorEntry,
+  type ScopeSelectorResult,
+} from "./scope-selector.ts";
+
+export { openConfigFlow, type ConfigFlowParams } from "./config-flow.js";
+
 export type {
   ActionField,
   BooleanField,
@@ -66,6 +72,7 @@ export type {
   PathField,
   ReadonlyField,
   SecretField,
+  SettingsModalBodyComponent,
   SettingsModalFactory,
   SettingsModalOptions,
   SettingsTheme,

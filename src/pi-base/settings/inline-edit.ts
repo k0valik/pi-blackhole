@@ -228,7 +228,7 @@ export function handleInlineEditInput(
     deleteInlineRange(editing, editing.cursor, before);
     return true;
   }
-  if (matchesKey(data, "delete") || matchesKey(data, "ctrl+d")) {
+  if (matchesKey(data, "delete")) {
     const start = editing.cursor;
     moveInlineCursorByChars(editing, 1);
     deleteInlineRange(editing, start, editing.cursor);

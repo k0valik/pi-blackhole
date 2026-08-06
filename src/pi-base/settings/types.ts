@@ -1,7 +1,4 @@
-/**
- * Public types for the `@k0valik/pi-base` settings modal (originally
- * vendored from wierdbytes/pi-common; since heavily reworked).
- *
+/** *
  * The modal accepts a flat array of `Field`s (or, when `tabs` is set,
  * one such array per tab) and a single `onChange` callback. Every
  * built-in field is a discriminated-union variant of `Field`. Callers
@@ -28,7 +25,6 @@ import type {
 
 export interface VisibilityContext {
   get(key: string): unknown;
-  getScoped(key: string, scope?: string): unknown;
   scope: string;
 }
 
@@ -96,6 +92,11 @@ export interface FieldBase {
    * `requiresReload` fields and shows a hint in the confirm prompt.
    */
   requiresReload?: boolean;
+  /**
+   * Optional dim suffix rendered after the row's value cell.
+   * Thunk form is re-evaluated on every render (mirrors `dim`).
+   */
+  valueNote?: string | (() => string | undefined);
 }
 
 export interface BooleanField extends FieldBase {
@@ -181,10 +182,18 @@ export interface PathField extends FieldBase {
   default?: string;
 }
 
+/**
+ * Non-interactive display row. Renders a label + value cell with no edit
+ * affordance — Enter does nothing, no hints, no inline editing. Used for
+ * read-only telemetry/stats views and informational rows inside the modal.
+ */
 export interface ReadonlyField extends FieldBase {
   type: "readonly";
+  /** Right-hand value cell shown on the row. */
   value: string;
+  /** Optional muted hint under the row when focused. */
   hint?: string;
+  /** Optional accent emphasis for the value cell (default: muted when unselected). */
   emphasis?: boolean;
 }
 
@@ -194,6 +203,7 @@ export interface ReadonlyField extends FieldBase {
  */
 export interface SectionField extends FieldBase {
   type: "section";
+  /** Full-width heading text. */
   value: string;
 }
 
@@ -409,10 +419,6 @@ export interface SettingsModalOptions<F extends Field = Field> {
   fields: F[];
   /** Optional tab strip; rendered only when length ≥ 1. */
   tabs?: Tab[];
-  /** Optional config filename to enable tabulated global vs project local views. */
-  configFilename?: string;
-  /** Optional defaults for the configuration to fallback to when loading. */
-  defaults?: Record<string, unknown>;
   /** Initial tab id (defaults to the first tab). */
   initialTab?: string;
   /** Show a fuzzy-search bar above the list. */
@@ -421,8 +427,6 @@ export interface SettingsModalOptions<F extends Field = Field> {
   theme?: SettingsTheme;
   /** Override the overlay positioning (defaults: anchor center, 92% × 85%). */
   overlayOptions?: OverlayOptions | (() => OverlayOptions);
-  /** Override the global config directory used for scope-tab loading. Defaults to `getExtensionsDir()`. */
-  globalConfigDir?: string;
   /**
    * Called whenever a field's value changes. The modal calls this
    * synchronously after updating its own row state, so any throw here
@@ -442,18 +446,21 @@ export interface SettingsModalOptions<F extends Field = Field> {
   mode?: "immediate" | "buffered";
   /**
    * Called when the user confirms a buffered save. Receives the
-   * full buffer (all field values, including untouched defaults) and
-   * the chosen scope. May be async.
+   * full buffer (all field values, including untouched defaults).
+   * May be async.
    */
-  onSave?: (
-    values: Record<string, unknown>,
-    scope: "global" | "project",
-  ) => void | Promise<void>;
+  onSave?: (values: Record<string, unknown>) => void | Promise<void>;
   /**
    * Called when the user discards buffered edits. The modal closes
    * immediately after.
    */
   onCancel?: () => void;
+  /**
+   * Close the modal automatically after a successful `onSave`.
+   * Defaults to `true`. Set to `false` when the caller wants to
+   * run additional UI (e.g. a confirm dialog) inside `onSave`.
+   */
+  closeOnSave?: boolean;
   /**
    * Called when the user presses alt+↑ / alt+↓ on a `reorderable: true`
    * row. The modal has already swapped its internal `rows` array and
@@ -473,36 +480,46 @@ export interface SettingsModalOptions<F extends Field = Field> {
     toIndex: number;
   }) => void;
   /**
+   * Optional footer actions rendered as a pill strip below the rows.
+   * Tab/Shift+Tab cycle through tabs then actions. Enter on an enabled
+   * action fires `onAction`.
+   */
+  actions?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    danger?: boolean;
+    disabled?: boolean | (() => boolean);
+  }>;
+  /**
+   * Called when the user presses Enter on an enabled action.
+   */
+  onAction?: (id: string) => void;
+  /**
+   * Called after every `activeTabId` change (not on mount).
+   */
+  onActiveTabChange?: (tabId: string) => void;
+  /**
+   * Called when the user requests exit while dirty (Esc/Ctrl+C in
+   * buffered mode with unsaved changes). If absent, a built-in
+   * 2-choice confirm is mounted instead.
+   */
+  onRequestExit?: () => void;
+  /**
+   * @internal Optional dim path/location note rendered above the
+   * search/fields area (e.g. resolved config file path).
+   */
+  pathNote?: string;
+  /**
+   * @internal Read-only mode: no edits, no dirty tracking, reorder
+   * is a no-op. Rows render normally.
+   */
+  readOnly?: boolean;
+  /**
    * Called once when the modal closes. Useful for fire-and-forget
    * cleanup (e.g. saving a debounced config).
    */
   onClose?: () => void;
-  /**
-   * Infer the default scope for the confirm prompt. Called once at
-   * modal mount. Return "project" if a project-local config file
-   * exists, "global" otherwise. Optional — defaults to "global".
-   *
-   * This keeps the modal framework independent of any specific
-   * config library (pi-base, custom fs, etc.) — the extension
-   * decides what "project-local" means for its own config system.
-   */
-  inferDefaultScope?: () => "global" | "project";
-  /**
-   * Called when the user activates "Reset scope to defaults" from
-   * the bottom of a scope tab. The callback should delete the
-   * scope's config file or otherwise clear all overrides so the
-   * next load falls back to defaults entirely.
-   *
-   * After this callback completes, the modal re-reads configs and
-   * updates all rows with their default values.
-   */
-  onResetScope?: (scope: "global" | "project") => void | Promise<void>;
-  /**
-   * Called when the user activates "Delete config" from the bottom of
-   * a scope tab. The callback should delete the scope's config file
-   * entirely (not just reset it).
-   */
-  onDeleteScope?: (scope: "global" | "project") => void | Promise<void>;
 }
 
 /** Value type of the field with key `K` inside a union `F`. */
@@ -516,3 +533,17 @@ export type SettingsModalFactory<T = void> = (
   keybindings: KeybindingsManager,
   done: (result: T) => void,
 ) => Component;
+
+/**
+ * Return type of `createSettingsModalBody`.
+ */
+export interface SettingsModalBodyComponent extends Component {
+  /** Mount a submenu/confirm overlay inside the frame. */
+  mountOverlay(c: Component, title?: string): void;
+  /** Dismiss any mounted overlay. */
+  dismissOverlay(): void;
+  /** Current active tab id, if tabs are configured. */
+  getActiveTabId(): string | undefined;
+  /** Replace row values in place, clear dirty state, re-snapshot. */
+  setValues(values: Record<string, unknown>): void;
+}

@@ -34,8 +34,8 @@ export const customRenderer: FieldRenderer<CustomField, unknown> = {
     // is a no-op, in which case the default "enter edit" heuristic
     // would be misleading.
     if (row.field.hints) return row.field.hints;
-    if (row.field.openSubmenu) return [{ key: "enter", label: "open" }];
-    if (row.field.handleInput) return [{ key: "enter", label: "edit" }];
+    if (row.field.openSubmenu) return [{ key: "enter/space", label: "open" }];
+    if (row.field.handleInput) return [{ key: "enter/space", label: "edit" }];
     return [];
   },
   handleKey(row, data, args) {

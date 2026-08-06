@@ -29,16 +29,16 @@ function labelFor(field: EnumField, value: string): string {
   return field.optionLabels?.[value] ?? value;
 }
 
-function nextCycleValue(field: EnumField, current: string): string {
-  if (field.options.length === 0) return current;
-  const idx = field.options.indexOf(current as never);
+function nextCycleValue(field: EnumField, _current: string): string {
+  if (field.options.length === 0) return _current;
+  const idx = field.options.indexOf(_current as never);
   const nextIdx = (idx + 1 + field.options.length) % field.options.length;
   return field.options[nextIdx]!;
 }
 
-function prevCycleValue(field: EnumField, current: string): string {
-  if (field.options.length === 0) return current;
-  const idx = field.options.indexOf(current as never);
+function prevCycleValue(field: EnumField, _current: string): string {
+  if (field.options.length === 0) return _current;
+  const idx = field.options.indexOf(_current as never);
   const prevIdx = (idx - 1 + field.options.length) % field.options.length;
   return field.options[prevIdx]!;
 }
@@ -77,7 +77,7 @@ function makeEnumSubmenu(
           ...(items.length > 1
             ? [{ key: `1-${Math.min(9, items.length)}`, label: "choose" }]
             : []),
-          { key: "enter", label: "save" },
+          { key: "enter/space", label: "save" },
           { key: "esc", label: "cancel" },
         ];
         const hintText = `  ${formatHintLine(hints, ctx.theme)}`;
@@ -135,11 +135,6 @@ function makeSearchableEnumSubmenu(
           item.label.toLowerCase().includes(q) ||
           item.value.toLowerCase().includes(q),
       );
-    }
-
-    function clampSelected(): void {
-      const items = filteredItems();
-      if (selected >= items.length) selected = Math.max(0, items.length - 1);
     }
 
     const component: Component = {
@@ -224,14 +219,12 @@ function makeSearchableEnumSubmenu(
         if (matchesKey(data, "backspace") || matchesKey(data, "ctrl+h")) {
           search = search.slice(0, -1);
           selected = 0;
-          clampSelected();
           ctx.tui.requestRender();
           return;
         }
         if (data.length === 1 && data >= " " && data !== "\x7f") {
           search += data;
           selected = 0;
-          clampSelected();
           ctx.tui.requestRender();
         }
       },
@@ -253,11 +246,11 @@ export const enumRenderer: FieldRenderer<EnumField, string> = {
     if (row.field.disabled) return [];
     // Searchable enums always open a list submenu
     if (row.field.search) {
-      return [{ key: "enter", label: "open list" }];
+      return [{ key: "enter/space", label: "open list" }];
     }
     const threshold = row.field.cycleThreshold ?? DEFAULT_CYCLE_THRESHOLD;
     if (row.field.options.length > threshold) {
-      return [{ key: "enter", label: "open list" }];
+      return [{ key: "enter/space", label: "open list" }];
     }
     return [
       { key: "enter/space", label: "cycle" },

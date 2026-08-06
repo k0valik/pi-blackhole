@@ -49,6 +49,12 @@ export interface FrameOptions {
   /** Inner padding rows (top and bottom). Defaults to {@link DEFAULT_PADDING_Y}. */
   paddingY?: number;
   /**
+   * Optional dim subtitle line(s) rendered directly under the top border,
+   * above the usual `paddingY` blank rows. Accepts `\n` for multi-line
+   * subtitles; each line is ANSI-aware truncated to fit `contentWidth`.
+   */
+  subtitle?: string;
+  /**
    * If set, the body is forced to exactly this many inner rows. Excess
    * lines are replaced with a `↓ N more` indicator at the bottom; missing
    * lines are padded with blank rows so the overlay never visually shrinks
@@ -163,6 +169,17 @@ export function frame(
   };
 
   const out: string[] = [top()];
+  if (options.subtitle) {
+    for (const line of options.subtitle.split(/\r?\n/)) {
+      const text = theme.fg(
+        "dim",
+        pad(truncateToWidth(line, contentWidth, "…"), contentWidth),
+      );
+      out.push(
+        `${border("│")}${" ".repeat(paddingX)}${text}${" ".repeat(paddingX)}${border("│")}`,
+      );
+    }
+  }
   for (let i = 0; i < paddingY; i += 1) out.push(blank);
   for (const line of body) {
     out.push(

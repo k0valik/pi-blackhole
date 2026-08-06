@@ -252,6 +252,112 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
+import type { FileEntry } from "@earendil-works/pi-coding-agent";
+import { getAncestorChain } from "./session.js";
+
+/** Separator between key parts. NUL cannot appear in paths or session IDs. */
+const SESSION_KEY_SEP = "\x00";
+
+/** LeafId sentinel for pending-mode session config.
+ *  Used as the leafId key in the in-memory store while the session JSONL
+ *  has not yet materialized. Once the file exists and getLeafId() returns
+ *  a real id, _tryFlushSession() migrates the config to the real leaf and
+ *  clears this sentinel key.
+ */
+export const PENDING_SENTINEL = "__pending__";
+
+const _sessionConfigs = new Map<string, Record<string, unknown>>();
+
+/** Max entries in the session config cache. Evicts oldest (FIFO) when exceeded.
+ *  Prevents unbounded growth in long-running processes that see many sessions. */
+const MAX_SESSION_CONFIGS = 500;
+
+function sessionKey(
+  namespace: string,
+  cwd: string,
+  sessionId: string,
+  leafId: string,
+): string {
+  return `${namespace}${SESSION_KEY_SEP}${cwd}${SESSION_KEY_SEP}${sessionId}${SESSION_KEY_SEP}${leafId}`;
+}
+
+/**
+ * Get session config for a specific leaf, walking up parentId chain
+ * using pi's own session entry tree. First match wins — children
+ * inherit parent config automatically. Returns empty object if no
+ * session config exists for this leaf or any ancestor.
+ */
+export function getSessionConfig(
+  namespace: string,
+  cwd: string,
+  sessionId: string,
+  leafId: string,
+  entries: FileEntry[],
+): Record<string, unknown> {
+  const chain = getAncestorChain(entries, leafId);
+  for (const id of chain) {
+    const key = sessionKey(namespace, cwd, sessionId, id);
+    const found = _sessionConfigs.get(key);
+    if (found) return found;
+  }
+  return {};
+}
+
+/**
+ * Set session config for a specific leaf. Overwrites any existing config
+ * for that leaf. Does NOT affect parent or sibling leaves.
+ */
+export function setSessionConfig(
+  namespace: string,
+  cwd: string,
+  sessionId: string,
+  leafId: string,
+  config: Record<string, unknown>,
+): void {
+  const key = sessionKey(namespace, cwd, sessionId, leafId);
+  _sessionConfigs.set(key, structuredClone(config));
+  // FIFO eviction: prevent unbounded growth across many sessions.
+  // clearAllSessionConfigs() resets the Map entirely, so tests
+  // and callers that want a hard reset still get it.
+  if (_sessionConfigs.size > MAX_SESSION_CONFIGS) {
+    const oldestKey = _sessionConfigs.keys().next().value!;
+    _sessionConfigs.delete(oldestKey);
+  }
+}
+
+/** Read a session config entry directly by key, without walking the entry tree.
+ *  Returns undefined if no config exists for that (cwd, sessionId, leafId) triple.
+ *  Used by ConfigManager._tryFlushSession to read the pending sentinel entry
+ *  without incurring the cost of getAncestorChain.
+ */
+export function getRawSessionConfig(
+  namespace: string,
+  cwd: string,
+  sessionId: string,
+  leafId: string,
+): Record<string, unknown> | undefined {
+  return _sessionConfigs.get(sessionKey(namespace, cwd, sessionId, leafId));
+}
+
+/**
+ * Clear session config for a specific leaf. After this, the leaf will
+ * inherit from its parent chain (or get clean defaults if no ancestor
+ * has config).
+ */
+export function clearSessionConfig(
+  namespace: string,
+  cwd: string,
+  sessionId: string,
+  leafId: string,
+): void {
+  _sessionConfigs.delete(sessionKey(namespace, cwd, sessionId, leafId));
+}
+
+/** Clear ALL session config entries. Used for testing. */
+export function clearAllSessionConfigs(): void {
+  _sessionConfigs.clear();
+}
+
 // ── deepEqual ─────────────────────────────────────────────────────────
 
 /**

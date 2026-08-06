@@ -342,7 +342,7 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
     }
     if (step !== undefined) {
       return [
-        { key: "enter", label: "edit" },
+        { key: "enter/space", label: "edit" },
         { key: "←/→", label: "step" },
       ];
     }
@@ -470,9 +470,9 @@ function handleStringLikeKey<V>(
   args: StringLikeArgs,
   parse: (buffer: string) => V,
 ): FieldKeyResult<V> {
-  // Defensive coercion: the caller may pass a non-string value (e.g. an
-  // array from config with configFilename + scope tabs). We coerce here
-  // so cursor/buffer arithmetic always works on a plain string.
+  // Defensive coercion: the caller may pass a non-string value (e.g.
+  // an array-backed value). We coerce here so cursor/buffer arithmetic
+  // always works on a plain string.
   const initialStr = String(initialBuffer);
 
   if (!args.isEditing) {

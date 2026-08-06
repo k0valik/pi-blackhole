@@ -1158,127 +1158,376 @@ describe("createSettingsModalBody — happy paths", () => {
   });
 });
 
-describe("createSettingsModal — default scope action handlers", () => {
-  const fakeKeybindings = {} as any;
+// ─────────────────────────────────────────────────────────────────────
+// New generic body APIs
+// ─────────────────────────────────────────────────────────────────────
 
-  it("injects default onResetScope and onDeleteScope when configFilename is set but handlers are absent", () => {
-    const ctx = { ...fakeCtx(), cwd: "/tmp/test-inject" };
-    const options: SettingsModalOptions = {
-      configFilename: "test-config.json",
-      defaults: { foo: "bar" },
-      fields: [{ key: "foo", type: "string", label: "Foo", value: "bar" }],
-    };
-
-    const factory = createSettingsModal(ctx, options);
-    factory(fakeTui(), fakeTheme(), fakeKeybindings, vi.fn());
-
-    expect(options.onResetScope).toBeDefined();
-    expect(typeof options.onResetScope).toBe("function");
-    expect(options.onDeleteScope).toBeDefined();
-    expect(typeof options.onDeleteScope).toBe("function");
-  });
-
-  it("does NOT inject scope action handlers when configFilename is absent", () => {
-    const ctx = { ...fakeCtx(), cwd: "/tmp/test-no-inject" };
-    const options: SettingsModalOptions = {
-      fields: [{ key: "foo", type: "string", label: "Foo", value: "bar" }],
-    };
-
-    const factory = createSettingsModal(ctx, options);
-    factory(fakeTui(), fakeTheme(), fakeKeybindings, vi.fn());
-
-    expect(options.onResetScope).toBeUndefined();
-    expect(options.onDeleteScope).toBeUndefined();
-  });
-
-  it("preserves explicit onResetScope when provided alongside configFilename", () => {
-    const customReset = vi.fn();
-    const ctx = { ...fakeCtx(), cwd: "/tmp/test-custom-reset" };
-    const options: SettingsModalOptions = {
-      configFilename: "test-config.json",
-      defaults: { foo: "bar" },
-      fields: [{ key: "foo", type: "string", label: "Foo", value: "bar" }],
-      onResetScope: customReset,
-    };
-
-    const factory = createSettingsModal(ctx, options);
-    factory(fakeTui(), fakeTheme(), fakeKeybindings, vi.fn());
-
-    expect(options.onResetScope).toBe(customReset);
-    expect(options.onDeleteScope).toBeDefined();
-    expect(typeof options.onDeleteScope).toBe("function");
-  });
-
-  it("preserves explicit onDeleteScope when provided alongside configFilename", () => {
-    const customDelete = vi.fn();
-    const ctx = { ...fakeCtx(), cwd: "/tmp/test-custom-delete" };
-    const options: SettingsModalOptions = {
-      configFilename: "test-config.json",
-      defaults: { foo: "bar" },
-      fields: [{ key: "foo", type: "string", label: "Foo", value: "bar" }],
-      onDeleteScope: customDelete,
-    };
-
-    const factory = createSettingsModal(ctx, options);
-    factory(fakeTui(), fakeTheme(), fakeKeybindings, vi.fn());
-
-    expect(options.onResetScope).toBeDefined();
-    expect(typeof options.onResetScope).toBe("function");
-    expect(options.onDeleteScope).toBe(customDelete);
-  });
-
-  it("uses globalConfigDir in auto-injected onResetScope/onDeleteScope when provided", async () => {
-    const {
-      mkdtempSync,
-      mkdirSync,
-      writeFileSync,
-      readFileSync,
-      rmSync,
-    } = require("node:fs");
-    const { join } = require("node:path");
-
-    const tmpDir = mkdtempSync("/tmp/pi-modal-test-");
-    const globalDir = join(tmpDir, "extensions");
-    const projectDir = join(tmpDir, "project");
-    mkdirSync(globalDir, { recursive: true });
-    mkdirSync(join(projectDir, ".pi"), { recursive: true });
-
-    const ctx = { ...fakeCtx(), cwd: projectDir };
-    const options: SettingsModalOptions = {
-      configFilename: "test-config.json",
-      defaults: { foo: "bar" },
-      fields: [{ key: "foo", type: "string", label: "Foo", value: "bar" }],
-      globalConfigDir: globalDir,
-    };
-
-    const factory = createSettingsModal(ctx, options);
-    factory(fakeTui(), fakeTheme(), fakeKeybindings, vi.fn());
-
-    // Write a global config with unknown key
-    writeFileSync(
-      join(globalDir, "test-config.json"),
-      JSON.stringify({ foo: "override", extra: "unknown" }),
-    );
-    // Write a project config
-    writeFileSync(
-      join(projectDir, ".pi", "test-config.json"),
-      JSON.stringify({ foo: "project" }),
+describe("generic body APIs", () => {
+  it("actions render as pill strip and Tab cycles through them", () => {
+    const onAction = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [{ id: "t1", label: "Tab 1" }];
+    const actions = [
+      { id: "save", label: "Save" },
+      { id: "cancel", label: "Cancel", danger: true },
+    ];
+    const body = createSettingsModalBody(
+      { fields, tabs, actions, onAction },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
     );
 
-    // Reset global scope
-    await options.onResetScope!("global");
-    const globalContent = JSON.parse(
-      readFileSync(join(globalDir, "test-config.json"), "utf-8"),
+    body.render(80);
+    // Focus starts on the tab
+    expect(body.render(80).join("\n")).toContain("▸ Tab 1");
+    // Tab → Save action
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("Save");
+    // Tab → Cancel action
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("Cancel");
+    // Tab → back to Tab 1
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 1");
+  });
+
+  it("Enter on enabled action calls onAction", () => {
+    const onAction = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const actions = [{ id: "save", label: "Save" }];
+    const body = createSettingsModalBody(
+      { fields, actions, onAction },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
     );
-    expect(globalContent).toEqual({ extra: "unknown" });
 
-    // Reset project scope
-    await options.onResetScope!("project");
-    // File should be deleted entirely since no unknown keys remain
-    const projectFile = join(projectDir, ".pi", "test-config.json");
-    expect(() => readFileSync(projectFile, "utf-8")).toThrow();
+    body.render(80);
+    body.handleInput?.("\t"); // focus action
+    body.handleInput?.("\r"); // Enter
 
-    // Cleanup
-    rmSync(tmpDir, { recursive: true, force: true });
+    expect(onAction).toHaveBeenCalledWith("save");
+  });
+
+  it("disabled action is a no-op on Enter and remains a Tab stop", () => {
+    const onAction = vi.fn();
+    const isDisabled = true;
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const actions = [{ id: "save", label: "Save", disabled: () => isDisabled }];
+    const body = createSettingsModalBody(
+      { fields, actions, onAction },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    body.handleInput?.("\t"); // focus action
+    body.handleInput?.("\r"); // Enter
+
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("onRequestExit defers dirty Esc instead of mounting built-in confirm", () => {
+    const onRequestExit = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const body = createSettingsModalBody(
+      { fields, mode: "buffered", onSave: vi.fn(), onRequestExit },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    body.handleInput?.("\r"); // toggle → dirty
+    body.handleInput?.("\x1b"); // Escape
+
+    expect(onRequestExit).toHaveBeenCalledTimes(1);
+    expect(body.render(80).join("\n")).not.toContain(
+      "You have unsaved changes.",
+    );
+  });
+
+  it("readOnly blocks edits but renders rows normally", () => {
+    const onChange = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const body = createSettingsModalBody(
+      { fields, readOnly: true, onChange },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    expect(body.render(80).join("\n")).toContain("X");
+    body.handleInput?.("\r");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("readOnly suppresses row-specific footer hints", () => {
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const body = createSettingsModalBody(
+      { fields, readOnly: true },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    const out = body.render(80).join("\n");
+    expect(out).not.toMatch(/enter\/space/);
+  });
+
+  it("setValues updates matching rows, clears dirty, and re-snapshots", () => {
+    const onSave = vi.fn();
+    const fields: Field[] = [
+      { key: "a", type: "boolean", label: "A", value: false },
+      { key: "b", type: "boolean", label: "B", value: false },
+    ];
+    const body = createSettingsModalBody(
+      { title: "test", fields, mode: "buffered", onSave },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    body.handleInput?.("\r"); // toggle a → dirty
+    expect(body.render(80).join("\n")).toContain("●");
+
+    body.setValues({ a: true, b: true });
+    expect(body.render(80).join("\n")).not.toContain("●");
+    expect(body.render(80).join("\n")).toContain("on");
+  });
+
+  it("mountOverlay and dismissOverlay control the overlay slot", () => {
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const body = createSettingsModalBody(
+      { fields },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    const overlay = {
+      render: () => ["overlay content"],
+      handleInput: () => {},
+      invalidate: () => {},
+    };
+    body.mountOverlay(overlay as any, "Test overlay");
+    expect(body.render(80).join("\n")).toContain("Test overlay");
+
+    body.dismissOverlay();
+    expect(body.render(80).join("\n")).not.toContain("Test overlay");
+  });
+
+  it("onActiveTabChange fires after every active tab change, not on mount", () => {
+    const onActiveTabChange = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [
+      { id: "tab1", label: "Tab 1" },
+      { id: "tab2", label: "Tab 2" },
+    ];
+    const body = createSettingsModalBody(
+      { fields, tabs, onActiveTabChange },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    expect(onActiveTabChange).not.toHaveBeenCalled();
+
+    body.handleInput?.("\t");
+    expect(onActiveTabChange).toHaveBeenCalledWith("tab2");
+
+    body.handleInput?.("\t");
+    expect(onActiveTabChange).toHaveBeenCalledWith("tab1");
+  });
+
+  it("left/right arrow keys cycle through tabs and actions when tabActionFocus is active", () => {
+    const onAction = vi.fn();
+    const onActiveTabChange = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [
+      { id: "t1", label: "Tab 1" },
+      { id: "t2", label: "Tab 2" },
+    ];
+    const actions = [
+      { id: "save", label: "Save" },
+      { id: "cancel", label: "Cancel", danger: true },
+    ];
+    const body = createSettingsModalBody(
+      { fields, tabs, actions, onAction, onActiveTabChange },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    // Focus starts on Tab 1; Tab to enter ring on Tab 2
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 2");
+
+    // → moves to Save action
+    body.handleInput?.("\x1b[C");
+    expect(body.render(80).join("\n")).toContain("Save");
+
+    // → moves to Cancel action
+    body.handleInput?.("\x1b[C");
+    expect(body.render(80).join("\n")).toContain("Cancel");
+
+    // → wraps to Tab 1
+    body.handleInput?.("\x1b[C");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 1");
+
+    // ← from Tab 1 wraps to Cancel
+    body.handleInput?.("\x1b[D");
+    expect(body.render(80).join("\n")).toContain("Cancel");
+
+    // ← from Cancel moves to Save
+    body.handleInput?.("\x1b[D");
+    expect(body.render(80).join("\n")).toContain("Save");
+
+    // ← from Save moves to Tab 2 (switches tab)
+    body.handleInput?.("\x1b[D");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 2");
+  });
+
+  it("left/right in readOnly field zone enters the action row", () => {
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [{ id: "t1", label: "Tab 1" }];
+    const actions = [
+      { id: "save", label: "Save" },
+      { id: "cancel", label: "Cancel" },
+    ];
+    const body = createSettingsModalBody(
+      { fields, tabs, actions, readOnly: true },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    // Field zone: tabActionFocus === -1
+    expect(body.render(80).join("\n")).toContain("X");
+
+    // → enters at first action
+    body.handleInput?.("\x1b[C");
+    expect(body.render(80).join("\n")).toContain("Save");
+
+    // → from first action wraps to last action (action row only)
+    body.handleInput?.("\x1b[C");
+    expect(body.render(80).join("\n")).toContain("Cancel");
+
+    // ← from last action wraps to first action (action row only)
+    body.handleInput?.("\x1b[D");
+    expect(body.render(80).join("\n")).toContain("Save");
+  });
+
+  it("left/right from readOnly tab focus enters the action row", () => {
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [{ id: "t1", label: "Tab 1" }];
+    const actions = [
+      { id: "save", label: "Save" },
+      { id: "cancel", label: "Cancel" },
+    ];
+    const body = createSettingsModalBody(
+      { fields, tabs, actions, readOnly: true },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    // Tab to focus the tab
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 1");
+
+    // → from tab focus enters at first action
+    body.handleInput?.("\x1b[C");
+    expect(body.render(80).join("\n")).toContain("Save");
+
+    // ← from tab focus enters at last action
+    body.handleInput?.("\x1b[D");
+    expect(body.render(80).join("\n")).toContain("Cancel");
+  });
+
+  it("Tab in readOnly cycles through tabs; Shift+Tab cycles backward", () => {
+    const onActiveTabChange = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [
+      { id: "t1", label: "Tab 1" },
+      { id: "t2", label: "Tab 2" },
+      { id: "t3", label: "Tab 3" },
+    ];
+    const actions = [
+      { id: "save", label: "Save" },
+      { id: "cancel", label: "Cancel" },
+    ];
+    const body = createSettingsModalBody(
+      { fields, tabs, actions, readOnly: true, onActiveTabChange },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    // On mount, first tab is pre-focused in readOnly mode
+    expect(body.render(80).join("\n")).toContain("▸ Tab 1");
+
+    // Tab: focus moves to tab 2 (activeTabId switches because tab 2 ≠ tab 1)
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 2");
+    expect(onActiveTabChange).toHaveBeenCalledWith("t2");
+
+    // Tab from tab 2 → tab 3
+    body.handleInput?.("\t");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 3");
+    expect(onActiveTabChange).toHaveBeenCalledWith("t3");
+
+    // Shift+Tab from tab 3 → back to tab 2
+    body.handleInput?.("\x1b[Z");
+    expect(body.render(80).join("\n")).toContain("▸ Tab 2");
+    expect(onActiveTabChange).toHaveBeenCalledWith("t2");
+  });
+
+  it("left/right in non-readOnly field zone with tabs still delegates to field renderer", () => {
+    const onChange = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const tabs = [{ id: "t1", label: "Tab 1" }];
+    const actions = [{ id: "save", label: "Save" }];
+    const body = createSettingsModalBody(
+      { fields, tabs, actions, onChange },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
+    );
+
+    body.render(80);
+    // Field zone with non-readOnly: → toggles boolean, does NOT enter action ring
+    body.handleInput?.("\x1b[C");
+    expect(onChange).toHaveBeenCalledWith(
+      "x",
+      true,
+      expect.objectContaining({ key: "x" }),
+    );
+    // Focus stays in field zone (no action pill highlighted)
+    expect(body.render(80).join("\n")).not.toContain("Save" + "\x1b[7m"); // not inverse-highlighted
+  });
+
+  it("closeOnSave: false keeps modal open after successful onSave", () => {
+    const onSave = vi.fn();
+    const close = vi.fn();
+    const fields: Field[] = [
+      { key: "x", type: "boolean", label: "X", value: false },
+    ];
+    const body = createSettingsModalBody(
+      { title: "test", fields, mode: "buffered", onSave, closeOnSave: false },
+      { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close },
+    );
+
+    body.render(80);
+    body.handleInput?.("\r"); // toggle → dirty
+    body.handleInput?.("\x13"); // ctrl+s → save
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
   });
 });

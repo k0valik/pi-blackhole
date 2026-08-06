@@ -2,11 +2,15 @@
  * Blackhole settings — modal-based configuration via ConfigManager.
  *
  * Replaces the hand-rolled configure overlay (src/om/configure-overlay.ts)
- * with pi-base's ConfigManager + openSettingsModal.
+ * with pi-base's ConfigManager + openConfigFlow (scope-selector →
+ * edit/display-all modal).
  *
  * Env-var overrides are applied by ConfigManager after load + validate,
  * so they take effect for both the runtime path (loadUnifiedConfig) and
  * the modal path (config.load / config.openSettings).
+ *
+ * Session-scoped config is enabled: blackhole-specific overrides are
+ * persisted to the session JSONL and recovered on session_start.
  */
 
 import { join } from "node:path";
@@ -56,6 +60,8 @@ export const config = new ConfigManager<UnifiedConfig>({
   label: "pi-blackhole",
   filename: CONFIG_FILENAME,
   defaults: DEFAULTS,
+  scopes: { global: true, project: true, session: true },
+  sessionConfig: { entryType: "session-config-pi-blackhole" },
 
   fields: (cfg) => [
     // ── Compaction ──
@@ -461,8 +467,7 @@ export async function openBlackholeSettings(
     ctx,
     ctx.cwd,
     (_updated) => {
-      // onSave is called after the config is persisted; caller (pi-vcc.ts)
-      // is responsible for reloading runtime.config from this instance.
+      // Caller (pi-vcc.ts) reloads runtime.config after save.
     },
     GLOBAL_CONFIG_DIR,
   );
