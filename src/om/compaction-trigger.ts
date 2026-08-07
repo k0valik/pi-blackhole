@@ -191,6 +191,10 @@ async function handleTurnEnd(
       }
     } finally {
       runtime.compactInFlight = false;
+
+      if (hasUI && ctx.signal?.aborted !== true) {
+        ui?.setWorkingVisible?.(true);
+      }
     }
     return;
   }
