@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerCompactionTrigger } from "../src/om/compaction-trigger.js";
 import {
   compactionEntry,
+  rawMessage,
   textCustomMessage,
   type TestEntry,
 } from "./fixtures/session.js";
@@ -193,6 +194,53 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(ctx.compact).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "Observational memory: compaction threshold reached (~3 tokens); triggering compaction",
+      "info",
+    );
+  });
+
+  it("auto-derives the threshold from the context window when compactAfterTokens is 0", async () => {
+    // 0 → 65% × 128k window = 83_200; branch has ~1 token → not due.
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 0 });
+    const ctx = fakeCtx([belowBranch]);
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).not.toHaveBeenCalled();
+  });
+
+  it("triggers on real assistant usage even when the chars/4 estimate is tiny", async () => {
+    // Compacted branch with a post-compaction assistant usage of 90_000:
+    // realContextTokens (90_000) ≥ auto threshold (83_200), while the
+    // raw chars/4 estimate since compaction is ~0.
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 0 });
+    const branch = [
+      compactionEntry("cmp-1", { firstKeptEntryId: "raw-1" }),
+      rawMessage("a-1", "done", {
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          stopReason: "stop",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 90_000,
+          },
+        },
+      }),
+    ];
+    const ctx = fakeCtx([branch]);
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Observational memory: compaction threshold reached (~90,000 tokens); triggering compaction",
       "info",
     );
   });

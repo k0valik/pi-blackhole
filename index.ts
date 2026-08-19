@@ -18,6 +18,7 @@ import { registerRecallTool } from "./src/tools/recall";
 import { Runtime } from "./src/om/runtime.js";
 import { captureRegisteredProviderStreams } from "./src/om/provider-stream.js";
 import { installHostInlineCompactionAdapter } from "./src/om/inline-compaction.js";
+import { registerBreakingNotice } from "./src/om/breaking-notice.js";
 
 export default async (pi: ExtensionAPI) => {
   // Resolve the host's AgentSession identity before this factory returns. Local
@@ -49,6 +50,7 @@ export default async (pi: ExtensionAPI) => {
   // Observational memory: background consolidation pipeline
   registerConsolidationTrigger(pi, omRuntime); // agent_start + turn_end → observer/reflector/dropper
   registerCompactionTrigger(pi, omRuntime); // turn_end + agent_end → auto-compaction
+  registerBreakingNotice(pi); // one-time agent_start warning for usage-based counting
 
   // Pi-vcc: compaction + om injection
   registerBeforeCompactHook(pi, omRuntime); // session_before_compact → pi-vcc + om content

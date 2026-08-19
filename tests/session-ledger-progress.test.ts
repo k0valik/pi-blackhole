@@ -377,6 +377,20 @@ describe("usage-aware progress helpers (plan-01)", () => {
       const entries = [userEntry("u1", "one")];
       expect(realTokensSinceAnchor(entries, -1)).toBeUndefined();
     });
+
+    it("anchor at the compaction entry itself uses the post-compaction baseline", () => {
+      const entries = [
+        assistantEntry("a-pre", "pre", 900),
+        compactionEntry("cmp-1", { firstKeptEntryId: "a-pre" }),
+        assistantEntry("a-post", "post", 200),
+        userEntry("u1", "bbbbbbbb"),
+        assistantEntry("a-later", "later", 300),
+      ];
+      // Anchor IS the compaction entry (index 1): its own usage (900) is
+      // pre-compaction context size — baseline must be the first usage
+      // strictly after it (200) → delta = 300 (a-later) − 200 = 100.
+      expect(realTokensSinceAnchor(entries, 1)).toBe(100);
+    });
   });
 
   describe("measureSinceAnchor", () => {

@@ -1,8 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { rawTokensSinceLastCompaction, type Entry } from "./ledger/index.js";
+import {
+  rawTokensSinceLastCompaction,
+  realContextTokens,
+  type Entry,
+} from "./ledger/index.js";
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
+import { resolveCompactThreshold } from "./due.js";
+import { resolveSessionContextWindow } from "./model-budget.js";
 import {
   compactInlineAtTurnBoundary,
   type InlineCompaction,
@@ -135,8 +141,16 @@ async function handleTurnEnd(
   }
 
   const entries = ctx.sessionManager.getBranch() as Entry[];
-  const tokens = rawTokensSinceLastCompaction(entries);
-  if (tokens < runtime.config.compactAfterTokens) {
+  const real = realContextTokens(entries);
+  const tokens = real ?? rawTokensSinceLastCompaction(entries);
+  const basis = real !== undefined ? "usage" : "estimate";
+  const threshold = resolveCompactThreshold(
+    runtime.config,
+    resolveSessionContextWindow(ctx.model as { contextWindow?: number }, () =>
+      ctx.getContextUsage?.(),
+    ),
+  );
+  if (tokens < threshold) {
     // Pressure relieved (a compaction ran) — lift any failure suspension.
     runtime.midRunCompactionSuspended = false;
     return;
@@ -156,7 +170,8 @@ async function handleTurnEnd(
   const ui = ctx.ui;
   dbg("compaction_trigger.turn_end.threshold_reached", {
     tokens,
-    threshold: runtime.config.compactAfterTokens,
+    threshold,
+    basis,
     mode,
   });
   runtime.tryEmitInfo(
@@ -287,17 +302,28 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       entries.length > 0 ? entries[entries.length - 1].type : "none",
   });
 
-  const tokens = rawTokensSinceLastCompaction(entries);
+  const real = realContextTokens(entries);
+  const tokens = real ?? rawTokensSinceLastCompaction(entries);
+  const basis = real !== undefined ? "usage" : "estimate";
+  const threshold = resolveCompactThreshold(
+    runtime.config,
+    resolveSessionContextWindow(ctx.model as { contextWindow?: number }, () =>
+      ctx.getContextUsage?.(),
+    ),
+  );
   dbg("compaction_trigger.tokens", {
     tokens,
+    threshold,
+    basis,
     compactAfterTokens: runtime.config.compactAfterTokens,
     branchLength: entries.length,
   });
-  if (tokens < runtime.config.compactAfterTokens) {
+  if (tokens < threshold) {
     dbg("compaction_trigger.skip", {
       reason: "below_threshold",
       tokens,
-      threshold: runtime.config.compactAfterTokens,
+      threshold,
+      basis,
     });
     return;
   }
@@ -416,19 +442,30 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       }
 
       const currentEntries = ctx.sessionManager.getBranch() as Entry[];
-      const currentTokens = rawTokensSinceLastCompaction(currentEntries);
+      const currentReal = realContextTokens(currentEntries);
+      const currentTokens =
+        currentReal ?? rawTokensSinceLastCompaction(currentEntries);
+      const currentBasis = currentReal !== undefined ? "usage" : "estimate";
+      const currentThreshold = resolveCompactThreshold(
+        runtime.config,
+        resolveSessionContextWindow(
+          ctx.model as { contextWindow?: number },
+          () => ctx.getContextUsage?.(),
+        ),
+      );
       dbg("compaction_trigger.microtask.recheck_tokens", {
         currentTokens,
-        threshold: runtime.config.compactAfterTokens,
-        ok: currentTokens >= runtime.config.compactAfterTokens,
+        threshold: currentThreshold,
+        basis: currentBasis,
+        ok: currentTokens >= currentThreshold,
       });
-      if (currentTokens < runtime.config.compactAfterTokens) {
+      if (currentTokens < currentThreshold) {
         runtime.compactInFlight = false;
         runtime.autoCompactionController = null;
         dbg("compaction_trigger.microtask.bail", {
           reason: "pressure_relieved",
           currentTokens,
-          threshold: runtime.config.compactAfterTokens,
+          threshold: currentThreshold,
         });
         runtime.tryEmitInfo(
           hasUI,

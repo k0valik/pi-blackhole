@@ -108,3 +108,55 @@ export function resolveObserverChunkMaxTokens(
   const derived = Math.floor(workerWindow * OBSERVER_CHUNK_RATIO);
   return Math.max(derived, OBSERVER_CHUNK_MIN_TOKENS);
 }
+
+// ── Auto-derived worker budgets (plan-03, D6) ───────────────────────────────
+
+export const WORKER_INPUT_RATIO = 0.6;
+export const POOL_MAX_RATIO = 0.15;
+export const BUDGET_MIN_TOKENS = 1_000;
+
+function resolveBudget(
+  configValue: number,
+  window: number,
+  ratio: number,
+): number {
+  if (configValue > 0) return configValue;
+  return Math.max(Math.floor(window * ratio), BUDGET_MIN_TOKENS);
+}
+
+/** Max prompt tokens for reflector input: explicit value honored verbatim;
+ *  0 derives floor(workerWindow × 0.6), clamped ≥ 1000. */
+export function resolveReflectorInputMaxTokens(
+  configValue: number,
+  workerWindow: number,
+): number {
+  return resolveBudget(configValue, workerWindow, WORKER_INPUT_RATIO);
+}
+
+/** Max prompt tokens for dropper input: explicit value honored verbatim;
+ *  0 derives floor(workerWindow × 0.6), clamped ≥ 1000. */
+export function resolveDropperInputMaxTokens(
+  configValue: number,
+  workerWindow: number,
+): number {
+  return resolveBudget(configValue, workerWindow, WORKER_INPUT_RATIO);
+}
+
+/** Observation pool pressure budget: explicit value honored verbatim;
+ *  0 derives floor(sessionWindow × 0.15), clamped ≥ 1000. */
+export function resolveObservationsPoolMaxTokens(
+  configValue: number,
+  sessionWindow: number,
+): number {
+  return resolveBudget(configValue, sessionWindow, POOL_MAX_RATIO);
+}
+
+/** Pool target: explicit value honored verbatim; 0 derives
+ *  floor(poolMax / 2). */
+export function resolveObservationsPoolTargetTokens(
+  configValue: number,
+  poolMax: number,
+): number {
+  if (configValue > 0) return configValue;
+  return Math.max(Math.floor(poolMax / 2), BUDGET_MIN_TOKENS);
+}

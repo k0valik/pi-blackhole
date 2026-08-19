@@ -65,6 +65,7 @@ function createMockEnvironment() {
     consolidationInFlight: false,
     compactInFlight: false,
     compactHookInFlight: false,
+    getCursor: vi.fn(() => undefined),
     lastObserverError: undefined,
     lastReflectorError: undefined,
     lastDropperError: undefined,

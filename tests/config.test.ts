@@ -52,10 +52,14 @@ describe("Config defaults", () => {
     expect(config.compactionEngine).toBe("blackhole");
     expect(config.tailBehavior).toBe("minimal");
     expect(config.debug).toBe(false);
-    expect(config.observeAfterTokens).toBe(15_000);
-    expect(config.reflectAfterTokens).toBe(25_000);
-    expect(config.compactAfterTokens).toBe(81_000);
-    expect(config.observationsPoolMaxTokens).toBe(20_000);
+    expect(config.observeAfterTokens).toBe(0);
+    expect(config.reflectAfterTokens).toBe(0);
+    expect(config.compactAfterTokens).toBe(0);
+    expect(config.observationsPoolMaxTokens).toBe(0);
+    expect(config.observationsPoolTargetTokens).toBe(0);
+    expect(config.reflectorInputMaxTokens).toBe(0);
+    expect(config.dropperInputMaxTokens).toBe(0);
+    expect(config.thresholdScale).toBe(1.0);
     expect(config.agentMaxTurns).toBe(16);
     expect(config.memory).toBe(true);
     expect(config.debugLog).toBe(false);
@@ -410,6 +414,8 @@ describe("Declarative env overrides apply at runtime", () => {
     delete process.env.PI_BLACKHOLE_DEBUG;
     delete process.env.PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD;
     delete process.env.PI_BLACKHOLE_OBSERVE_AFTER_TOKENS;
+    delete process.env.PI_BLACKHOLE_REFLECT_AFTER_TOKENS;
+    delete process.env.PI_BLACKHOLE_THRESHOLD_SCALE;
   });
 
   it("int override wins over the file value (runtime path)", async () => {
@@ -451,6 +457,76 @@ describe("Declarative env overrides apply at runtime", () => {
     const config = loadUnifiedConfig(testDir);
     expect(config.dropperPressureThreshold).toBe(0.7);
   });
+
+  it("0-default int override accepts explicit 0 (auto-derive)", async () => {
+    process.env.PI_BLACKHOLE_OBSERVE_AFTER_TOKENS = "0";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ observeAfterTokens: 15_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.observeAfterTokens).toBe(0);
+  });
+
+  it("0-default int override accepts a positive value", async () => {
+    process.env.PI_BLACKHOLE_REFLECT_AFTER_TOKENS = "5000";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.reflectAfterTokens).toBe(5_000);
+  });
+
+  it("thresholdScale env override applies", async () => {
+    process.env.PI_BLACKHOLE_THRESHOLD_SCALE = "0.5";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.thresholdScale).toBe(0.5);
+  });
+
+  it("thresholdScale env override clamps to [0.1, 10]", async () => {
+    process.env.PI_BLACKHOLE_THRESHOLD_SCALE = "20";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.thresholdScale).toBe(10);
+  });
+
+  it("thresholdScale env override rejects invalid values", async () => {
+    process.env.PI_BLACKHOLE_THRESHOLD_SCALE = "banana";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.thresholdScale).toBe(1.0);
+  });
+});
+
+describe("thresholdScale parsing", () => {
+  it("accepts a finite positive value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ thresholdScale: 1.5 });
+    expect(loadUnifiedConfig(testDir).thresholdScale).toBe(1.5);
+  });
+
+  it("clamps values above 10", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ thresholdScale: 42 });
+    expect(loadUnifiedConfig(testDir).thresholdScale).toBe(10);
+  });
+
+  it("clamps values below 0.1", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ thresholdScale: 0.01 });
+    expect(loadUnifiedConfig(testDir).thresholdScale).toBe(0.1);
+  });
+
+  it("rejects zero and negative (falls back to default 1.0)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ thresholdScale: 0 });
+    expect(loadUnifiedConfig(testDir).thresholdScale).toBe(1.0);
+    writeConfig({ thresholdScale: -2 });
+    expect(loadUnifiedConfig(testDir).thresholdScale).toBe(1.0);
+  });
+
+  it("rejects non-finite values", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ thresholdScale: Number.NaN });
+    expect(loadUnifiedConfig(testDir).thresholdScale).toBe(1.0);
+  });
 });
 
 describe("Integer fields are validated as positive integers", () => {
@@ -462,8 +538,8 @@ describe("Integer fields are validated as positive integers", () => {
       compactAfterTokens: 81_000,
     });
     const config = loadUnifiedConfig(testDir);
-    expect(config.observeAfterTokens).toBe(15_000); // blackhole default (upstream is 10_000)
-    expect(config.reflectAfterTokens).toBe(25_000); // blackhole default (upstream is 20_000)
+    expect(config.observeAfterTokens).toBe(0); // invalid → default 0 (auto-derive)
+    expect(config.reflectAfterTokens).toBe(0); // explicit 0 accepted (auto-derive)
     expect(config.compactAfterTokens).toBe(81_000); // from config
   });
 });

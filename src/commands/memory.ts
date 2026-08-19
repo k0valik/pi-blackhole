@@ -14,15 +14,26 @@ import {
   fullProjection,
   observationToSummaryLine,
   rawTokensAfterIndex,
-  rawTokensSinceDropCoverage,
   rawTokensSinceLastCompaction,
-  rawTokensSinceObservationCoverage,
-  rawTokensSinceReflectionCoverage,
+  realContextTokens,
   reflectionToSummaryLine,
   visibleProjection,
   type Entry,
   type Projection,
 } from "../om/ledger/index.js";
+import {
+  measureDropperDue,
+  measureObserverDue,
+  measureReflectorDue,
+  resolveCompactThreshold,
+  resolveTriggerThresholds,
+} from "../om/due.js";
+import {
+  resolveObserverChunkMaxTokens,
+  resolveObservationsPoolMaxTokens,
+  resolveSessionContextWindow,
+  resolveWorkerWindow,
+} from "../om/model-budget.js";
 import { readPendingState } from "../om/pending.js";
 import { isManualMode } from "../core/unified-config.js";
 
@@ -155,10 +166,28 @@ export function registerMemoryCommand(
         `Reflections:  ${folded.reflections.length} recorded / ${visible.reflections.length} visible`,
         [addedSuffix(drift.reflectionsOnlyInFull.length)],
       );
-      let obsProgress = rawTokensSinceObservationCoverage(entries);
-      let reflectionProgress = rawTokensSinceReflectionCoverage(entries);
-      let dropProgress = rawTokensSinceDropCoverage(entries);
-      const compactionProgress = rawTokensSinceLastCompaction(entries);
+      const dueCtx = {
+        model: ctx.model as { contextWindow?: number },
+        getContextUsage: ctx.getContextUsage,
+      };
+      const sessionWindow = resolveSessionContextWindow(
+        dueCtx.model,
+        dueCtx.getContextUsage,
+      );
+      const thresholds = resolveTriggerThresholds(
+        runtime.config,
+        sessionWindow,
+      );
+      let obsProgress = measureObserverDue(entries, runtime, dueCtx).progress;
+      let reflectionProgress = measureReflectorDue(
+        entries,
+        runtime,
+        dueCtx,
+      ).progress;
+      let dropProgress = measureDropperDue(entries, runtime, dueCtx).progress;
+      const compactionReal = realContextTokens(entries);
+      const compactionProgress =
+        compactionReal ?? rawTokensSinceLastCompaction(entries);
 
       // In manual mode, pending coversUpToId entries act as virtual coverage markers
       // that aren't reflected in the branch. Adjust accumulated counts accordingly.
@@ -190,6 +219,10 @@ export function registerMemoryCommand(
             ]
           : [];
 
+      const poolMax = resolveObservationsPoolMaxTokens(
+        runtime.config.observationsPoolMaxTokens,
+        sessionWindow,
+      );
       const lines = [
         ...passiveLines,
         "── Memory ──",
@@ -198,14 +231,14 @@ export function registerMemoryCommand(
         "",
         "── Pipeline ──",
         "Transcript accumulated since last run. Triggers when exceeding threshold.",
-        `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
-        `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
-        `Dropper:        pool ${pct(visibleObservationTokens, runtime.config.observationsPoolMaxTokens)}% — prunes at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% pool (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
+        `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${thresholds.observeAfterTokens.toLocaleString()})`,
+        `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${thresholds.reflectAfterTokens.toLocaleString()})`,
+        `Dropper:        pool ${pct(visibleObservationTokens, poolMax)}% — prunes at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% pool (${dropProgress.toLocaleString()}/${thresholds.reflectAfterTokens.toLocaleString()} new tokens)`,
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"
-            : ` (triggers at ${runtime.config.compactAfterTokens.toLocaleString()})`),
-        `Obs pool:       ~${visibleObservationTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(visibleObservationTokens, runtime.config.observationsPoolMaxTokens)}%)`,
+            : ` (triggers at ${resolveCompactThreshold(runtime.config, sessionWindow).toLocaleString()})`),
+        `Obs pool:       ~${visibleObservationTokens.toLocaleString()} / ${poolMax.toLocaleString()} tokens (${pct(visibleObservationTokens, poolMax)}%)`,
         `Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
       ];
 
@@ -223,11 +256,23 @@ export function registerMemoryCommand(
           const preambleCap =
             runtime.config.observerPreambleMaxTokens > 0
               ? runtime.config.observerPreambleMaxTokens
-              : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+              : Math.round(
+                  resolveObserverChunkMaxTokens(
+                    runtime.config.observerChunkMaxTokens,
+                    resolveWorkerWindow(
+                      runtime.config.observerModel,
+                      sessionWindow,
+                    ),
+                  ) * 0.3,
+                );
+          const resolvedChunkCap = resolveObserverChunkMaxTokens(
+            runtime.config.observerChunkMaxTokens,
+            resolveWorkerWindow(runtime.config.observerModel, sessionWindow),
+          );
           const pctNote =
             runtime.config.observerPreambleMaxTokens > 0
               ? ""
-              : ` (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`;
+              : ` (30% of ${resolvedChunkCap.toLocaleString()} chunk)`;
           lines.push(
             `Preamble cap: ${preambleCap.toLocaleString()} tokens for observations${pctNote}`,
           );

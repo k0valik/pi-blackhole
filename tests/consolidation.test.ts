@@ -5,6 +5,9 @@ import {
   type ConsolidationCtx,
 } from "../src/om/consolidation.js";
 
+/** Minimal due-context for anyStageDue calls (128k session window). */
+const DUE_CTX = { model: { contextWindow: 128_000 } };
+
 function mockCtx(
   notifyCalls: Array<{ message: string; level?: string }>,
 ): ConsolidationCtx {
@@ -92,7 +95,7 @@ describe("anyStageDue with cursors", () => {
       },
     ];
     runtime.advanceCursor("observer", "msg-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 
   test("observer NOT due when no cursor and tokens below threshold (no observation markers)", async () => {
@@ -120,7 +123,7 @@ describe("anyStageDue with cursors", () => {
         },
       },
     ];
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false); // no observer markers → raw tokens counted from scratch
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false); // no observer markers → raw tokens counted from scratch
   });
 
   test("dropper NOT due when cursor advanced and no new data, no pressure", async () => {
@@ -146,7 +149,7 @@ describe("anyStageDue with cursors", () => {
       },
     ];
     runtime.advanceCursor("dropper", "obs-1", "skipped");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 
   test("dropper due when pool fullness passes a lowered fullness threshold", async () => {
@@ -199,7 +202,7 @@ describe("anyStageDue with cursors", () => {
       },
     ];
     runtime.advanceCursor("reflector", "obs-1", "skipped");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(true);
   });
 
   test("dropper NOT due when pool fullness is below the configured threshold", async () => {
@@ -249,7 +252,7 @@ describe("anyStageDue with cursors", () => {
       },
     ];
     runtime.advanceCursor("reflector", "obs-1", "skipped");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 
   test("reflector due when new observation batches exist AND token threshold met", async () => {
@@ -287,7 +290,7 @@ describe("anyStageDue with cursors", () => {
       },
     ];
     runtime.advanceCursor("reflector", "msg-1", "recorded");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(true);
   });
 
   test("reflector NOT due when new obs batch exists but token threshold NOT met", async () => {
@@ -322,7 +325,7 @@ describe("anyStageDue with cursors", () => {
       },
     ];
     runtime.advanceCursor("reflector", "msg-1", "recorded");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 });
 
@@ -360,7 +363,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
         { coversUpToId: "msg-2", data: { observations: [] } },
       ],
     };
-    expect(anyStageDue(entries, runtime, pending)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX, pending)).toBe(true);
   });
 
   test("dropper due when pending pool exceeds threshold (manual mode)", async () => {
@@ -398,7 +401,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
     // No cursors → rawTokensSinceDropCoverage on entries with conversation
     // → some tokens > 0.  Pool from pending: 125/1000 = 12.5% > 10%.
     // Both gates pass → dropper due.
-    expect(anyStageDue(entries, runtime, pending)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX, pending)).toBe(true);
   });
 
   test("pipeline launches when observer not due but pending has new data for reflector", async () => {
@@ -444,7 +447,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
       ],
     };
     // Reflector should see the new batch at msg-2 (after cursor at msg-1)
-    expect(anyStageDue(entries, runtime, pending)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX, pending)).toBe(true);
   });
 
   test("reflector due when cursor state 'initial' and pending batch exists after cursor", async () => {
@@ -500,7 +503,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
     };
 
     // Reflector should see new pending batch even when cursor.state is "initial"
-    expect(anyStageDue(entries, runtime, pending)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX, pending)).toBe(true);
   });
 });
 
@@ -537,7 +540,7 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
       },
     ];
     runtime.advanceCursor("reflector", "msg-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 
   test("reflector IS due: marker after cursor with coversUpToId truly past cursor", async () => {
@@ -579,7 +582,7 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
       },
     ];
     runtime.advanceCursor("reflector", "msg-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(true);
   });
 
   test("dropper NOT due: marker after cursor but coversUpToId at cursor, pool too low", async () => {
@@ -616,7 +619,7 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
       },
     ];
     runtime.advanceCursor("dropper", "obs-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 
   test("dropper IS due: marker coversUpToId truly after cursor AND pool above threshold", async () => {
@@ -666,7 +669,7 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
       },
     ];
     runtime.advanceCursor("dropper", "msg-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(true);
   });
 
   test("dropper NOT due: new batches exist after cursor but token threshold not met", async () => {
@@ -716,7 +719,7 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
       },
     ];
     runtime.advanceCursor("dropper", "msg-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
   test("reflector NOT due when state 'empty' and marker coversUpToId at cursor (exact production scenario)", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
@@ -757,6 +760,6 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
       },
     ];
     runtime.advanceCursor("reflector", "source-1", "empty");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX)).toBe(false);
   });
 });

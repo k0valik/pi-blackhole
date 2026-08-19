@@ -611,6 +611,7 @@ describe("Consolidation trigger — guards with new config keys", () => {
       },
       consolidationInFlight: false,
       isConsolidationRetryGated: vi.fn(() => false),
+      getCursor: vi.fn(() => undefined),
       launchConsolidationTask,
     };
     const ctx = {

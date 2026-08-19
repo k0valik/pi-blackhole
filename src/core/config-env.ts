@@ -20,10 +20,18 @@ export interface EnvParser {
 
 export type EnvOverride = string | EnvParser;
 
+/** Parse a non-negative integer env value (0 = auto-derive). Returns
+ *  undefined when the value is not a valid non-negative integer. */
+function nonNegativeIntEnv(raw: string): number | undefined {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
 /**
  * Apply env overrides onto a config object. Field types are inferred from
  * the defaults (boolean → truthy parsing, positive integer → int parsing,
- * anything else → float). Returns a NEW object; input is not mutated.
+ * anything else → float), or a custom parser for special types. Returns a
+ * NEW object; input is not mutated.
  */
 export function applyEnvOverrides<T extends object>(
   config: T,
@@ -88,28 +96,56 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   sessionFallback: "PI_BLACKHOLE_SESSION_FALLBACK",
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
   // Positive integers
-  compactAfterTokens: "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
-  observeAfterTokens: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
-  reflectAfterTokens: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
-  observationsPoolMaxTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS",
-  observationsPoolTargetTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS",
-  reflectorInputMaxTokens: "PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS",
-  dropperInputMaxTokens: "PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS",
-  observerPreambleMaxTokens: "PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS",
   agentMaxTurns: "PI_BLACKHOLE_AGENT_MAX_TURNS",
   // Non-negative integer (0 = auto-derive, unset = inherit pi default)
+  compactAfterTokens: {
+    var: "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  observeAfterTokens: {
+    var: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  reflectAfterTokens: {
+    var: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  observationsPoolMaxTokens: {
+    var: "PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  observationsPoolTargetTokens: {
+    var: "PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  reflectorInputMaxTokens: {
+    var: "PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  dropperInputMaxTokens: {
+    var: "PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
+  observerPreambleMaxTokens: {
+    var: "PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS",
+    parse: nonNegativeIntEnv,
+  },
   observerChunkMaxTokens: {
     var: "PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS",
-    parse: (raw: string) => {
-      const n = Number(raw);
-      return Number.isInteger(n) && n >= 0 ? n : undefined;
-    },
+    parse: nonNegativeIntEnv,
   },
   providerIdleTimeoutMs: {
     var: "PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS",
+    parse: nonNegativeIntEnv,
+  },
+  // Float > 0, clamped to [0.1, 10] (mirrors THRESHOLD_SCALE_MIN/MAX in
+  // unified-config.ts; kept inline to avoid an import cycle)
+  thresholdScale: {
+    var: "PI_BLACKHOLE_THRESHOLD_SCALE",
     parse: (raw: string) => {
-      const n = Number(raw);
-      return Number.isInteger(n) && n >= 0 ? n : undefined;
+      const n = Number.parseFloat(raw);
+      if (!Number.isFinite(n) || n <= 0) return undefined;
+      return Math.min(10, Math.max(0.1, n));
     },
   },
   // Float in (0, 1]

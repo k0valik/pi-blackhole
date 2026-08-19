@@ -238,8 +238,9 @@ export function realTokensAtAnchor(
  * Real usage delta between the current context and the anchor.
  *
  * Baseline rules (D3): a compaction entry's own usage is never used.
- * - Anchor before the latest compaction → baseline is the first valid
- *   assistant usage strictly after the compaction entry.
+ * - Anchor at or before the latest compaction → baseline is the first
+ *   valid assistant usage strictly after the compaction entry (usage
+ *   at/before the compaction would be pre-compaction context size).
  * - Anchor after the latest compaction (or no compaction) → baseline is
  *   the last valid usage at or before the anchor.
  * - No anchor → baseline is the current real context itself.
@@ -257,7 +258,7 @@ export function realTokensSinceAnchor(
   const compactionIndex = findLastCompactionIndex(entries);
   let baseline: number | undefined;
 
-  if (compactionIndex > anchorIndex) {
+  if (compactionIndex >= 0 && compactionIndex >= anchorIndex) {
     const usageIndex = firstValidUsageIndex(entries, compactionIndex + 1);
     baseline =
       usageIndex === -1

@@ -97,7 +97,7 @@ describe("New config keys — defaults", () => {
     const config = loadUnifiedConfig(testDir);
 
     expect(config.memory).toBe(true);
-    expect(config.compactAfterTokens).toBe(81_000);
+    expect(config.compactAfterTokens).toBe(0); // 0 = auto-derive (was 81_000)
     // Old keys are optional and absent from DEFAULTS
     expect(config.overrideDefaultCompaction).toBeUndefined();
   });
@@ -237,7 +237,7 @@ describe("Old → new key migration", () => {
 
     // Existing unrelated keys should be untouched
     expect(config.memory).toBe(true);
-    expect(config.compactAfterTokens).toBe(81_000);
+    expect(config.compactAfterTokens).toBe(0); // 0 = auto-derive (was 81_000)
   });
 
   it("T8: migration runs once — old keys deleted from parsed result", async () => {

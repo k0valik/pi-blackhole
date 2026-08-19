@@ -103,19 +103,30 @@ export interface UnifiedConfig {
    *  ONLY applies when compactionEngine: "blackhole" */
   tailBehavior: "pi-default" | "minimal";
 
-  /** Token threshold for observer runs. */
+  /** Token threshold for observer runs.
+   *  Default 0 means auto-derive from the session context window (25%,
+   *  clamped ≥ 1000, scaled by thresholdScale). Explicit values are honored
+   *  verbatim (measured in real usage tokens). */
   observeAfterTokens: number;
-  /** Token threshold for reflector and dropper. */
+  /** Token threshold for reflector and dropper.
+   *  Default 0 means auto-derive from the session context window (40%,
+   *  clamped ≥ 1000, scaled by thresholdScale). Explicit values are honored
+   *  verbatim (measured in real usage tokens). */
   reflectAfterTokens: number;
-  /** Token threshold for proactive auto-compaction. */
+  /** Token threshold for proactive auto-compaction.
+   *  Default 0 means auto-derive from the session context window (65%,
+   *  clamped ≥ 1000, scaled by thresholdScale). Explicit values are honored
+   *  verbatim (measured in real usage tokens). */
   compactAfterTokens: number;
-  /** Observation pool token pressure for full fold. */
+  /** Observation pool token pressure for full fold.
+   *  Default 0 means auto-derive from the session context window (15%,
+   *  clamped ≥ 1000). Explicit values are honored verbatim. */
   observationsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
    *  survive the first compaction in a fresh session. Default true. */
   fullFoldAlways: boolean;
   /** Target token budget for the observation pool (dropper aims here).
-   *  Optional; defaults to half of observationsPoolMaxTokens when unset.
+   *  Default 0 means auto-derive (half of observationsPoolMaxTokens).
    *  Must be less than observationsPoolMaxTokens.
    *
    *  NOTE: Ported from upstream as forward-compat (no-op in our pool algorithm).
@@ -124,9 +135,13 @@ export interface UnifiedConfig {
    *  We keep our ratio-based urgency algorithm; this knob exists so future
    *  lockstep iterations don't diverge on the config shape. */
   observationsPoolTargetTokens: number;
-  /** Max prompt tokens for reflector model input (rolling window cap). */
+  /** Max prompt tokens for reflector model input (rolling window cap).
+   *  Default 0 means auto-derive from the reflector's context window (60%,
+   *  clamped ≥ 1000). Explicit values are honored verbatim. */
   reflectorInputMaxTokens: number;
-  /** Max prompt tokens for dropper model input (rolling window cap). */
+  /** Max prompt tokens for dropper model input (rolling window cap).
+   *  Default 0 means auto-derive from the dropper's context window (60%,
+   *  clamped ≥ 1000). Explicit values are honored verbatim. */
   dropperInputMaxTokens: number;
   /** Pressure threshold for dropper.  When active observation pool tokens exceed
    *  this fraction of reflectorInputMaxTokens, the dropper runs even without new
@@ -148,6 +163,10 @@ export interface UnifiedConfig {
   observerPreambleMaxTokens: number;
   /** Shared turn cap for background memory agents. */
   agentMaxTurns: number;
+  /** Multiplier for AUTO-DERIVED trigger thresholds (observe/reflect/compact).
+   *  Ignored for explicit threshold values. Default 1.0; must be finite and
+   *  > 0, clamped to [0.1, 10]. e.g. 0.6 = cost-saver, 1.5 = responsive. */
+  thresholdScale: number;
   /** Body-idle timeout for background provider streams. Uses pi's default when unset;
    *  set to 0 to explicitly disable the wrapper. */
   providerIdleTimeoutMs?: number;
@@ -195,19 +214,20 @@ export const DEFAULTS: UnifiedConfig = {
   tailBehavior: "minimal",
   midRunCompaction: "off",
 
-  observeAfterTokens: 15_000,
-  reflectAfterTokens: 25_000,
-  compactAfterTokens: 81_000,
-  observationsPoolMaxTokens: 20_000,
+  observeAfterTokens: 0,
+  reflectAfterTokens: 0,
+  compactAfterTokens: 0,
+  observationsPoolMaxTokens: 0,
   fullFoldAlways: true,
-  observationsPoolTargetTokens: 10_000,
-  reflectorInputMaxTokens: 80_000,
-  dropperInputMaxTokens: 80_000,
+  observationsPoolTargetTokens: 0,
+  reflectorInputMaxTokens: 0,
+  dropperInputMaxTokens: 0,
   dropperPressureThreshold: 0.7,
   dropperPoolFullnessThreshold: 0.1,
   observerChunkMaxTokens: 0,
   observerPreambleMaxTokens: 0,
   agentMaxTurns: 16,
+  thresholdScale: 1.0,
 
   memory: true,
   debugLog: false,
@@ -276,6 +296,10 @@ function nonNegativeInt(v: unknown): number | undefined {
   return Number.isInteger(v) && typeof v === "number" && v >= 0 ? v : undefined;
 }
 
+/** Clamp bounds for thresholdScale (plan-03, D14). */
+export const THRESHOLD_SCALE_MIN = 0.1;
+export const THRESHOLD_SCALE_MAX = 10;
+
 function parseModel(v: unknown): OmModelConfig | undefined {
   if (!isRecord(v)) return undefined;
   const provider = nonEmptyString(v.provider);
@@ -334,7 +358,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.fullFoldAlways = raw.fullFoldAlways;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
-  // Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
+  // Numeric fields — 0 means auto-derive for thresholds/budgets, so those
+  // keys use nonNegativeInt; only agentMaxTurns must be > 0.
   const numKeys = [
     "observeAfterTokens",
     "reflectAfterTokens",
@@ -368,17 +393,23 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
   }
   for (const k of numKeys) {
-    // observerPreambleMaxTokens, observerChunkMaxTokens and
-    // providerIdleTimeoutMs accept 0 (disabled/inherit/auto); everything
-    // else must be > 0.
-    const validator =
-      k === "observerPreambleMaxTokens" ||
-      k === "observerChunkMaxTokens" ||
-      k === "providerIdleTimeoutMs"
-        ? nonNegativeInt
-        : positiveInt;
+    // Thresholds, budgets and preamble/chunk caps accept 0 (auto-derive or
+    // disabled); only agentMaxTurns must be > 0.
+    const validator = k === "agentMaxTurns" ? positiveInt : nonNegativeInt;
     const v = validator(raw[k]);
     if (v !== undefined) (c as Record<string, unknown>)[k] = v;
+  }
+
+  // thresholdScale — finite, > 0, clamped to [0.1, 10]
+  if (
+    typeof raw.thresholdScale === "number" &&
+    Number.isFinite(raw.thresholdScale) &&
+    raw.thresholdScale > 0
+  ) {
+    c.thresholdScale = Math.min(
+      THRESHOLD_SCALE_MAX,
+      Math.max(THRESHOLD_SCALE_MIN, raw.thresholdScale),
+    );
   }
 
   // Models

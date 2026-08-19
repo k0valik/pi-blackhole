@@ -22,14 +22,22 @@ import {
 } from "./retryable-error.js";
 import {
   effectiveContextWindow,
+  resolveDropperInputMaxTokens,
   resolveObserverChunkMaxTokens,
+  resolveObservationsPoolMaxTokens,
+  resolveReflectorInputMaxTokens,
   resolveSessionContextWindow,
   resolveWorkerWindow,
 } from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
-
-/** Fixed overhead for system prompt, tool definitions, and turn scaffold in context window pre-check. */
-const AGENT_LOOP_RESERVE = 8_000;
+import {
+  AGENT_LOOP_RESERVE,
+  measureDropperDue,
+  measureObserverDue,
+  measureReflectorDue,
+  resolveTriggerThresholds,
+  type DueContext,
+} from "./due.js";
 import {
   readPendingState,
   savePendingObservation,
@@ -51,7 +59,6 @@ import {
   earlierCoverageMarkerId,
   entryIndexForId,
   foldLedger,
-  findLastCompactionIndex,
   fullProjection,
   isSourceEntry,
   latestCoverageIndex,
@@ -61,7 +68,6 @@ import {
   rawTokensAfterIndex,
   rawTokensSinceDropCoverage,
   rawTokensSinceObservationCoverage,
-  rawTokensSinceReflectionCoverage,
   reflectionToSummaryLine,
   reflectionsCreatedAfterIndex,
   selectPriorObservations,
@@ -81,6 +87,8 @@ export type ConsolidationCtx = {
   model: unknown;
   modelRegistry: any;
   sessionManager: { getBranch: () => unknown; getSessionId: () => string };
+  /** Live session context usage (stale context throws — guarded upstream). */
+  getContextUsage?: () => { contextWindow?: number } | undefined;
 };
 
 type StageOutcome = "continue" | "abort";
@@ -149,8 +157,11 @@ function pendingObservationsCreatedAfter(
   return newObs;
 }
 
-/** Cursor-aware stage-due check.  Uses cursors when available; falls back to
- *  legacy coverage markers when cursors are absent (cold start, fork recovery).
+/** Cursor-aware stage-due check.  Uses the truthful measurement core
+ *  (real usage delta since the stage anchor, chars/4 estimate fallback)
+ *  with auto-derived thresholds.  Cursor-based new-data marker scans are
+ *  preserved on top of the tokens leg; falls back to coverage markers when
+ *  cursors are absent (cold start, fork recovery).
  *
  *  In compaction: "manual" mode, the branch has no OM markers — observations
  *  live in the per‑session pending file.  `pending` provides the pool fullness
@@ -158,46 +169,27 @@ function pendingObservationsCreatedAfter(
 export function anyStageDue(
   entries: Entry[],
   runtime: Runtime,
+  dueCtx: DueContext,
   pending?: PendingOMState,
 ): boolean {
   const config = runtime.config;
   const cursors = runtime.cursors ?? {};
+  const sessionWindow = resolveSessionContextWindow(
+    dueCtx.model,
+    dueCtx.getContextUsage,
+  );
 
   // ── Observer ──────────────────────────────────────────────────────────
-  const observerDue = (() => {
-    const cursor = cursors.observer;
-    if (!cursor) {
-      return (
-        rawTokensSinceObservationCoverage(entries) >= config.observeAfterTokens
-      );
-    }
-    const idx = entryIndexForId(entries, cursor.entryId);
-    const tokensSince =
-      idx >= 0
-        ? rawTokensAfterIndex(entries, idx)
-        : rawTokensSinceObservationCoverage(entries);
-    return tokensSince >= config.observeAfterTokens;
-  })();
+  const observerDue = measureObserverDue(entries, runtime, dueCtx).due;
 
   // ── Reflector ─────────────────────────────────────────────────────────
   const reflectorDue = (() => {
+    const tokensDue = measureReflectorDue(entries, runtime, dueCtx).due;
     const cursor = cursors.reflector;
-    if (!cursor) {
-      return (
-        rawTokensSinceReflectionCoverage(entries) >= config.reflectAfterTokens
-      );
-    }
+    if (!cursor) return tokensDue;
     const idx = entryIndexForId(entries, cursor.entryId);
-    if (idx < 0) {
-      return (
-        rawTokensSinceReflectionCoverage(entries) >= config.reflectAfterTokens
-      );
-    }
-    // Must have enough accumulated tokens before considering reflector
-    const tokensSince = rawTokensAfterIndex(entries, idx);
-    if (tokensSince < config.reflectAfterTokens) {
-      return false;
-    }
+    if (idx < 0) return tokensDue;
+    if (!tokensDue) return false;
     // Check for new observation batches after the cursor
     for (let i = idx + 1; i < entries.length; i++) {
       const e = entries[i];
@@ -250,22 +242,27 @@ export function anyStageDue(
               );
             }
           }
-          const fullnessVsPool =
-            config.observationsPoolMaxTokens > 0
-              ? poolTokens / config.observationsPoolMaxTokens
-              : 0;
+          const poolMax = resolveObservationsPoolMaxTokens(
+            config.observationsPoolMaxTokens,
+            sessionWindow,
+          );
+          const fullnessVsPool = poolTokens / poolMax;
 
           // Must have at least dropperPoolFullnessThreshold fullness to consider dropper
           if (fullnessVsPool < (config.dropperPoolFullnessThreshold ?? 0.1))
             return false;
 
-          // Pressure check: pool ≥ threshold × reflectorInputMaxTokens
+          // Pressure check: pool ≥ threshold × reflector input budget
+          const reflectorInputMax = resolveReflectorInputMaxTokens(
+            config.reflectorInputMaxTokens,
+            resolveWorkerWindow(config.reflectorModel, sessionWindow),
+          );
           const pressure =
-            poolTokens >=
-            config.dropperPressureThreshold * config.reflectorInputMaxTokens;
+            poolTokens >= config.dropperPressureThreshold * reflectorInputMax;
           if (pressure) return true;
 
           // New data check: new obs or ref batches after dropper cursor
+          const tokensDue = measureDropperDue(entries, runtime, dueCtx).due;
           const cursor = cursors.dropper;
           if (!cursor) {
             // In manual mode, pending batches are the only source of new‑data
@@ -275,21 +272,11 @@ export function anyStageDue(
                 (pending.reflectionBatches?.length ?? 0) > 0
               : false;
             if (hasPendingNewData) return true;
-            return (
-              rawTokensSinceDropCoverage(entries) >= config.reflectAfterTokens
-            );
+            return tokensDue;
           }
           const idx = entryIndexForId(entries, cursor.entryId);
-          if (idx < 0) {
-            return (
-              rawTokensSinceDropCoverage(entries) >= config.reflectAfterTokens
-            );
-          }
-          // Must have enough accumulated tokens before considering dropper
-          const tokensSince = rawTokensAfterIndex(entries, idx);
-          if (tokensSince < config.reflectAfterTokens) {
-            return false;
-          }
+          if (idx < 0) return tokensDue;
+          if (!tokensDue) return false;
           for (let i = idx + 1; i < entries.length; i++) {
             const e = entries[i];
             if (
@@ -525,7 +512,18 @@ function maybeLaunchConsolidation(
   const pending = isManualMode(runtime.config)
     ? readPendingState(sessionId)
     : undefined;
-  if (!anyStageDue(entries, runtime, pending)) return;
+  if (
+    !anyStageDue(
+      entries,
+      runtime,
+      {
+        model: ctx.model as { contextWindow?: number },
+        getContextUsage: ctx.getContextUsage,
+      },
+      pending,
+    )
+  )
+    return;
 
   const runId = `consolidation-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
   const consolidationCtx: ConsolidationCtx = {
@@ -535,6 +533,7 @@ function maybeLaunchConsolidation(
     model: ctx.model,
     modelRegistry: ctx.modelRegistry,
     sessionManager: ctx.sessionManager,
+    getContextUsage: ctx.getContextUsage,
   };
 
   void runtime.launchConsolidationTask(ctx, async () =>
@@ -659,35 +658,27 @@ async function runObserverStage(
     throw error;
   }
 
-  // Determine start index: cursor takes priority, fall back to coverage markers
-  const observerCursor = runtime.getCursor("observer");
-  let effectiveStart: number;
-  if (observerCursor) {
-    const cursorIdx = entryIndexForId(entries, observerCursor.entryId);
-    effectiveStart =
-      cursorIdx >= 0
-        ? cursorIdx
-        : latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED);
-  } else {
-    const lastCoverageIdx = latestCoverageIndex(
-      entries,
-      OM_OBSERVATIONS_RECORDED,
-    );
-    effectiveStart =
-      lastCoverageIdx >= 0 ? lastCoverageIdx : findLastCompactionIndex(entries);
-  }
-
-  const tokens =
-    effectiveStart >= 0 ? rawTokensAfterIndex(entries, effectiveStart) : 0;
-  if (tokens < runtime.config.observeAfterTokens) {
-    // Not due — advance cursor to last source entry so we don't re-check immediately
-    const lastSourceId = [...entries]
-      .reverse()
-      .find((e: Entry) => isSourceEntry(e))?.id;
-    if (lastSourceId)
-      runtime.advanceCursor("observer", lastSourceId, "not_due");
+  // Truthful due measurement: cursor → coverage markers → compaction (cold
+  // start) anchor, real usage delta with chars/4 estimate fallback.
+  const measurement = measureObserverDue(entries, runtime, {
+    model: ctx.model as { contextWindow?: number },
+    getContextUsage: ctx.getContextUsage,
+  });
+  if (!measurement.due) {
+    // Not due — advance cursor to last source entry so we don't re-check
+    // immediately.  Skipped on the estimate basis: an unmeasurable baseline
+    // must not advance the cursor (fallback-safety rule).
+    if (measurement.basis === "usage") {
+      const lastSourceId = [...entries]
+        .reverse()
+        .find((e: Entry) => isSourceEntry(e))?.id;
+      if (lastSourceId)
+        runtime.advanceCursor("observer", lastSourceId, "not_due");
+    }
     return "continue";
   }
+  const effectiveStart = measurement.anchorIndex;
+  const tokens = measurement.progress;
 
   const chunkEntries = sourceEntriesAfter(entries, effectiveStart);
 
@@ -747,7 +738,7 @@ async function runObserverStage(
     const preambleMaxTokens =
       runtime.config.observerPreambleMaxTokens > 0
         ? runtime.config.observerPreambleMaxTokens
-        : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+        : Math.round(maxChunkTokens * 0.3);
     const allObservations = [
       ...memory.observations,
       ...accumulatedObservations,
@@ -989,6 +980,14 @@ async function runReflectorStage(
   }
   let reflectionTokens = 0;
   let observationCoverageId: string | undefined;
+  const sessionWindow = resolveSessionContextWindow(
+    ctx.model as { contextWindow?: number },
+    ctx.getContextUsage,
+  );
+  const reflectThreshold = resolveTriggerThresholds(
+    runtime.config,
+    sessionWindow,
+  ).reflectAfterTokens;
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
@@ -1020,7 +1019,7 @@ async function runReflectorStage(
       }
       if (refIdx >= 0) {
         reflectionTokens = rawTokensAfterIndex(entries, refIdx);
-        if (reflectionTokens < runtime.config.reflectAfterTokens) {
+        if (reflectionTokens < reflectThreshold) {
           runtime.advanceCursor(
             "reflector",
             pending.reflection.coversUpToId,
@@ -1035,15 +1034,21 @@ async function runReflectorStage(
       reflectionTokens = rawTokensSinceObservationCoverage(entries);
     }
   } else {
-    reflectionTokens = rawTokensSinceReflectionCoverage(entries);
-    if (reflectionTokens < runtime.config.reflectAfterTokens) {
-      runtime.advanceCursor(
-        "reflector",
-        entries.at(-1)?.id ?? "unknown",
-        "not_due",
-      );
+    const measurement = measureReflectorDue(entries, runtime, {
+      model: ctx.model as { contextWindow?: number },
+      getContextUsage: ctx.getContextUsage,
+    });
+    if (!measurement.due) {
+      if (measurement.basis === "usage") {
+        runtime.advanceCursor(
+          "reflector",
+          entries.at(-1)?.id ?? "unknown",
+          "not_due",
+        );
+      }
       return { outcome: "continue", sameRunReflections: [] };
     }
+    reflectionTokens = measurement.progress;
     observationCoverageId = latestCoverageMarkerId(
       entries,
       OM_OBSERVATIONS_RECORDED,
@@ -1085,11 +1090,17 @@ async function runReflectorStage(
         newReflections.reduce((s: number, r: any) => s + r.content.length, 0)) /
         4,
     );
-    const summaryBudget =
-      Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
+    const reflectorInputMax = resolveReflectorInputMaxTokens(
+      runtime.config.reflectorInputMaxTokens,
+      resolveWorkerWindow(
+        stageModelConfig(runtime, "reflector"),
+        sessionWindow,
+      ),
+    );
+    const summaryBudget = Math.floor(reflectorInputMax * 0.15) * 2;
     const reflectorInputTokens = Math.min(
       newItemsTokens + summaryBudget,
-      runtime.config.reflectorInputMaxTokens,
+      reflectorInputMax,
     );
     // Adjust accumulated for pending coverage in manual mode
     let effectiveReflectionTokens = reflectionTokens;
@@ -1172,13 +1183,13 @@ async function runReflectorStage(
         : folded.activeObservations;
       const existingReflectionsSummary = buildExistingReflectionsSummary(
         sourceReflections,
-        Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
+        Math.floor(reflectorInputMax * 0.15),
       );
       const existingObservationsSummary = buildExistingObservationsSummary(
         sourceObservations.filter(
           (o: any) => !newObservations.some((no: any) => no.id === o.id),
         ),
-        Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
+        Math.floor(reflectorInputMax * 0.15),
       );
 
       const reflections = await runReflector({
@@ -1294,6 +1305,14 @@ async function runDropperStage(
   }
   let dropTokens = 0;
   let observationCoverageId: string | undefined;
+  const sessionWindow = resolveSessionContextWindow(
+    ctx.model as { contextWindow?: number },
+    ctx.getContextUsage,
+  );
+  const dropThreshold = resolveTriggerThresholds(
+    runtime.config,
+    sessionWindow,
+  ).reflectAfterTokens;
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
@@ -1325,7 +1344,7 @@ async function runDropperStage(
       }
       if (dropIdx >= 0) {
         dropTokens = rawTokensAfterIndex(entries, dropIdx);
-        if (dropTokens < runtime.config.reflectAfterTokens) {
+        if (dropTokens < dropThreshold) {
           runtime.advanceCursor(
             "dropper",
             pending.dropped.coversUpToId,
@@ -1340,15 +1359,21 @@ async function runDropperStage(
       dropTokens = rawTokensSinceDropCoverage(entries);
     }
   } else {
-    dropTokens = rawTokensSinceDropCoverage(entries);
-    if (dropTokens < runtime.config.reflectAfterTokens) {
-      runtime.advanceCursor(
-        "dropper",
-        entries.at(-1)?.id ?? "unknown",
-        "not_due",
-      );
+    const measurement = measureDropperDue(entries, runtime, {
+      model: ctx.model as { contextWindow?: number },
+      getContextUsage: ctx.getContextUsage,
+    });
+    if (!measurement.due) {
+      if (measurement.basis === "usage") {
+        runtime.advanceCursor(
+          "dropper",
+          entries.at(-1)?.id ?? "unknown",
+          "not_due",
+        );
+      }
       return "continue";
     }
+    dropTokens = measurement.progress;
     observationCoverageId = latestCoverageMarkerId(
       entries,
       OM_OBSERVATIONS_RECORDED,
@@ -1386,12 +1411,14 @@ async function runDropperStage(
       newObservations.reduce((s: number, o: any) => s + o.content.length, 0) /
         4,
     );
-    const dropperSummaryBudget = Math.floor(
-      runtime.config.dropperInputMaxTokens * 0.2,
+    const dropperInputMax = resolveDropperInputMaxTokens(
+      runtime.config.dropperInputMaxTokens,
+      resolveWorkerWindow(stageModelConfig(runtime, "dropper"), sessionWindow),
     );
+    const dropperSummaryBudget = Math.floor(dropperInputMax * 0.2);
     const dropperInputTokens = Math.min(
       dropperNewObsTokens + dropperSummaryBudget,
-      runtime.config.dropperInputMaxTokens,
+      dropperInputMax,
     );
     // Adjust accumulated for pending coverage in manual mode
     let effectiveDropTokens = dropTokens;
@@ -1423,7 +1450,7 @@ async function runDropperStage(
         sourceObsForDropper.filter(
           (o: any) => !newObservations.some((no: any) => no.id === o.id),
         ),
-        Math.floor(runtime.config.dropperInputMaxTokens * 0.2),
+        Math.floor(dropperInputMax * 0.2),
       );
       // In manual mode, merge accumulated reflection batches with
       // branch data (preserving pre-switch markers), matching the
@@ -1489,7 +1516,10 @@ async function runDropperStage(
         reflections: reflectionsForDropper,
         observations: newObservations,
         existingObservationsSummary: existingObservationsSummary || undefined,
-        budgetTokens: runtime.config.observationsPoolMaxTokens,
+        budgetTokens: resolveObservationsPoolMaxTokens(
+          runtime.config.observationsPoolMaxTokens,
+          sessionWindow,
+        ),
         skipFullness: runtime.config.dropperPoolFullnessThreshold,
         maxTurns: runtime.config.agentMaxTurns,
         thinkingLevel: stageThinkingLevel(

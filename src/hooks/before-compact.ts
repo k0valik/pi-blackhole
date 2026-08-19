@@ -22,6 +22,10 @@ import {
 } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
+import {
+  resolveObservationsPoolMaxTokens,
+  resolveSessionContextWindow,
+} from "../om/model-budget.js";
 import { configFileNeedsMigration } from "../core/unified-config.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
@@ -636,7 +640,13 @@ export const registerBeforeCompactHook = (
         branchEntries as any[],
         firstKeptEntryId,
         {
-          observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens,
+          observationsPoolMaxTokens: resolveObservationsPoolMaxTokens(
+            omRuntime.config.observationsPoolMaxTokens,
+            resolveSessionContextWindow(
+              ctx.model as { contextWindow?: number },
+              () => ctx.getContextUsage?.(),
+            ),
+          ),
           fullFoldAlways: omRuntime.config.fullFoldAlways,
         },
       );

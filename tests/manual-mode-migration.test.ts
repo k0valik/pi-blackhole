@@ -15,6 +15,9 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { __setTestConfigDir } from "../src/core/unified-config.js";
 
+/** Minimal due-context for anyStageDue calls (128k session window). */
+const DUE_CTX = { model: { contextWindow: 128_000 } };
+
 // ── isManualMode tests ───────────────────────────────────────────────────────
 
 describe("isManualMode", () => {
@@ -188,7 +191,7 @@ describe("Consolidation — pending state loading uses isManualMode", () => {
     // With pending observation batches after cursor, reflector should be due
     runtime.advanceCursor("reflector", "entry-1", "recorded");
     expect(isManualMode(runtime.config)).toBe(true);
-    expect(anyStageDue(entries, runtime, pending)).toBe(true);
+    expect(anyStageDue(entries, runtime, DUE_CTX, pending)).toBe(true);
   });
 
   it("anyStageDue ignores pending in auto mode", async () => {
@@ -228,6 +231,6 @@ describe("Consolidation — pending state loading uses isManualMode", () => {
     // In auto mode, pending is ignored — no OM markers on branch, no new data
     runtime.advanceCursor("reflector", "entry-1", "recorded");
     expect(isManualMode(runtime.config)).toBe(false);
-    expect(anyStageDue(entries, runtime, pending)).toBe(false);
+    expect(anyStageDue(entries, runtime, DUE_CTX, pending)).toBe(false);
   });
 });
