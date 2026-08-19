@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   effectiveContextWindow,
+  resolveObserverChunkMaxTokens,
   resolveSessionContextWindow,
+  resolveWorkerWindow,
 } from "../src/om/model-budget.js";
 
 const testDir = join(tmpdir(), `pi-blackhole-model-budget-test-${Date.now()}`);
@@ -163,5 +165,40 @@ describe("resolveSessionContextWindow", () => {
     expect(
       resolveSessionContextWindow({ contextWindow: 0 } as any, undefined),
     ).toBe(128_000);
+  });
+});
+
+describe("resolveWorkerWindow", () => {
+  it("prefers the stage model window", () => {
+    expect(resolveWorkerWindow({ contextWindow: 32_000 }, 200_000)).toBe(
+      32_000,
+    );
+  });
+
+  it("falls back to the session window", () => {
+    expect(resolveWorkerWindow(undefined, 200_000)).toBe(200_000);
+    expect(resolveWorkerWindow({} as any, 64_000)).toBe(64_000);
+  });
+
+  it("falls back to 128000 when both are unusable", () => {
+    expect(resolveWorkerWindow({ contextWindow: 0 } as any, 0)).toBe(128_000);
+    expect(resolveWorkerWindow(undefined, NaN)).toBe(128_000);
+  });
+});
+
+describe("resolveObserverChunkMaxTokens", () => {
+  it("derives 20% of the worker window when unset", () => {
+    expect(resolveObserverChunkMaxTokens(0, 128_000)).toBe(25_600);
+    expect(resolveObserverChunkMaxTokens(0, 32_000)).toBe(6_400);
+  });
+
+  it("honors explicit values", () => {
+    expect(resolveObserverChunkMaxTokens(40_000, 128_000)).toBe(40_000);
+    expect(resolveObserverChunkMaxTokens(5_000, 128_000)).toBe(5_000);
+  });
+
+  it("clamps both paths to 256 tokens minimum", () => {
+    expect(resolveObserverChunkMaxTokens(0, 500)).toBe(256);
+    expect(resolveObserverChunkMaxTokens(100, 128_000)).toBe(256);
   });
 });

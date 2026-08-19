@@ -32,6 +32,7 @@ import {
   type Reflection,
 } from "../../ledger/index.js";
 import type { ReflectionCoverageTier } from "../dropper/coverage.js";
+import { logAgentStreamError } from "../stream-errors.js";
 
 interface RunReflectorArgs {
   model: Model<any>;
@@ -52,6 +53,8 @@ interface RunReflectorArgs {
   maxTurns?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
+  /** Optional callback fired when the agent stream fails or aborts. */
+  onError?: (message: string) => void;
 }
 
 const RecordReflectionsSchema = Type.Object({
@@ -210,16 +213,7 @@ export async function runReflector(
   let agentError: string | undefined;
   for await (const event of stream) {
     // Tool execution collects records.
-    if (event.type === "agent_end") {
-      const msgs = ((event as any).messages || []) as Array<{
-        stopReason?: string;
-        errorMessage?: string;
-      }>;
-      const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.stopReason === "error") {
-        agentError = lastMsg.errorMessage ?? "Unknown API error";
-      }
-    }
+    agentError ??= logAgentStreamError("reflector", event, args.onError);
   }
   await stream.result();
   if (agentError && accumulated.size === 0)

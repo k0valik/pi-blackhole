@@ -27,6 +27,7 @@ import { OBSERVER_SYSTEM } from "./prompts.js";
 import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
 import { estimateStringTokens } from "../../tokens.js";
+import { logAgentStreamError } from "../stream-errors.js";
 
 interface RunObserverArgs {
   model: Model<any>;
@@ -45,6 +46,8 @@ interface RunObserverArgs {
   maxTurns?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
+  /** Optional callback fired when the agent stream fails or aborts. */
+  onError?: (message: string) => void;
 }
 
 const RelevanceSchema = Type.Union([
@@ -279,16 +282,7 @@ ${conversation}`;
   let agentError: string | undefined;
   for await (const event of stream) {
     // Drain events; the tool's execute already collects records.
-    if (event.type === "agent_end") {
-      const msgs = ((event as any).messages || []) as Array<{
-        stopReason?: string;
-        errorMessage?: string;
-      }>;
-      const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.stopReason === "error") {
-        agentError = lastMsg.errorMessage ?? "Unknown API error";
-      }
-    }
+    agentError ??= logAgentStreamError("observer", event, args.onError);
   }
   await stream.result();
 

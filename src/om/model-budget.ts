@@ -76,3 +76,35 @@ export function resolveSessionContextWindow(
   }
   return 128_000;
 }
+
+export const WORKER_WINDOW_FALLBACK = 128_000;
+
+/** Best synchronously-known window for a worker stage: stage model metadata
+ *  contextWindow first, then the resolved session window, then 128k. */
+export function resolveWorkerWindow(
+  stageModel: { contextWindow?: number } | undefined,
+  sessionWindow: number,
+): number {
+  if (
+    typeof stageModel?.contextWindow === "number" &&
+    Number.isFinite(stageModel.contextWindow) &&
+    stageModel.contextWindow > 0
+  ) {
+    return stageModel.contextWindow;
+  }
+  return sessionWindow > 0 ? sessionWindow : WORKER_WINDOW_FALLBACK;
+}
+
+export const OBSERVER_CHUNK_RATIO = 0.2;
+export const OBSERVER_CHUNK_MIN_TOKENS = 256;
+
+/** Resolve the observer chunk budget: explicit config values are honored
+ *  (clamped ≥ 256); 0 derives floor(workerWindow × 0.2), also ≥ 256. */
+export function resolveObserverChunkMaxTokens(
+  configValue: number,
+  workerWindow: number,
+): number {
+  if (configValue > 0) return Math.max(configValue, OBSERVER_CHUNK_MIN_TOKENS);
+  const derived = Math.floor(workerWindow * OBSERVER_CHUNK_RATIO);
+  return Math.max(derived, OBSERVER_CHUNK_MIN_TOKENS);
+}

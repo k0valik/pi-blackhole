@@ -20,7 +20,12 @@ import {
   isRetryableError,
   isStaleExtensionContextError,
 } from "./retryable-error.js";
-import { effectiveContextWindow } from "./model-budget.js";
+import {
+  effectiveContextWindow,
+  resolveObserverChunkMaxTokens,
+  resolveSessionContextWindow,
+  resolveWorkerWindow,
+} from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
 
 /** Fixed overhead for system prompt, tool definitions, and turn scaffold in context window pre-check. */
@@ -93,60 +98,6 @@ const MAX_STAGE_ATTEMPTS = 10;
 
 function sourceEntriesAfter(entries: Entry[], index: number): Entry[] {
   return entries.slice(index + 1).filter(isSourceEntry);
-}
-
-/**
- * Cap source entries to maxTokens by keeping newest entries first,
- * walking backwards until the token budget is exceeded.
- * Uses a conservative chars/4 heuristic for token estimation.
- */
-function capSourceEntriesToTokens(
-  entries: Entry[],
-  maxTokens: number,
-): Entry[] {
-  let totalTokens = 0;
-  const kept: Entry[] = [];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
-    let chars = 0;
-    // Tokenize all entry types, not just "message": custom_message and
-    // branch_summary entries also consume observer context window.
-    if (entry.type === "message" && entry.message) {
-      const msg = entry.message as any;
-      if (typeof msg.content === "string") chars = msg.content.length;
-      else if (Array.isArray(msg.content)) {
-        for (const block of msg.content) {
-          if (block.text) chars += block.text.length;
-        }
-      }
-    } else if (
-      entry.type === "custom" &&
-      (entry.customType === OM_OBSERVATIONS_RECORDED ||
-        entry.customType === OM_REFLECTIONS_RECORDED ||
-        entry.customType === OM_OBSERVATIONS_DROPPED)
-    ) {
-      // Custom entries carry structured data — estimate from JSON serialization
-      chars = String(JSON.stringify(entry.data ?? {})).length;
-    } else if (entry.summary) {
-      chars = String(entry.summary).length;
-    }
-    const estTokens = Math.ceil(chars / 4);
-    if (totalTokens + estTokens > maxTokens && kept.length > 0) break;
-    // Remove the `kept.length > 0` guard? No — keep the guard but allow
-    // the first entry to be dropped only if it exceeds maxTokens alone.
-    // (The guard against empty kept list prevents dropping the first entry
-    // when later entries are small; but a single oversized entry should
-    // still be included to avoid losing the newest data entirely.)
-    if (totalTokens + estTokens > maxTokens && kept.length === 0) {
-      // First (newest) entry exceeds maxTokens alone — include it anyway
-      // to avoid data loss, but don't add more.
-      kept.unshift(entry);
-      break;
-    }
-    kept.unshift(entry);
-    totalTokens += estTokens;
-  }
-  return kept;
 }
 
 function appendEntry(
@@ -738,22 +689,41 @@ async function runObserverStage(
     return "continue";
   }
 
-  let chunkEntries = sourceEntriesAfter(entries, effectiveStart);
+  const chunkEntries = sourceEntriesAfter(entries, effectiveStart);
 
-  // Cap observer input to observerChunkMaxTokens (newest-to-oldest)
-  const maxChunkTokens = runtime.config.observerChunkMaxTokens;
-  if (tokens > maxChunkTokens) {
-    chunkEntries = capSourceEntriesToTokens(chunkEntries, maxChunkTokens);
+  // Cap observer input to the resolved chunk budget (oldest-first walk;
+  // oversized entries become head/tail excerpts, never silently dropped).
+  const workerWindow = resolveWorkerWindow(
+    stageModelConfig(runtime, "observer"),
+    resolveSessionContextWindow(ctx.model as { contextWindow?: number }),
+  );
+  const maxChunkTokens = resolveObserverChunkMaxTokens(
+    runtime.config.observerChunkMaxTokens,
+    workerWindow,
+  );
+  const {
+    text: chunk,
+    sourceEntryIds,
+    estimatedTokens: chunkTokens,
+    truncatedSourceEntryIds,
+  } = serializeSourceAddressedBranchEntries(chunkEntries, {
+    maxTokens: maxChunkTokens,
+    trim: true,
+  });
+
+  // coversUpToId must point to the LAST included entry (after budget capping)
+  const coversUpToId = sourceEntryIds.at(-1);
+  if (!coversUpToId || !chunk.trim()) return "continue";
+
+  if (truncatedSourceEntryIds.length > 0) {
+    debugLog("observer.chunk_capped", {
+      budgetTokens: maxChunkTokens,
+      estimatedTokens: chunkTokens,
+      sourceEntryCount: chunkEntries.length,
+      includedCount: sourceEntryIds.length,
+      truncatedSourceEntryIds,
+    });
   }
-
-  // coversUpToId must point to the LAST entry AFTER capping, not before
-  const coversUpToId = chunkEntries.at(-1)?.id;
-  if (!coversUpToId) return "continue";
-
-  const { text: chunk, sourceEntryIds } =
-    serializeSourceAddressedBranchEntries(chunkEntries);
-  if (!chunk.trim() || sourceEntryIds.length === 0) return "continue";
-  const chunkTokens = Math.ceil(chunk.length / 4);
 
   const memory = fullProjection(entries);
   let priorReflections = memory.reflections.map(reflectionToSummaryLine);
@@ -884,6 +854,9 @@ async function runObserverStage(
           stageModelForThinking,
         ),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+        onError: (message) => {
+          runtime.lastObserverError = message;
+        },
       });
 
       if (result.observations && result.observations.length > 0) {
@@ -1223,6 +1196,9 @@ async function runReflectorStage(
           stageModelForThinking,
         ),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+        onError: (message) => {
+          runtime.lastReflectorError = message;
+        },
       });
 
       if (!reflections || reflections.length === 0) {
@@ -1522,6 +1498,9 @@ async function runDropperStage(
           stageModelForThinking,
         ),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+        onError: (message) => {
+          runtime.lastDropperError = message;
+        },
       });
       const latestReflectionCoverageId = isManualMode(runtime.config)
         ? pending?.reflection?.coversUpToId

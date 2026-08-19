@@ -137,7 +137,9 @@ export interface UnifiedConfig {
    *  before the dropper may run. Prevents churn on a nearly empty pool.
    *  Default 0.10 (10%). Must be in range (0, 1]. */
   dropperPoolFullnessThreshold: number;
-  /** Max source entries tokens sent to observer per chunk. */
+  /** Max source-entry tokens sent to observer per chunk.
+   *  Default 0 means auto-derive from the worker context window (20%,
+   *  clamped ≥ 256). Explicit values are honored verbatim (clamped ≥ 256). */
   observerChunkMaxTokens: number;
   /** Max preamble tokens (CURRENT REFLECTIONS / OBSERVATIONS) in the observer prompt.
    *  Default 0 means auto-compute from observerChunkMaxTokens (30%). Only applied in
@@ -203,7 +205,7 @@ export const DEFAULTS: UnifiedConfig = {
   dropperInputMaxTokens: 80_000,
   dropperPressureThreshold: 0.7,
   dropperPoolFullnessThreshold: 0.1,
-  observerChunkMaxTokens: 40_000,
+  observerChunkMaxTokens: 0,
   observerPreambleMaxTokens: 0,
   agentMaxTurns: 16,
 
@@ -366,10 +368,13 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
   }
   for (const k of numKeys) {
-    // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
-    // everything else must be > 0.
+    // observerPreambleMaxTokens, observerChunkMaxTokens and
+    // providerIdleTimeoutMs accept 0 (disabled/inherit/auto); everything
+    // else must be > 0.
     const validator =
-      k === "observerPreambleMaxTokens" || k === "providerIdleTimeoutMs"
+      k === "observerPreambleMaxTokens" ||
+      k === "observerChunkMaxTokens" ||
+      k === "providerIdleTimeoutMs"
         ? nonNegativeInt
         : positiveInt;
     const v = validator(raw[k]);

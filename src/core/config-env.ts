@@ -95,10 +95,16 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   observationsPoolTargetTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS",
   reflectorInputMaxTokens: "PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS",
   dropperInputMaxTokens: "PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS",
-  observerChunkMaxTokens: "PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS",
   observerPreambleMaxTokens: "PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS",
   agentMaxTurns: "PI_BLACKHOLE_AGENT_MAX_TURNS",
-  // Non-negative integer (0 = disabled, unset = inherit pi default)
+  // Non-negative integer (0 = auto-derive, unset = inherit pi default)
+  observerChunkMaxTokens: {
+    var: "PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS",
+    parse: (raw: string) => {
+      const n = Number(raw);
+      return Number.isInteger(n) && n >= 0 ? n : undefined;
+    },
+  },
   providerIdleTimeoutMs: {
     var: "PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS",
     parse: (raw: string) => {

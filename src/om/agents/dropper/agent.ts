@@ -36,6 +36,7 @@ import {
   summarizeCoverageByRelevance,
   summarizeCoverageByRelevanceForIds,
 } from "./coverage.js";
+import { logAgentStreamError } from "../stream-errors.js";
 
 interface RunDropperArgs {
   model: Model<any>;
@@ -58,6 +59,8 @@ interface RunDropperArgs {
   maxTurns?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
+  /** Optional callback fired when the agent stream fails or aborts. */
+  onError?: (message: string) => void;
 }
 
 const DROP_SKIP_FULLNESS = 0.1;
@@ -399,16 +402,7 @@ export async function runDropper(
   let agentError: string | undefined;
   for await (const event of stream) {
     // Tool execution collects candidate ids.
-    if (event.type === "agent_end") {
-      const msgs = ((event as any).messages || []) as Array<{
-        stopReason?: string;
-        errorMessage?: string;
-      }>;
-      const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.stopReason === "error") {
-        agentError = lastMsg.errorMessage ?? "Unknown API error";
-      }
-    }
+    agentError ??= logAgentStreamError("dropper", event, args.onError);
   }
   await stream.result();
   if (agentError && proposedDropIds.length === 0)
