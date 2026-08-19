@@ -2,12 +2,68 @@
  * Token estimation for serialized entries.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/tokens.ts)
- * Unmodified.
+ * Unmodified (estimateStringTokens, estimateEntryTokens).
+ *
+ * Amended: usage-aware helpers (hasUsageData, getUsageTokens,
+ * observationLineTokenCount) — real-usage measurement core, plan-01
+ * (approach: tavasti@360f24a, pi-vcc upstream PR #40).
  */
-import { estimateTokens as estimateMessageTokens } from "@earendil-works/pi-coding-agent";
+import {
+  calculateContextTokens,
+  estimateTokens as estimateMessageTokens,
+} from "@earendil-works/pi-coding-agent";
 
 export function estimateStringTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+export function hasUsageData(msg: unknown): boolean {
+  return getUsageTokens(msg) !== undefined;
+}
+
+/**
+ * Extract real usage token count from an assistant message.
+ *
+ * Only trusted when the message is a real assistant response:
+ * - role must be "assistant" (never toolResult — ToolResultMessage.usage
+ *   reflects tool execution, not LLM context accounting)
+ * - stopReason must not be "error" or "aborted" (failed turns carry
+ *   misleading usage)
+ *
+ * Never throws; returns undefined when usage is missing, zero, or not finite.
+ */
+export function getUsageTokens(msg: unknown): number | undefined {
+  if (typeof msg !== "object" || msg === null) return undefined;
+  const record = msg as Record<string, unknown>;
+  if (record.role !== "assistant") return undefined;
+  if (record.stopReason === "error" || record.stopReason === "aborted")
+    return undefined;
+  if (record.usage === undefined) return undefined;
+  try {
+    const tokens = calculateContextTokens(
+      record.usage as Parameters<typeof calculateContextTokens>[0],
+    );
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0)
+      return undefined;
+    return tokens;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Token count of a single observation summary line as serialized in
+ * buildExistingObservationsSummary: `[id] ts [rel] content`.
+ */
+export function observationLineTokenCount(observation: {
+  id: string;
+  timestamp: string;
+  relevance: string;
+  content: string;
+}): number {
+  return estimateStringTokens(
+    `[${observation.id}] ${observation.timestamp} [${observation.relevance}] ${observation.content}`,
+  );
 }
 
 export function estimateEntryTokens(entry: {

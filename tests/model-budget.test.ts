@@ -5,7 +5,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { effectiveContextWindow } from "../src/om/model-budget.js";
+import {
+  effectiveContextWindow,
+  resolveSessionContextWindow,
+} from "../src/om/model-budget.js";
 
 const testDir = join(tmpdir(), `pi-blackhole-model-budget-test-${Date.now()}`);
 
@@ -111,5 +114,54 @@ describe("effectiveContextWindow", () => {
     const model = { provider: "test", id: "test", contextWindow: 200_000 };
     const modelConfig = { provider: "test", id: "test", contextWindow: 64_000 };
     expect(effectiveContextWindow(model as any, modelConfig)).toBe(64_000);
+  });
+});
+
+describe("resolveSessionContextWindow", () => {
+  it("prefers the live context usage window", () => {
+    const model = { contextWindow: 200_000 };
+    expect(
+      resolveSessionContextWindow(model, () => ({ contextWindow: 32_000 })),
+    ).toBe(32_000);
+  });
+
+  it("falls back to the model window when the thunk returns nothing", () => {
+    const model = { contextWindow: 200_000 };
+    expect(resolveSessionContextWindow(model, () => undefined)).toBe(200_000);
+    expect(resolveSessionContextWindow(model, undefined)).toBe(200_000);
+  });
+
+  it("falls back to 128000 when nothing provides a window", () => {
+    expect(resolveSessionContextWindow(undefined, () => undefined)).toBe(
+      128_000,
+    );
+    expect(resolveSessionContextWindow({} as any, undefined)).toBe(128_000);
+  });
+
+  it("falls through on a throwing (stale) context thunk", () => {
+    const model = { contextWindow: 64_000 };
+    expect(() =>
+      resolveSessionContextWindow(model, () => {
+        throw new Error("stale context");
+      }),
+    ).not.toThrow();
+    expect(
+      resolveSessionContextWindow(model, () => {
+        throw new Error("stale context");
+      }),
+    ).toBe(64_000);
+  });
+
+  it("falls through on non-positive and NaN windows", () => {
+    const model = { contextWindow: 64_000 };
+    expect(
+      resolveSessionContextWindow(model, () => ({ contextWindow: -1 })),
+    ).toBe(64_000);
+    expect(
+      resolveSessionContextWindow(model, () => ({ contextWindow: NaN })),
+    ).toBe(64_000);
+    expect(
+      resolveSessionContextWindow({ contextWindow: 0 } as any, undefined),
+    ).toBe(128_000);
   });
 });

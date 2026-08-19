@@ -1,4 +1,4 @@
-import { estimateEntryTokens } from "../tokens.js";
+import { estimateEntryTokens, getUsageTokens } from "../tokens.js";
 import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
@@ -158,6 +158,140 @@ export function rawTokensSinceLastCompaction(entries: Entry[]): number {
   if (firstKeptIndex === -1)
     return rawTokensAfterIndex(entries, compactionIndex);
   return rawTokensAfterIndex(entries, firstKeptIndex - 1);
+}
+
+export type CountBasis = "usage" | "estimate";
+
+/**
+ * Index of the last assistant message with valid usage at or before
+ * `beforeIndex` (inclusive) within the range starting at `fromIndex`
+ * (inclusive), or -1.
+ *
+ * The compaction entry itself is never a usage source (its summary call
+ * carries pre-compaction usage, see realContextTokens).
+ */
+export function lastValidUsageIndex(
+  entries: Entry[],
+  beforeIndex: number,
+  fromIndex = 0,
+): number {
+  for (let i = Math.min(beforeIndex, entries.length - 1); i >= fromIndex; i--) {
+    if (getUsageTokens(entries[i].message) !== undefined) return i;
+  }
+  return -1;
+}
+
+/**
+ * Index of the first assistant message with valid usage at or after
+ * `afterIndex` (inclusive), or -1.
+ */
+export function firstValidUsageIndex(
+  entries: Entry[],
+  afterIndex: number,
+): number {
+  for (let i = Math.max(0, afterIndex); i < entries.length; i++) {
+    if (getUsageTokens(entries[i].message) !== undefined) return i;
+  }
+  return -1;
+}
+
+/**
+ * Real context tokens for the branch: the last valid assistant usage
+ * strictly after the latest compaction entry, plus the chars/4 estimate
+ * for source entries after it.
+ *
+ * Returns undefined when there is no measurable baseline (no compaction
+ * and no valid usage anywhere; or a compaction with no valid assistant
+ * response after it). Never counts usage from before the latest
+ * compaction: after compaction, that usage reflects the pre-compaction
+ * context size.
+ */
+export function realContextTokens(entries: Entry[]): number | undefined {
+  const compactionIndex = findLastCompactionIndex(entries);
+  const scanStart = compactionIndex === -1 ? 0 : compactionIndex + 1;
+  const usageIndex = lastValidUsageIndex(
+    entries,
+    entries.length - 1,
+    scanStart,
+  );
+  if (usageIndex === -1) return undefined;
+
+  const usage = getUsageTokens(entries[usageIndex].message);
+  if (usage === undefined) return undefined;
+  return usage + rawTokensAfterIndex(entries, usageIndex);
+}
+
+/**
+ * Real context tokens measured at the anchor: the last valid assistant
+ * usage at or before `anchorIndex` (inclusive), or undefined.
+ */
+export function realTokensAtAnchor(
+  entries: Entry[],
+  anchorIndex: number,
+): number | undefined {
+  const usageIndex = lastValidUsageIndex(entries, anchorIndex);
+  if (usageIndex === -1) return undefined;
+  return getUsageTokens(entries[usageIndex].message);
+}
+
+/**
+ * Real usage delta between the current context and the anchor.
+ *
+ * Baseline rules (D3): a compaction entry's own usage is never used.
+ * - Anchor before the latest compaction → baseline is the first valid
+ *   assistant usage strictly after the compaction entry.
+ * - Anchor after the latest compaction (or no compaction) → baseline is
+ *   the last valid usage at or before the anchor.
+ * - No anchor → baseline is the current real context itself.
+ *
+ * Returns undefined when the current context or the baseline is
+ * unmeasurable, or when the delta is negative.
+ */
+export function realTokensSinceAnchor(
+  entries: Entry[],
+  anchorIndex: number,
+): number | undefined {
+  const real = realContextTokens(entries);
+  if (real === undefined) return undefined;
+
+  const compactionIndex = findLastCompactionIndex(entries);
+  let baseline: number | undefined;
+
+  if (compactionIndex > anchorIndex) {
+    const usageIndex = firstValidUsageIndex(entries, compactionIndex + 1);
+    baseline =
+      usageIndex === -1
+        ? undefined
+        : getUsageTokens(entries[usageIndex].message);
+  } else if (anchorIndex >= 0) {
+    baseline = realTokensAtAnchor(entries, anchorIndex);
+  } else {
+    baseline = real;
+  }
+
+  if (baseline === undefined) return undefined;
+  const delta = real - baseline;
+  if (delta < 0) return undefined;
+  return delta;
+}
+
+/**
+ * Tokens since the anchor with its measurement basis:
+ * - "usage" when a real usage delta is measurable,
+ * - "estimate" (chars/4) otherwise.
+ */
+export function measureSinceAnchor(
+  entries: Entry[],
+  anchorIndex: number,
+): { tokens: number; basis: CountBasis } {
+  const usageDelta = realTokensSinceAnchor(entries, anchorIndex);
+  if (usageDelta !== undefined) {
+    return { tokens: usageDelta, basis: "usage" };
+  }
+  return {
+    tokens: rawTokensAfterIndex(entries, anchorIndex),
+    basis: "estimate",
+  };
 }
 
 /**
