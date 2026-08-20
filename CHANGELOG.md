@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### Breaking
+
+- **Token counting is now usage-aware; thresholds auto-derive from the context window.** ([plan-00](../work_docs/plan-00-overview.md)) All trigger and budget thresholds (`compactAfterTokens`, `observeAfterTokens`, `reflectAfterTokens`, `observationsPoolMaxTokens`, `observationsPoolTargetTokens`, `reflectorInputMaxTokens`, `dropperInputMaxTokens`, `observerChunkMaxTokens`) now default to `0`, which auto-derives the value from the resolved context window:
+  - Triggers (observe/reflect/compact) measure **real model usage** — assistant-message usage tokens from branch entries plus a chars/4 estimate for the trailing unmeasured tail — falling back to the pure chars/4 estimate only when usage is unmeasurable.
+  - Derivation: `observe` = 25%, `reflect` = 40%, `compact` = 65% of the session window × `thresholdScale` (≥ 1000); `observationsPoolMaxTokens` = 15% of the session window (≥ 1000); `observationsPoolTargetTokens` = half of the resolved pool max (≥ 1000); `reflectorInputMaxTokens` / `dropperInputMaxTokens` = 60% of the worker window (≥ 1000); `observerChunkMaxTokens` = 20% of the worker window (≥ 256).
+  - **New `thresholdScale`** (default `1.0`, range `[0.1, 10]`) multiplies only auto-derived trigger thresholds; `0.6` = cost-saver, `1.5` = responsive. Explicit values are honored verbatim.
+  - **Migration:** existing custom thresholds now count in real usage tokens, so old estimate-based values land ~1.45× lower — multiply custom `observeAfterTokens` / `reflectAfterTokens` by ~1.45 (or ~1.6 for `compactAfterTokens`), or set them to `0` to auto-derive. A one-time notice is shown after upgrading (`last-seen-version.json`).
+
+### Added
+
+- **Honest status display.** `/blackhole memory` now reports real usage where available and prefixes estimate-based counters with `~`, plus a basis hint line when any counter is an estimate.
+- **Line-based observation accounting.** Observation sizes are now computed from the full stored line (`[id] timestamp [relevance] content`), uniformly across observer storage, dropper/coverage sums, pool accounting, and fold projections.
+- **Presets tab in the config modal.** `/blackhole settings` gains a Presets tab with Auto (all auto-derived), Cost-saver (`thresholdScale` 0.6), Balanced (1.0), and Responsive (1.5) — presets fill the current scope's buffer; nothing is written until you Save.
+- **Chunk integrity.** Observer serialization walks the source oldest-first with a hard budget, emits a source-omission marker with head/tail excerpts for oversized entries (original source stays in the session ledger), and trims oversized text/thinking blocks in the observer prompt (the recall path stays untrimmed).
+- **Failure visibility.** `debugLog` gains `observer.chunk_capped`, `<stage>.stream_error`, and `<stage>.upper_bound` events; stream errors/aborts are recorded on the runtime (`lastObserverError` / `lastReflectorError` / `lastDropperError`).
+
+### Changed
+
+- **Env overrides accept `0`.** `PI_BLACKHOLE_COMPACT_AFTER_TOKENS`, `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS`, `PI_BLACKHOLE_REFLECT_AFTER_TOKENS`, `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS`, `PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS`, `PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS`, `PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS`, `PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS`, `PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS`, and `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS` now accept non-negative integers (`0` = auto-derive/disabled). New `PI_BLACKHOLE_THRESHOLD_SCALE` (float, `[0.1, 10]`).
+
+---
+
 ## [0.4.7] - 2026-08-15
 
 ### Fixed

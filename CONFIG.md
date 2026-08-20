@@ -23,20 +23,21 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "compactionEngine": "blackhole", // "blackhole" | "pi-default"
   "tailBehavior": "minimal",   // "pi-default" | "minimal"
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
-  "compactAfterTokens": 81000,    // Token threshold for auto-compaction
+  "compactAfterTokens": 0,        // 0 = auto: floor(sessionWindow × 0.65 × thresholdScale), min 1000
 
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
   "sessionFallback": true,        // Fall back to session model when OM models fail
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
-  "observeAfterTokens": 15000,    // Token threshold for observer runs
-  "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
-  "observationsPoolMaxTokens": 20000, // Observation pool token ceiling
-  "observationsPoolTargetTokens": 10000, // Target after dropper prune (no-op)
-  "reflectorInputMaxTokens": 80000, // Reflector prompt token cap
-  "dropperInputMaxTokens": 80000,  // Dropper prompt token cap
-  "observerChunkMaxTokens": 40000, // Max source tokens per observer chunk
-  "observerPreambleMaxTokens": 0,  // Preamble budget (0 = auto 30% of chunk)
+  "observeAfterTokens": 0,        // 0 = auto: floor(sessionWindow × 0.25 × thresholdScale), min 1000
+  "reflectAfterTokens": 0,        // 0 = auto: floor(sessionWindow × 0.40 × thresholdScale), min 1000
+  "observationsPoolMaxTokens": 0, // 0 = auto: floor(sessionWindow × 0.15), min 1000
+  "observationsPoolTargetTokens": 0, // 0 = auto: half of resolved pool max
+  "reflectorInputMaxTokens": 0,   // 0 = auto: floor(workerWindow × 0.60), min 1000
+  "dropperInputMaxTokens": 0,     // 0 = auto: floor(workerWindow × 0.60), min 1000
+  "observerChunkMaxTokens": 0,    // 0 = auto: floor(workerWindow × 0.20), min 256
+  "observerPreambleMaxTokens": 0, // Preamble budget (0 = auto 30% of resolved chunk)
+  "thresholdScale": 1.0,          // Multiplies auto-derived trigger thresholds only; [0.1, 10]
   "dropperPressureThreshold": 0.70, // Pool-pressure relief valve
   "dropperPoolFullnessThreshold": 0.10, // Min pool fullness before dropper runs
   "agentMaxTurns": 16,            // Max turns per memory agent
@@ -179,9 +180,13 @@ Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
 Token threshold for auto-compaction. When `compaction: "auto"` and accumulated tokens since the last compaction exceed this threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
 
+Default `0` auto-derives the threshold from the session context window: `floor(sessionWindow × 0.65 × thresholdScale)`, clamped to at least 1000 (see [How thresholds are derived](#how-thresholds-are-derived)). Explicit values are honored verbatim.
+
+The threshold measures **real model usage** — assistant-message usage tokens from branch entries plus a chars/4 estimate for the trailing unmeasured tail — not a pure chars/4 estimate of the whole transcript. When usage is unmeasurable it falls back to the chars/4 estimate.
+
 | Type | Default |
 |------|---------|
-| number | 81000 |
+| number | 0 (auto: 65% of session window, min 1000) |
 
 **The interaction with Pi's threshold:** Pi has its own `keepRecentTokens` default (~20k tokens). Blackhole's threshold is independent — it's the trigger point, not the keep point. When blackhole's trigger fires, `tailBehavior` determines how much is actually kept visible.
 
@@ -224,52 +229,103 @@ Treat every compaction as a full-fold boundary so early reflections/drops surviv
 
 ### `observeAfterTokens`, `reflectAfterTokens`
 
-Token thresholds that control when the OM pipeline runs. Unchanged from the previous config.
+Token thresholds that control when the OM pipeline runs. The observer fires at `observeAfterTokens`; the reflector and dropper fire at `reflectAfterTokens`.
 
-| Key | Default |
-|-----|---------|
-| `observeAfterTokens` | 15000 |
-| `reflectAfterTokens` | 25000 |
+Default `0` auto-derives each threshold from the session context window, scaled by `thresholdScale` and clamped to at least 1000 (see [How thresholds are derived](#how-thresholds-are-derived)). Explicit values are honored verbatim and measure real usage tokens.
+
+| Key | Auto-derived default |
+|-----|----------------------|
+| `observeAfterTokens` | `floor(sessionWindow × 0.25 × thresholdScale)`, min 1000 |
+| `reflectAfterTokens` | `floor(sessionWindow × 0.40 × thresholdScale)`, min 1000 |
+
+### How thresholds are derived
+
+Since pi-blackhole 0.5.0, all token thresholds and budgets default to `0`, which means **auto-derive** from the resolved context window. An explicit value `> 0` is always honored verbatim (trigger thresholds are measured in real usage tokens; budgets clamp to a sane minimum).
+
+| Field | Auto-derived rule | Window |
+|-------|-------------------|--------|
+| `observeAfterTokens` | `floor(window × 0.25 × thresholdScale)`, min 1000 | session |
+| `reflectAfterTokens` | `floor(window × 0.40 × thresholdScale)`, min 1000 | session |
+| `compactAfterTokens` | `floor(window × 0.65 × thresholdScale)`, min 1000 | session |
+| `observationsPoolMaxTokens` | `floor(window × 0.15)`, min 1000 | session |
+| `observationsPoolTargetTokens` | `floor(resolved pool max / 2)`, min 1000 | resolved pool max |
+| `reflectorInputMaxTokens` | `floor(window × 0.60)`, min 1000 | worker |
+| `dropperInputMaxTokens` | `floor(window × 0.60)`, min 1000 | worker |
+| `observerChunkMaxTokens` | `floor(window × 0.20)`, min 256 | worker |
+| `observerPreambleMaxTokens` | 30% of resolved chunk budget | resolved chunk |
+
+**Window resolution:**
+
+- **Session window** = the live context window from `ctx.getContextUsage()` (guarded — a stale context throws and falls through), then the model's `contextWindow`, then `128_000`.
+- **Worker window** = the stage model's `contextWindow` (config override → Pi's model registry), then the resolved session window, then `128_000`.
+
+**Counting basis:** trigger thresholds measure **real model usage** — assistant-message usage tokens from branch entries (usage delta since the anchor) plus a chars/4 estimate for the trailing unmeasured tail. When usage is unmeasurable, they fall back to the chars/4 estimate. `/blackhole memory` prefixes estimate-based counters with `~`; unmarked counters are real usage.
+
+**Migration for custom thresholds:** the counting basis switched from pure chars/4 estimates to real usage, so old estimate-based values land ~1.45× lower than before. Users with custom threshold values should multiply their old `observeAfterTokens` / `reflectAfterTokens` values by ~1.45 (or ~1.6 for `compactAfterTokens`), or set them to `0` to auto-derive.
+
+### `thresholdScale`
+
+Multiplier for auto-derived trigger thresholds (`observeAfterTokens`, `reflectAfterTokens`, `compactAfterTokens`). Only affects values that are auto-derived — explicit threshold values are honored verbatim and are not scaled. Must be finite and `> 0`; out-of-range values are clamped.
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | 1.0 | [0.1, 10] |
+
+- **1.0** (default): neutral — auto-derived thresholds are exactly the window ratios above
+- **0.6**: cost-saver — triggers fire later, fewer background runs
+- **1.5**: responsive — triggers fire earlier, memory stays fresher
 
 ### `observationsPoolMaxTokens`
 
 Hard ceiling for the active observation pool. The dropper prunes when this ceiling is reached.
 
+Default `0` auto-derives the ceiling from the session context window: `floor(sessionWindow × 0.15)`, clamped to at least 1000. Explicit values are honored verbatim.
+
 | Type | Default |
 |------|---------|
-| number | 20000 |
+| number | 0 (auto: 15% of session window, min 1000) |
 
 ### `observationsPoolTargetTokens`
 
-Target token budget the dropper aims for after pruning. **Currently a no-op** in the pool algorithm. If unset or `>= observationsPoolMaxTokens`, the loader silently resets it to `floor(observationsPoolMaxTokens / 2)`.
+Target token budget the dropper aims for after pruning. **Currently a no-op** in the pool algorithm — the dropper gates on pool max / fullness instead. Must be less than the resolved `observationsPoolMaxTokens`; the validator silently resets it to `floor(observationsPoolMaxTokens / 2)` when it isn't.
+
+Default `0` auto-derives the target as half the resolved pool max, clamped to at least 1000. Explicit values are honored verbatim.
 
 | Type | Default |
 |------|---------|
-| number | 10000 |
+| number | 0 (auto: half of resolved pool max, min 1000) |
 
 ### `reflectorInputMaxTokens`
 
 Rolling window cap for reflector prompt tokens. The reflector only sees **new** observations plus a summary budget, capped at this value.
 
+Default `0` auto-derives the cap from the reflector's worker window: `floor(workerWindow × 0.60)`, clamped to at least 1000. Explicit values are honored verbatim.
+
 | Type | Default |
 |------|---------|
-| number | 80000 |
+| number | 0 (auto: 60% of worker window, min 1000) |
 
 ### `dropperInputMaxTokens`
 
 Rolling window cap for dropper prompt tokens.
 
+Default `0` auto-derives the cap from the dropper's worker window: `floor(workerWindow × 0.60)`, clamped to at least 1000. Explicit values are honored verbatim.
+
 | Type | Default |
 |------|---------|
-| number | 80000 |
+| number | 0 (auto: 60% of worker window, min 1000) |
 
 ### `observerChunkMaxTokens`
 
 Max source-entry tokens sent to the observer per chunk.
 
+Default `0` auto-derives the budget from the observer's worker window: `floor(workerWindow × 0.20)`, clamped to at least 256. Explicit values are honored verbatim (also clamped to at least 256).
+
+Serialization walks source entries **oldest-first** with this budget and stops once it is exhausted. An entry too large for the remaining budget is included as a head/tail excerpt with a `SOURCE_OMISSION_MARKER` replacing the middle — the full source entry stays in the session ledger.
+
 | Type | Default |
 |------|---------|
-| number | 40000 |
+| number | 0 (auto: 20% of worker window, min 256) |
 
 ### `observerPreambleMaxTokens`
 
@@ -427,7 +483,7 @@ Boolean fields:
 | `PI_BLACKHOLE_SESSION_FALLBACK` | `sessionFallback` |
 | `PI_BLACKHOLE_FULL_FOLD_ALWAYS` | `fullFoldAlways` |
 
-Positive-integer fields (invalid values fall back):
+Integer fields (0 = auto-derive; invalid values fall back):
 
 | Variable | Overrides |
 |----------|-----------|
@@ -450,6 +506,12 @@ Float field (must be in `(0, 1]`):
 | `PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD` | `dropperPressureThreshold` |
 | `PI_BLACKHOLE_DROPPER_POOL_FULLNESS_THRESHOLD` | `dropperPoolFullnessThreshold` |
 
+Float field (`thresholdScale`, range `[0.1, 10]`; invalid values fall back):
+
+| Variable | Overrides |
+|----------|-----------|
+| `PI_BLACKHOLE_THRESHOLD_SCALE` | `thresholdScale` |
+
 ### Paths and internals
 
 | Variable | Purpose |
@@ -469,6 +531,21 @@ Float field (must be in `(0, 1]`):
   "memory": true
 }
 ```
+
+### Custom thresholds with a responsive scale
+
+```jsonc
+{
+  "compaction": "auto",
+  "compactionEngine": "blackhole",
+  "compactAfterTokens": 120000,
+  "observeAfterTokens": 40000,
+  "reflectAfterTokens": 60000,
+  "thresholdScale": 1.5
+}
+```
+
+Explicit threshold values are honored verbatim; `thresholdScale` only scales the auto-derived values for fields left at `0`.
 
 ### Manual compaction, no OM, aggressive tail
 
@@ -529,4 +606,6 @@ Float field (must be in `(0, 1]`):
 
 - **Config file**: `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`
 - **TUI overlay**: `/blackhole settings` (alias: `/blackhole configure`) — opens an interactive overlay with ↑↓ navigation, Enter to toggle, Ctrl+S to save
+- **Presets tab**: `/blackhole settings` includes a Presets tab with **Auto (recommended) / Cost-saver / Balanced / Responsive** presets. Presets fill the current scope's buffer — nothing is persisted until you press Save.
+- **Memory stats**: `/blackhole memory` shows real-usage token counters; estimate-based counters are prefixed with `~`.
 - **CLI subcommands**: `/blackhole om-off` / `/blackhole om-on` — toggle memory without editing the file

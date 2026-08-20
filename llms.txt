@@ -43,7 +43,7 @@ Packages in Pi can be installed in non-standard locations. If you cannot find `C
 Read these files fully. They contain every default, behavioral nuance, and edge case you need.
 
 - **`CONFIG.md`** — full config reference with every key, type, default, and behavior (same dir as this file)
-- **`README.md`** — overview, commands, settings table, configuration presets (low/medium/high context), feature comparison
+- **`README.md`** — overview, commands, settings table, configuration presets (Auto/Cost-saver/Balanced/Responsive), feature comparison
 - **`example-config.json`** — annotated example with model choices, fallback rationale, and thinking levels
 
 Also scan the source tree for discovery (especially if you need to understand a specific behavior):
@@ -139,7 +139,7 @@ If user picks Off, ask separately whether they also want to disable memory (`mem
 
 > pi-blackhole has three modes for compaction (compressing old conversation to save context space):
 >
-> - **Auto** — install and forget. Compaction fires automatically when enough conversation accumulates (~80k tokens by default). The extension handles everything. Best for most people.
+> - **Auto** — install and forget. Compaction fires automatically at ~65% of your model's context window (auto-derived, no numbers to set). The extension handles everything. Best for most people.
 > - **Manual** — compaction only happens when you type `/blackhole`. You control when context gets compressed. Observations still accumulate in the background automatically. Good if you want to decide the right moment to compress.
 > - **Off** — Pi handles compaction normally. pi-blackhole only activates when you explicitly use `/blackhole`. Workers still run unless you also disable memory. Useful if you mainly want the memory features without changing how compaction works.
 >
@@ -201,24 +201,36 @@ After user chooses, examine what's available and propose specific models. The ta
 
 ### Question 3: Context size
 
-**Agent context:** This determines ALL token thresholds — `compactAfterTokens`, `observeAfterTokens`, `reflectAfterTokens`, `observerChunkMaxTokens`, `observationsPoolMaxTokens`, `reflectorInputMaxTokens`, `dropperInputMaxTokens`. They all scale from `compactAfterTokens` which should be ~65% of the model's context window.
+**Agent context:** All token thresholds auto-derive from context windows — leave them at 0. Session window resolution: live `ctx.getContextUsage()` context window (guarded) → model `contextWindow` → 128k fallback. Worker budget windows: stage model's `contextWindow` → session window → 128k fallback.
+
+| Field | Auto-derived (0) |
+|-------|------------------|
+| `compactAfterTokens` | 65% of session window × `thresholdScale` (≥ 1000) |
+| `observeAfterTokens` | 25% of session window × `thresholdScale` (≥ 1000) |
+| `reflectAfterTokens` | 40% of session window × `thresholdScale` (≥ 1000) |
+| `observationsPoolMaxTokens` | 15% of session window (≥ 1000) |
+| `observationsPoolTargetTokens` | half of resolved pool max (≥ 1000) |
+| `reflectorInputMaxTokens` / `dropperInputMaxTokens` | 60% of worker window (≥ 1000) |
+| `observerChunkMaxTokens` | 20% of worker window (≥ 256) |
+| `observerPreambleMaxTokens` | 30% of resolved chunk budget |
 
 The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens kept by default). Blackhole's `compactAfterTokens` is independent — it's the *trigger* point, not the *keep* point. When blackhole's trigger fires, `tailBehavior` determines what's kept visible.
 
-**Scaling rationale:** The ratios are designed so workers always have enough headroom. `compactAfterTokens` at 65% means there's 35% headroom for system prompts, tool definitions, and the summary itself. The observer chunk is capped at half of that so it never floods itself. The reflector/dropper budgets match `compactAfterTokens` because they need to see all accumulated observations plus summaries.
+**Scaling rationale:** The ratios are designed so workers always have enough headroom. `compactAfterTokens` at 65% means there's 35% headroom for system prompts, tool definitions, and the summary itself. The observer chunk (20% of worker window) is small so it never floods itself. The reflector/dropper budgets (60% of worker window) fit all accumulated observations plus summaries.
+
+**When to override:** explicit values > 0 are honored verbatim (budgets clamp ≥ 1000, chunk ≥ 256). Override only when you must — tiny context windows (auto already clamps ≥ 1000), cost-sensitive models where you want fewer runs, or strict cadence control. Otherwise prefer `thresholdScale` (default 1.0, range [0.1, 10]) — it multiplies ONLY the auto-derived trigger thresholds: 0.6 = cost-saver (fewer runs), 1.5 = responsive (more frequent). Ignored for explicitly-set thresholds.
 
 **User-facing statement:**
 
-> What's the context window of your main conversation model? This tells me when compaction should fire and how much data the workers can process per run.
+> pi-blackhole sizes itself: all token thresholds derive from your model's context window, so no numbers to pick. Compaction fires at ~65% of your context window; workers run at fractions of it.
 >
-> Rule of thumb: compaction triggers at about 60-70% of your model's context window, leaving headroom for tools and system prompts.
+> Optional presets (in `/blackhole` settings → Presets):
+> - **Auto** — everything at 0, scale 1.0 (default, works for most people)
+> - **Cost-saver** — scale 0.6, fewer worker runs and later compaction
+> - **Balanced** — scale 1.0, same as Auto
+> - **Responsive** — scale 1.5, fires more often for tighter memory
 >
-> Standard presets:
-> - **Small models** (~32-64k context) — compact at ~30k tokens
-> - **Medium models** (~128k — GPT-4o, Claude Sonnet, Gemini Pro) — compact at ~80k tokens (this is the default, works for most people)
-> - **Large models** (~200k+ — Claude Opus, Gemini Ultra, big local models) — compact at ~180k tokens
->
-> Tell me your model name and its context window, or just pick a preset.
+> Just confirm your model, or pick a preset if you want to tune.
 
 ### Question 4 (optional): Compaction engine behavior
 
@@ -267,7 +279,7 @@ Based on interview answers, build the config object. Write it to:
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default" — irrelevant for manual/off
   "tailBehavior": "minimal",      // "minimal" (last user msg only, default) | "pi-default" (Pi's gentler cut)
-  "compactAfterTokens": 81000,    // auto-compaction threshold, ~65% of model's context window
+  "compactAfterTokens": 0,        // 0 = auto: 65% of session context window × thresholdScale (≥ 1000)
 
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
@@ -287,17 +299,18 @@ Based on interview answers, build the config object. Write it to:
   "reflectorFallbackModels": [ ... ],
   "dropperFallbackModels":   [ ... ],
 
-  // ── Token thresholds (scale from compactAfterTokens) ──
-  "observeAfterTokens": 15000,         // compactAfterTokens / ~5.4
-  "reflectAfterTokens": 25000,         // compactAfterTokens / ~3.2
-  "observerChunkMaxTokens": 40000,     // compactAfterTokens / ~2 — max conversation chunk sent to observer per run
-  "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
-  "observationsPoolMaxTokens": 20000,  // compactAfterTokens / ~4 — max active observation pool before dropper prunes
-  "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
-  "reflectorInputMaxTokens": 80000,    // ~compactAfterTokens
-  "dropperInputMaxTokens": 80000,      // ~compactAfterTokens
-  "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
-  "agentMaxTurns": 16                  // max agent-loop turns per worker per run
+  // ── Token thresholds (0 = auto-derive from context windows) ──
+  "observeAfterTokens": 0,            // 0 = auto: 25% of session window × thresholdScale (≥ 1000)
+  "reflectAfterTokens": 0,            // 0 = auto: 40% of session window × thresholdScale (≥ 1000)
+  "observerChunkMaxTokens": 0,        // 0 = auto: 20% of worker window (≥ 256) — max conversation chunk per observer run
+  "observerPreambleMaxTokens": 0,     // 0 = auto: 30% of chunk. Caps prior-observation preamble in manual mode only.
+  "observationsPoolMaxTokens": 0,     // 0 = auto: 15% of session window (≥ 1000) — max active pool before dropper prunes
+  "observationsPoolTargetTokens": 0,  // 0 = auto: half of resolved pool max (≥ 1000) — dropper target after pruning
+  "reflectorInputMaxTokens": 0,       // 0 = auto: 60% of worker window (≥ 1000)
+  "dropperInputMaxTokens": 0,         // 0 = auto: 60% of worker window (≥ 1000)
+  "thresholdScale": 1.0,              // [0.1, 10] — multiplies ONLY auto-derived trigger thresholds; ignored for explicit values
+  "dropperPressureThreshold": 0.70,   // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
+  "agentMaxTurns": 16                 // max agent-loop turns per worker per run
 }
 ```
 
@@ -320,32 +333,32 @@ Each model entry supports these fields:
 - It's available again on the next pipeline run (no persisted cooldown)
 - Useful for testing or when you don't want cooldown state to persist across restarts
 
-### Context size presets
+### Auto-derived thresholds
 
-Match `compactAfterTokens` to ~65% of the user's model context window. Then scale thresholds proportionally:
+**0 = auto-derive (default).** All threshold/budget fields default to 0. At runtime pi-blackhole resolves them from context windows:
 
-| Setting | ~128k model (default) | ~64k model (low) | ~200k+ model (high) |
-|---------|:---------------------:|:-----------------:|:-------------------:|
-| `compactAfterTokens` | 81000 | 30000 | 180000 |
-| `observeAfterTokens` | 15000 | 5000 | 20000 |
-| `reflectAfterTokens` | 25000 | 10000 | 40000 |
-| `observerChunkMaxTokens` | 40000 | 15000 | 80000 |
-| `observationsPoolMaxTokens` | 20000 | 8000 | 40000 |
-| `reflectorInputMaxTokens` | 80000 | 30000 | 160000 |
-| `dropperInputMaxTokens` | 80000 | 30000 | 160000 |
+- Session window = live `ctx.getContextUsage()` context window (guarded) → model `contextWindow` → 128k fallback.
+- Worker budget window = stage model's `contextWindow` → session window → 128k fallback.
 
-Sizing formula (for non-standard context windows):
-```
-compactAfterTokens:        round(model_context * 0.65,     nearest_1000)
-observeAfterTokens:        round(compactAfterTokens / 5.4, nearest_1000)
-reflectAfterTokens:        round(compactAfterTokens / 3.2, nearest_1000)
-observerChunkMaxTokens:    round(compactAfterTokens / 2,   nearest_1000)
-observationsPoolMaxTokens: round(compactAfterTokens / 4,   nearest_1000)
-reflectorInputMaxTokens:   round(compactAfterTokens,       nearest_1000)
-dropperInputMaxTokens:     round(compactAfterTokens,       nearest_1000)
-```
+| Field | 0 = auto |
+|-------|----------|
+| `compactAfterTokens` | floor(sessionWindow × 0.65 × thresholdScale), ≥ 1000 |
+| `observeAfterTokens` | floor(sessionWindow × 0.25 × thresholdScale), ≥ 1000 |
+| `reflectAfterTokens` | floor(sessionWindow × 0.40 × thresholdScale), ≥ 1000 |
+| `observationsPoolMaxTokens` | floor(sessionWindow × 0.15), ≥ 1000 |
+| `observationsPoolTargetTokens` | floor(resolvedPoolMax / 2), ≥ 1000 |
+| `reflectorInputMaxTokens` | floor(workerWindow × 0.60), ≥ 1000 |
+| `dropperInputMaxTokens` | floor(workerWindow × 0.60), ≥ 1000 |
+| `observerChunkMaxTokens` | floor(workerWindow × 0.20), ≥ 256 |
+| `observerPreambleMaxTokens` | 30% of resolved chunk budget |
 
-The ratios are the same as the default 128k presets — scale linearly. The default presets are slightly hand-tuned from pure math for cost-efficiency (observer threshold is raised a bit, reflector similarly). For custom sizes, the formulas above are a good starting point; the user can tune from there.
+**`thresholdScale`** (default 1.0, clamped [0.1, 10]) multiplies ONLY the auto-derived trigger thresholds (observe/reflect/compact). Ignored when a threshold is set explicitly.
+
+**Triggers measure real model usage**, not token estimates: assistant usage from branch entries plus a chars/4 estimate for the trailing tail (chars/4 fallback when unmeasurable). `/blackhole-memory` prefixes estimates with `~`.
+
+**Presets tab** in `/blackhole` settings: Auto (all 0, scale 1.0), Cost-saver (scale 0.6), Balanced (scale 1.0), Responsive (scale 1.5). A one-time upgrade warning fires once per install crossing 0.5.0 (tracked in `last-seen-version.json`): custom thresholds keep working but are now counted in real tokens — multiply old estimate-based values by ~1.45 (observe/reflect) or ~1.6 (compact), or set them to 0 for auto-derivation.
+
+**When to override:** set a field > 0 to pin it verbatim (budgets clamp ≥ 1000, chunk ≥ 256). Worth doing for tiny context windows where auto values feel too small, cost-sensitive models where you want fewer runs (or a lower `thresholdScale` instead), or strict run cadence. Otherwise leave everything at 0.
 
 ### Fallback chain strategy
 
@@ -375,7 +388,7 @@ If the user doesn't have all these providers, adapt. The key constraints:
 
 ### Minimal config (one model for all workers)
 
-If the user doesn't want per-worker tuning, just set `model` — all workers fall back to it:
+If the user doesn't want per-worker tuning, just set `model` — all workers fall back to it. All token thresholds default to 0 (auto-derived), so nothing else is needed:
 
 ```json
 {
@@ -383,15 +396,7 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
   "compactionEngine": "blackhole",
   "tailBehavior": "minimal",
   "memory": true,
-  "model": { "provider": "openrouter", "id": "google/gemma-4-31b-it:free" },
-
-  "observeAfterTokens": 15000,
-  "reflectAfterTokens": 25000,
-  "compactAfterTokens": 81000,
-  "observerChunkMaxTokens": 40000,
-  "observationsPoolMaxTokens": 20000,
-  "reflectorInputMaxTokens": 80000,
-  "dropperInputMaxTokens": 80000
+  "model": { "provider": "openrouter", "id": "google/gemma-4-31b-it:free" }
 }
 ```
 
@@ -523,6 +528,9 @@ These override config file values at load time, applied AFTER config is parsed. 
 | `PI_BLACKHOLE_PASSIVE` | Sets `compaction: "off"` + `memory: false` | `1`, `true`, `yes`, `on` |
 | `PI_BLACKHOLE_COMPACTION` | Overrides `compaction` | `auto`, `manual`, `off` |
 | `PI_BLACKHOLE_COMPACTION_ENGINE` | Overrides `compactionEngine` | `blackhole`, `pi-default` |
+| `PI_BLACKHOLE_THRESHOLD_SCALE` | Overrides `thresholdScale` | Float in `[0.1, 10]` |
+
+The full declarative set (`PI_BLACKHOLE_COMPACT_AFTER_TOKENS`, `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS`, `PI_BLACKHOLE_REFLECT_AFTER_TOKENS`, `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS`, `PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS`, `PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS`, `PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS`, etc.) accepts non-negative integers, including 0 = auto-derive.
 
 Legacy aliases (still work): `PI_VCC_OM_PASSIVE`, `PI_OBSERVATIONAL_MEMORY_PASSIVE`.
 
@@ -555,7 +563,7 @@ These are processed in `loadUnifiedConfig()` in `unified-config.ts`. The passive
 
 **Do not touch `auth.json`.** It contains API keys. Never read it, never reference it.
 
-**Do not set `compactAfterTokens` the user's model can't handle.** 65% of context window max. If the model has 32k context, `compactAfterTokens` should be ~20k, not 81k. The compaction fires, generates a summary, and keeps a tail — if the sum of summary + tail + system prompt exceeds the model's context, the model will fail or degrade.
+**Do not set `compactAfterTokens` the user's model can't handle.** Leave it at 0 — auto-derivation caps it at 65% of the session context window (≥ 1000), so it always fits the model. If you set it explicitly, never exceed 65% of the model's context window: the compaction summary + kept tail + system prompt must all fit, or the model fails or degrades.
 
 **Do not set model fields without `provider` and `id`.** Both are required. Setting just one — e.g. `{ "provider": "openrouter" }` without an `id` — silently ignores the entire model block. The parser checks both are non-empty strings. Same for fallback array entries: invalid entries (missing provider or id) are filtered out silently.
 

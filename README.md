@@ -102,12 +102,12 @@ The agent receives a deterministic recap of recent work *plus* durable facts fro
 
 Three background workers (separate LLM calls) run automatically during the session (when `memory: true`, which is the default):
 
-- **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` newest-first to prevent context blowup on long sessions. Runs most frequently.
+- **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` newest-first (auto-derived from the worker window) to prevent context blowup on long sessions. Runs most frequently.
 - **Reflector** — distills new observations into durable reflections: stable facts, patterns, and constraints that survive future compactions. Runs less often.
-- **Dropper** — prunes low-value observations from active memory when the pool exceeds `observationsPoolMaxTokens`, while keeping reflections and other long-term elements safely in the session ledger.
+- **Dropper** — prunes low-value observations from active memory when the pool exceeds its auto-derived `observationsPoolMaxTokens`, while keeping reflections and other long-term elements safely in the session ledger.
 
 ```
-[Conversation turn] ──> (accumulated tokens >= observeAfterTokens)
+[Conversation turn] ──> (real usage since anchor >= auto-derived threshold)
                             │
                             v
                     1. OBSERVER
@@ -189,7 +189,7 @@ When exact source context is needed for precision or traceability, use the `reca
 
 Two modes, one shared goal: keep your agent's context sharp without manual housekeeping.
 
-- **Auto mode (default):** install and forget. Workers run, observations are appended as invisible conversation markers, compaction fires automatically when tokens exceed threshold.
+- **Auto mode (default):** install and forget. Workers run, observations are appended as invisible conversation markers, compaction fires automatically when real usage crosses the auto-derived threshold.
 - **Manual mode (`compaction: "manual"` — the maintainer's daily driver):** same workers, same pipeline. But observations go to per-session disk buffers and compaction only happens when you run `/blackhole`. Cleaner conversation, manual schedule.
 
 The tradeoff is simplicity vs cleanliness:
@@ -288,79 +288,81 @@ Everything else has sensible defaults.
 | *(per model)* `thinking` | `"low"` | Thinking/reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | *(per model)* `cooldownHours` | `1` | How long to skip this model after a retryable error |
 | *(per model)* `contextWindow` | *(inherited from Pi)* | Override context window for this model. If unset, inherits from Pi's model registry. When set, the OM pipeline checks if the estimated input fits before calling the model — if not, the next fallback is tried. |
-| `observeAfterTokens` | `15000` | Min accumulated tokens before observer runs |
-| `reflectAfterTokens` | `25000` | Min accumulated tokens before reflector + dropper run |
-| `compactAfterTokens` | `81000` | Auto-compaction threshold (when `compaction: "auto"`) |
-| `observerChunkMaxTokens` | `40000` | Max observer input per run (newest-first) |
-| `observerPreambleMaxTokens` | `0` (auto) | Preamble cap for observer in `compaction: "manual"` mode (auto = 30% of chunk) |
-| `observationsPoolMaxTokens` | `20000` | Max active observation pool before dropper prunes |
-| `observationsPoolTargetTokens` | `10000` | Target size dropper aims for after pruning (derived: half of pool max) |
-| `reflectorInputMaxTokens` | `80000` | Max reflector input budget |
-| `dropperInputMaxTokens` | `80000` | Max dropper input budget |
+| `observeAfterTokens` | `0` | Min accumulated tokens before observer runs (0 = auto-derive: 25% of the session window × `thresholdScale`, clamp ≥ 1000) |
+| `reflectAfterTokens` | `0` | Min accumulated tokens before reflector + dropper run (0 = auto-derive: 40% of the session window × `thresholdScale`, clamp ≥ 1000) |
+| `compactAfterTokens` | `0` | Auto-compaction threshold (0 = auto-derive: 65% of the session window × `thresholdScale`, clamp ≥ 1000) |
+| `observerChunkMaxTokens` | `0` | Max observer input per run (newest-first) (0 = auto-derive: 20% of the worker window, clamp ≥ 256) |
+| `observerPreambleMaxTokens` | `0` | Preamble cap for observer in `compaction: "manual"` mode (0 = auto: 30% of the resolved chunk budget) |
+| `observationsPoolMaxTokens` | `0` | Max active observation pool before dropper prunes (0 = auto-derive: 15% of the session window, clamp ≥ 1000) |
+| `observationsPoolTargetTokens` | `0` | Target size dropper aims for after pruning (0 = auto-derive: half of resolved pool max, clamp ≥ 1000) |
+| `reflectorInputMaxTokens` | `0` | Max reflector input budget (0 = auto-derive: 60% of the worker window, clamp ≥ 1000) |
+| `dropperInputMaxTokens` | `0` | Max dropper input budget (0 = auto-derive: 60% of the worker window, clamp ≥ 1000) |
+| `thresholdScale` | `1.0` | Multiplier for auto-derived trigger thresholds only (range 0.1–10; e.g. 0.6 cost-saver, 1.5 responsive). Ignored for explicit threshold values |
 | `dropperPressureThreshold` | `0.70` | Fraction of `reflectorInputMaxTokens` at which dropper runs even without new data (pressure relief valve) |
+| `dropperPoolFullnessThreshold` | `0.10` | Min pool fullness (fraction of `observationsPoolMaxTokens`) before the dropper may run — prevents churn on a nearly empty pool |
 | `agentMaxTurns` | `16` | Max agent-loop turns per worker per run |
+| `fullFoldAlways` | `true` | Treat every compaction as a full-fold boundary so early reflections/drops survive the first compaction in a fresh session |
 | `providerIdleTimeoutMs` | unset | Body-idle timeout for background provider streams (ms); `0` = disabled, unset = inherit pi's default |
 | `debug` | `false` | Pre-compaction snapshot to `/tmp/pi-blackhole-debug.json` |
 | `debugLog` | `false` | Continuous JSONL debug log to `~/.pi/agent/pi-blackhole/debug.ndjson` |
 
 **Environment override:** `PI_BLACKHOLE_PASSIVE=true` sets `compaction: "off"` + `memory: false` without touching the config file. Also accepts legacy `PI_VCC_OM_PASSIVE` / `PI_OBSERVATIONAL_MEMORY_PASSIVE`.
 
+### How thresholds auto-derive
+
+Every threshold and budget field defaults to `0`, which means **auto-derive from the effective context window** instead of a fixed number. An explicit value > 0 is honored verbatim (budgets clamp ≥ 1000, chunks ≥ 256). The `0` resolution rules:
+
+| Field | Auto-derived value |
+|---|---|
+| `observeAfterTokens` | `floor(sessionWindow × 0.25 × thresholdScale)`, clamp ≥ 1000 |
+| `reflectAfterTokens` | `floor(sessionWindow × 0.40 × thresholdScale)`, clamp ≥ 1000 |
+| `compactAfterTokens` | `floor(sessionWindow × 0.65 × thresholdScale)`, clamp ≥ 1000 |
+| `observationsPoolMaxTokens` | `floor(sessionWindow × 0.15)`, clamp ≥ 1000 |
+| `observationsPoolTargetTokens` | `floor(resolvedPoolMax / 2)`, clamp ≥ 1000 |
+| `reflectorInputMaxTokens` | `floor(workerWindow × 0.60)`, clamp ≥ 1000 |
+| `dropperInputMaxTokens` | `floor(workerWindow × 0.60)`, clamp ≥ 1000 |
+| `observerChunkMaxTokens` | `floor(workerWindow × 0.20)`, clamp ≥ 256 |
+| `observerPreambleMaxTokens` | 30% of the resolved chunk budget |
+
+- **Session window** — live `getContextUsage().contextWindow` (guarded), then the session model's `contextWindow`, then `128_000`. **Worker window** — the stage model's `contextWindow`, then the session window, then `128_000`.
+- **Real usage, not estimates** — triggers measure actual model usage (assistant usage across branch entries + a `chars/4` trailing estimate; unmeasurable sessions fall back to the `chars/4` estimate). `/blackhole-memory` prefixes `~` for estimates.
+- **`thresholdScale`** — multiplies only the auto-derived *trigger* thresholds (`observe`/`reflect`/`compact`); ignored when any threshold is set explicitly. Range 0.1–10.
+- **Upgrading from pre-0.5.0?** Triggers now measure real usage, so old hand-tuned thresholds feel different. Custom thresholds need roughly **1.45×** (observe/reflect) / **1.6×** (compact) of the old estimate-based values — or set them to `0` and let the window do the math. The settings overlay shows a one-time notice on upgrade.
+- New debug events when `debugLog: true`: `observer.chunk_capped`, `<stage>.stream_error`, `<stage>.upper_bound`.
+
 ### Configuration presets
 
-The defaults above target a **medium-context** setup (~128k context window, e.g. GPT-4o, Claude Sonnet).
-Paste the appropriate block into your config to match your main session model's context size.
+You usually don't need to set thresholds at all — `0` derives them from the model's context window. The `/blackhole settings` overlay ships a **Presets** tab that only varies `thresholdScale`:
 
-#### Low context (~32k-64k — older models, fast budget models)
-
-```json
-{
-  "observeAfterTokens": 5000,
-  "reflectAfterTokens": 10000,
-  "compactAfterTokens": 30000,
-  "observerChunkMaxTokens": 15000,
-  "observerPreambleMaxTokens": 0,
-  "observationsPoolMaxTokens": 8000,
-  "reflectorInputMaxTokens": 30000,
-  "dropperInputMaxTokens": 30000,
-  "dropperPressureThreshold": 0.70
-}
-```
-
-#### Medium context (~128k — GPT-4o, Claude Sonnet, Gemini Pro; this is the default)
-
-These are the built-in defaults. If you reset your config, these are what you get:
+| Preset | `thresholdScale` | Effect |
+|---|---|---|
+| Auto | `1.0` | All-zero defaults — fully auto-derived |
+| Cost-saver | `0.6` | Workers trigger less often — fewer LLM calls |
+| Balanced | `1.0` | Same as Auto — the default ratios |
+| Responsive | `1.5` | Workers trigger earlier — snappier memory, more LLM calls |
 
 ```json
 {
-  "observeAfterTokens": 15000,
-  "reflectAfterTokens": 25000,
-  "compactAfterTokens": 81000,
-  "observerChunkMaxTokens": 40000,
-  "observerPreambleMaxTokens": 0,
-  "observationsPoolMaxTokens": 20000,
-  "reflectorInputMaxTokens": 80000,
-  "dropperInputMaxTokens": 80000,
-  "dropperPressureThreshold": 0.70
+  "thresholdScale": 0.6
 }
 ```
 
-#### High context (~200k+ — Claude Opus, Gemini Ultra, large local models)
+Setting any threshold explicitly (> 0) overrides auto-derivation for that knob only; set it back to `0` to re-enable auto:
 
 ```json
 {
-  "observeAfterTokens": 20000,
-  "reflectAfterTokens": 40000,
-  "compactAfterTokens": 180000,
-  "observerChunkMaxTokens": 80000,
-  "observerPreambleMaxTokens": 0,
-  "observationsPoolMaxTokens": 40000,
-  "reflectorInputMaxTokens": 160000,
-  "dropperInputMaxTokens": 160000,
-  "dropperPressureThreshold": 0.70
+  "observeAfterTokens": 0,
+  "reflectAfterTokens": 0,
+  "compactAfterTokens": 0,
+  "observerChunkMaxTokens": 0,
+  "observationsPoolMaxTokens": 0,
+  "observationsPoolTargetTokens": 0,
+  "reflectorInputMaxTokens": 0,
+  "dropperInputMaxTokens": 0
 }
 ```
 
-**What to tune first:** `compactAfterTokens` should be significantly below your model's total context window — aim for ~60-70%. If the agent loses context before compaction fires, lower it. If compaction fires too often and breaks flow, raise it. The other thresholds scale proportionally.
+**What to tune first:** with `0` defaults, compaction fires at 65% of the session window. If the agent loses context before that, lower `compactAfterTokens` (or drop `thresholdScale`); if it fires too often and breaks flow, raise it. All other knobs are usually best left at `0`.
 
 ### Tip: comments in config
 
