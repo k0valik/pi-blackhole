@@ -120,8 +120,9 @@ function resolveBudget(
   window: number,
   ratio: number,
 ): number {
-  if (configValue > 0) return configValue;
-  return Math.max(Math.floor(window * ratio), BUDGET_MIN_TOKENS);
+  const base = configValue > 0 ? configValue : Math.floor(window * ratio);
+  // Explicit values are honored, but never below the sane minimum (plan-03 §5).
+  return Math.max(base, BUDGET_MIN_TOKENS);
 }
 
 /** Max prompt tokens for reflector input: explicit value honored verbatim;

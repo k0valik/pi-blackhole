@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   effectiveContextWindow,
+  resolveDropperInputMaxTokens,
+  resolveObservationsPoolMaxTokens,
   resolveObserverChunkMaxTokens,
+  resolveReflectorInputMaxTokens,
   resolveSessionContextWindow,
   resolveWorkerWindow,
 } from "../src/om/model-budget.js";
@@ -200,5 +203,28 @@ describe("resolveObserverChunkMaxTokens", () => {
   it("clamps both paths to 256 tokens minimum", () => {
     expect(resolveObserverChunkMaxTokens(0, 500)).toBe(256);
     expect(resolveObserverChunkMaxTokens(100, 128_000)).toBe(256);
+  });
+});
+
+describe("resolveReflectorInputMaxTokens / resolveDropperInputMaxTokens / resolveObservationsPoolMaxTokens", () => {
+  it("derives 60% of the worker window when unset", () => {
+    expect(resolveReflectorInputMaxTokens(0, 128_000)).toBe(76_800);
+    expect(resolveDropperInputMaxTokens(0, 128_000)).toBe(76_800);
+  });
+
+  it("derives 15% of the session window for the pool", () => {
+    expect(resolveObservationsPoolMaxTokens(0, 128_000)).toBe(19_200);
+  });
+
+  it("honors explicit values at or above the minimum", () => {
+    expect(resolveReflectorInputMaxTokens(80_000, 128_000)).toBe(80_000);
+    expect(resolveDropperInputMaxTokens(80_000, 128_000)).toBe(80_000);
+    expect(resolveObservationsPoolMaxTokens(20_000, 128_000)).toBe(20_000);
+  });
+
+  it("clamps explicit values below the 1000 minimum", () => {
+    expect(resolveReflectorInputMaxTokens(500, 128_000)).toBe(1_000);
+    expect(resolveDropperInputMaxTokens(100, 128_000)).toBe(1_000);
+    expect(resolveObservationsPoolMaxTokens(0, 500)).toBe(1_000);
   });
 });

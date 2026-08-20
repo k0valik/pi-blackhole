@@ -21,6 +21,9 @@ tmp/
 # Subagent reports are local-only
 .pi/subagents/
 
+# Local agent tooling and skills are never committed
+.agent/
+
 # Windows NTFS alternate data stream artifacts
 *:Zone.Identifier
 

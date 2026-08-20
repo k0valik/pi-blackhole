@@ -139,6 +139,14 @@ describe("chunk content trimming", () => {
     expect(beforeOmission).not.toContain("k".repeat(4_001));
   });
 
+  it("caps the thinking tail at 4000 chars too", () => {
+    const entry = thinkingEntry("m1", "k".repeat(30_000));
+    const trimmed = serializeBranchEntries([entry], { trim: true });
+    const afterOmission = trimmed.slice(trimmed.indexOf("omitted"));
+    expect(afterOmission).toContain("k".repeat(4_000));
+    expect(afterOmission).not.toContain("k".repeat(4_001));
+  });
+
   it("keeps small blocks untouched", () => {
     const entry = toolResultEntry("m1", "short result");
     expect(serializeBranchEntries([entry], { trim: true })).toContain(

@@ -35,7 +35,6 @@ import {
   measureDropperDue,
   measureObserverDue,
   measureReflectorDue,
-  resolveTriggerThresholds,
   type DueContext,
 } from "./due.js";
 import {
@@ -706,7 +705,10 @@ async function runObserverStage(
   const coversUpToId = sourceEntryIds.at(-1);
   if (!coversUpToId || !chunk.trim()) return "continue";
 
-  if (truncatedSourceEntryIds.length > 0) {
+  // Log when the chunk was capped by the budget (backlog cut) or when an
+  // oversized entry was included only as an excerpt (truncation).
+  const backlogCut = chunkEntries.length > sourceEntryIds.length;
+  if (backlogCut || truncatedSourceEntryIds.length > 0) {
     debugLog("observer.chunk_capped", {
       budgetTokens: maxChunkTokens,
       estimatedTokens: chunkTokens,
@@ -984,10 +986,6 @@ async function runReflectorStage(
     ctx.model as { contextWindow?: number },
     ctx.getContextUsage,
   );
-  const reflectThreshold = resolveTriggerThresholds(
-    runtime.config,
-    sessionWindow,
-  ).reflectAfterTokens;
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
@@ -1003,6 +1001,10 @@ async function runReflectorStage(
       return { outcome: "continue", sameRunReflections: [] };
     }
     observationCoverageId = pending.observation?.coversUpToId;
+    const dueCtx = {
+      model: ctx.model as { contextWindow?: number },
+      getContextUsage: ctx.getContextUsage,
+    };
     if (pending.reflection?.coversUpToId) {
       const obsIdx = entryIndexForId(
         entries,
@@ -1017,19 +1019,26 @@ async function runReflectorStage(
         );
         return { outcome: "continue", sameRunReflections: [] };
       }
-      if (refIdx >= 0) {
-        reflectionTokens = rawTokensAfterIndex(entries, refIdx);
-        if (reflectionTokens < reflectThreshold) {
+      // Measure from the pending reflection anchor with the same usage/estimate
+      // core as the trigger side (plan-03; estimate-basis re-checks never
+      // advance the cursor — the not_due advance needs a trustworthy baseline).
+      const measurement = measureReflectorDue(entries, runtime, dueCtx, {
+        anchorIndex:
+          refIdx >= 0
+            ? refIdx
+            : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED),
+      });
+      if (!measurement.due) {
+        if (measurement.basis === "usage") {
           runtime.advanceCursor(
             "reflector",
             pending.reflection.coversUpToId,
             "not_due",
           );
-          return { outcome: "continue", sameRunReflections: [] };
         }
-      } else {
-        reflectionTokens = rawTokensSinceObservationCoverage(entries);
+        return { outcome: "continue", sameRunReflections: [] };
       }
+      reflectionTokens = measurement.progress;
     } else {
       reflectionTokens = rawTokensSinceObservationCoverage(entries);
     }
@@ -1309,10 +1318,6 @@ async function runDropperStage(
     ctx.model as { contextWindow?: number },
     ctx.getContextUsage,
   );
-  const dropThreshold = resolveTriggerThresholds(
-    runtime.config,
-    sessionWindow,
-  ).reflectAfterTokens;
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
@@ -1328,6 +1333,10 @@ async function runDropperStage(
       return "continue";
     }
     observationCoverageId = pending.observation?.coversUpToId;
+    const dueCtx = {
+      model: ctx.model as { contextWindow?: number },
+      getContextUsage: ctx.getContextUsage,
+    };
     if (pending.dropped?.coversUpToId) {
       const obsIdx = entryIndexForId(
         entries,
@@ -1342,19 +1351,26 @@ async function runDropperStage(
         );
         return "continue";
       }
-      if (dropIdx >= 0) {
-        dropTokens = rawTokensAfterIndex(entries, dropIdx);
-        if (dropTokens < dropThreshold) {
+      // Measure from the pending drop anchor with the same usage/estimate
+      // core as the trigger side (plan-03; estimate-basis re-checks never
+      // advance the cursor — the not_due advance needs a trustworthy baseline).
+      const measurement = measureDropperDue(entries, runtime, dueCtx, {
+        anchorIndex:
+          dropIdx >= 0
+            ? dropIdx
+            : latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED),
+      });
+      if (!measurement.due) {
+        if (measurement.basis === "usage") {
           runtime.advanceCursor(
             "dropper",
             pending.dropped.coversUpToId,
             "not_due",
           );
-          return "continue";
         }
-      } else {
-        dropTokens = rawTokensSinceDropCoverage(entries);
+        return "continue";
       }
+      dropTokens = measurement.progress;
     } else {
       dropTokens = rawTokensSinceDropCoverage(entries);
     }

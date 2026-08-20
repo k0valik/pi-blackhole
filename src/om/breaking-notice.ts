@@ -8,8 +8,9 @@
  * Persistence pattern mirrors cooldown.ts: a small JSON state file under
  * `~/.pi/agent/pi-blackhole/last-seen-version.json` records the last
  * extension version the user saw; the notice fires once per upgrade that
- * crosses BREAKING_SINCE (persisted before notifying so a stale ctx can
- * never cause a repeat).
+ * crosses BREAKING_SINCE.  Persistence happens only after the notice is
+ * actually shown (gated on hasUI) so a headless-first run never swallows
+ * the one-time notice for that install.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -79,16 +80,17 @@ export function registerBreakingNotice(pi: ExtensionAPI): void {
     ) {
       return;
     }
-    // Persist before notifying — a stale ctx mid-notify must not cause a repeat.
-    writeLastSeenVersion(BREAKING_SINCE);
+    // Show the notice first (hasUI-gated), then persist — a headless-first
+    // run must not swallow the one-time notice for this install.
     if (!ctx?.hasUI) return;
     try {
       ctx.ui?.notify(
         "pi-blackhole: token counting now uses real model usage; thresholds auto-derive from your model's context window — custom thresholds keep working (now counted in real tokens, ~1.45× your old estimate values). See /blackhole configure.",
         "warning",
       );
+      writeLastSeenVersion(BREAKING_SINCE);
     } catch {
-      // stale ctx — version already persisted, notice won't repeat
+      // stale ctx — nothing persisted, the notice repeats on the next start
     }
   });
 }

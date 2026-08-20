@@ -213,12 +213,20 @@ export function measureObserverDue(
   );
 }
 
+/** Measure options: manual-mode stages pass an explicit anchor index
+ *  (pending-batch coversUpToId) instead of cursor/coverage resolution. */
+export type MeasureOptions = {
+  anchorIndex?: number;
+};
+
 /** Reflector tokens leg: cursor → reflections-recorded coverage → −1.
- *  (New-data marker/pending legs stay in the pipeline.) */
+ *  (New-data marker/pending legs stay in the pipeline.) Manual mode passes
+ *  the pending batch anchor explicitly. */
 export function measureReflectorDue(
   entries: Entry[],
   runtime: Runtime,
   dueCtx: DueContext,
+  options: MeasureOptions = {},
 ): StageMeasurement {
   const sessionWindow = sessionWindowFor(dueCtx);
   const threshold = resolveTriggerThresholds(
@@ -229,13 +237,16 @@ export function measureReflectorDue(
     runtime.config.reflectorModel,
     sessionWindow,
   );
-  const anchorIndex = resolveAnchor(
-    entries,
-    runtime,
-    "reflector",
-    OM_REFLECTIONS_RECORDED,
-    false,
-  );
+  const anchorIndex =
+    options.anchorIndex !== undefined
+      ? options.anchorIndex
+      : resolveAnchor(
+          entries,
+          runtime,
+          "reflector",
+          OM_REFLECTIONS_RECORDED,
+          false,
+        );
   return measureStage(
     entries,
     "reflector",
@@ -246,11 +257,13 @@ export function measureReflectorDue(
 }
 
 /** Dropper tokens leg: cursor → observations-dropped coverage → −1.
- *  (Pool fullness/pressure and new-data legs stay in the pipeline.) */
+ *  (Pool fullness/pressure and new-data legs stay in the pipeline.) Manual
+ *  mode passes the pending batch anchor explicitly. */
 export function measureDropperDue(
   entries: Entry[],
   runtime: Runtime,
   dueCtx: DueContext,
+  options: MeasureOptions = {},
 ): StageMeasurement {
   const sessionWindow = sessionWindowFor(dueCtx);
   const threshold = resolveTriggerThresholds(
@@ -261,12 +274,15 @@ export function measureDropperDue(
     runtime.config.dropperModel,
     sessionWindow,
   );
-  const anchorIndex = resolveAnchor(
-    entries,
-    runtime,
-    "dropper",
-    OM_OBSERVATIONS_DROPPED,
-    false,
-  );
+  const anchorIndex =
+    options.anchorIndex !== undefined
+      ? options.anchorIndex
+      : resolveAnchor(
+          entries,
+          runtime,
+          "dropper",
+          OM_OBSERVATIONS_DROPPED,
+          false,
+        );
   return measureStage(entries, "dropper", anchorIndex, threshold, workerWindow);
 }

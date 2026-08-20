@@ -285,4 +285,51 @@ describe("measureReflectorDue / measureDropperDue", () => {
     expect(m.threshold).toBe(Math.floor(100_000 * 0.4));
     expect(m.due).toBe(true);
   });
+
+  test("explicit anchor override wins over the cursor (manual-mode pending batch)", () => {
+    const runtime = new Runtime();
+    runtime.config.reflectAfterTokens = 40;
+    runtime.advanceCursor("reflector", "u1", "recorded");
+    const entries = [
+      userEntry("u1", "x".repeat(200)),
+      userEntry("u2", "x".repeat(200)),
+      userEntry("u3", "x".repeat(200)),
+    ];
+    // Cursor would anchor at u1 (idx 0); the pending reflection covers u2.
+    const m = measureReflectorDue(entries, runtime, DUE_CTX, {
+      anchorIndex: 1,
+    });
+    expect(m.anchorIndex).toBe(1);
+    expect(m.progress).toBe(50); // u3 only
+    expect(m.due).toBe(true);
+  });
+
+  test("dropper explicit anchor override measures since the pending batch", () => {
+    const runtime = new Runtime();
+    runtime.config.reflectAfterTokens = 40;
+    const entries = [
+      userEntry("u1", "x".repeat(200)),
+      userEntry("u2", "x".repeat(200)),
+      userEntry("u3", "x".repeat(200)),
+    ];
+    const m = measureDropperDue(entries, runtime, DUE_CTX, { anchorIndex: 2 });
+    expect(m.anchorIndex).toBe(2);
+    expect(m.progress).toBe(0);
+    expect(m.due).toBe(false);
+  });
+
+  test("override anchor without usage falls back to estimate basis", () => {
+    const runtime = new Runtime();
+    runtime.config.reflectAfterTokens = 40;
+    const entries = [
+      userEntry("u1", "x".repeat(200)),
+      userEntry("u2", "x".repeat(200)),
+    ];
+    const m = measureReflectorDue(entries, runtime, DUE_CTX, {
+      anchorIndex: 0,
+    });
+    expect(m.basis).toBe("estimate");
+    expect(m.progress).toBe(50);
+    expect(m.due).toBe(true);
+  });
 });

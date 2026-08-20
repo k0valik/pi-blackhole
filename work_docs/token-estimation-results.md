@@ -1,7 +1,7 @@
 # Token estimation — calibration summary (review artifact)
 
-- Generated: 2026-08-01T03:35:02.960Z
-- Sessions: 698 unique (realpath-deduped) under `~/.pi/agent/sessions`
+- Generated: 2026-08-20T00:07:14.017Z
+- Sessions: 1178 unique (realpath-deduped) under `~/.pi/agent/sessions`
 - Command: `node scripts/analyze-token-estimation.mjs --summary work_docs/token-estimation-results.md`
 - Full plan: `work_docs/issue-usage-based-token-counting.md`
 - Raw per-window reports (gitignored, regenerate with the script): `tmp/token-estimation-report.md` (author config), `tmp/token-estimation-report-defaults.md` (code defaults)
@@ -14,26 +14,26 @@ Reading guide: **churn×** = how many more fires truthful counting produces with
 
 | stage | threshold | n | median | min | max | est fires | usage fires | churn× | LATE | EARLY | marker | no-marker | no-usage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| observer | 25,000 | 243 | 0.80 | 0.00 | 23.59 | 297 | 377 | 1.3 | 98 | 18 | 280 | 418 | 23 |
-| reflector | 80,000 | 176 | 0.83 | 0.00 | 23.59 | 98 | 164 | 1.7 | 77 | 11 | 207 | 491 | 21 |
-| dropper | 80,000 | 5 | 0.61 | 0.03 | 1.17 | 192 | 286 | 1.5 | 109 | 15 | 11 | 687 | 6 |
-| compaction | 185,000 | 339 | 0.61 | 0.00 | 3.17 | 3 | 23 | 7.7 | 21 | 1 | 343 | 355 | 5 |
+| observer | 25,000 | 254 | 0.80 | 0.00 | 1487.68 | 692 | 805 | 1.2 | 135 | 22 | 297 | 881 | 26 |
+| reflector | 80,000 | 184 | 0.83 | 0.00 | 1487.68 | 226 | 313 | 1.4 | 109 | 22 | 221 | 957 | 24 |
+| dropper | 80,000 | 6 | 0.65 | 0.03 | 1.17 | 320 | 441 | 1.4 | 144 | 23 | 12 | 1166 | 6 |
+| compaction | 185,000 | 385 | 0.63 | 0.00 | 3.17 | 18 | 36 | 2.0 | 26 | 8 | 389 | 789 | 5 |
 
 ### Calibration (usage threshold that reproduces today's fire frequency)
 
 | stage | threshold | same-fire-count T' | achieved | usage p50 | p90 | p95 | max |
 |---|---|---|---|---|---|---|---|
-| observer | 25,000 | 36,303 | 298 | 31,775 | 110,826 | 129,975 | 238,483 |
-| reflector | 80,000 | 99,327 | 98 | 40,621 | 114,395 | 131,394 | 238,483 |
-| dropper | 80,000 | 103,162 | 192 | 66,956 | 142,940 | 165,993 | 274,486 |
-| compaction | 185,000 | 262,007 | 3 | 67,020 | 143,523 | 169,043 | 274,486 |
+| observer | 25,000 | 35,022 | 692 | 46,809 | 119,243 | 143,773 | 297,071 |
+| reflector | 80,000 | 92,825 | 226 | 51,677 | 120,476 | 143,905 | 297,071 |
+| dropper | 80,000 | 95,905 | 320 | 64,906 | 139,324 | 163,641 | 297,071 |
+| compaction | 185,000 | 214,990 | 18 | 65,325 | 140,049 | 163,641 | 297,071 |
 
 ### Observer input simulation (tool-result + thinking trimming)
 
-- windows with content: 674
-- median chunk: 19,282 tokens | tool_result share: 51% | thinking share: 22%
+- windows with content: 1151
+- median chunk: 35,536 tokens | tool_result share: 57% | thinking share: 21%
 - trim policy: tool results > 4096 chars → head+tail 1000/1000 chars; thinking > 4096 chars → head+tail 20%/20% (fractional)
-- median 19,282 → 12,220 tokens (combined median save 31%, p90 61%); of tool-result tokens median 51% saved; of thinking tokens median 1% saved
+- median 35,536 → 17,188 tokens (combined median save 41%, p90 65%); of tool-result tokens median 60% saved; of thinking tokens median 19% saved
 
 
 ## Tier calibration (per achieved-context tier)
@@ -42,24 +42,24 @@ Tier = max context each session actually reached (max `usage.totalTokens`) — a
 
 | tier | n | p50 ctx | p90 ctx | compact (65%) |
 |---|---|---|---|---|
-| low (<100k) | 358 | 49,703 | 91,918 | 59,747 |
-| medium (100–200k) | 246 | 137,233 | 187,347 | 121,776 |
-| high (200k+) | 71 | 222,459 | 273,451 | 177,743 |
+| low (<100k) | 722 | 52,272 | 88,089 | 57,258 |
+| medium (100–200k) | 343 | 137,742 | 187,637 | 121,964 |
+| high (200k+) | 90 | 223,560 | 264,057 | 171,637 |
 
 | tier | stage | fire-20% | fire-40% | fire-60% |
 |---|---|---|---|---|
-| low (<100k) | observer | 56,438 | 36,396 | 22,069 |
-| low (<100k) | reflector | 72,331 | 48,253 | 31,094 |
-| low (<100k) | dropper | 75,841 | 51,674 | 33,069 |
-| low (<100k) | compaction | 75,841 | 51,674 | 33,069 |
-| medium (100–200k) | observer | 114,104 | 67,922 | 28,542 |
-| medium (100–200k) | reflector | 119,605 | 82,400 | 38,990 |
-| medium (100–200k) | dropper | 141,269 | 120,476 | 104,168 |
-| medium (100–200k) | compaction | 141,466 | 120,476 | 104,800 |
-| high (200k+) | observer | 120,504 | 89,876 | 30,397 |
-| high (200k+) | reflector | 119,963 | 85,511 | 31,973 |
-| high (200k+) | dropper | 203,424 | 128,551 | 95,141 |
-| high (200k+) | compaction | 201,339 | 128,551 | 96,444 |
+| low (<100k) | observer | 68,712 | 51,092 | 34,759 |
+| low (<100k) | reflector | 72,956 | 54,869 | 38,939 |
+| low (<100k) | dropper | 74,715 | 56,410 | 40,207 |
+| low (<100k) | compaction | 74,715 | 56,410 | 40,207 |
+| medium (100–200k) | observer | 126,431 | 104,163 | 49,425 |
+| medium (100–200k) | reflector | 128,295 | 106,549 | 65,521 |
+| medium (100–200k) | dropper | 143,589 | 120,831 | 106,675 |
+| medium (100–200k) | compaction | 143,589 | 120,831 | 106,675 |
+| high (200k+) | observer | 185,578 | 104,036 | 54,411 |
+| high (200k+) | reflector | 185,578 | 104,036 | 53,557 |
+| high (200k+) | dropper | 214,990 | 143,905 | 105,853 |
+| high (200k+) | compaction | 212,987 | 143,905 | 105,853 |
 
 ## Code defaults (observe 15,000 / reflect+drop 25,000 / compact 81,000 — auto-install surface)
 
@@ -67,26 +67,26 @@ Tier = max context each session actually reached (max `usage.totalTokens`) — a
 
 | stage | threshold | n | median | min | max | est fires | usage fires | churn× | LATE | EARLY | marker | no-marker | no-usage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| observer | 15,000 | 243 | 0.80 | 0.00 | 23.59 | 388 | 451 | 1.2 | 88 | 25 | 280 | 418 | 23 |
-| reflector | 25,000 | 176 | 0.83 | 0.00 | 23.59 | 359 | 447 | 1.2 | 103 | 15 | 207 | 491 | 21 |
-| dropper | 25,000 | 5 | 0.61 | 0.03 | 1.17 | 460 | 552 | 1.2 | 96 | 4 | 11 | 687 | 6 |
-| compaction | 81,000 | 339 | 0.61 | 0.00 | 3.17 | 173 | 282 | 1.6 | 121 | 12 | 343 | 355 | 5 |
+| observer | 15,000 | 254 | 0.80 | 0.00 | 1487.68 | 827 | 904 | 1.1 | 106 | 29 | 297 | 881 | 26 |
+| reflector | 25,000 | 184 | 0.83 | 0.00 | 1487.68 | 755 | 876 | 1.2 | 140 | 19 | 221 | 957 | 24 |
+| dropper | 25,000 | 6 | 0.65 | 0.03 | 1.17 | 858 | 989 | 1.2 | 136 | 5 | 12 | 1166 | 6 |
+| compaction | 81,000 | 385 | 0.63 | 0.00 | 3.17 | 296 | 435 | 1.5 | 159 | 20 | 389 | 789 | 5 |
 
 ### Calibration (usage threshold that reproduces today's fire frequency)
 
 | stage | threshold | same-fire-count T' | achieved | usage p50 | p90 | p95 | max |
 |---|---|---|---|---|---|---|---|
-| observer | 15,000 | 23,581 | 388 | 31,775 | 110,826 | 129,975 | 238,483 |
-| reflector | 25,000 | 36,303 | 359 | 40,621 | 114,395 | 131,394 | 238,483 |
-| dropper | 25,000 | 40,069 | 460 | 66,956 | 142,940 | 165,993 | 274,486 |
-| compaction | 81,000 | 108,206 | 173 | 67,020 | 143,523 | 169,043 | 274,486 |
+| observer | 15,000 | 23,133 | 827 | 46,809 | 119,243 | 143,773 | 297,071 |
+| reflector | 25,000 | 35,022 | 755 | 51,677 | 120,476 | 143,905 | 297,071 |
+| dropper | 25,000 | 37,606 | 858 | 64,906 | 139,324 | 163,641 | 297,071 |
+| compaction | 81,000 | 100,282 | 296 | 65,325 | 140,049 | 163,641 | 297,071 |
 
 ### Observer input simulation (tool-result + thinking trimming)
 
-- windows with content: 674
-- median chunk: 19,282 tokens | tool_result share: 49% | thinking share: 22%
+- windows with content: 1151
+- median chunk: 34,793 tokens | tool_result share: 54% | thinking share: 22%
 - trim policy: tool results > 4096 chars → head+tail 1000/1000 chars; thinking > 4096 chars → head+tail 20%/20% (fractional)
-- median 19,282 → 11,992 tokens (combined median save 30%, p90 61%); of tool-result tokens median 49% saved; of thinking tokens median 1% saved
+- median 34,793 → 16,462 tokens (combined median save 39%, p90 64%); of tool-result tokens median 57% saved; of thinking tokens median 19% saved
 
 
 _Generated by `scripts/analyze-token-estimation.mjs --summary`. Re-run any time to reproduce._

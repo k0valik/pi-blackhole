@@ -156,7 +156,10 @@ function trimLongThinkingBlock(text: string): string {
     Math.ceil(text.length * THINKING_HEAD_TAIL_RATIO),
     THINKING_HEAD_CAP_CHARS,
   );
-  const tailLen = Math.ceil(text.length * THINKING_HEAD_TAIL_RATIO);
+  const tailLen = Math.min(
+    Math.ceil(text.length * THINKING_HEAD_TAIL_RATIO),
+    THINKING_HEAD_CAP_CHARS,
+  );
   const head = text.slice(0, headLen);
   const tail = text.slice(-tailLen);
   const dropped = text.length - head.length - tail.length;
