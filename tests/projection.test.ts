@@ -200,7 +200,10 @@ describe("buildCompactionProjection", () => {
   it("triggers full fold when observations pool exceeds threshold", async () => {
     const { buildCompactionProjection } =
       await import("../src/om/ledger/projection.js");
-    const obs = makeObservation(hexId("big-obs"), { tokenCount: 25_000 });
+    const obs = makeObservation(hexId("big-obs"), {
+      // Line-based accounting: a long content pushes the pool past the threshold.
+      content: "x".repeat(90_000),
+    });
     const entries: Entry[] = [
       src("kept-entry"),
       recordEntry("e1", [obs], "kept-entry"),

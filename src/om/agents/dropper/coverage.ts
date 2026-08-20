@@ -1,4 +1,5 @@
 import type { Observation, Reflection } from "../../ledger/index.js";
+import { observationLineTokenCount } from "../../tokens.js";
 
 export const REFLECTION_COVERAGE_TIERS = ["none", "partial", "strong"] as const;
 export type ReflectionCoverageTier = (typeof REFLECTION_COVERAGE_TIERS)[number];
@@ -82,7 +83,7 @@ export function summarizeCoverageByRelevance(
     const tier = coverageById.get(observation.id) ?? "none";
     const bucket = summary[observation.relevance][tier];
     bucket.count++;
-    bucket.tokens += observation.tokenCount;
+    bucket.tokens += observationLineTokenCount(observation);
   }
   return summary;
 }
@@ -127,7 +128,7 @@ export function summarizeCoverageTransitionsByRelevance(
       tokens: 0,
     };
     bucket.count++;
-    bucket.tokens += observation.tokenCount;
+    bucket.tokens += observationLineTokenCount(observation);
     summary[observation.relevance][key] = bucket;
   }
   return summary;

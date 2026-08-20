@@ -26,7 +26,7 @@ import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { OBSERVER_SYSTEM } from "./prompts.js";
 import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
-import { estimateStringTokens } from "../../tokens.js";
+import { observationLineTokenCount } from "../../tokens.js";
 import { logAgentStreamError } from "../stream-errors.js";
 
 interface RunObserverArgs {
@@ -190,7 +190,12 @@ export async function runObserver(
           timestamp: obs.timestamp,
           relevance: obs.relevance as Relevance,
           sourceEntryIds,
-          tokenCount: estimateStringTokens(content),
+          tokenCount: observationLineTokenCount({
+            id,
+            timestamp: obs.timestamp,
+            relevance: obs.relevance as Relevance,
+            content,
+          }),
         });
         added++;
       }

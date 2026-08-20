@@ -12,7 +12,7 @@ import {
   OBSERVATION_TIMESTAMP_PATTERN,
   runObserver,
 } from "../src/om/agents/observer/agent.js";
-import { estimateStringTokens } from "../src/om/tokens.js";
+import { observationLineTokenCount } from "../src/om/tokens.js";
 
 function fakeAgentLoop(
   handler: (prompts: any[], context: any, config: any) => Promise<void> | void,
@@ -109,8 +109,16 @@ describe("runObserver", () => {
       timestamp: "2026-05-02 10:30",
       relevance: "high",
       sourceEntryIds: ["entry-a"],
-      tokenCount: estimateStringTokens(content),
     });
+    const stored = observations?.[0];
+    expect(stored?.tokenCount).toBe(
+      observationLineTokenCount({
+        id: stored.id,
+        timestamp: stored.timestamp,
+        relevance: stored.relevance,
+        content: stored.content,
+      }),
+    );
     expect(observations?.[0].id).toMatch(/^[a-f0-9]{12}$/);
   });
 

@@ -24,6 +24,11 @@ const CONFIG_FILENAME = "pi-blackhole-config.json";
 
 export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
 
+/** valueDescriptions note for "0 = auto-derive" number fields. */
+const AUTO_DERIVE_NOTE = (note: string): Record<string, string> => ({
+  "0": note,
+});
+
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
 export const config = new ConfigManager<UnifiedConfig>({
@@ -33,12 +38,107 @@ export const config = new ConfigManager<UnifiedConfig>({
   defaults: DEFAULTS,
   scopes: { global: true, project: true, session: true },
   sessionConfig: { entryType: "session-config-pi-blackhole" },
+  tabs: [
+    { id: "presets", label: "Presets" },
+    { id: "settings", label: "Settings" },
+  ],
+  presets: [
+    {
+      id: "auto",
+      label: "Auto (recommended)",
+      description:
+        "all thresholds and budgets auto-derive from your model context windows",
+      values: {
+        compactAfterTokens: 0,
+        observeAfterTokens: 0,
+        reflectAfterTokens: 0,
+        observationsPoolMaxTokens: 0,
+        observationsPoolTargetTokens: 0,
+        reflectorInputMaxTokens: 0,
+        dropperInputMaxTokens: 0,
+        observerChunkMaxTokens: 0,
+        thresholdScale: 1.0,
+      },
+    },
+    {
+      id: "costSaver",
+      label: "Cost-saver",
+      description:
+        "scale auto-derived trigger thresholds by 0.6 — fewer background runs",
+      values: { thresholdScale: 0.6 },
+    },
+    {
+      id: "balanced",
+      label: "Balanced",
+      description:
+        "scale auto-derived trigger thresholds by 1.0 — the default posture",
+      values: { thresholdScale: 1.0 },
+    },
+    {
+      id: "responsive",
+      label: "Responsive",
+      description:
+        "scale auto-derived trigger thresholds by 1.5 — workers trigger earlier",
+      values: { thresholdScale: 1.5 },
+    },
+  ],
 
   fields: (cfg) => [
+    // ── Presets ──
+    {
+      key: "preset.how",
+      type: "readonly",
+      tab: "presets",
+      label: "How presets work",
+      value: "apply → review → Save",
+      hint: "Presets fill the current scope's buffer; nothing is written until you press Save.",
+    },
+    {
+      key: "preset.auto",
+      type: "action",
+      tab: "presets",
+      label: "Auto (recommended)",
+      description:
+        "All thresholds and budgets auto-derive from your model context windows. Equivalent to clearing every threshold and budget field to 0.",
+      display: "apply",
+      onActivate: () => {},
+    },
+    {
+      key: "preset.costSaver",
+      type: "action",
+      tab: "presets",
+      label: "Cost-saver",
+      description:
+        "Multiplies auto-derived trigger thresholds by 0.6: fewer background observer/reflector/dropper runs and less frequent compaction. Custom thresholds are untouched.",
+      display: "apply",
+      onActivate: () => {},
+    },
+    {
+      key: "preset.balanced",
+      type: "action",
+      tab: "presets",
+      label: "Balanced",
+      description:
+        "Multiplies auto-derived trigger thresholds by 1.0: the default posture. Custom thresholds are untouched.",
+      display: "apply",
+      onActivate: () => {},
+    },
+    {
+      key: "preset.responsive",
+      type: "action",
+      tab: "presets",
+      label: "Responsive",
+      description:
+        "Multiplies auto-derived trigger thresholds by 1.5: workers trigger earlier and compaction runs sooner. Custom thresholds are untouched.",
+      display: "apply",
+      onActivate: () => {},
+    },
+
     // ── Compaction ──
     {
       key: "compaction",
       type: "enum",
+      tab: "settings",
       label: "Compaction mode",
       description:
         "auto=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline",
@@ -53,6 +153,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactionEngine",
       type: "enum",
+      tab: "settings",
       label: "Compaction engine",
       description:
         "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
@@ -66,6 +167,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "tailBehavior",
       type: "enum",
+      tab: "settings",
       label: "Visible tail",
       description:
         "minimal=keep last user message only (default), pi-default=keep Pi's preserved visible context",
@@ -79,6 +181,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "midRunCompaction",
       type: "enum",
+      tab: "settings",
       label: "Mid-run compaction",
       description:
         "resume=compact transparently and continue the same run, pause=interrupt and stop, off=only check when run ends (default)",
@@ -93,18 +196,22 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactAfterTokens",
       type: "number",
+      tab: "settings",
       label: "Auto-compact threshold",
-      description: "Token count that triggers auto-compaction when reached",
+      description:
+        "Real context tokens (assistant usage + chars/4 tail) that triggers auto-compaction. 0 = auto-derive 65% of the session context window (× thresholdScale), clamped ≥ 1000.",
       value: cfg.compactAfterTokens,
-      min: 1_000,
+      min: 0,
       max: 500_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("65% of session context window"),
     },
 
     // ── Observational Memory ──
     {
       key: "memory",
       type: "boolean",
+      tab: "settings",
       label: "Observational memory",
       description:
         "Enable OM workers (observer, reflector, dropper) and content injection",
@@ -117,6 +224,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "sessionFallback",
       type: "boolean",
+      tab: "settings",
       label: "Session model fallback",
       description:
         "off=skip stage when all OM models fail, instead of falling back to the main coding model",
@@ -125,82 +233,98 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "observeAfterTokens",
       type: "number",
+      tab: "settings",
       label: "Observer threshold",
       description:
-        "Tokens accumulated since last observer run before triggering next observe",
+        "Real usage tokens since the last observer run before triggering the next observe. 0 = auto-derive 25% of the session context window (× thresholdScale), clamped ≥ 1000.",
       value: cfg.observeAfterTokens,
-      min: 1_000,
+      min: 0,
       max: 200_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("25% of session context window"),
     },
     {
       key: "reflectAfterTokens",
       type: "number",
+      tab: "settings",
       label: "Reflect + dropper threshold",
       description:
-        "Tokens accumulated since last reflect before triggering reflector and dropper",
+        "Real usage tokens since the last reflect before triggering reflector and dropper. 0 = auto-derive 40% of the session context window (× thresholdScale), clamped ≥ 1000.",
       value: cfg.reflectAfterTokens,
-      min: 1_000,
+      min: 0,
       max: 200_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("40% of session context window"),
     },
     {
       key: "observationsPoolMaxTokens",
       type: "number",
+      tab: "settings",
       label: "Observation pool max",
       description:
-        "Max tokens in observation pool before dropper prunes (fold pressure)",
+        "Max observation-pool tokens before the dropper prunes (fold pressure). 0 = auto-derive 15% of the session context window, clamped ≥ 1000.",
       value: cfg.observationsPoolMaxTokens,
-      min: 1_000,
+      min: 0,
       max: 200_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("15% of session context window"),
     },
     {
       key: "observationsPoolTargetTokens",
       type: "number",
+      tab: "settings",
       label: "Observation pool target",
       description:
-        "Target tokens after dropper prunes (defaults to half of pool max)",
+        "Target pool tokens after the dropper prunes. 0 = auto-derive half of the resolved pool max.",
       value: cfg.observationsPoolTargetTokens,
-      min: 500,
+      min: 0,
       max: 200_000,
       step: 500,
+      valueDescriptions: AUTO_DERIVE_NOTE("half of resolved pool max"),
     },
     {
       key: "reflectorInputMaxTokens",
       type: "number",
+      tab: "settings",
       label: "Reflector input max",
       description:
-        "Max prompt tokens for reflector model input (rolling window cap)",
+        "Max prompt tokens for the reflector model input. 0 = auto-derive 60% of the reflector's context window, clamped ≥ 1000.",
       value: cfg.reflectorInputMaxTokens,
-      min: 1_000,
+      min: 0,
       max: 500_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("60% of worker context window"),
     },
     {
       key: "dropperInputMaxTokens",
       type: "number",
+      tab: "settings",
       label: "Dropper input max",
       description:
-        "Max prompt tokens for dropper model input (rolling window cap)",
+        "Max prompt tokens for the dropper model input. 0 = auto-derive 60% of the dropper's context window, clamped ≥ 1000.",
       value: cfg.dropperInputMaxTokens,
-      min: 1_000,
+      min: 0,
       max: 500_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("60% of worker context window"),
     },
     {
       key: "observerChunkMaxTokens",
       type: "number",
+      tab: "settings",
       label: "Observer chunk max",
-      description: "Max source entry tokens sent to observer per chunk",
+      description:
+        "Max source-entry tokens sent to the observer per chunk. 0 = auto-derive 20% of the observer's context window, clamped ≥ 256.",
       value: cfg.observerChunkMaxTokens,
-      min: 1_000,
+      min: 0,
       max: 200_000,
       step: 1_000,
+      valueDescriptions: AUTO_DERIVE_NOTE("20% of worker context window"),
     },
     {
       key: "observerPreambleMaxTokens",
       type: "number",
+      tab: "settings",
       label: "Observer preamble max",
       description:
         "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
@@ -210,8 +334,21 @@ export const config = new ConfigManager<UnifiedConfig>({
       step: 500,
     },
     {
+      key: "thresholdScale",
+      type: "number",
+      tab: "settings",
+      label: "Auto-derive scale",
+      description:
+        "Multiplier for auto-derived trigger thresholds (observer/reflector/compaction). 0.6 = cost-saver, 1.0 = balanced (default), 1.5 = responsive. Ignored for explicit threshold values.",
+      value: cfg.thresholdScale,
+      min: 0.1,
+      max: 10,
+      step: 0.1,
+    },
+    {
       key: "dropperPressureThreshold",
       type: "number",
+      tab: "settings",
       label: "Dropper pressure threshold",
       description:
         "Fraction of reflectorInputMaxTokens that triggers pressure-driven dropper (0-1, default 0.70)",
@@ -223,6 +360,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "dropperPoolFullnessThreshold",
       type: "number",
+      tab: "settings",
       label: "Dropper pool fullness threshold",
       description:
         "Min observation-pool fullness (fraction of pool max) before the dropper runs (0-1, default 0.10)",
@@ -234,6 +372,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "agentMaxTurns",
       type: "number",
+      tab: "settings",
       label: "Max turns per agent",
       description: "Shared turn cap for background memory agents",
       value: cfg.agentMaxTurns,
@@ -244,6 +383,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "providerIdleTimeoutMs",
       type: "number",
+      tab: "settings",
       label: "Provider idle timeout (ms)",
       description:
         "Body-idle timeout for background provider streams; 0 = disabled, unset = inherit pi's default",
@@ -255,6 +395,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "fullFoldAlways",
       type: "boolean",
+      tab: "settings",
       label: "Preserve OM on first compaction",
       description:
         "When true, early reflections/drops survive the first compaction in a fresh session",
@@ -265,6 +406,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "debug",
       type: "boolean",
+      tab: "settings",
       label: "Debug snapshots",
       description:
         "Write detailed debug snapshots to /tmp/pi-blackhole-debug.json",
@@ -273,6 +415,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "debugLog",
       type: "boolean",
+      tab: "settings",
       label: "Debug JSONL logging",
       description: "Write structured JSONL debug logs to agent directory",
       value: cfg.debugLog,
@@ -378,10 +521,20 @@ export const config = new ConfigManager<UnifiedConfig>({
     ];
     for (const k of REQUIRED_NUMERIC_KEYS) {
       const v = (merged as unknown as Record<string, unknown>)[k];
-      const minVal = k === "observerPreambleMaxTokens" ? 0 : 1;
+      // 0 = auto-derive for all threshold/budget fields; only agentMaxTurns
+      // must be > 0.
+      const minVal = k === "agentMaxTurns" ? 1 : 0;
       if (typeof v !== "number" || !Number.isFinite(v) || v < minVal) {
         (merged as unknown as Record<string, unknown>)[k] = DEFAULTS[k];
       }
+    }
+
+    // thresholdScale — finite > 0, clamped to [0.1, 10]
+    const ts = merged.thresholdScale;
+    if (typeof ts !== "number" || !Number.isFinite(ts) || ts <= 0) {
+      merged.thresholdScale = DEFAULTS.thresholdScale;
+    } else {
+      merged.thresholdScale = Math.min(10, Math.max(0.1, ts));
     }
 
     // dropperPressureThreshold — must be in (0, 1]

@@ -163,7 +163,7 @@ describe("anyStageDue with cursors", () => {
     runtime.config.dropperPressureThreshold = 0.7;
     runtime.config.reflectorInputMaxTokens = 10_000; // pressure needs 7,000 — pool only has 1,400
     // No dropper cursor → token condition is rawTokensSinceDropCoverage ≥ 5 (msg-1 ≈ 50 tokens).
-    // Pool: 2 obs × 700 = 1,400 / 100,000 = 1.4% ≥ 1% → dropper due.
+    // Pool: 2 obs × ~511 (line-based) = 1,022 / 100,000 = 1.02% ≥ 1% → dropper due.
     // Reflector is silenced by advancing its cursor past all entries.
     const entries = [
       {
@@ -183,19 +183,19 @@ describe("anyStageDue with cursors", () => {
           observations: [
             {
               id: "aaaaaaaaaaaa",
-              content: "x".repeat(100),
+              content: "x".repeat(2000),
               timestamp: "2026-08-01T00:00:00.000Z",
               relevance: "low",
               sourceEntryIds: ["msg-1"],
-              tokenCount: 700,
+              tokenCount: 1,
             },
             {
               id: "bbbbbbbbbbbb",
-              content: "y".repeat(100),
+              content: "y".repeat(2000),
               timestamp: "2026-08-01T00:00:00.001Z",
               relevance: "medium",
               sourceEntryIds: ["msg-1"],
-              tokenCount: 700,
+              tokenCount: 1,
             },
           ],
         },

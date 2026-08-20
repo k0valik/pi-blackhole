@@ -2019,4 +2019,155 @@ describe("ConfigFlow smoke tests", () => {
       await promise;
     });
   });
+
+  // ── 12. Presets tab ──────────────────────────────────────────────────
+
+  describe("presets", () => {
+    function createPresetManager() {
+      return createManager({
+        tabs: [
+          { id: "presets", label: "Presets" },
+          { id: "settings", label: "Settings" },
+        ],
+        presets: [
+          {
+            id: "responsive",
+            label: "Responsive",
+            description: "scale by 1.5",
+            values: { threshold: 7 },
+          },
+        ],
+        fields: (cfg: TestConfig) => [
+          {
+            key: "preset.how",
+            type: "readonly",
+            tab: "presets",
+            label: "How presets work",
+            value: "apply → review → Save",
+          },
+          {
+            key: "preset.responsive",
+            type: "action",
+            tab: "presets",
+            label: "Responsive",
+            description: "scale by 1.5",
+            display: "apply",
+            onActivate: () => {},
+          },
+          {
+            key: "enabled",
+            type: "boolean",
+            tab: "settings",
+            label: "Enabled",
+            value: cfg.enabled,
+          },
+          {
+            key: "threshold",
+            type: "number",
+            tab: "settings",
+            label: "Threshold",
+            value: cfg.threshold,
+            min: 0,
+            max: 10,
+          },
+        ],
+      });
+    }
+
+    it("presets tab is active on open and shows the preset rows", async () => {
+      const ctx = fakeCtx();
+      const mgr = createPresetManager();
+
+      const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
+
+      await selectFirst(ctx);
+      const body = getEditBody(ctx);
+      const out = body.render(80).join("\n");
+
+      expect(out).toContain("Presets");
+      expect(out).toContain("How presets work");
+      expect(out).toContain("Responsive");
+      expect(out).toContain("apply");
+      // Settings-tab rows are not rendered while the presets tab is active
+      expect(out).not.toContain("Threshold");
+
+      await promise;
+    });
+
+    it("applying a preset fills the buffer; save persists the values", async () => {
+      const notify = vi.fn();
+      const ctx = fakeCtx(notify);
+      const mgr = createPresetManager();
+
+      const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
+
+      await selectFirst(ctx);
+      const body = getEditBody(ctx);
+
+      // ↓ enters the field zone → first preset row (preset.responsive)
+      body.handleInput?.("\x1b[B");
+      body.handleInput?.("\r");
+
+      expect(notify).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Preset "Responsive" applied: scale by 1.5 — review, then Save.',
+        ),
+        "info",
+      );
+
+      // Tab from the field zone: 1 → Settings tab, 2 → Save action
+      body.handleInput?.("\t");
+      body.handleInput?.("\t");
+      body.handleInput?.("\r");
+
+      const withConfirm = body.render(80).join("\n");
+      expect(withConfirm).toContain("Really save to Global");
+
+      const confirm = getLastConfirm();
+      confirm.handleInput?.("\r");
+      await flushMicrotasks();
+      await promise;
+
+      const written = JSON.parse(
+        readFileSync(join(tempDir, "flow-test-config.json"), "utf8"),
+      ) as TestConfig;
+      expect(written.threshold).toBe(7);
+      expect(written.enabled).toBe(true);
+    });
+
+    it("preset rows are filtered out of display-all (read-only view)", async () => {
+      const ctx = fakeCtx();
+      const mgr = createPresetManager();
+
+      const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
+
+      const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
+      const selFactory = customMock.mock.calls[0]?.[0] as (
+        tui: TUI,
+        theme: Theme,
+        kb: KeybindingsManager,
+        done: (r: unknown) => void,
+      ) => Component;
+      const sel = selFactory(
+        fakeTui(),
+        fakeTheme(),
+        null! as KeybindingsManager,
+        (r) => {
+          ctx.ui.done(r);
+        },
+      );
+      navigateToDisplayAll(sel, false);
+      sel.handleInput?.("\r");
+      await ctx.ui.done(vi.fn());
+
+      const daBody = getDisplayAllBody(ctx);
+      const out = daBody.render(80).join("\n");
+
+      expect(out).toContain("Threshold");
+      expect(out).not.toContain("Responsive");
+      expect(out).not.toContain("apply → review → Save");
+
+      await promise;
+    });
+  });
 });

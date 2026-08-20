@@ -15,9 +15,22 @@ import {
   type ScopeSelectorResult,
 } from "./scope-selector.ts";
 import { createSettingsModalBody } from "./body.ts";
-import type { SettingsModalBodyComponent } from "./types.ts";
+import type { SettingsModalBodyComponent, Tab } from "./types.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
+
+/**
+ * A config preset: fills the current scope's edit buffer with `values`
+ * (nothing is persisted until the user saves). Rows are exposed as
+ * action fields whose key starts with "preset:"; config-flow intercepts
+ * their activation so presets apply to the correct scope + buffer.
+ */
+export interface PresetDef {
+  id: string;
+  label: string;
+  description: string;
+  values: Record<string, unknown>;
+}
 
 export interface ConfigFlowParams {
   label: string;
@@ -46,6 +59,12 @@ export interface ConfigFlowParams {
   ) => void | Promise<void>;
   onSaved: (values: Record<string, unknown>) => void;
   onChange?: (key: string, value: unknown) => void;
+  /** Optional tab strip for edit mode (e.g. presets + settings tabs). */
+  tabs?: Tab[];
+  /** Tab active when edit mode opens (defaults to the first tab). */
+  initialTab?: string;
+  /** Preset rows rendered as action fields keyed "preset:<id>". */
+  presets?: PresetDef[];
 }
 
 // Re-export engine types the flow references directly.
@@ -238,13 +257,44 @@ async function openEditMode(
             ? sourceEntry.path
             : (sourceEntry?.note ?? "");
 
-  const wrappedFields = fields.map((f) => ({
-    ...f,
-    valueNote: () => valueNote(f),
-  }));
+  const wrappedFields = fields.map((f) => {
+    if (f.type === "action" && String(f.key).startsWith("preset.")) {
+      const preset = params.presets?.find(
+        (p) => p.id === String(f.key).slice("preset.".length),
+      );
+      if (preset) {
+        return { ...f, onActivate: () => applyPreset(preset) };
+      }
+    }
+    return {
+      ...f,
+      valueNote: () => valueNote(f),
+    };
+  });
 
   // Per-flow body ref so nested async confirm handlers can mount overlays.
   let activeEditBody: SettingsModalBodyComponent | undefined;
+
+  /**
+   * Fill the current scope's edit buffer with a preset's values. Nothing
+   * is persisted until the user saves; dirty keys are marked so the
+   * buffer's unsaved state stays visible.
+   */
+  function applyPreset(preset: PresetDef): void {
+    const next: Record<string, unknown> = {
+      ...currentValues,
+      ...preset.values,
+    };
+    Object.assign(currentValues, preset.values);
+    for (const key of Object.keys(preset.values)) {
+      dirtyKeys.add(key);
+    }
+    activeEditBody?.setValues(next);
+    params.ctx.ui.notify(
+      `Preset "${preset.label}" applied: ${preset.description} — review, then Save.`,
+      "info",
+    );
+  }
 
   async function saveEdit(
     tui: TUI,
@@ -448,6 +498,8 @@ async function openEditMode(
         {
           title: `${params.label} — ${scopeLabel}`,
           fields: wrappedFields,
+          tabs: params.tabs,
+          initialTab: params.initialTab ?? params.tabs?.[0]?.id,
           mode: "buffered",
           closeOnSave: false,
           enableSearch: true,
@@ -536,11 +588,14 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
       );
     }
     const raw = params.buildFields(layerVals);
-    tabFields[tab.id] = raw.map((f) => ({
-      ...f,
-      tab: tab.id,
-      valueNote: displayValueNote(f, tab.id, inspection, params.env),
-    }));
+    // Preset rows (action + hint) are meaningless read-only — drop them.
+    tabFields[tab.id] = raw
+      .filter((f) => !String(f.key).startsWith("preset."))
+      .map((f) => ({
+        ...f,
+        tab: tab.id,
+        valueNote: displayValueNote(f, tab.id, inspection, params.env),
+      }));
   }
 
   let currentTabId = tabDefs[0]!.id;

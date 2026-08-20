@@ -145,7 +145,10 @@ describe("om-ledger-robust", () => {
 
   describe("buildCompactionProjection", () => {
     it("marks fullFold when observation tokens exceed max", () => {
-      const entries = [obsEntry("e1", [obs(1, "t1", 500), obs(2, "t2", 600)])];
+      // Line-based accounting: each obs ≈ (2010 + 45) / 4 ≈ 514 tokens.
+      const entries = [
+        obsEntry("e1", [obs(1, "x".repeat(2010)), obs(2, "y".repeat(2010))]),
+      ];
       const res = buildCompactionProjection(entries, "e1", {
         observationsPoolMaxTokens: 1000,
       });
@@ -214,7 +217,8 @@ describe("om-ledger-robust", () => {
     it("returns all reflections regardless of fullFold", () => {
       const entries = [
         reflEntry("e1", [refl(1, "ref1")]),
-        obsEntry("e2", [obs(1, "t1", 2000)]),
+        // Line-based: (4010 + 45) / 4 ≈ 1014 tokens ≥ 1000 budget.
+        obsEntry("e2", [obs(1, "x".repeat(4010))]),
       ];
       const res = buildCompactionProjection(entries, "e2", {
         observationsPoolMaxTokens: 1000,
@@ -242,7 +246,9 @@ describe("om-ledger-robust", () => {
     });
 
     it("fullFold remains true even if budget is exactly reached", () => {
-      const entries = [obsEntry("e1", [obs(1, "t1", 100)])];
+      // Line-based: fixed prefix is 45 chars ([id] ts [rel] + spaces); content
+      // of 54 chars → 99 chars → ceil(99/4) = 25 tokens = budget exactly.
+      const entries = [obsEntry("e1", [obs(1, "x".repeat(54))])];
       const res = buildCompactionProjection(entries, "e1", {
         observationsPoolMaxTokens: 25,
       });

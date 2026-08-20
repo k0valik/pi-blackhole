@@ -5,6 +5,7 @@
  * Unmodified.
  */
 import { selectPriorObservations } from "./render-summary.js";
+import { observationLineTokenCount } from "../tokens.js";
 import {
   OM_FOLDED,
   isMemoryDetails,
@@ -251,7 +252,7 @@ export function buildCompactionProjection(
     dropsBoundary: maintenanceBoundary,
   });
   const observationTokens = normalProjection.observations.reduce(
-    (total, observation) => total + observation.tokenCount,
+    (total, observation) => total + observationLineTokenCount(observation),
     0,
   );
   const fullFold = observationTokens >= config.observationsPoolMaxTokens;

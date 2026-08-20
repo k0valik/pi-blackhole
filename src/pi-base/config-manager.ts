@@ -29,8 +29,9 @@ import {
   getRawSessionConfig,
 } from "./config.js";
 import { openConfigFlow } from "./settings/config-flow.js";
+import type { PresetDef } from "./settings/config-flow.js";
 import { validateFieldValue } from "./settings/validate-field.ts";
-import type { Field } from "./settings/types.ts";
+import type { Field, Tab } from "./settings/types.ts";
 import type {
   ExtensionContext,
   FileEntry,
@@ -81,6 +82,12 @@ export interface ConfigManagerOptions<T extends object = object> {
     project?: boolean; // default true
     session?: boolean; // default true
   };
+  /** Optional tab strip for edit mode (e.g. presets + settings tabs). */
+  tabs?: Tab[];
+  /** Tab active when edit mode opens (defaults to the first tab). */
+  initialTab?: string;
+  /** Preset rows rendered as action fields keyed "preset:<id>". */
+  presets?: PresetDef[];
 }
 
 export interface ConfigLoadWarning {
@@ -1077,6 +1084,9 @@ export class ConfigManager<T extends object> {
       sessionNote: sources.find((s) => s.scope === "session")?.note ?? "",
       defaults: this.opts.defaults as Record<string, unknown>,
       env: this.opts.env as Record<string, string | EnvParser> | undefined,
+      tabs: this.opts.tabs,
+      initialTab: this.opts.initialTab,
+      presets: this.opts.presets,
       buildFields: (values) => {
         const fields = this.opts.fields(values as T);
         const configDefaults = this.opts.defaults as Record<string, unknown>;

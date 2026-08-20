@@ -37,6 +37,7 @@ import {
   summarizeCoverageByRelevanceForIds,
 } from "./coverage.js";
 import { logAgentStreamError } from "../stream-errors.js";
+import { observationLineTokenCount } from "../../tokens.js";
 
 interface RunDropperArgs {
   model: Model<any>;
@@ -229,7 +230,7 @@ export async function runDropper(
   if (observations.length === 0) return undefined;
 
   const observationTokens = observations.reduce(
-    (sum, observation) => sum + observation.tokenCount,
+    (sum, observation) => sum + observationLineTokenCount(observation),
     0,
   );
   const fullness = observationPoolFullness(observationTokens, budgetTokens);
@@ -422,7 +423,11 @@ export async function runDropper(
           ? "all_filtered"
           : "selected_empty";
   const selectedDropTokens = droppedIds.reduce(
-    (sum, id) => sum + (allowed.get(id)?.tokenCount ?? 0),
+    (sum, id) =>
+      sum +
+      (allowed.get(id)
+        ? observationLineTokenCount(allowed.get(id) as Observation)
+        : 0),
     0,
   );
   debugLog("dropper.result", {

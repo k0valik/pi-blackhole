@@ -43,9 +43,9 @@ describe("V3 dropper reflection coverage helpers", () => {
 
   it("summarizes coverage counts and token totals by relevance", () => {
     const observations = [
-      observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 3 }),
-      observation("bbbbbbbbbbbb", { relevance: "critical", tokenCount: 5 }),
-      observation("cccccccccccc", { relevance: "critical", tokenCount: 7 }),
+      observation("aaaaaaaaaaaa", { relevance: "low" }),
+      observation("bbbbbbbbbbbb", { relevance: "critical" }),
+      observation("cccccccccccc", { relevance: "critical" }),
     ];
     const coverage = reflectionCoverageMap(observations, [
       reflection("rrrrrrrrrrr1", ["bbbbbbbbbbbb", "cccccccccccc"]),
@@ -53,19 +53,19 @@ describe("V3 dropper reflection coverage helpers", () => {
     ]);
 
     expect(summarizeCoverageByRelevance(observations, coverage)).toMatchObject({
-      low: { none: { count: 1, tokens: 3 } },
+      low: { none: { count: 1, tokens: 18 } },
       critical: {
-        partial: { count: 1, tokens: 5 },
-        strong: { count: 1, tokens: 7 },
+        partial: { count: 1, tokens: 19 },
+        strong: { count: 1, tokens: 19 },
       },
     });
   });
 
   it("summarizes coverage transitions by relevance without exposing ids", () => {
     const observations = [
-      observation("aaaaaaaaaaaa", { relevance: "high", tokenCount: 3 }),
-      observation("bbbbbbbbbbbb", { relevance: "critical", tokenCount: 5 }),
-      observation("cccccccccccc", { relevance: "critical", tokenCount: 7 }),
+      observation("aaaaaaaaaaaa", { relevance: "high" }),
+      observation("bbbbbbbbbbbb", { relevance: "critical" }),
+      observation("cccccccccccc", { relevance: "critical" }),
     ];
     const before = reflectionCoverageMap(observations, [
       reflection("rrrrrrrrrrr1", ["bbbbbbbbbbbb"]),
@@ -85,10 +85,10 @@ describe("V3 dropper reflection coverage helpers", () => {
     ).toEqual({
       low: {},
       medium: {},
-      high: { "none->partial": { count: 1, tokens: 3 } },
+      high: { "none->partial": { count: 1, tokens: 18 } },
       critical: {
-        "partial->strong": { count: 1, tokens: 5 },
-        "none->strong": { count: 1, tokens: 7 },
+        "partial->strong": { count: 1, tokens: 19 },
+        "none->strong": { count: 1, tokens: 19 },
       },
     });
   });

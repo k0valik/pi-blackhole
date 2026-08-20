@@ -30,6 +30,7 @@ import {
   resolveWorkerWindow,
 } from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
+import { observationLineTokenCount } from "./tokens.js";
 import {
   AGENT_LOOP_RESERVE,
   measureDropperDue,
@@ -228,7 +229,7 @@ export function anyStageDue(
           // Compute active observation pool tokens (branch + pending in manual mode)
           const folded = foldLedger(entries);
           let poolTokens = folded.activeObservations.reduce(
-            (s: number, o: Observation) => s + (o.tokenCount ?? 0),
+            (s: number, o: Observation) => s + observationLineTokenCount(o),
             0,
           );
           // In manual mode, include pending observation batches
@@ -236,7 +237,8 @@ export function anyStageDue(
             const pendingBatches = pending.observationBatches ?? [];
             for (const batch of pendingBatches) {
               poolTokens += ((batch.data as any)?.observations ?? []).reduce(
-                (s: number, o: any) => s + (o.tokenCount ?? 0),
+                (s: number, o: any) =>
+                  s + observationLineTokenCount(o as Observation),
                 0,
               );
             }
@@ -864,7 +866,7 @@ async function runObserverStage(
         debugLog("observer.records", {
           count: result.observations.length,
           observationTokens: result.observations.reduce(
-            (s: number, o: any) => s + o.tokenCount,
+            (s: number, o: any) => s + observationLineTokenCount(o),
             0,
           ),
           coversUpToId,

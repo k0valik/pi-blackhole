@@ -147,6 +147,8 @@ export async function runReflector(
           id,
           content,
           supportingObservationIds,
+          // Reflections stay content-only: they carry no pool budget, so the
+          // line-based accounting rule (plan-04) applies to observations only.
           tokenCount: estimateStringTokens(content),
         });
         added++;
