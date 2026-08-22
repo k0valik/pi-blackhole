@@ -82,6 +82,11 @@ export interface UnifiedConfig {
    *  "pi-default" — Pi's built-in summarization */
   compactionEngine: "blackhole" | "pi-default";
 
+  /** How Blackhole exposes compaction summaries to the provider.
+   *  "default"    — current one-summary replacement behavior
+   *  "append"     — immutable VCC segments; explicit /blackhole rebases */
+  compactionSummaryMode: "default" | "append";
+
   /**
    * Providers for which blackhole steps aside entirely (no compaction, no
    * observational-memory consolidation) — used for multi-engine coordination
@@ -189,6 +194,8 @@ export const DEFAULTS: UnifiedConfig = {
   // New config surface
   compaction: "auto",
   compactionEngine: "blackhole",
+  compactionSummaryMode: "default",
+
   skipForProviders: [],
   tailBehavior: "minimal",
   midRunCompaction: "off",
@@ -225,6 +232,8 @@ const THINKING_LEVELS: readonly string[] = [
 // String enums for new config surface
 const COMPACTION_VALUES = ["auto", "manual", "off"] as const;
 const COMPACTION_ENGINE_VALUES = ["blackhole", "pi-default"] as const;
+const COMPACTION_SUMMARY_MODE_VALUES = ["default", "append"] as const;
+
 const TAIL_BEHAVIOR_VALUES = ["pi-default", "minimal"] as const;
 const MID_RUN_COMPACTION_VALUES = ["resume", "pause", "off"] as const;
 
@@ -238,6 +247,12 @@ function isCompactionEngine(v: unknown): v is "blackhole" | "pi-default" {
   return (
     typeof v === "string" &&
     (COMPACTION_ENGINE_VALUES as readonly string[]).includes(v)
+  );
+}
+function isCompactionSummaryMode(v: unknown): v is "default" | "append" {
+  return (
+    typeof v === "string" &&
+    (COMPACTION_SUMMARY_MODE_VALUES as readonly string[]).includes(v)
   );
 }
 function isTailBehavior(v: unknown): v is "pi-default" | "minimal" {
@@ -303,6 +318,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (isCompaction(raw.compaction)) c.compaction = raw.compaction;
   if (isCompactionEngine(raw.compactionEngine))
     c.compactionEngine = raw.compactionEngine;
+  if (isCompactionSummaryMode(raw.compactionSummaryMode))
+    c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
   if (isMidRunCompaction(raw.midRunCompaction))
     c.midRunCompaction = raw.midRunCompaction;

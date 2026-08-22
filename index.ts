@@ -9,6 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { scaffoldSettings } from "./src/core/settings";
 import { registerBeforeCompactHook } from "./src/hooks/before-compact";
+import { registerCompactionContextHook } from "./src/hooks/compaction-context.js";
 import { registerPiVccCommand } from "./src/commands/pi-vcc";
 import { registerMemoryCommand } from "./src/commands/memory";
 import { registerVccRecallCommand } from "./src/commands/vcc-recall";
@@ -23,7 +24,8 @@ export default async (pi: ExtensionAPI) => {
   // Resolve the host's AgentSession identity before this factory returns. Local
   // package development can otherwise patch a duplicate devDependency module.
   // The adapter is reload-idempotent and fails closed on unknown Pi internals.
-  await installHostInlineCompactionAdapter();
+  const inlineCompactionAdapterStatus =
+    await installHostInlineCompactionAdapter();
   // ── Bridge: capture custom provider stream functions for jiti-loaded agents ──
   // pi-blackhole's consolidation agents are loaded via jiti with moduleCache: false,
   // which creates a separate pi-ai instance whose apiProviderRegistry lacks custom
@@ -45,6 +47,7 @@ export default async (pi: ExtensionAPI) => {
   scaffoldSettings();
 
   const omRuntime = new Runtime();
+  omRuntime.inlineCompactionAdapterStatus = inlineCompactionAdapterStatus;
 
   // Observational memory: background consolidation pipeline
   registerConsolidationTrigger(pi, omRuntime); // agent_start + turn_end → observer/reflector/dropper
@@ -52,6 +55,7 @@ export default async (pi: ExtensionAPI) => {
 
   // Pi-vcc: compaction + om injection
   registerBeforeCompactHook(pi, omRuntime); // session_before_compact → pi-vcc + om content
+  registerCompactionContextHook(pi); // context → immutable append segment projection
 
   // Commands
   registerPiVccCommand(pi, omRuntime); // /pi-vcc (needs runtime for noAutoCompact flush)

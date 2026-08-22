@@ -28,3 +28,9 @@ tmp/
 .pi/skills/*
 !.pi/skills/lockstep/
 AGENTS.md
+
+# Hindsight runtime state
+.pi/hindsight/
+
+# Local work docs
+work_docs/

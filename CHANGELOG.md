@@ -14,8 +14,13 @@
 
 - **All env overrides are visible in the config modal.** `PI_BLACKHOLE_MID_RUN_COMPACTION`, `PI_BLACKHOLE_COMPACTION`, and `PI_BLACKHOLE_COMPACTION_ENGINE` (alongside existing overrides like `PI_BLACKHOLE_SKIP_PROVIDERS` and `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS`) now appear in the env tab of the config modal with their current effective values, so you can see at a glance what the environment is contributing.
 
+- **Opt-in append compaction (`compactionSummaryMode`).** New config key (`default` | `append`; `default` is the default) plus `PI_BLACKHOLE_COMPACTION_SUMMARY_MODE` override. In append mode each automatic Blackhole compaction appends one immutable provider-visible segment (`S1 | S2 | …`) while every stored summary stays a complete fallback; `/blackhole` rebases the active chain into one clean segment; a legacy v1 summary enters through one marked rebase. A new `context` hook projects segments before each model call and fails closed to the fallback on any malformed state. See `docs/APPEND_COMPACTION.md`.
+
 ### Changed
 
+- **Auto-compaction now follows Pi's live context usage.** All `turn_end`, `agent_end`, and deferred rechecks use `ctx.getContextUsage()` instead of the undercounting source-entry estimate; estimated tokens remain the fallback only while Pi reports unknown usage. Effective trigger is capped at 65% of the active model window while preserving lower explicit `compactAfterTokens` values.
+- **Minimal tails honor later Pi split-turn boundaries.** An oversized current turn can now be cut at Pi's safe assistant/user boundary instead of being retained whole after compaction.
+- **Transparent compaction failures recover.** Resume-mode failures use bounded `1s`–`30s` exponential backoff instead of a permanent session latch. Settled `agent_end` compaction remains available during backoff. Unsupported Pi adapters warn once, disable inline attempts, and retain settled fallback.
 - **Config modal migrated to the canonical `pi-base` config-rework surface.** The modal now uses the upstream scope-selector and config-flow, replacing the legacy `openSettingsModal` path. The layer precedence is: global → project → env → session, matching pi-utils behavior.
 
 ### Removed

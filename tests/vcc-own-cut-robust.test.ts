@@ -279,7 +279,7 @@ describe("buildOwnCut", () => {
       }
     });
 
-    it("tailBehavior minimal ignores Pi's cut even if provided", () => {
+    it("tailBehavior minimal ignores an earlier Pi cut", () => {
       const entries = [
         msg("1", "user"),
         msg("2", "assistant"),
@@ -287,10 +287,28 @@ describe("buildOwnCut", () => {
         msg("4", "assistant"),
         msg("5", "user"),
       ];
-      // Pi wants to keep from 3, but mode is minimal
+      // Pi wants to keep from 3, but minimal's last-user cut at 5 is later.
       const res = buildOwnCut(entries, "3", "minimal");
       expect(res.ok).toBe(true);
       if (res.ok) expect(res.firstKeptEntryId).toBe("5");
+    });
+
+    it("tailBehavior minimal uses Pi's later split-turn cut", () => {
+      const entries = [
+        msg("1", "user"),
+        msg("2", "assistant"),
+        msg("3", "user"),
+        msg("4", "assistant"),
+        msg("5", "toolResult"),
+        msg("6", "assistant"),
+      ];
+      // Minimal would keep the whole turn from 3. Pi safely split it at 5.
+      const res = buildOwnCut(entries, "5", "minimal");
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.firstKeptEntryId).toBe("5");
+        expect(res.messages).toHaveLength(4);
+      }
     });
 
     it("pi-default behavior with invalid resolvedId falls through", () => {

@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerCompactionTrigger } from "../src/om/compaction-trigger.js";
+import { InlineCompactionUnavailableError } from "../src/om/inline-compaction.js";
 import {
   compactionEntry,
   textCustomMessage,
@@ -95,7 +96,9 @@ function captureHandler(
     },
     compactInFlight: args.compactInFlight ?? false,
     autoCompactionController: null as AbortController | null,
-    midRunCompactionSuspended: false,
+    midRunCompactionRetry: { failures: 0, retryAfter: 0 },
+    inlineCompactionAdapterStatus: { supported: true },
+    inlineCompactionWarningEmitted: false,
   };
   registerCompactionTrigger(pi as any, runtime as any, inlineCompact);
   if (!agentEndHandler) throw new Error("agent_end handler was not registered");
@@ -151,6 +154,11 @@ function fakeCtx(
       getBranch,
       getSessionId: vi.fn(() => sessionId),
     },
+    getContextUsage: vi.fn(() => ({
+      tokens: null,
+      percent: null,
+      contextWindow: 200_000,
+    })),
     hasUI: true,
     ui: { notify: vi.fn() },
     isIdle: vi.fn(() => true),
@@ -195,6 +203,69 @@ describe("V3 compaction trigger (blackhole)", () => {
       "Observational memory: compaction threshold reached (~3 tokens); triggering compaction",
       "info",
     );
+  });
+
+  it("uses Pi context usage instead of the lower raw source estimate", async () => {
+    const { handler } = captureHandler({ compactAfterTokens: 100 });
+    const ctx = fakeCtx([belowBranch], {
+      getContextUsage: vi.fn(() => ({
+        tokens: 120,
+        percent: 60,
+        contextWindow: 200,
+      })),
+    });
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps an oversized configured threshold at 65% of the context window", async () => {
+    const { handler } = captureHandler({ compactAfterTokens: 217_600 });
+    const ctx = fakeCtx([belowBranch], {
+      getContextUsage: vi.fn(() => ({
+        tokens: 176_800,
+        percent: 65,
+        contextWindow: 272_000,
+      })),
+    });
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a lower configured threshold", async () => {
+    const { handler } = captureHandler({ compactAfterTokens: 100 });
+    const ctx = fakeCtx([belowBranch], {
+      getContextUsage: vi.fn(() => ({
+        tokens: 99,
+        contextWindow: 1_000,
+      })),
+    });
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).not.toHaveBeenCalled();
+  });
+
+  it("rechecks Pi context usage after deferral", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 100 });
+    const getContextUsage = vi
+      .fn()
+      .mockReturnValueOnce({ tokens: 120, contextWindow: 200 })
+      .mockReturnValueOnce({ tokens: 10, contextWindow: 200 });
+    const ctx = fakeCtx([belowBranch], { getContextUsage });
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(getContextUsage).toHaveBeenCalledTimes(2);
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(runtime.compactInFlight).toBe(false);
   });
 
   it("compaction:auto + compactionEngine:pi-default skips trigger (pi-default means Pi handles timing too)", async () => {
@@ -544,7 +615,9 @@ describe("mid-run compaction trigger (turn_end)", () => {
       compactAfterTokens: 3,
       midRunCompaction: "resume",
     });
-    const ctx = fakeCtx([dueBranch]);
+    const ctx = fakeCtx([belowBranch], {
+      getContextUsage: vi.fn(() => ({ tokens: 3, contextWindow: 100 })),
+    });
 
     const pending = turnHandler(turnEnd(), ctx);
 
@@ -636,7 +709,7 @@ describe("mid-run compaction trigger (turn_end)", () => {
     expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
 
-  it("M6: inline failure clears in-flight state and suspends retries without aborting", async () => {
+  it("M6: inline failure clears in-flight state and starts bounded backoff without aborting", async () => {
     const inlineCompact = vi.fn(async () => {
       throw new Error("boom");
     });
@@ -652,7 +725,8 @@ describe("mid-run compaction trigger (turn_end)", () => {
     await turnHandler(turnEnd(), ctx);
 
     expect(runtime.compactInFlight).toBe(false);
-    expect(runtime.midRunCompactionSuspended).toBe(true);
+    expect(runtime.midRunCompactionRetry.failures).toBe(1);
+    expect(runtime.midRunCompactionRetry.retryAfter).toBe(Date.now() + 1_000);
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
@@ -791,7 +865,15 @@ describe("mid-run compaction trigger (turn_end)", () => {
 });
 
 describe("mid-run compaction cancellation resilience", () => {
-  it("M15: cancelled inline compaction suspends retries without injecting continuation", async () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("M15: cancelled inline compaction backs off, then retries without injecting continuation", async () => {
     const inlineCompact = vi.fn(async () => {
       throw new Error("Compaction cancelled");
     });
@@ -807,14 +889,20 @@ describe("mid-run compaction cancellation resilience", () => {
     await turnHandler(turnEnd(), ctx);
 
     expect(runtime.compactInFlight).toBe(false);
-    expect(runtime.midRunCompactionSuspended).toBe(true);
+    expect(runtime.midRunCompactionRetry.failures).toBe(1);
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     await turnHandler(turnEnd(), ctx);
     expect(inlineCompact).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1_000);
+    await turnHandler(turnEnd(), ctx);
+    expect(inlineCompact).toHaveBeenCalledTimes(2);
+    expect(runtime.midRunCompactionRetry.failures).toBe(2);
+    expect(runtime.midRunCompactionRetry.retryAfter).toBe(Date.now() + 2_000);
   });
 
-  it("M15a: agent_end does not immediately retry a failed mid-run compaction", async () => {
+  it("M15a: agent_end remains the settled fallback during inline backoff", async () => {
     const inlineCompact = vi.fn(async () => {
       throw new Error("Compaction cancelled");
     });
@@ -828,16 +916,16 @@ describe("mid-run compaction cancellation resilience", () => {
     const ctx = fakeCtx([dueBranch, dueBranch]);
 
     await turnHandler(turnEnd(), ctx);
-    expect(runtime.midRunCompactionSuspended).toBe(true);
+    expect(runtime.midRunCompactionRetry.failures).toBe(1);
 
     handler(agentEnd(), ctx);
+    await flushAll();
 
     expect(inlineCompact).toHaveBeenCalledTimes(1);
-    expect(ctx.compact).not.toHaveBeenCalled();
-    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
 
-  it("M16: suspension clears once pressure drops below threshold", async () => {
+  it("M16: retry state clears once pressure drops below threshold", async () => {
     const inlineCompact = vi
       .fn()
       .mockRejectedValueOnce(new Error("Compaction cancelled"))
@@ -859,6 +947,62 @@ describe("mid-run compaction cancellation resilience", () => {
     await turnHandler(turnEnd(), ctx);
     await turnHandler(turnEnd(), ctx);
     expect(inlineCompact).toHaveBeenCalledTimes(2);
+  });
+
+  it("M16a: backoff caps at 30 seconds", async () => {
+    const inlineCompact = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const { turnHandler, runtime } = captureHandler(
+      {
+        compactAfterTokens: 3,
+        midRunCompaction: "resume",
+      },
+      inlineCompact,
+    );
+    const ctx = fakeCtx([dueBranch]);
+
+    for (let failure = 1; failure <= 7; failure++) {
+      await turnHandler(turnEnd(), ctx);
+      const expectedDelay = Math.min(30_000, 1_000 * 2 ** (failure - 1));
+      expect(runtime.midRunCompactionRetry.failures).toBe(failure);
+      expect(runtime.midRunCompactionRetry.retryAfter).toBe(
+        Date.now() + expectedDelay,
+      );
+      vi.advanceTimersByTime(expectedDelay);
+    }
+  });
+
+  it("M16b: unsupported inline adapter warns once and leaves agent_end fallback active", async () => {
+    const inlineCompact = vi.fn(async () => {
+      throw new InlineCompactionUnavailableError("unsupported host");
+    });
+    const { turnHandler, handler, runtime } = captureHandler(
+      {
+        compactAfterTokens: 3,
+        midRunCompaction: "resume",
+      },
+      inlineCompact,
+    );
+    const ctx = fakeCtx([dueBranch]);
+
+    await turnHandler(turnEnd(), ctx);
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).toHaveBeenCalledTimes(1);
+    expect(runtime.inlineCompactionAdapterStatus).toEqual({
+      supported: false,
+      reason: "unsupported host",
+    });
+    expect(
+      ctx.ui.notify.mock.calls.filter(([message]) =>
+        String(message).includes("using settled compaction fallback"),
+      ),
+    ).toHaveLength(1);
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
 
   it("M17: pause mode does not resume on cancellation", () => {

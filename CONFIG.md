@@ -23,7 +23,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "compactionEngine": "blackhole", // "blackhole" | "pi-default"
   "tailBehavior": "minimal",   // "pi-default" | "minimal"
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
-  "compactAfterTokens": 81000,    // Token threshold for auto-compaction
+  "compactAfterTokens": 81000,    // Max live-context threshold for auto-compaction
 
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
@@ -109,7 +109,7 @@ Controls how much of the recent transcript stays *visible* after compaction. Onl
 | Value | Behavior |
 |-------|----------|
 | `"pi-default"` | Use Pi's `firstKeptEntryId` — respects Pi's `keepRecentTokens` (~20k tokens kept). Messages before Pi's cut are compiled into the summary and removed from view. |
-| `"minimal"` | Keep only the last user message. Everything before gets compiled and removed. Same as the original pi-vcc behavior (default for both auto-triggered and manual `/blackhole`). |
+| `"minimal"` | Keep only the last user message, unless Pi provides a later safe split-turn boundary for an oversized current turn. Everything before the chosen boundary gets compiled and removed (default for both auto-triggered and manual `/blackhole`). |
 
 **Visual comparison:**
 
@@ -158,11 +158,11 @@ Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
 `"resume"` reuses Pi's native summary, `session_before_compact`, session-entry, and context-rebuild pipeline. Blackhole's runtime adapter suppresses only the compaction method's initial internal quiesce (`abort`, plus disconnect on older Pi), then refreshes the low-level loop from the compacted `agent.state.messages` before another provider request. Completed tools stay paired, the active run signal is not aborted, background agents do not receive a false interrupt, and nested runners keep awaiting their original prompt promise.
 
-**Compatibility is fail-closed.** The adapter recognizes the known Pi 0.81 legacy and Pi 0.84 connected-listener compact shapes. If Pi internals drift, `"resume"` refuses the mid-run attempt, leaves the current run alive, reports the incompatibility, and suspends retries at that pressure level. It never falls back to the old abort + `blackhole-resume` path.
+**Compatibility is fail-closed.** The adapter recognizes the known Pi 0.81 legacy and Pi 0.84 connected-listener compact shapes. If Pi internals drift, `"resume"` refuses the mid-run attempt, leaves the current run alive, warns once, disables further inline attempts, and retains settled `agent_end` compaction. It never falls back to the old abort + `blackhole-resume` path.
 
 `"pause"` is intentionally different: it calls public `ctx.compact()`, which aborts the active run by design. That abort may propagate to extensions which treat the run signal as user cancellation, so use `"resume"` for transparent/subagent workflows.
 
-**Re-trigger safety:** after a successful compaction, accumulated tokens are counted from the fresh compaction entry. Failed or cancelled attempts are suspended until pressure drops below the threshold.
+**Re-trigger safety:** successful compaction or pressure relief resets inline retry state. Failed or cancelled attempts retry at later `turn_end` boundaries after bounded exponential backoff (`1s`, `2s`, `4s`, …, capped at `30s`). Inline backoff never blocks settled `agent_end` compaction.
 
 ```jsonc
 // Default: only evaluate when the run ends
@@ -177,7 +177,7 @@ Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
 ### `compactAfterTokens`
 
-Token threshold for auto-compaction. When `compaction: "auto"` and accumulated tokens since the last compaction exceed this threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
+Maximum token threshold for auto-compaction. Blackhole reads Pi's live `ctx.getContextUsage()` metric—the same context amount used by Pi's footer—and falls back to estimated source tokens only while Pi reports usage as unknown (for example, immediately after compaction). Effective threshold is `min(compactAfterTokens, floor(contextWindow * 0.65))` when the active model window is known. This keeps one tool-cycle headroom even when a configured absolute threshold is too high. The same threshold applies mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, Blackhole returns before checking tokens.
 
 | Type | Default |
 |------|---------|
@@ -530,3 +530,13 @@ Float field (must be in `(0, 1]`):
 - **Config file**: `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`
 - **TUI overlay**: `/blackhole settings` (alias: `/blackhole configure`) — opens an interactive overlay with ↑↓ navigation, Enter to toggle, Ctrl+S to save
 - **CLI subcommands**: `/blackhole om-off` / `/blackhole om-on` — toggle memory without editing the file
+
+## Append-only compaction
+
+Set `compactionSummaryMode` to `"append"` to keep automatic Blackhole
+compaction summaries as immutable provider-visible segments. Explicit
+`/blackhole` folds the active chain into one clean segment and starts a new
+chain. The default value is `"default"`.
+
+See [`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md) for
+the fallback, branch, observational-memory, and cache-measurement rules.

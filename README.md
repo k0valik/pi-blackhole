@@ -290,7 +290,7 @@ Everything else has sensible defaults.
 | *(per model)* `contextWindow` | *(inherited from Pi)* | Override context window for this model. If unset, inherits from Pi's model registry. When set, the OM pipeline checks if the estimated input fits before calling the model — if not, the next fallback is tried. |
 | `observeAfterTokens` | `15000` | Min accumulated tokens before observer runs |
 | `reflectAfterTokens` | `25000` | Min accumulated tokens before reflector + dropper run |
-| `compactAfterTokens` | `81000` | Auto-compaction threshold (when `compaction: "auto"`) |
+| `compactAfterTokens` | `81000` | Maximum auto-compaction threshold; effective trigger is the lower of this value and 65% of the active model window |
 | `observerChunkMaxTokens` | `40000` | Max observer input per run (newest-first) |
 | `observerPreambleMaxTokens` | `0` (auto) | Preamble cap for observer in `compaction: "manual"` mode (auto = 30% of chunk) |
 | `observationsPoolMaxTokens` | `20000` | Max active observation pool before dropper prunes |
@@ -360,7 +360,7 @@ These are the built-in defaults. If you reset your config, these are what you ge
 }
 ```
 
-**What to tune first:** `compactAfterTokens` should be significantly below your model's total context window — aim for ~60-70%. If the agent loses context before compaction fires, lower it. If compaction fires too often and breaks flow, raise it. The other thresholds scale proportionally.
+**What to tune first:** `compactAfterTokens` is an absolute maximum. Blackhole also caps the effective trigger at 65% of the active model window using Pi's live context metric, with estimated source tokens only as the temporary fallback when usage is unknown. Lower it for earlier compaction; raising it above the 65% cap has no effect. The other thresholds scale proportionally.
 
 ### Tip: comments in config
 
@@ -546,3 +546,13 @@ What blackhole adds and reworks on top:
 ## License
 
 MIT
+
+## Append-only compaction
+
+Set `compactionSummaryMode` to `"append"` to keep automatic Blackhole
+compaction summaries as immutable provider-visible segments. Explicit
+`/blackhole` folds the active chain into one clean segment and starts a new
+chain. The default value is `"default"`.
+
+See [`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md) for
+the fallback, branch, observational-memory, and cache-measurement rules.

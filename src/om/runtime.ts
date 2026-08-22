@@ -27,6 +27,7 @@ import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthResult } from "@earendil-works/pi-ai";
+import type { InlineCompactionAdapterStatus } from "./inline-compaction.js";
 
 export type ResolveResult =
   | {
@@ -146,10 +147,13 @@ export class Runtime {
    * Set when handleAgentEnd schedules a wait; cleared on abort, success, or terminal bail.
    * agent_start handlers read this to abort the pending wait when a new turn starts. */
   autoCompactionController: AbortController | null = null;
-  /** Mid-run (turn_end) compaction is suspended after a failed/cancelled attempt
-   * at the current pressure level. Cleared when accumulated tokens drop below
-   * the threshold again (i.e. a compaction ran). Prevents per-turn retry thrash. */
-  midRunCompactionSuspended = false;
+  /** Bounded retry state for transparent turn-boundary compaction. */
+  midRunCompactionRetry = { failures: 0, retryAfter: 0 };
+  /** Host adapter capability captured at extension startup. */
+  inlineCompactionAdapterStatus: InlineCompactionAdapterStatus = {
+    supported: true,
+  };
+  inlineCompactionWarningEmitted = false;
   resolveFailureNotified = false;
   lastObserverError: string | undefined;
   lastReflectorError: string | undefined;

@@ -1,8 +1,16 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
-import { writeFileSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
+import {
+  writeFileSync,
+  readFileSync,
+  unlinkSync,
+  mkdirSync,
+  existsSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createConfigureOverlay } from "../src/om/configure-overlay.js";
+import { loadUnifiedConfig } from "../src/core/unified-config.js";
 import { setKittyProtocolActive } from "@earendil-works/pi-tui";
 
 const testDir = join(tmpdir(), "pi-blackhole-overlay-test");
@@ -126,15 +134,15 @@ describe("createConfigureOverlay", () => {
   });
 
   test("enter toggles boolean field", () => {
-    // First navigate to memory field (index 5 in FIELDS, type boolean)
+    // First navigate to memory field (index 6 in FIELDS, type boolean)
     const overlay = createConfigureOverlay(
       configPath,
       mockTheme,
       makeTui(),
       () => {},
     );
-    // Navigate down to memory field (5th field, 0-indexed)
-    for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[B");
+    // Navigate to memory field (6th field, 0-indexed)
+    for (let i = 0; i < 6; i++) overlay.handleInput("\x1b[B");
     // Toggle
     overlay.handleInput("\r");
     const lines = overlay.render(80).join("\n");
@@ -152,7 +160,8 @@ describe("createConfigureOverlay", () => {
     // Default selection is first field (compaction mode), should show its helpText
     const lines = overlay.render(80).join("\n");
     expect(lines).toContain("auto=trigger on threshold");
-    // Navigate to tailBehavior field (index 2)
+    // Navigate to tailBehavior field (index 3)
+    overlay.handleInput("\x1b[B");
     overlay.handleInput("\x1b[B");
     overlay.handleInput("\x1b[B");
     const lines2 = overlay.render(80).join("\n");
@@ -272,8 +281,8 @@ describe("createConfigureOverlay", () => {
         makeTui(),
         () => {},
       );
-      // Navigate down to memory field (index 5, boolean, initially on)
-      for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[1;1B");
+      // Navigate down to memory field (index 6, boolean, initially on)
+      for (let i = 0; i < 6; i++) overlay.handleInput("\x1b[1;1B");
       // Verify it's showing "on" before toggle
       const before = overlay.render(80).join("\n");
       expect(before).toContain("Observational memory");
@@ -292,8 +301,8 @@ describe("createConfigureOverlay", () => {
           makeTui(),
           done,
         );
-        // Navigate to compactAfterTokens (index 4, number field)
-        for (let i = 0; i < 4; i++) overlay.handleInput("\x1b[1;1B");
+        // Navigate to compactAfterTokens (index 5, number field)
+        for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[1;1B");
         overlay.handleInput("\x1b[13u"); // Kitty enter → start editing
         const origLength = overlay.render(80).join("\n");
         overlay.handleInput("\x1b[127u"); // Kitty backspace
@@ -310,8 +319,8 @@ describe("createConfigureOverlay", () => {
         makeTui(),
         () => {},
       );
-      // Navigate to compactAfterTokens (index 4, number field)
-      for (let i = 0; i < 4; i++) overlay.handleInput("\x1b[1;1B");
+      // Navigate to compactAfterTokens (index 5, number field)
+      for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[1;1B");
       overlay.handleInput("\x1b[13u"); // Kitty enter → start editing
       overlay.handleInput("\x1b[127u"); // backspace to clear
       overlay.handleInput("\x1b[48u"); // Kitty '0'
@@ -328,8 +337,8 @@ describe("createConfigureOverlay", () => {
         makeTui(),
         () => {},
       );
-      // Navigate to compactAfterTokens (index 4, number field)
-      for (let i = 0; i < 4; i++) overlay.handleInput("\x1b[1;1B");
+      // Navigate to compactAfterTokens (index 5, number field)
+      for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[1;1B");
       overlay.handleInput("\x1b[13u"); // Kitty enter → start editing
       const editingOutput = overlay.render(80).join("\n");
       overlay.handleInput("\x1b[9u"); // Kitty tab → exit edit
@@ -345,8 +354,8 @@ describe("createConfigureOverlay", () => {
         makeTui(),
         () => {},
       );
-      // Navigate to memory field (index 5, boolean, initially on)
-      for (let i = 0; i < 5; i++) overlay.handleInput("\x1b[1;1B");
+      // Navigate to memory field (index 6, boolean, initially on)
+      for (let i = 0; i < 6; i++) overlay.handleInput("\x1b[1;1B");
       const before = overlay.render(80).join("\n");
       overlay.handleInput("\x1b[32u"); // Kitty space
       const after = overlay.render(80).join("\n");
@@ -367,4 +376,77 @@ describe("createConfigureOverlay", () => {
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.some((l) => l.includes("Blackhole Configuration"))).toBe(true);
   });
+
+  test("compactionSummaryMode round-trips through the overlay: load append, flip to default, save, reload", () =>
+    new Promise<void>((done) => {
+      // Isolated config dir so this test drives the real loader path.
+      const roundTripDir = join(
+        tmpdir(),
+        `pi-blackhole-overlay-rt-${Date.now()}`,
+      );
+      const roundTripPath = join(
+        roundTripDir,
+        "pi-blackhole",
+        "pi-blackhole-config.json",
+      );
+      mkdirSync(join(roundTripDir, "pi-blackhole"), { recursive: true });
+      writeFileSync(
+        roundTripPath,
+        JSON.stringify(
+          {
+            compaction: "auto",
+            compactionEngine: "blackhole",
+            compactionSummaryMode: "append",
+            tailBehavior: "pi-default",
+            memory: true,
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+
+      const cleanup = () => {
+        delete process.env.PI_CODING_AGENT_DIR;
+        rmSync(roundTripDir, { recursive: true, force: true });
+      };
+
+      const overlay = createConfigureOverlay(
+        roundTripPath,
+        mockTheme,
+        makeTui(),
+        (result) => {
+          try {
+            expect(result?.saved).toBe(true);
+            // The file on disk now carries default.
+            const persisted = JSON.parse(readFileSync(roundTripPath, "utf8"));
+            expect(persisted.compactionSummaryMode).toBe("default");
+            // The real unified-config loader agrees.
+            process.env.PI_CODING_AGENT_DIR = roundTripDir;
+            expect(loadUnifiedConfig(roundTripDir).compactionSummaryMode).toBe(
+              "default",
+            );
+            // Reopening the overlay shows the persisted value, not the old one.
+            const reopened = createConfigureOverlay(
+              roundTripPath,
+              mockTheme,
+              makeTui(),
+              () => {},
+            );
+            expect(reopened.render(80).join("\n")).toContain(
+              "Summary history:default",
+            );
+          } finally {
+            cleanup();
+          }
+          done();
+        },
+      );
+      // Saved append value loads into the field.
+      expect(overlay.render(80).join("\n")).toContain("append");
+      // Navigate to the Summary history field (index 2) and cycle it.
+      overlay.handleInput("\x1b[B");
+      overlay.handleInput("\x1b[B");
+      overlay.handleInput("\r"); // enum cycles append → default
+      overlay.handleInput("\x13"); // ctrl+s saves and closes
+    }));
 });

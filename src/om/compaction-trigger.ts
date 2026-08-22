@@ -5,6 +5,7 @@ import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
 import {
   compactInlineAtTurnBoundary,
+  InlineCompactionUnavailableError,
   type InlineCompaction,
 } from "./inline-compaction.js";
 
@@ -38,6 +39,71 @@ function notifySafely(
   }
 }
 
+const MAX_CONTEXT_PRESSURE_RATIO = 0.65;
+
+type CompactionPressure = {
+  tokens: number;
+  basis: "provider_context" | "raw_source";
+  contextWindow?: number;
+};
+
+/** Use Pi's live context metric; retain the old source estimate only while Pi reports unknown. */
+function getCompactionPressure(ctx: any, entries: Entry[]): CompactionPressure {
+  const usage =
+    typeof ctx.getContextUsage === "function"
+      ? ctx.getContextUsage()
+      : undefined;
+  const reportedWindow = usage?.contextWindow ?? ctx.model?.contextWindow;
+  const contextWindow =
+    typeof reportedWindow === "number" &&
+    Number.isFinite(reportedWindow) &&
+    reportedWindow > 0
+      ? reportedWindow
+      : undefined;
+  if (
+    typeof usage?.tokens === "number" &&
+    Number.isFinite(usage.tokens) &&
+    usage.tokens >= 0
+  ) {
+    return {
+      tokens: usage.tokens,
+      basis: "provider_context",
+      contextWindow,
+    };
+  }
+  return {
+    tokens: rawTokensSinceLastCompaction(entries),
+    basis: "raw_source",
+    contextWindow,
+  };
+}
+
+function resolveCompactionThreshold(
+  configured: number,
+  contextWindow: number | undefined,
+): number {
+  return contextWindow === undefined
+    ? configured
+    : Math.min(
+        configured,
+        Math.max(1, Math.floor(contextWindow * MAX_CONTEXT_PRESSURE_RATIO)),
+      );
+}
+
+function resetMidRunRetry(runtime: Runtime): void {
+  runtime.midRunCompactionRetry = { failures: 0, retryAfter: 0 };
+}
+
+function recordMidRunFailure(runtime: Runtime): number {
+  const failures = runtime.midRunCompactionRetry.failures + 1;
+  const delay = Math.min(30_000, 1_000 * 2 ** (failures - 1));
+  runtime.midRunCompactionRetry = {
+    failures,
+    retryAfter: Date.now() + delay,
+  };
+  return delay;
+}
+
 /**
  * Shared config gating for auto-compaction (agent_end and turn_end paths).
  * Returns null when compaction may proceed, or a skip reason string.
@@ -68,9 +134,25 @@ export function registerCompactionTrigger(
   runtime: Runtime,
   inlineCompact: InlineCompaction = compactInlineAtTurnBoundary,
 ): void {
-  pi.on("agent_start", () => {
+  pi.on("agent_start", (_event: unknown, ctx: any) => {
     // Reset the info gate — allow one info notification during the new turn.
     runtime.resetInfoGate();
+
+    if (
+      runtime.inlineCompactionAdapterStatus.supported === false &&
+      runtime.inlineCompactionWarningEmitted === false
+    ) {
+      runtime.ensureConfig(ctx.cwd, (msg) => ctx.ui?.notify?.(msg, "warning"));
+      if (runtime.config.midRunCompaction === "resume" && ctx.hasUI) {
+        runtime.inlineCompactionWarningEmitted = true;
+        notifySafely(
+          true,
+          ctx.ui,
+          `${runtime.inlineCompactionAdapterStatus.reason ?? "Blackhole inline compaction is unavailable"}; using settled compaction fallback`,
+          "warning",
+        );
+      }
+    }
 
     // A new turn is starting — abort any pending auto-compaction wait.
     // The new turn's own agent_end will re-evaluate the threshold and
@@ -134,20 +216,37 @@ async function handleTurnEnd(
     return;
   }
 
-  const entries = ctx.sessionManager.getBranch() as Entry[];
-  const tokens = rawTokensSinceLastCompaction(entries);
-  if (tokens < runtime.config.compactAfterTokens) {
-    // Pressure relieved (a compaction ran) — lift any failure suspension.
-    runtime.midRunCompactionSuspended = false;
+  if (
+    mode === "resume" &&
+    runtime.inlineCompactionAdapterStatus.supported === false
+  ) {
+    dbg("compaction_trigger.turn_end.skip", {
+      reason: "inline_adapter_unsupported",
+    });
     return;
   }
-  if (runtime.midRunCompactionSuspended) {
-    // A previous mid-run attempt failed/cancelled at this pressure level.
-    // Re-triggering every turn would retry the same failure and spam the user.
-    // Stay suspended until a compaction lowers pressure below the threshold.
+
+  const entries = ctx.sessionManager.getBranch() as Entry[];
+  const pressure = getCompactionPressure(ctx, entries);
+  const { tokens } = pressure;
+  const threshold = resolveCompactionThreshold(
+    runtime.config.compactAfterTokens,
+    pressure.contextWindow,
+  );
+  if (tokens < threshold) {
+    resetMidRunRetry(runtime);
+    return;
+  }
+  if (
+    mode === "resume" &&
+    Date.now() < runtime.midRunCompactionRetry.retryAfter
+  ) {
     dbg("compaction_trigger.turn_end.skip", {
-      reason: "suspended_after_failure",
+      reason: "inline_retry_backoff",
       tokens,
+      basis: pressure.basis,
+      failures: runtime.midRunCompactionRetry.failures,
+      retryAfter: runtime.midRunCompactionRetry.retryAfter,
     });
     return;
   }
@@ -156,7 +255,9 @@ async function handleTurnEnd(
   const ui = ctx.ui;
   dbg("compaction_trigger.turn_end.threshold_reached", {
     tokens,
-    threshold: runtime.config.compactAfterTokens,
+    basis: pressure.basis,
+    threshold,
+    configuredThreshold: runtime.config.compactAfterTokens,
     mode,
   });
   runtime.tryEmitInfo(
@@ -170,6 +271,7 @@ async function handleTurnEnd(
   if (mode === "resume") {
     try {
       await inlineCompact(ctx.sessionManager);
+      resetMidRunRetry(runtime);
       dbg("compaction_trigger.turn_end.inline_complete");
       runtime.tryEmitInfo(
         hasUI,
@@ -178,16 +280,37 @@ async function handleTurnEnd(
       );
     } catch (error) {
       if (isStaleExtensionContextError(error)) throw error;
-      runtime.midRunCompactionSuspended = true;
       const message = getErrorMessage(error);
-      dbg("compaction_trigger.turn_end.inline_error", { message });
-      if (message !== "Compaction cancelled") {
-        notifySafely(
-          hasUI,
-          ui,
-          `Observational memory: transparent mid-run compaction failed: ${message}`,
-          "error",
-        );
+      if (error instanceof InlineCompactionUnavailableError) {
+        runtime.inlineCompactionAdapterStatus = {
+          supported: false,
+          reason: message,
+        };
+        dbg("compaction_trigger.turn_end.inline_unavailable", { message });
+        if (runtime.inlineCompactionWarningEmitted === false) {
+          runtime.inlineCompactionWarningEmitted = true;
+          notifySafely(
+            hasUI,
+            ui,
+            `${message}; using settled compaction fallback`,
+            "warning",
+          );
+        }
+      } else {
+        const retryDelay = recordMidRunFailure(runtime);
+        dbg("compaction_trigger.turn_end.inline_error", {
+          message,
+          failures: runtime.midRunCompactionRetry.failures,
+          retryAfter: runtime.midRunCompactionRetry.retryAfter,
+        });
+        if (message !== "Compaction cancelled") {
+          notifySafely(
+            hasUI,
+            ui,
+            `Observational memory: transparent mid-run compaction failed: ${message}; retrying in ${Math.ceil(retryDelay / 1000)}s`,
+            "error",
+          );
+        }
       }
     } finally {
       runtime.compactInFlight = false;
@@ -213,7 +336,6 @@ async function handleTurnEnd(
     },
     onError: (error: { message: string }) => {
       runtime.compactInFlight = false;
-      runtime.midRunCompactionSuspended = true;
       const message = error?.message ?? String(error);
       dbg("compaction_trigger.turn_end.pause_error", { message });
       if (message !== "Compaction cancelled") {
@@ -287,24 +409,26 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       entries.length > 0 ? entries[entries.length - 1].type : "none",
   });
 
-  const tokens = rawTokensSinceLastCompaction(entries);
+  const pressure = getCompactionPressure(ctx, entries);
+  const { tokens } = pressure;
+  const threshold = resolveCompactionThreshold(
+    runtime.config.compactAfterTokens,
+    pressure.contextWindow,
+  );
   dbg("compaction_trigger.tokens", {
     tokens,
-    compactAfterTokens: runtime.config.compactAfterTokens,
+    basis: pressure.basis,
+    threshold,
+    configuredThreshold: runtime.config.compactAfterTokens,
     branchLength: entries.length,
   });
-  if (tokens < runtime.config.compactAfterTokens) {
+  if (tokens < threshold) {
+    resetMidRunRetry(runtime);
     dbg("compaction_trigger.skip", {
       reason: "below_threshold",
       tokens,
-      threshold: runtime.config.compactAfterTokens,
-    });
-    return;
-  }
-  if (runtime.midRunCompactionSuspended) {
-    dbg("compaction_trigger.skip", {
-      reason: "suspended_after_mid_run_failure",
-      tokens,
+      basis: pressure.basis,
+      threshold,
     });
     return;
   }
@@ -315,7 +439,12 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   const ui = ctx.ui;
   const sessionId = ctx.sessionManager.getSessionId();
 
-  dbg("compaction_trigger.threshold_reached", { tokens, sessionId, hasUI });
+  dbg("compaction_trigger.threshold_reached", {
+    tokens,
+    basis: pressure.basis,
+    sessionId,
+    hasUI,
+  });
 
   runtime.tryEmitInfo(
     hasUI,
@@ -416,19 +545,27 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       }
 
       const currentEntries = ctx.sessionManager.getBranch() as Entry[];
-      const currentTokens = rawTokensSinceLastCompaction(currentEntries);
+      const currentPressure = getCompactionPressure(ctx, currentEntries);
+      const currentTokens = currentPressure.tokens;
+      const currentThreshold = resolveCompactionThreshold(
+        runtime.config.compactAfterTokens,
+        currentPressure.contextWindow,
+      );
       dbg("compaction_trigger.microtask.recheck_tokens", {
         currentTokens,
-        threshold: runtime.config.compactAfterTokens,
-        ok: currentTokens >= runtime.config.compactAfterTokens,
+        basis: currentPressure.basis,
+        threshold: currentThreshold,
+        configuredThreshold: runtime.config.compactAfterTokens,
+        ok: currentTokens >= currentThreshold,
       });
-      if (currentTokens < runtime.config.compactAfterTokens) {
+      if (currentTokens < currentThreshold) {
+        resetMidRunRetry(runtime);
         runtime.compactInFlight = false;
         runtime.autoCompactionController = null;
         dbg("compaction_trigger.microtask.bail", {
           reason: "pressure_relieved",
           currentTokens,
-          threshold: runtime.config.compactAfterTokens,
+          threshold: currentThreshold,
         });
         runtime.tryEmitInfo(
           hasUI,
@@ -445,6 +582,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       ctx.compact({
         onComplete: (result: any) => {
           runtime.compactInFlight = false;
+          resetMidRunRetry(runtime);
           dbg("compaction_trigger.onComplete", { result: !!result });
           runtime.tryEmitInfo(
             hasUI,
