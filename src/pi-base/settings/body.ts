@@ -254,7 +254,9 @@ export function createSettingsModalBody<F extends Field>(
     if (readOnly) return;
     const row = focusedRow(state);
     if (!row) return;
+    if (row.field.type === "section") return;
     const renderer = rendererFor(row.field);
+    if (!renderer) return;
     try {
       const result = renderer.handleKey(
         { field: row.field as never, value: row.value as never },

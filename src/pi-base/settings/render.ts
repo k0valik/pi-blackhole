@@ -75,12 +75,14 @@ export function renderFooter(
 ): string[] {
   const row = focusedRow(state);
   let rowHints: FieldKeyHint[] = [];
-  if (row && !state.options.readOnly) {
+  if (row && row.field.type !== "section" && !state.options.readOnly) {
     const renderer = rendererFor(row.field);
-    rowHints = renderer.hints(
-      { field: row.field as never, value: row.value as never },
-      { isEditing: row.isEditing },
-    );
+    if (renderer) {
+      rowHints = renderer.hints(
+        { field: row.field as never, value: row.value as never },
+        { isEditing: row.isEditing },
+      );
+    }
   }
 
   // Always-present hints: nav, field-reset, save, search
