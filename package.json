@@ -25,6 +25,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "replay": "REPLAY=1 vitest run tests/replay-gate1.test.ts",
     "check": "pnpm typecheck && pnpm lint",
     "prepare": "node scripts/prepare.mjs"
   },
