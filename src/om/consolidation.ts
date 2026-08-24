@@ -668,8 +668,14 @@ async function runObserverStage(
   if (!measurement.due) {
     // Not due — advance cursor to last source entry so we don't re-check
     // immediately.  Skipped on the estimate basis: an unmeasurable baseline
-    // must not advance the cursor (fallback-safety rule).
-    if (measurement.basis === "usage") {
+    // must not advance the cursor (fallback-safety rule).  Legacy mode
+    // restores the old unconditional advance (its contract is exact
+    // pre-0.5.0 cadence; blocking the advance would accumulate progress
+    // across checks and fire far earlier than the old counters).
+    if (
+      measurement.basis === "usage" ||
+      runtime.config.legacyEstimateCounting === true
+    ) {
       const lastSourceId = [...entries]
         .reverse()
         .find((e: Entry) => isSourceEntry(e))?.id;
@@ -1031,7 +1037,10 @@ async function runReflectorStage(
             : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED),
       });
       if (!measurement.due) {
-        if (measurement.basis === "usage") {
+        if (
+          measurement.basis === "usage" ||
+          runtime.config.legacyEstimateCounting === true
+        ) {
           runtime.advanceCursor(
             "reflector",
             pending.reflection.coversUpToId,
@@ -1050,7 +1059,10 @@ async function runReflectorStage(
       getContextUsage: ctx.getContextUsage,
     });
     if (!measurement.due) {
-      if (measurement.basis === "usage") {
+      if (
+        measurement.basis === "usage" ||
+        runtime.config.legacyEstimateCounting === true
+      ) {
         runtime.advanceCursor(
           "reflector",
           entries.at(-1)?.id ?? "unknown",
@@ -1363,7 +1375,10 @@ async function runDropperStage(
             : latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED),
       });
       if (!measurement.due) {
-        if (measurement.basis === "usage") {
+        if (
+          measurement.basis === "usage" ||
+          runtime.config.legacyEstimateCounting === true
+        ) {
           runtime.advanceCursor(
             "dropper",
             pending.dropped.coversUpToId,
@@ -1382,7 +1397,10 @@ async function runDropperStage(
       getContextUsage: ctx.getContextUsage,
     });
     if (!measurement.due) {
-      if (measurement.basis === "usage") {
+      if (
+        measurement.basis === "usage" ||
+        runtime.config.legacyEstimateCounting === true
+      ) {
         runtime.advanceCursor(
           "dropper",
           entries.at(-1)?.id ?? "unknown",

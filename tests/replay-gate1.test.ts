@@ -404,7 +404,10 @@ function simulateSession(parsed: any, cfg: any): SimResult {
         rt._cursors.set("observer", { entryId: coversUpToId });
         sim.coverageAdvances++;
       }
-    } else if (mo.basis === "usage") {
+    } else if (
+      mo.basis === "usage" ||
+      rt.config.legacyEstimateCounting === true
+    ) {
       // not_due advance (consolidation.ts L671–679): usage-basis only,
       // anchor moves to the last SOURCE entry.
       const id = lastSourceId();
@@ -451,7 +454,10 @@ function simulateSession(parsed: any, cfg: any): SimResult {
           rt._cursors.set("reflector", { entryId: covers });
         }
       }
-    } else if (mr.basis === "usage") {
+    } else if (
+      mr.basis === "usage" ||
+      rt.config.legacyEstimateCounting === true
+    ) {
       const id = lastEntryId();
       if (id) rt._cursors.set("reflector", { entryId: id });
     }
@@ -475,7 +481,10 @@ function simulateSession(parsed: any, cfg: any): SimResult {
         const covers = lastSourceId();
         if (covers) rt._cursors.set("dropper", { entryId: covers });
       }
-    } else if (md.basis === "usage") {
+    } else if (
+      md.basis === "usage" ||
+      rt.config.legacyEstimateCounting === true
+    ) {
       const id = lastEntryId();
       if (id) rt._cursors.set("dropper", { entryId: id });
     }
@@ -914,7 +923,7 @@ function writeSummary(
     "- G1.5 B/C: measured directions are B > A and C < A — consistent with thresholdScale mechanics (scale 0.6 lowers auto thresholds → more, smaller runs; scale 1.5 raises them → fewer runs). plan-06's `B ≤ A, C ≥ A` inequalities read inverted relative to that physics; run counts alone also ignore per-run chunk size (see obs chunk tok column).",
   );
   lines.push(
-    "- G1.5 A/A-leg + D/D-leg: shipped usage-basis counting fires ~0.5× relative to the legacy-estimate twin over identical spans (2324 vs 4901; 2563 vs 5111 obs+ref runs). The legacy twin accumulates across runs (estimate basis skips the not_due cursor advance), while usage basis re-rules every run-end evaluation. This contradicts the churn-derived prediction that truthful counting fires MORE (~1.3–1.7×); it supports the suspicion that archive est-vs-usage density divergence was overstated.",
+    "- G1.5 A/A-leg + D/D-leg: shipped usage-basis counting fires ~1.2–1.3× relative to the legacy-estimate twin over identical spans (A: 2345 vs 1826; D: 2568 vs 2090 obs+ref runs) — inside family with the churn-derived 1.3–1.7× prediction, just under its lower bound. NOTE: the first harness run measured 0.47× because consolidation.ts gated the not_due cursor advance on usage basis only, so the legacy twins accumulated progress across checks and over-fired; fixing that gating (consolidation.ts + this mirror now advance on estimate basis too when legacyEstimateCounting is on) restored the legacy contract of exact pre-0.5.0 cadence.",
   );
   lines.push(
     "- G1.6: estimate-basis measurements come from sessions without valid usage, spans after invalid latest assistants (stream errors/provider gaps → realTokensSinceAnchor undefined), cold-start prefixes before first usage, and post-compaction segments until a cursor refresh lands on surviving entries.",
