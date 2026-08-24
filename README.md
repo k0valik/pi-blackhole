@@ -309,7 +309,7 @@ Everything else has sensible defaults.
 | `observationsPoolTargetTokens` | `0` | Target size dropper aims for after pruning (0 = auto-derive: half of resolved pool max, clamp ≥ 1000) |
 | `reflectorInputMaxTokens` | `0` | Max reflector input budget (0 = auto-derive: 60% of the worker window, clamp ≥ 1000) |
 | `dropperInputMaxTokens` | `0` | Max dropper input budget (0 = auto-derive: 60% of the worker window, clamp ≥ 1000) |
-| `thresholdScale` | `1.0` | Multiplier for auto-derived trigger thresholds only (range 0.1–10; e.g. 0.6 cost-saver, 1.5 responsive). Ignored for explicit threshold values |
+| `thresholdScale` | `1.0` | Multiplier for auto-derived trigger thresholds only (range 0.1–10; e.g. 1.5 cost-saver (fewer runs), 0.6 responsive (earlier runs)). Ignored for explicit threshold values |
 | `dropperPressureThreshold` | `0.70` | Fraction of `reflectorInputMaxTokens` at which dropper runs even without new data (pressure relief valve) |
 | `dropperPoolFullnessThreshold` | `0.10` | Min pool fullness (fraction of `observationsPoolMaxTokens`) before the dropper may run — prevents churn on a nearly empty pool |
 | `agentMaxTurns` | `16` | Max agent-loop turns per worker per run |
@@ -349,9 +349,9 @@ You usually don't need to set thresholds at all — `0` derives them from the mo
 | Preset | `thresholdScale` | Effect |
 |---|---|---|
 | Auto | `1.0` | All-zero defaults — fully auto-derived |
-| Cost-saver | `0.6` | Workers trigger less often — fewer LLM calls |
+| Cost-saver | `1.5` | Workers trigger less often — fewer LLM calls, later compaction |
 | Balanced | `1.0` | Same as Auto — the default ratios |
-| Responsive | `1.5` | Workers trigger earlier — snappier memory, more LLM calls |
+| Responsive | `0.6` | Workers trigger earlier — snappier memory, more LLM calls |
 
 ```json
 {

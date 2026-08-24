@@ -218,7 +218,7 @@ The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens 
 
 **Scaling rationale:** The ratios are designed so workers always have enough headroom. `compactAfterTokens` at 65% means there's 35% headroom for system prompts, tool definitions, and the summary itself. The observer chunk (20% of worker window) is small so it never floods itself. The reflector/dropper budgets (60% of worker window) fit all accumulated observations plus summaries.
 
-**When to override:** explicit values > 0 are honored verbatim (budgets clamp ≥ 1000, chunk ≥ 256). Override only when you must — tiny context windows (auto already clamps ≥ 1000), cost-sensitive models where you want fewer runs, or strict cadence control. Otherwise prefer `thresholdScale` (default 1.0, range [0.1, 10]) — it multiplies ONLY the auto-derived trigger thresholds: 0.6 = cost-saver (fewer runs), 1.5 = responsive (more frequent). Ignored for explicitly-set thresholds.
+**When to override:** explicit values > 0 are honored verbatim (budgets clamp ≥ 1000, chunk ≥ 256). Override only when you must — tiny context windows (auto already clamps ≥ 1000), cost-sensitive models where you want fewer runs, or strict cadence control. Otherwise prefer `thresholdScale` (default 1.0, range [0.1, 10]) — it multiplies ONLY the auto-derived trigger thresholds: 1.5 = cost-saver (fewer, later runs), 0.6 = responsive (earlier, more frequent). Ignored for explicitly-set thresholds.
 
 **User-facing statement:**
 
@@ -226,9 +226,9 @@ The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens 
 >
 > Optional presets (in `/blackhole` settings → Presets):
 > - **Auto** — everything at 0, scale 1.0 (default, works for most people)
-> - **Cost-saver** — scale 0.6, fewer worker runs and later compaction
+> - **Cost-saver** — scale 1.5, fewer worker runs and later compaction
 > - **Balanced** — scale 1.0, same as Auto
-> - **Responsive** — scale 1.5, fires more often for tighter memory
+> - **Responsive** — scale 0.6, fires more often for tighter memory
 >
 > Just confirm your model, or pick a preset if you want to tune.
 
@@ -356,7 +356,7 @@ Each model entry supports these fields:
 
 **Triggers measure real model usage**, not token estimates: assistant usage from branch entries plus a chars/4 estimate for the trailing tail (chars/4 fallback when unmeasurable). `/blackhole-memory` prefixes estimates with `~`.
 
-**Presets tab** in `/blackhole` settings: Auto (all 0, scale 1.0), Cost-saver (scale 0.6), Balanced (scale 1.0), Responsive (scale 1.5). A one-time upgrade warning fires once per install crossing 0.5.0 (tracked in `last-seen-version.json`): custom thresholds keep working but are now counted in real tokens — the shift vs chars/4 estimates is content- and provider-dependent (no single multiplier), so re-tune from `/blackhole-memory` or set fields to 0 for auto-derivation. `PI_BLACKHOLE_LEGACY_ESTIMATE=1` restores the old counting exactly while migrating (deprecated escape hatch, scheduled for removal).
+**Presets tab** in `/blackhole` settings: Auto (all 0, scale 1.0), Cost-saver (scale 1.5), Balanced (scale 1.0), Responsive (scale 0.6). A one-time upgrade warning fires once per install crossing 0.5.0 (tracked in `last-seen-version.json`): custom thresholds keep working but are now counted in real tokens — the shift vs chars/4 estimates is content- and provider-dependent (no single multiplier), so re-tune from `/blackhole-memory` or set fields to 0 for auto-derivation. `PI_BLACKHOLE_LEGACY_ESTIMATE=1` restores the old counting exactly while migrating (deprecated escape hatch, scheduled for removal).
 
 **Session window resolution** for auto-derivation: live context usage → model `contextWindow` → 128k floor — raised automatically when the branch shows the current model already served prompts larger than the resolved value (`session_window.inferred` debug event), so unknown-window large models do not compact early.
 

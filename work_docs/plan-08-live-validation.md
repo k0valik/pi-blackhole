@@ -59,6 +59,22 @@ All numbers above come from one author's history (heavily tool-using, code-heavy
 
 dev's interim usage-counter port (`cebd27a`, tavasti@360f24a lineage) is fully subsumed by plan-01/03's measurement core; `rawTokensSinceLastCompaction` stays pure-estimate (D4 naming contract) with usage layered at call sites. dev's independent PR#58/#59 machinery (append-mode segments, mid-run exponential backoff, adapter-unavailable classification) was unioned into the branch's trigger/hook files. Conflicts resolved: tokens.ts/tests took branch supersets; compaction-trigger/before-compact were semantic unions; CHANGELOG/CONFIG folded additively.
 
+### D21 — thresholdScale preset values swapped (Gate-1 finding)
+
+Gate 1 exposed that the preset economics were inverted: under multiply semantics, scale **0.6 lowers** thresholds → ~1.65× MORE worker runs (B: 3831 obs+ref runs vs A: 2324), while scale **1.5** raises the compact threshold to ~97.5% of window → auto-compaction effectively disabled archive-wide (8 fires / 1202 sessions). plan-00 D14's "~40% fewer worker runs at 0.6" contradicted its own formula. Decision: **swap the preset values** — Cost-saver = 1.5, Responsive = 0.6 — names now match physics on both axes (run counts and compaction timing). Shipped in presets tab, CONFIG.md, README.md, llms.txt, CHANGELOG.
+
+### D22 — Gate-1 criteria recalibrated (first full run)
+
+All seven gates pass post-revisions (see plan-06 §4 revised table + `replay-gate1-results.md`): G1.4 reframed to mechanism-property + long-session band share (46.3%); G1.5 inequalities corrected for multiply semantics with A/A-leg at 1.29 and D-shift 1.23 (legacy twins required fixing a real product bug first — legacy mode blocked not_due advances, over-firing ~2×); G1.6 accepted at ≥85% with structural-breakdown reporting. The first-run → fix → re-run cycle is itself the documented Gate methodology: failures route to analysis, criteria change only with recorded rationale, product code changes only when the finding is a genuine defect.
+
+---
+
+## §3 addendum — live-test implications of D21/D22
+
+- L1.2 scale variants: expectations unchanged (proportional scaling verified by replay).
+- Preset labels in `/blackhole settings` now read Cost-saver = 1.5 / Responsive = 0.6 — use THESE during the matrix.
+- Compaction timing under scale 1.5 is *late by design* (~97.5% of window); do not flag as a bug during L-phases — it is the documented cost-saver trade-off.
+
 ---
 
 ## 2. Live validation protocol ("Gate 2b" — driven, on-branch build)

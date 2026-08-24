@@ -170,7 +170,8 @@ export interface UnifiedConfig {
   agentMaxTurns: number;
   /** Multiplier for AUTO-DERIVED trigger thresholds (observe/reflect/compact).
    *  Ignored for explicit threshold values. Default 1.0; must be finite and
-   *  > 0, clamped to [0.1, 10]. e.g. 0.6 = cost-saver, 1.5 = responsive. */
+   *  > 0, clamped to [0.1, 10]. e.g. 1.5 = cost-saver (fewer, later runs),
+   *  0.6 = responsive (earlier, more frequent runs). */
   thresholdScale: number;
   /** Legacy escape hatch (deprecated, scheduled for removal): force trigger
    *  counters back to chars/4 estimate basis so pre-0.5.0 absolute threshold

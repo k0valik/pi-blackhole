@@ -273,8 +273,8 @@ Multiplier for auto-derived trigger thresholds (`observeAfterTokens`, `reflectAf
 | number | 1.0 | [0.1, 10] |
 
 - **1.0** (default): neutral — auto-derived thresholds are exactly the window ratios above
-- **0.6**: cost-saver — triggers fire later, fewer background runs
-- **1.5**: responsive — triggers fire earlier, memory stays fresher
+- **1.5**: cost-saver — triggers fire later, fewer background runs, later compaction
+- **0.6**: responsive — triggers fire earlier and more often, memory stays fresher
 
 ### `observationsPoolMaxTokens`
 
@@ -549,7 +549,7 @@ Boolean field (`legacyEstimateCounting`, deprecated escape hatch — forces trig
   "compactAfterTokens": 120000,
   "observeAfterTokens": 40000,
   "reflectAfterTokens": 60000,
-  "thresholdScale": 1.5
+  "thresholdScale": 0.6
 }
 ```
 

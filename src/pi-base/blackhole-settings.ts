@@ -64,8 +64,8 @@ export const config = new ConfigManager<UnifiedConfig>({
       id: "costSaver",
       label: "Cost-saver",
       description:
-        "scale auto-derived trigger thresholds by 0.6 — fewer background runs",
-      values: { thresholdScale: 0.6 },
+        "scale auto-derived trigger thresholds by 1.5 — fewer background runs, later compaction",
+      values: { thresholdScale: 1.5 },
     },
     {
       id: "balanced",
@@ -78,8 +78,8 @@ export const config = new ConfigManager<UnifiedConfig>({
       id: "responsive",
       label: "Responsive",
       description:
-        "scale auto-derived trigger thresholds by 1.5 — workers trigger earlier",
-      values: { thresholdScale: 1.5 },
+        "scale auto-derived trigger thresholds by 0.6 — workers trigger earlier and more often",
+      values: { thresholdScale: 0.6 },
     },
   ],
 
@@ -109,7 +109,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       tab: "presets",
       label: "Cost-saver",
       description:
-        "Multiplies auto-derived trigger thresholds by 0.6: fewer background observer/reflector/dropper runs and less frequent compaction. Custom thresholds are untouched.",
+        "Multiplies auto-derived trigger thresholds by 1.5: fewer background observer/reflector/dropper runs and less frequent, later compaction. Custom thresholds are untouched.",
       display: "apply",
       onActivate: () => {},
     },
@@ -129,7 +129,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       tab: "presets",
       label: "Responsive",
       description:
-        "Multiplies auto-derived trigger thresholds by 1.5: workers trigger earlier and compaction runs sooner. Custom thresholds are untouched.",
+        "Multiplies auto-derived trigger thresholds by 0.6: workers trigger earlier and more often, memory stays fresher. Custom thresholds are untouched.",
       display: "apply",
       onActivate: () => {},
     },
