@@ -356,7 +356,9 @@ Each model entry supports these fields:
 
 **Triggers measure real model usage**, not token estimates: assistant usage from branch entries plus a chars/4 estimate for the trailing tail (chars/4 fallback when unmeasurable). `/blackhole-memory` prefixes estimates with `~`.
 
-**Presets tab** in `/blackhole` settings: Auto (all 0, scale 1.0), Cost-saver (scale 0.6), Balanced (scale 1.0), Responsive (scale 1.5). A one-time upgrade warning fires once per install crossing 0.5.0 (tracked in `last-seen-version.json`): custom thresholds keep working but are now counted in real tokens — multiply old estimate-based values by ~1.45 (observe/reflect) or ~1.6 (compact), or set them to 0 for auto-derivation.
+**Presets tab** in `/blackhole` settings: Auto (all 0, scale 1.0), Cost-saver (scale 0.6), Balanced (scale 1.0), Responsive (scale 1.5). A one-time upgrade warning fires once per install crossing 0.5.0 (tracked in `last-seen-version.json`): custom thresholds keep working but are now counted in real tokens — the shift vs chars/4 estimates is content- and provider-dependent (no single multiplier), so re-tune from `/blackhole-memory` or set fields to 0 for auto-derivation. `PI_BLACKHOLE_LEGACY_ESTIMATE=1` restores the old counting exactly while migrating (deprecated escape hatch, scheduled for removal).
+
+**Session window resolution** for auto-derivation: live context usage → model `contextWindow` → 128k floor — raised automatically when the branch shows the current model already served prompts larger than the resolved value (`session_window.inferred` debug event), so unknown-window large models do not compact early.
 
 **When to override:** set a field > 0 to pin it verbatim (budgets clamp ≥ 1000, chunk ≥ 256). Worth doing for tiny context windows where auto values feel too small, cost-sensitive models where you want fewer runs (or a lower `thresholdScale` instead), or strict run cadence. Otherwise leave everything at 0.
 

@@ -257,12 +257,12 @@ Since pi-blackhole 0.5.0, all token thresholds and budgets default to `0`, which
 
 **Window resolution:**
 
-- **Session window** = the live context window from `ctx.getContextUsage()` (guarded — a stale context throws and falls through), then the model's `contextWindow`, then `128_000`.
+- **Session window** = the live context window from `ctx.getContextUsage()` (guarded — a stale context throws and falls through), then the model's `contextWindow`, then `128_000`. Additionally, when the branch shows the current model already served a prompt larger than that resolved window (missing/wrong registry entries — local llama.cpp models especially), the window is **raised to keep derived thresholds at-or-above observed usage** (`session_window.inferred` debug event); peaks are scoped to the branch-tail assistant message's model so switches are tracked from the first post-switch turn.
 - **Worker window** = the stage model's `contextWindow` (config override → Pi's model registry), then the resolved session window, then `128_000`.
 
 **Counting basis:** trigger thresholds measure **real model usage** — assistant-message usage tokens from branch entries (usage delta since the anchor) plus a chars/4 estimate for the trailing unmeasured tail. When usage is unmeasurable, they fall back to the chars/4 estimate. `/blackhole memory` prefixes estimate-based counters with `~`; unmarked counters are real usage.
 
-**Migration for custom thresholds:** the counting basis switched from pure chars/4 estimates to real usage, so old estimate-based values land ~1.45× lower than before. Users with custom threshold values should multiply their old `observeAfterTokens` / `reflectAfterTokens` values by ~1.45 (or ~1.6 for `compactAfterTokens`), or set them to `0` to auto-derive.
+**Migration for custom thresholds:** the counting basis switched from pure chars/4 estimates to real usage. The cadence shift is content- and provider-dependent (archive decomposition: coverage-stage density spans ~0.5–4×; compaction additionally gains system+tools+summary scope overhead, median ~+90k on the author archive), so there is no single valid multiplier: re-tune from `/blackhole memory` if cadence changed, or set the field to `0` to auto-derive. While deciding, `PI_BLACKHOLE_LEGACY_ESTIMATE=1` restores the old chars/4 counting exactly (deprecated escape hatch, scheduled for removal).
 
 ### `thresholdScale`
 
@@ -513,6 +513,12 @@ Float field (`thresholdScale`, range `[0.1, 10]`; invalid values fall back):
 | Variable | Overrides |
 |----------|-----------|
 | `PI_BLACKHOLE_THRESHOLD_SCALE` | `thresholdScale` |
+
+Boolean field (`legacyEstimateCounting`, deprecated escape hatch — forces trigger counters back to chars/4 so pre-0.5.0 pinned setups keep their exact old cadence; scheduled for removal):
+
+| Variable | Overrides |
+|----------|-----------|
+| `PI_BLACKHOLE_LEGACY_ESTIMATE` | `legacyEstimateCounting` |
 
 ### Paths and internals
 

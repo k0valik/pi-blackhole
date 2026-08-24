@@ -14,6 +14,12 @@
 
 **Why deferred:** we already have `MAX_STAGE_ATTEMPTS` + `recordRetryableError` + fallback chains + the upper-bound pre-check; the marginal value is the *halt* semantics and the shrink-on-failure policy, both of which need design (what resets the streak? per-session or persistent?). Phase 2's stream-error logging is the prerequisite and ships first.
 
+## D-6 Remove the `PI_BLACKHOLE_LEGACY_ESTIMATE` escape hatch
+
+**What:** delete the legacy estimate-basis escape hatch (config-env entry, `legacyEstimateCounting` flag plumbing in due.ts/compaction-trigger.ts/memory.ts, breaking-notice mention, tests) 1–2 minor releases after 0.5.0 ships, per plan-08 D15. Before removal, check whether any user reported using it; if yes, extend once.
+
+**Why deferred:** the hatch exists so pre-0.5.0 pinned-threshold users keep their exact old cadence while deciding how to migrate; it is intentionally temporary and must not become a second permanent counting basis.
+
 ## D-2 Upstream PR #40 merge watch
 
 **What:** upstream's real-usage trigger PR is **open** (unmerged) as of 2026-08-01. Our Phase 1/3 implement the same semantics independently (entries-only variant). When it merges, run the lockstep audit for any late changes (review fixes, edge cases we missed).

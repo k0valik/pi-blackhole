@@ -339,7 +339,7 @@ Every threshold and budget field defaults to `0`, which means **auto-derive from
 - **Session window** — live `getContextUsage().contextWindow` (guarded), then the session model's `contextWindow`, then `128_000`. **Worker window** — the stage model's `contextWindow`, then the session window, then `128_000`.
 - **Real usage, not estimates** — triggers measure actual model usage (assistant usage across branch entries + a `chars/4` trailing estimate; unmeasurable sessions fall back to the `chars/4` estimate). `/blackhole-memory` prefixes `~` for estimates.
 - **`thresholdScale`** — multiplies only the auto-derived *trigger* thresholds (`observe`/`reflect`/`compact`); ignored when any threshold is set explicitly. Range 0.1–10.
-- **Upgrading from pre-0.5.0?** Triggers now measure real usage, so old hand-tuned thresholds feel different. Custom thresholds need roughly **1.45×** (observe/reflect) / **1.6×** (compact) of the old estimate-based values — or set them to `0` and let the window do the math. The settings overlay shows a one-time notice on upgrade.
+- **Upgrading from pre-0.5.0?** Triggers now measure real usage, so old hand-tuned thresholds feel different — by an amount that depends on your content and provider (no single multiplier is valid). Custom thresholds keep working verbatim as real-token triggers; re-tune from `/blackhole memory` if cadence changed, or set them to `0` and let the window do the math. `PI_BLACKHOLE_LEGACY_ESTIMATE=1` restores the old counting exactly while you decide (deprecated, scheduled for removal). The settings overlay shows a one-time notice on upgrade.
 - New debug events when `debugLog: true`: `observer.chunk_capped`, `<stage>.stream_error`, `<stage>.upper_bound`.
 
 ### Configuration presets
