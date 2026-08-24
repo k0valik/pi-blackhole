@@ -16,6 +16,7 @@ import {
   findLastCompactionIndex,
   latestCoverageIndex,
   measureSinceAnchor,
+  peakAssistantUsage,
   rawTokensAfterIndex,
   realContextTokens,
 } from "./ledger/index.js";
@@ -45,6 +46,41 @@ export const OBSERVE_THRESHOLD_RATIO = 0.25;
 export const REFLECT_THRESHOLD_RATIO = 0.4;
 export const COMPACT_THRESHOLD_RATIO = 0.65;
 export const DERIVED_THRESHOLD_MIN_TOKENS = 1_000;
+
+/** Ceiling for the peak-inferred session window (guard against pathological
+ *  usage values; real windows stay far below this today). */
+export const MAX_INFERRED_SESSION_WINDOW = 2_000_000;
+
+function sessionWindowFor(dueCtx: DueContext): number {
+  return resolveSessionContextWindow(dueCtx.model, dueCtx.getContextUsage);
+}
+
+/** Session window raised by measured evidence: when the branch shows the
+ *  current model already served prompts larger than the resolved window,
+ *  the registry value is wrong or missing — derive the floor that keeps
+ *  derived thresholds at-or-above the observed peak (a 1M model with an
+ *  unknown registry entry must not compact at 83k). Peaks are scoped to
+ *  the branch-tail assistant model: pi's setModel applies immediately but
+ *  keeps an in-flight loop on its current stream, so the tail message's
+ *  model is exactly "who served last" — inference follows switches from
+ *  the first post-switch response without needing run boundaries. */
+export function effectiveSessionWindow(
+  dueCtx: DueContext,
+  entries: Entry[],
+): number {
+  const resolved = sessionWindowFor(dueCtx);
+  const peak = peakAssistantUsage(entries);
+  if (peak === undefined) return resolved;
+  const floor = Math.min(
+    MAX_INFERRED_SESSION_WINDOW,
+    Math.ceil(peak / COMPACT_THRESHOLD_RATIO),
+  );
+  if (floor > resolved) {
+    debugLog("session_window.inferred", { resolved, peak, floor });
+    return floor;
+  }
+  return resolved;
+}
 
 /** Synchronously-available session-window sources (mirrors what the
  *  compaction trigger and stage runners can resolve without awaiting). */
@@ -114,13 +150,19 @@ export function resolveCompactThreshold(
 
 /** Progress for a session with no anchor and no compaction yet: the real
  *  context usage (whole branch) is the truthful "tokens since session
- *  start"; fall back to the chars/4 estimate when unmeasurable. */
-function measureFreshSession(entries: Entry[]): {
+ *  start"; fall back to the chars/4 estimate when unmeasurable (or when
+ *  legacy estimate counting is forced). */
+function measureFreshSession(
+  entries: Entry[],
+  forceEstimate = false,
+): {
   tokens: number;
   basis: CountBasis;
 } {
-  const real = realContextTokens(entries);
-  if (real !== undefined) return { tokens: real, basis: "usage" };
+  if (!forceEstimate) {
+    const real = realContextTokens(entries);
+    if (real !== undefined) return { tokens: real, basis: "usage" };
+  }
   return { tokens: rawTokensAfterIndex(entries, -1), basis: "estimate" };
 }
 
@@ -130,11 +172,12 @@ function measureStage(
   anchorIndex: number,
   threshold: number,
   workerWindow: number,
+  forceEstimate = false,
 ): StageMeasurement {
   const { tokens, basis } =
-    anchorIndex < 0 && findLastCompactionIndex(entries) === -1
+    !forceEstimate && anchorIndex < 0 && findLastCompactionIndex(entries) === -1
       ? measureFreshSession(entries)
-      : measureSinceAnchor(entries, anchorIndex);
+      : measureSinceAnchor(entries, anchorIndex, forceEstimate);
 
   // Worker-window upper bound (D7): never run a worker when its own
   // context window can't fit the progress + agent-loop overhead.
@@ -177,10 +220,6 @@ function resolveAnchor(
   return compactionFallback ? findLastCompactionIndex(entries) : -1;
 }
 
-function sessionWindowFor(dueCtx: DueContext): number {
-  return resolveSessionContextWindow(dueCtx.model, dueCtx.getContextUsage);
-}
-
 /** Observer: cursor → observations-recorded coverage → latest compaction
  *  (cold start) → −1. */
 export function measureObserverDue(
@@ -188,7 +227,7 @@ export function measureObserverDue(
   runtime: Runtime,
   dueCtx: DueContext,
 ): StageMeasurement {
-  const sessionWindow = sessionWindowFor(dueCtx);
+  const sessionWindow = effectiveSessionWindow(dueCtx, entries);
   const threshold = resolveTriggerThresholds(
     runtime.config,
     sessionWindow,
@@ -210,6 +249,7 @@ export function measureObserverDue(
     anchorIndex,
     threshold,
     workerWindow,
+    runtime.config.legacyEstimateCounting === true,
   );
 }
 
@@ -228,7 +268,7 @@ export function measureReflectorDue(
   dueCtx: DueContext,
   options: MeasureOptions = {},
 ): StageMeasurement {
-  const sessionWindow = sessionWindowFor(dueCtx);
+  const sessionWindow = effectiveSessionWindow(dueCtx, entries);
   const threshold = resolveTriggerThresholds(
     runtime.config,
     sessionWindow,
@@ -253,6 +293,7 @@ export function measureReflectorDue(
     anchorIndex,
     threshold,
     workerWindow,
+    runtime.config.legacyEstimateCounting === true,
   );
 }
 
@@ -265,7 +306,7 @@ export function measureDropperDue(
   dueCtx: DueContext,
   options: MeasureOptions = {},
 ): StageMeasurement {
-  const sessionWindow = sessionWindowFor(dueCtx);
+  const sessionWindow = effectiveSessionWindow(dueCtx, entries);
   const threshold = resolveTriggerThresholds(
     runtime.config,
     sessionWindow,
@@ -284,5 +325,12 @@ export function measureDropperDue(
           OM_OBSERVATIONS_DROPPED,
           false,
         );
-  return measureStage(entries, "dropper", anchorIndex, threshold, workerWindow);
+  return measureStage(
+    entries,
+    "dropper",
+    anchorIndex,
+    threshold,
+    workerWindow,
+    runtime.config.legacyEstimateCounting === true,
+  );
 }

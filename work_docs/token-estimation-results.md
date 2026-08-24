@@ -1,7 +1,7 @@
 # Token estimation — calibration summary (review artifact)
 
-- Generated: 2026-08-20T00:07:14.017Z
-- Sessions: 1178 unique (realpath-deduped) under `~/.pi/agent/sessions`
+- Generated: 2026-08-24T12:09:09.725Z
+- Sessions: 1202 unique (realpath-deduped) under `~/.pi/agent/sessions`
 - Command: `node scripts/analyze-token-estimation.mjs --summary work_docs/token-estimation-results.md`
 - Full plan: `work_docs/issue-usage-based-token-counting.md`
 - Raw per-window reports (gitignored, regenerate with the script): `tmp/token-estimation-report.md` (author config), `tmp/token-estimation-report-defaults.md` (code defaults)
@@ -10,30 +10,40 @@ Reading guide: **churn×** = how many more fires truthful counting produces with
 
 ## Author's config (observe 25,000 / reflect+drop 80,000 / compact 185,000)
 
-### Aggregate (ratios over marker-present, usage>0 windows)
+### Measurement decomposition (clean same-model same-segment spans)
 
-| stage | threshold | n | median | min | max | est fires | usage fires | churn× | LATE | EARLY | marker | no-marker | no-usage |
+| stage | clean pairs | density median | p25 | p75 | p90 | excluded |
+|---|---|---|---|---|---|---|
+| observer | 1184 | 2.14 | 1.33 | 17.04 | 47.63 | backtrack:30 crossModel:47 nonPositiveDelta:72 tinySpan:38 danglingAnchor:24 noBaseline:683 |
+| reflector | 236 | 1.89 | 1.40 | 2.88 | 4.32 | backtrack:24 crossModel:23 nonPositiveDelta:55 tinySpan:16 danglingAnchor:15 noBaseline:558 |
+| dropper | 48 | 2.55 | 1.92 | 3.71 | 4.85 | nonPositiveDelta:7 tinySpan:14 noBaseline:38 |
+- compaction drift (absolute usage − est-since-anchor): median 88,408, p25 40,263, p75 142,431, p90 180,827
+
+
+### Aggregate (clean windows, usage>0)
+
+| stage | threshold | n (clean) | median | min | max | est fires | usage fires | churn× | LATE | EARLY | windows | no-usage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| observer | 25,000 | 254 | 0.80 | 0.00 | 1487.68 | 692 | 805 | 1.2 | 135 | 22 | 297 | 881 | 26 |
-| reflector | 80,000 | 184 | 0.83 | 0.00 | 1487.68 | 226 | 313 | 1.4 | 109 | 22 | 221 | 957 | 24 |
-| dropper | 80,000 | 6 | 0.65 | 0.03 | 1.17 | 320 | 441 | 1.4 | 144 | 23 | 12 | 1166 | 6 |
-| compaction | 185,000 | 385 | 0.63 | 0.00 | 3.17 | 18 | 36 | 2.0 | 26 | 8 | 389 | 789 | 5 |
+| observer | 25,000 | 1184 | 0.47 | 0.00 | 5.29 | 653 | 1112 | 1.7 | 479 | 20 | 2078 | 774 |
+| reflector | 80,000 | 236 | 0.53 | 0.06 | 48.27 | 41 | 162 | 4.0 | 127 | 6 | 927 | 633 |
+| dropper | 80,000 | 48 | 0.39 | 0.18 | 12.03 | 0 | 39 | n/a | 39 | 0 | 107 | 45 |
+| compaction | 185,000 | 0 | n/a | n/a | n/a | 2 | 167 | 83.5 | 167 | 2 | 1426 | 0 |
 
 ### Calibration (usage threshold that reproduces today's fire frequency)
 
 | stage | threshold | same-fire-count T' | achieved | usage p50 | p90 | p95 | max |
 |---|---|---|---|---|---|---|---|
-| observer | 25,000 | 35,022 | 692 | 46,809 | 119,243 | 143,773 | 297,071 |
-| reflector | 80,000 | 92,825 | 226 | 51,677 | 120,476 | 143,905 | 297,071 |
-| dropper | 80,000 | 95,905 | 320 | 64,906 | 139,324 | 163,641 | 297,071 |
-| compaction | 185,000 | 214,990 | 18 | 65,325 | 140,049 | 163,641 | 297,071 |
+| observer | 25,000 | 47,170 | 653 | 47,932 | 120,674 | 139,374 | 222,316 |
+| reflector | 80,000 | 126,319 | 42 | 89,510 | 134,823 | 155,898 | 222,316 |
+| dropper | 80,000 | n/a | n/a | 95,652 | 139,374 | 140,827 | 173,912 |
+| compaction | 185,000 | 348,207 | 2 | 100,656 | 192,332 | 210,173 | 348,207 |
 
 ### Observer input simulation (tool-result + thinking trimming)
 
-- windows with content: 1151
-- median chunk: 35,536 tokens | tool_result share: 57% | thinking share: 21%
+- windows with content: 1112
+- median chunk: 37,783 tokens | tool_result share: 58% | thinking share: 21%
 - trim policy: tool results > 4096 chars → head+tail 1000/1000 chars; thinking > 4096 chars → head+tail 20%/20% (fractional)
-- median 35,536 → 17,188 tokens (combined median save 41%, p90 65%); of tool-result tokens median 60% saved; of thinking tokens median 19% saved
+- median 37,783 → 17,806 tokens (combined median save 42%, p90 65%); of tool-result tokens median 60% saved; of thinking tokens median 21% saved
 
 
 ## Tier calibration (per achieved-context tier)
@@ -42,51 +52,59 @@ Tier = max context each session actually reached (max `usage.totalTokens`) — a
 
 | tier | n | p50 ctx | p90 ctx | compact (65%) |
 |---|---|---|---|---|
-| low (<100k) | 722 | 52,272 | 88,089 | 57,258 |
-| medium (100–200k) | 343 | 137,742 | 187,637 | 121,964 |
+| low (<100k) | 733 | 52,272 | 88,079 | 57,251 |
+| medium (100–200k) | 356 | 138,265 | 189,836 | 123,393 |
 | high (200k+) | 90 | 223,560 | 264,057 | 171,637 |
 
 | tier | stage | fire-20% | fire-40% | fire-60% |
 |---|---|---|---|---|
-| low (<100k) | observer | 68,712 | 51,092 | 34,759 |
-| low (<100k) | reflector | 72,956 | 54,869 | 38,939 |
-| low (<100k) | dropper | 74,715 | 56,410 | 40,207 |
-| low (<100k) | compaction | 74,715 | 56,410 | 40,207 |
-| medium (100–200k) | observer | 126,431 | 104,163 | 49,425 |
-| medium (100–200k) | reflector | 128,295 | 106,549 | 65,521 |
-| medium (100–200k) | dropper | 143,589 | 120,831 | 106,675 |
-| medium (100–200k) | compaction | 143,589 | 120,831 | 106,675 |
-| high (200k+) | observer | 185,578 | 104,036 | 54,411 |
-| high (200k+) | reflector | 185,578 | 104,036 | 53,557 |
-| high (200k+) | dropper | 214,990 | 143,905 | 105,853 |
-| high (200k+) | compaction | 212,987 | 143,905 | 105,853 |
+| low (<100k) | observer | 48,021 | 39,518 | 34,464 |
+| low (<100k) | compaction | 65,204 | 52,377 | 43,448 |
+| medium (100–200k) | observer | 90,469 | 57,582 | 40,966 |
+| medium (100–200k) | reflector | 115,515 | 92,513 | 75,684 |
+| medium (100–200k) | dropper | 139,374 | 116,299 | 116,299 |
+| medium (100–200k) | compaction | 147,894 | 119,678 | 90,464 |
+| high (200k+) | observer | 84,120 | 56,331 | 41,592 |
+| high (200k+) | reflector | 124,398 | 102,246 | 85,675 |
+| high (200k+) | dropper | 95,652 | 72,165 | 51,389 |
+| high (200k+) | compaction | 205,093 | 172,192 | 139,052 |
 
 ## Code defaults (observe 15,000 / reflect+drop 25,000 / compact 81,000 — auto-install surface)
 
-### Aggregate (ratios over marker-present, usage>0 windows)
+### Measurement decomposition (clean same-model same-segment spans)
 
-| stage | threshold | n | median | min | max | est fires | usage fires | churn× | LATE | EARLY | marker | no-marker | no-usage |
+| stage | clean pairs | density median | p25 | p75 | p90 | excluded |
+|---|---|---|---|---|---|---|
+| observer | 1184 | 2.14 | 1.33 | 17.04 | 47.63 | backtrack:30 crossModel:47 nonPositiveDelta:72 tinySpan:38 danglingAnchor:24 noBaseline:683 |
+| reflector | 236 | 1.89 | 1.40 | 2.88 | 4.32 | backtrack:24 crossModel:23 nonPositiveDelta:55 tinySpan:16 danglingAnchor:15 noBaseline:558 |
+| dropper | 48 | 2.55 | 1.92 | 3.71 | 4.85 | nonPositiveDelta:7 tinySpan:14 noBaseline:38 |
+- compaction drift (absolute usage − est-since-anchor): median 88,408, p25 40,263, p75 142,431, p90 180,827
+
+
+### Aggregate (clean windows, usage>0)
+
+| stage | threshold | n (clean) | median | min | max | est fires | usage fires | churn× | LATE | EARLY | windows | no-usage |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| observer | 15,000 | 254 | 0.80 | 0.00 | 1487.68 | 827 | 904 | 1.1 | 106 | 29 | 297 | 881 | 26 |
-| reflector | 25,000 | 184 | 0.83 | 0.00 | 1487.68 | 755 | 876 | 1.2 | 140 | 19 | 221 | 957 | 24 |
-| dropper | 25,000 | 6 | 0.65 | 0.03 | 1.17 | 858 | 989 | 1.2 | 136 | 5 | 12 | 1166 | 6 |
-| compaction | 81,000 | 385 | 0.63 | 0.00 | 3.17 | 296 | 435 | 1.5 | 159 | 20 | 389 | 789 | 5 |
+| observer | 15,000 | 1184 | 0.47 | 0.00 | 5.29 | 691 | 1195 | 1.7 | 504 | 0 | 2078 | 774 |
+| reflector | 25,000 | 236 | 0.53 | 0.06 | 48.27 | 220 | 259 | 1.2 | 50 | 11 | 927 | 633 |
+| dropper | 25,000 | 48 | 0.39 | 0.18 | 12.03 | 32 | 59 | 1.8 | 28 | 1 | 107 | 45 |
+| compaction | 81,000 | 0 | n/a | n/a | n/a | 16 | 842 | 52.6 | 827 | 1 | 1426 | 0 |
 
 ### Calibration (usage threshold that reproduces today's fire frequency)
 
 | stage | threshold | same-fire-count T' | achieved | usage p50 | p90 | p95 | max |
 |---|---|---|---|---|---|---|---|
-| observer | 15,000 | 23,133 | 827 | 46,809 | 119,243 | 143,773 | 297,071 |
-| reflector | 25,000 | 35,022 | 755 | 51,677 | 120,476 | 143,905 | 297,071 |
-| dropper | 25,000 | 37,606 | 858 | 64,906 | 139,324 | 163,641 | 297,071 |
-| compaction | 81,000 | 100,282 | 296 | 65,325 | 140,049 | 163,641 | 297,071 |
+| observer | 15,000 | 45,341 | 691 | 47,932 | 120,674 | 139,374 | 222,316 |
+| reflector | 25,000 | 54,528 | 222 | 89,510 | 134,823 | 155,898 | 222,316 |
+| dropper | 25,000 | 95,652 | 32 | 95,652 | 139,374 | 140,827 | 173,912 |
+| compaction | 81,000 | 246,729 | 16 | 100,656 | 192,332 | 210,173 | 348,207 |
 
 ### Observer input simulation (tool-result + thinking trimming)
 
-- windows with content: 1151
-- median chunk: 34,793 tokens | tool_result share: 54% | thinking share: 22%
+- windows with content: 1112
+- median chunk: 36,707 tokens | tool_result share: 56% | thinking share: 22%
 - trim policy: tool results > 4096 chars → head+tail 1000/1000 chars; thinking > 4096 chars → head+tail 20%/20% (fractional)
-- median 34,793 → 16,462 tokens (combined median save 39%, p90 64%); of tool-result tokens median 57% saved; of thinking tokens median 19% saved
+- median 36,707 → 17,015 tokens (combined median save 40%, p90 65%); of tool-result tokens median 57% saved; of thinking tokens median 20% saved
 
 
 _Generated by `scripts/analyze-token-estimation.mjs --summary`. Re-run any time to reproduce._

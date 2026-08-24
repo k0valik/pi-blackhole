@@ -172,6 +172,11 @@ export interface UnifiedConfig {
    *  Ignored for explicit threshold values. Default 1.0; must be finite and
    *  > 0, clamped to [0.1, 10]. e.g. 0.6 = cost-saver, 1.5 = responsive. */
   thresholdScale: number;
+  /** Legacy escape hatch (deprecated, scheduled for removal): force trigger
+   *  counters back to chars/4 estimate basis so pre-0.5.0 absolute threshold
+   *  setups keep their exact old cadence. Env-only:
+   *  PI_BLACKHOLE_LEGACY_ESTIMATE=1. Default false. */
+  legacyEstimateCounting: boolean;
   /** Body-idle timeout for background provider streams. Uses pi's default when unset;
    *  set to 0 to explicitly disable the wrapper. */
   providerIdleTimeoutMs?: number;
@@ -235,6 +240,7 @@ export const DEFAULTS: UnifiedConfig = {
   observerPreambleMaxTokens: 0,
   agentMaxTurns: 16,
   thresholdScale: 1.0,
+  legacyEstimateCounting: false,
 
   memory: true,
   debugLog: false,
@@ -373,6 +379,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (typeof raw.memory === "boolean") c.memory = raw.memory;
   if (typeof raw.fullFoldAlways === "boolean")
     c.fullFoldAlways = raw.fullFoldAlways;
+  if (typeof raw.legacyEstimateCounting === "boolean")
+    c.legacyEstimateCounting = raw.legacyEstimateCounting;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
   // Numeric fields — 0 means auto-derive for thresholds/budgets, so those

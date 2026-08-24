@@ -59,6 +59,8 @@ function captureHandler(
     compactionEngine?: "blackhole" | "pi-default";
     /** NEW: Mid-run (turn_end) compaction behavior */
     midRunCompaction?: "resume" | "pause" | "off";
+    /** Legacy escape hatch: force estimate-basis counters */
+    legacyEstimateCounting?: boolean;
   } = {},
   inlineCompact = vi.fn(async () => ({ summary: "inline summary" })),
 ) {
@@ -98,6 +100,8 @@ function captureHandler(
       compactionEngine: args.compactionEngine,
       /** NEW: Mid-run (turn_end) compaction behavior */
       midRunCompaction: args.midRunCompaction,
+      /** Legacy escape hatch: force estimate-basis counters */
+      legacyEstimateCounting: args.legacyEstimateCounting ?? false,
     },
     compactInFlight: args.compactInFlight ?? false,
     autoCompactionController: null as AbortController | null,
@@ -251,6 +255,38 @@ describe("V3 compaction trigger (blackhole)", () => {
       "Observational memory: compaction threshold reached (~90,000 tokens); triggering compaction",
       "info",
     );
+  });
+
+  it("legacyEstimateCounting restores the estimate-only counter (escape hatch)", () => {
+    // Same usage-heavy branch as above: legacy mode ignores the 90_000 real
+    // usage and compares the ~0 chars/4 estimate against the auto threshold
+    // → no fire. This reproduces pre-0.5.0 cadence for pinned setups.
+    const { handler, runtime } = captureHandler({
+      compactAfterTokens: 0,
+      legacyEstimateCounting: true,
+    });
+    const branch = [
+      compactionEntry("cmp-1", { firstKeptEntryId: "raw-1" }),
+      rawMessage("a-1", "done", {
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          stopReason: "stop",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 90_000,
+          },
+        },
+      } as never),
+    ];
+    const ctx = fakeCtx([branch]);
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).not.toHaveBeenCalled();
   });
 
   it("compaction:auto + compactionEngine:pi-default skips trigger (pi-default means Pi handles timing too)", async () => {

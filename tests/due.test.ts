@@ -10,6 +10,8 @@ import { Runtime } from "../src/om/runtime.js";
 import {
   COMPACT_THRESHOLD_RATIO,
   DERIVED_THRESHOLD_MIN_TOKENS,
+  effectiveSessionWindow,
+  MAX_INFERRED_SESSION_WINDOW,
   measureDropperDue,
   measureObserverDue,
   measureReflectorDue,
@@ -330,6 +332,91 @@ describe("measureReflectorDue / measureDropperDue", () => {
     });
     expect(m.basis).toBe("estimate");
     expect(m.progress).toBe(50);
+    expect(m.due).toBe(true);
+  });
+});
+
+describe("effectiveSessionWindow (peak-inferred floor)", () => {
+  const SMALL_WINDOW_CTX = { model: { contextWindow: 64_000 } };
+
+  test("returns the resolved window when the branch has no usage", () => {
+    expect(effectiveSessionWindow(DUE_CTX, [userEntry("u1", "abcd")])).toBe(
+      128_000,
+    );
+  });
+
+  test("raises the window when observed usage exceeds the resolved window", () => {
+    // Registry says 64k, but this model already served a 200k-token prompt:
+    // floor = ceil(200_000 / 0.65) = 307_693 → derived observe = 76_923.
+    const entries = [
+      userEntry("u1", "aaaa"),
+      assistantEntry("a1", "b".repeat(64), 200_000),
+    ];
+    const m = measureObserverDue(entries, new Runtime(), SMALL_WINDOW_CTX);
+    expect(m.threshold).toBe(76_923);
+    expect(effectiveSessionWindow(SMALL_WINDOW_CTX, entries)).toBe(307_693);
+  });
+
+  test("ignores peaks from other models on the branch (setModel applies immediately)", () => {
+    const big = assistantEntry("a-big", "b", 900_000);
+    (big.message as Record<string, unknown>).model = "vendor/big-model";
+    const small = assistantEntry("a-small", "b", 40_000);
+    (small.message as Record<string, unknown>).model = "llama-cpp/small";
+    const entries = [userEntry("u1", "x"), big, userEntry("u2", "y"), small];
+    // Tail model = llama-cpp/small → peak 40k → floor 61_539 < resolved 128k
+    expect(
+      effectiveSessionWindow({ model: { contextWindow: 128_000 } }, entries),
+    ).toBe(128_000);
+  });
+
+  test("caps the inferred floor at MAX_INFERRED_SESSION_WINDOW", () => {
+    const entries = [assistantEntry("a1", "b", 1_600_000)];
+    expect(
+      effectiveSessionWindow({ model: { contextWindow: 64_000 } }, entries),
+    ).toBe(MAX_INFERRED_SESSION_WINDOW);
+  });
+});
+
+describe("legacyEstimateCounting forces estimate basis", () => {
+  test("observer ignores real usage and compares chars/4 against explicit thresholds", () => {
+    const runtime = new Runtime();
+    runtime.config.legacyEstimateCounting = true;
+    runtime.config.observeAfterTokens = 100;
+    const entries = [
+      userEntry("u1", "x".repeat(400)), // est 100
+      assistantEntry("a1", "y".repeat(8), 50_000), // est 2 — usage ignored
+    ];
+    const m = measureObserverDue(entries, runtime, DUE_CTX);
+    expect(m.basis).toBe("estimate");
+    expect(m.progress).toBe(102); // whole-branch chars/4, not the 50k usage
+    expect(m.due).toBe(true);
+  });
+
+  test("same usage stays measurable when legacy mode is off", () => {
+    const runtime = new Runtime();
+    runtime.config.observeAfterTokens = 100;
+    const entries = [
+      userEntry("u1", "x".repeat(400)),
+      assistantEntry("a1", "y".repeat(8), 50_000),
+    ];
+    const m = measureObserverDue(entries, runtime, DUE_CTX);
+    expect(m.basis).toBe("usage");
+    expect(m.progress).toBe(50_000);
+  });
+
+  test("reflector legacy path measures raw delta from the anchor", () => {
+    const runtime = new Runtime();
+    runtime.config.legacyEstimateCounting = true;
+    runtime.config.reflectAfterTokens = 40;
+    const entries = [
+      userEntry("u1", "x".repeat(200)),
+      assistantEntry("a1", "ok", 999_999), // usage would dominate if counted
+      userEntry("u2", "x".repeat(200)),
+    ];
+    runtime.advanceCursor("reflector", "a1", "empty");
+    const m = measureReflectorDue(entries, runtime, DUE_CTX);
+    expect(m.basis).toBe("estimate");
+    expect(m.progress).toBe(50); // u2 only
     expect(m.due).toBe(true);
   });
 });

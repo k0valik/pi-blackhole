@@ -2,8 +2,11 @@
  * One-time breaking-change notice (plan-03, D10).
  *
  * The token-rework release switches trigger/budget counting from chars/4
- * estimates to real model usage with auto-derived thresholds.  Users on
- * custom thresholds need a one-time heads-up (~1.45× their old values).
+ * estimates to real model usage with auto-derived thresholds.  The shift for
+ * custom-threshold users is content- and provider-dependent (archive
+ * decomposition: coverage-stage density 0.5–4×+, compaction scope overhead
+ * median ~+90k), so the notice points at the status display and the
+ * PI_BLACKHOLE_LEGACY_ESTIMATE escape hatch instead of a flat multiplier.
  *
  * Persistence pattern mirrors cooldown.ts: a small JSON state file under
  * `~/.pi/agent/pi-blackhole/last-seen-version.json` records the last
@@ -85,7 +88,7 @@ export function registerBreakingNotice(pi: ExtensionAPI): void {
     if (!ctx?.hasUI) return;
     try {
       ctx.ui?.notify(
-        "pi-blackhole: token counting now uses real model usage; thresholds auto-derive from your model's context window — custom thresholds keep working (now counted in real tokens, ~1.45× your old estimate values). See /blackhole configure.",
+        "pi-blackhole: token counting now uses real model usage; thresholds auto-derive from your model's context window. Custom thresholds keep working but now count real tokens — the shift vs old chars/4 estimates is content- and provider-dependent, so re-tune from /blackhole-memory if cadence changed. Set PI_BLACKHOLE_LEGACY_ESTIMATE=1 to restore the old counting until you migrate (removed in a future release).",
         "warning",
       );
       writeLastSeenVersion(BREAKING_SINCE);

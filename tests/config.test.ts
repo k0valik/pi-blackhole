@@ -567,3 +567,22 @@ describe("saveUnifiedConfig", () => {
     expect(config.debug).toBe(false);
   });
 });
+
+describe("legacyEstimateCounting escape hatch", () => {
+  afterEach(() => {
+    delete process.env.PI_BLACKHOLE_LEGACY_ESTIMATE;
+  });
+
+  it("defaults to false", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.legacyEstimateCounting).toBe(false);
+  });
+
+  it("PI_BLACKHOLE_LEGACY_ESTIMATE=1 enables estimate-basis counting", async () => {
+    process.env.PI_BLACKHOLE_LEGACY_ESTIMATE = "1";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.legacyEstimateCounting).toBe(true);
+  });
+});

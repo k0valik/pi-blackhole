@@ -7,8 +7,7 @@ import {
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
-import { resolveCompactThreshold } from "./due.js";
-import { resolveSessionContextWindow } from "./model-budget.js";
+import { effectiveSessionWindow, resolveCompactThreshold } from "./due.js";
 import {
   compactInlineAtTurnBoundary,
   InlineCompactionUnavailableError,
@@ -186,13 +185,18 @@ async function handleTurnEnd(
   }
 
   const entries = ctx.sessionManager.getBranch() as Entry[];
-  const real = realContextTokens(entries);
+  const legacy = runtime.config.legacyEstimateCounting === true;
+  const real = legacy ? undefined : realContextTokens(entries);
   const tokens = real ?? rawTokensSinceLastCompaction(entries);
   const basis = real !== undefined ? "usage" : "estimate";
   const threshold = resolveCompactThreshold(
     runtime.config,
-    resolveSessionContextWindow(ctx.model as { contextWindow?: number }, () =>
-      ctx.getContextUsage?.(),
+    effectiveSessionWindow(
+      {
+        model: ctx.model as { contextWindow?: number },
+        getContextUsage: () => ctx.getContextUsage?.(),
+      },
+      entries,
     ),
   );
   if (tokens < threshold) {
@@ -397,13 +401,20 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       entries.length > 0 ? entries[entries.length - 1].type : "none",
   });
 
-  const real = realContextTokens(entries);
+  const real =
+    runtime.config.legacyEstimateCounting === true
+      ? undefined
+      : realContextTokens(entries);
   const tokens = real ?? rawTokensSinceLastCompaction(entries);
   const basis = real !== undefined ? "usage" : "estimate";
   const threshold = resolveCompactThreshold(
     runtime.config,
-    resolveSessionContextWindow(ctx.model as { contextWindow?: number }, () =>
-      ctx.getContextUsage?.(),
+    effectiveSessionWindow(
+      {
+        model: ctx.model as { contextWindow?: number },
+        getContextUsage: () => ctx.getContextUsage?.(),
+      },
+      entries,
     ),
   );
   dbg("compaction_trigger.tokens", {
@@ -539,15 +550,21 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       }
 
       const currentEntries = ctx.sessionManager.getBranch() as Entry[];
-      const currentReal = realContextTokens(currentEntries);
+      const legacy = runtime.config.legacyEstimateCounting === true;
+      const currentReal = legacy
+        ? undefined
+        : realContextTokens(currentEntries);
       const currentTokens =
         currentReal ?? rawTokensSinceLastCompaction(currentEntries);
       const currentBasis = currentReal !== undefined ? "usage" : "estimate";
       const currentThreshold = resolveCompactThreshold(
         runtime.config,
-        resolveSessionContextWindow(
-          ctx.model as { contextWindow?: number },
-          () => ctx.getContextUsage?.(),
+        effectiveSessionWindow(
+          {
+            model: ctx.model as { contextWindow?: number },
+            getContextUsage: () => ctx.getContextUsage?.(),
+          },
+          currentEntries,
         ),
       );
       dbg("compaction_trigger.microtask.recheck_tokens", {

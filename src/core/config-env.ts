@@ -95,6 +95,7 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   debugLog: "PI_BLACKHOLE_DEBUG_LOG",
   sessionFallback: "PI_BLACKHOLE_SESSION_FALLBACK",
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
+  legacyEstimateCounting: "PI_BLACKHOLE_LEGACY_ESTIMATE",
   // Positive integers
   agentMaxTurns: "PI_BLACKHOLE_AGENT_MAX_TURNS",
   // Non-negative integer (0 = auto-derive, unset = inherit pi default)

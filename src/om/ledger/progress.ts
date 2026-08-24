@@ -148,55 +148,7 @@ export function findLastCompactionIndex(entries: Entry[]): number {
   return -1;
 }
 
-/**
- * Index of the last assistant message with valid usage at or before
- * `beforeIndex` (inclusive) within the range starting at `fromIndex`
- * (inclusive), or -1.
- *
- * The compaction entry itself is never a usage source (its summary call
- * carries pre-compaction usage, see realContextTokens).
- */
-export function lastValidUsageIndex(
-  entries: Entry[],
-  beforeIndex: number,
-  fromIndex = 0,
-): number {
-  for (let i = Math.min(beforeIndex, entries.length - 1); i >= fromIndex; i--) {
-    if (getUsageTokens(entries[i].message) !== undefined) return i;
-  }
-  return -1;
-}
-
-/**
- * Real context tokens for the branch: the last valid assistant usage
- * strictly after the latest compaction entry, plus the chars/4 estimate
- * for source entries after it.
- *
- * Returns undefined when there is no measurable baseline (no compaction
- * and no valid usage anywhere; or a compaction with no valid assistant
- * response after it). Never counts usage from before the latest
- * compaction: after compaction, that usage reflects the pre-compaction
- * context size.
- */
-export function realContextTokens(entries: Entry[]): number | undefined {
-  const compactionIndex = findLastCompactionIndex(entries);
-  const scanStart = compactionIndex === -1 ? 0 : compactionIndex + 1;
-  const usageIndex = lastValidUsageIndex(
-    entries,
-    entries.length - 1,
-    scanStart,
-  );
-  if (usageIndex === -1) return undefined;
-
-  const usage = getUsageTokens(entries[usageIndex].message);
-  if (usage === undefined) return undefined;
-  return usage + rawTokensAfterIndex(entries, usageIndex);
-}
-
 export function rawTokensSinceLastCompaction(entries: Entry[]): number {
-  const real = realContextTokens(entries);
-  if (real !== undefined) return real;
-
   const compactionIndex = findLastCompactionIndex(entries);
   if (compactionIndex === -1) return rawTokensAfterIndex(entries, -1);
 
@@ -332,15 +284,45 @@ export function realTokensSinceAnchor(
 export function measureSinceAnchor(
   entries: Entry[],
   anchorIndex: number,
+  forceEstimate = false,
 ): { tokens: number; basis: CountBasis } {
-  const usageDelta = realTokensSinceAnchor(entries, anchorIndex);
-  if (usageDelta !== undefined) {
-    return { tokens: usageDelta, basis: "usage" };
+  if (!forceEstimate) {
+    const usageDelta = realTokensSinceAnchor(entries, anchorIndex);
+    if (usageDelta !== undefined) {
+      return { tokens: usageDelta, basis: "usage" };
+    }
   }
   return {
     tokens: rawTokensAfterIndex(entries, anchorIndex),
     basis: "estimate",
   };
+}
+
+/** Highest valid assistant usage among the branch-tail model's messages —
+ *  a measured lower bound on the session model's context window (the
+ *  provider already served prompts at least this large). pi's setModel
+ *  applies immediately while keeping any in-flight agent loop on its
+ *  current stream — the new model serves from the next completed turn.
+ *  Scoping peaks to the tail assistant message's model therefore tracks
+ *  the ACTIVE window across switches without needing run boundaries. */
+export function peakAssistantUsage(entries: Entry[]): number | undefined {
+  let tailModel: string | undefined;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const m = entries[i]?.message as { role?: string; model?: string } | null;
+    if (m && m.role === "assistant" && typeof m.model === "string") {
+      tailModel = m.model;
+      break;
+    }
+  }
+  let peak: number | undefined;
+  for (const entry of entries) {
+    const m = entry?.message as { role?: string; model?: string } | null;
+    if (!m || m.role !== "assistant") continue;
+    if (tailModel !== undefined && m.model !== tailModel) continue;
+    const t = getUsageTokens(entry.message);
+    if (t !== undefined && (peak === undefined || t > peak)) peak = t;
+  }
+  return peak;
 }
 
 /**

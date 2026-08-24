@@ -24,6 +24,7 @@ import {
   type Projection,
 } from "../om/ledger/index.js";
 import {
+  effectiveSessionWindow,
   measureDropperDue,
   measureObserverDue,
   measureReflectorDue,
@@ -33,7 +34,6 @@ import {
 import {
   resolveObserverChunkMaxTokens,
   resolveObservationsPoolMaxTokens,
-  resolveSessionContextWindow,
   resolveWorkerWindow,
 } from "../om/model-budget.js";
 import { readPendingState } from "../om/pending.js";
@@ -177,10 +177,9 @@ export function registerMemoryCommand(
         model: ctx.model as { contextWindow?: number },
         getContextUsage: ctx.getContextUsage,
       };
-      const sessionWindow = resolveSessionContextWindow(
-        dueCtx.model,
-        dueCtx.getContextUsage,
-      );
+      // Same window the triggers resolve against (incl. peak-inferred floor)
+      // so displayed thresholds can never disagree with firing behavior.
+      const sessionWindow = effectiveSessionWindow(dueCtx, entries);
       const thresholds = resolveTriggerThresholds(
         runtime.config,
         sessionWindow,
@@ -206,7 +205,8 @@ export function registerMemoryCommand(
         reflectBasis = reflectMeasurement.basis;
         dropBasis = dropMeasurement.basis;
       }
-      const compactionReal = realContextTokens(entries);
+      const legacy = runtime.config.legacyEstimateCounting === true;
+      const compactionReal = legacy ? undefined : realContextTokens(entries);
       const compactionProgress =
         compactionReal ?? rawTokensSinceLastCompaction(entries);
       const compactionBasis: CountBasis =
@@ -286,6 +286,12 @@ export function registerMemoryCommand(
           ? [
               "",
               'Basis: usage | estimate — "~" marks chars/4 estimates; unmarked counters use real model usage.',
+            ]
+          : []),
+        ...(legacy
+          ? [
+              "",
+              "Legacy estimate counting active (PI_BLACKHOLE_LEGACY_ESTIMATE) — deprecated, scheduled for removal.",
             ]
           : []),
       ];
