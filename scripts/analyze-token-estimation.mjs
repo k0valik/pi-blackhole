@@ -2,32 +2,23 @@
 /**
  * Analyze chars/4 token estimation vs actual model usage across real pi sessions.
  *
- * Motivation: our compaction + coverage counters (rawTokensSinceLastCompaction,
- * rawTokensSinceCoverage) estimate tokens as chars/4 via pi's estimateTokens().
- * This systematically underreports actual provider usage (often ~2-3x), so
- * auto-compaction and the observer/reflector/dropper thresholds fire late.
+ * Event-based, branch-aware replay (2026-08 rework):
+ *   - Windows are EVENTS, not per-session snapshots: every compaction entry and
+ *     every om coverage marker contributes one window, evaluated on the
+ *     ancestor path as it existed when the event was appended (parentId walk —
+ *     /tree backtracks and append-chain bulk in the JSONL cannot pollute it).
+ *   - `est`   : chars/4 over source entries since the anchor (coverage marker /
+ *     compaction firstKeptEntryId), mirroring progress.ts runtime semantics.
+ *   - `usage` : real provider context — absolute last-valid assistant usage for
+ *     compaction windows; usage DELTA between coverage anchors for coverage
+ *     windows (calculateContextTokens semantics: totalTokens preferred;
+ *     error/aborted turns excluded).
  *
- * This script replays both counting methods over real session JSONL files:
- *   - `est`   : current behavior — estimateTokens() over source entries since the
- *               last coverage marker / compaction (mirrors progress.ts).
- *   - `usage` : proposed behavior —
- *               * compaction: last assistant message's calculateContextTokens()
- *                 after the compaction point + estimate for trailing messages
- *                 (mirrors tavasti fork commit 360f24a / pi's estimateContextTokens).
- *               * coverage : usage DELTA — last assistant usage after the marker
- *                 minus last assistant usage before the marker + trailing estimate.
- *                 (Needed because coverage markers sit mid-context; the last usage
- *                 alone would report the whole context, not "since the marker".)
- *
- * Beyond the raw comparison it computes an algorithmic calibration surface for
- * planning default threshold bumps (see work_docs/issue-usage-based-token-counting.md):
- *   - churn multiplier: how many more times each stage would fire under truthful
- *     counting with unchanged thresholds (usageOver / estOver);
- *   - same-fire-count threshold: the usage threshold T' whose firing frequency
- *     equals today's est-based frequency (largest T' with count(usage >= T')
- *     <= count(est >= T_current));
- *   - usage distribution percentiles (p50/p75/p90/p95/max) per stage, the raw
- *     material for generation-aware preset proposals.
+ * Beyond est-vs-usage it DECOMPOSES the drift (work_docs measurement critique,
+ * 2026-08-23): clean-span density ratios per stage (same model, no compaction,
+ * no backtrack between anchors) are reported separately from compaction-stage
+ * scope drift (system+tools+summary overhead + density), with degenerate pairs
+ * excluded by reason instead of silently averaged.
  *
  * Usage: node scripts/analyze-token-estimation.mjs [N] [--defaults] [--summary <path>]
  *   N = number of most-recent session files to analyze.
@@ -36,20 +27,19 @@
  *                reflect+drop 25k / compact 81k) instead of the user's global
  *                config values — the surface an auto-install user gets.
  *   --summary <path> = also write a tracked review artifact to <path> with
- *                only the math (aggregate + calibration + observer input
- *                simulation) for BOTH surfaces — no per-window rows. Intended
- *                for work_docs/ so the numbers are reviewable on GitHub.
+ *                only the math for BOTH surfaces — no per-window rows.
+ *                Intended for work_docs/ so numbers are reviewable on GitHub.
  *
  * Output:
- *   - console: per-window table (first 70 rows) + aggregate + calibration
+ *   - console: event windows (first 70) + aggregate + decomposition +
+ *     calibration
  *   - observer input simulation: what the observer would serialize upstream
- *     (role shares + trimming of oversized tool results AND thinking blocks —
- *     head+tail; tunable via --trim-head/--trim-tail/--trim-threshold and
- *     --think-head-pct/--think-tail-pct/--think-threshold) — orthogonal to
- *     the counters, which use provider usage of the session context
+ *     from the ACTIVE branch tail (role shares + head/tail trimming of
+ *     oversized tool results AND thinking blocks; tunable via --trim-head/
+ *     --trim-tail/--trim-threshold and --think-head-pct/--think-tail-pct/
+ *     --think-threshold) — orthogonal to the counters
  *   - tmp/token-estimation-report.md (or -defaults.md): full report incl. ALL
- *     rows, per-stage aggregate, calibration table, usage distributions, and
- *     the observer simulation (reproducible).
+ *     rows, aggregate, decomposition, calibration, tiers, simulation
  */
 import {
   readFileSync,
@@ -65,6 +55,7 @@ import {
   calculateContextTokens,
   estimateTokens,
 } from "@earendil-works/pi-coding-agent";
+import { parseSession, sliceAt } from "./om-session-parser.mjs";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
 const args = process.argv.slice(2);
@@ -181,7 +172,14 @@ function isSourceEntry(entry) {
   return SOURCE_TYPES.has(entry.type);
 }
 
+/** Real context tokens from an assistant message (pi calculateContextTokens),
+ *  excluding error/aborted turns and non-assistant messages — mirrors the
+ *  runtime's getUsageTokens guards. */
 function usageTokens(message) {
+  if (!message || typeof message !== "object") return undefined;
+  if (message.role !== "assistant") return undefined;
+  if (message.stopReason === "error" || message.stopReason === "aborted")
+    return undefined;
   const usage = message?.usage;
   if (!usage || typeof usage !== "object") return undefined;
   try {
@@ -200,114 +198,27 @@ function rawTokensAfterIndex(entries, index) {
   return total;
 }
 
-function latestCoverageIndex(entries, customType) {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i];
-    if (
-      e.type === "custom" &&
-      e.customType === customType &&
-      e.data &&
-      typeof e.data.coversUpToId === "string"
-    ) {
-      return i;
-    }
+/** Last valid assistant context usage at or before each slice position. */
+function prefixContextTokens(slice) {
+  const out = new Array(slice.length);
+  let cur;
+  for (let i = 0; i < slice.length; i++) {
+    const t = usageTokens(slice[i]?.message);
+    if (t !== undefined) cur = t;
+    out[i] = cur;
   }
-  return -1;
+  return out;
 }
 
-function findLastCompactionIndex(entries) {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].type === "compaction") return i;
+/** Cumulative chars/4 estimate over source entries (out[i] = sum before i). */
+function prefixSourceEstimate(slice) {
+  const out = new Array(slice.length + 1);
+  out[0] = 0;
+  for (let i = 0; i < slice.length; i++) {
+    out[i + 1] =
+      out[i] + (isSourceEntry(slice[i]) ? estimateEntryTokens(slice[i]) : 0);
   }
-  return -1;
-}
-
-/** Index of the first entry in the runtime's current branch: the last
- *  compaction's firstKeptEntryId (or 0 when never compacted). The session
- *  JSONL file keeps pre-compaction messages; the runtime branch does not,
- *  so "since coverage" windows must be clamped to this boundary. */
-function branchStartIndex(entries) {
-  const ci = findLastCompactionIndex(entries);
-  if (ci === -1) return 0;
-  const fk = entries[ci].firstKeptEntryId;
-  const fki = fk ? entries.findIndex((e) => e.id === fk) : -1;
-  return fki === -1 ? ci : fki;
-}
-
-/** est tokens after index, clamped to the current branch start. */
-function rawTokensAfterIndexBounded(entries, index) {
-  const start = Math.max(0, index + 1, branchStartIndex(entries));
-  let total = 0;
-  for (let i = start; i < entries.length; i++) {
-    if (isSourceEntry(entries[i])) total += estimateEntryTokens(entries[i]);
-  }
-  return total;
-}
-
-// ── proposed counters ─────────────────────────────────────────────────────
-/** Usage-delta for coverage markers: last usage after marker − last usage
- *  before marker + trailing estimate. Falls back to estimate when no usage. */
-function usageDeltaSinceCoverage(entries, customType) {
-  const marker = latestCoverageIndex(entries, customType);
-  const after = marker + 1;
-
-  let baseline = 0; // last assistant usage at/before the marker (0 = fresh context)
-  let ceiling = undefined;
-  let ceilingIndex = -1;
-  for (let i = branchStartIndex(entries); i < entries.length; i++) {
-    const e = entries[i];
-    if (e.type !== "message" || !e.message) continue;
-    const t = usageTokens(e.message);
-    if (t === undefined) continue;
-    if (i < after) baseline = t;
-    else {
-      ceiling = t;
-      ceilingIndex = i;
-    }
-  }
-  if (ceiling === undefined) return rawTokensAfterIndexBounded(entries, marker);
-
-  let trailing = 0;
-  for (let j = ceilingIndex + 1; j < entries.length; j++) {
-    if (isSourceEntry(entries[j])) trailing += estimateEntryTokens(entries[j]);
-  }
-  return Math.max(0, ceiling - baseline) + trailing;
-}
-
-/** Usage-based for compaction: context is rebuilt after compacting, so the
- *  last assistant usage after the compaction point IS "tokens since". */
-function usageSinceLastCompaction(entries) {
-  const compactionIndex = findLastCompactionIndex(entries);
-  let startIndex;
-  if (compactionIndex === -1) {
-    startIndex = -1;
-  } else {
-    const firstKept = entries[compactionIndex].firstKeptEntryId;
-    const firstKeptIndex = firstKept
-      ? entries.findIndex((e) => e.id === firstKept)
-      : -1;
-    startIndex = firstKeptIndex === -1 ? compactionIndex : firstKeptIndex - 1;
-  }
-
-  let lastUsage = undefined;
-  let lastUsageIndex = -1;
-  for (let i = entries.length - 1; i > startIndex; i--) {
-    const e = entries[i];
-    if (e.type !== "message" || !e.message) continue;
-    const t = usageTokens(e.message);
-    if (t !== undefined) {
-      lastUsage = t;
-      lastUsageIndex = i;
-      break;
-    }
-  }
-  if (lastUsage === undefined) return rawTokensAfterIndex(entries, startIndex);
-
-  let trailing = 0;
-  for (let j = lastUsageIndex + 1; j < entries.length; j++) {
-    if (isSourceEntry(entries[j])) trailing += estimateEntryTokens(entries[j]);
-  }
-  return lastUsage + trailing;
+  return out;
 }
 
 // ── statistics helpers (algorithmic calibration surface) ──────────────────
@@ -363,9 +274,18 @@ function messageText(msg) {
   return "";
 }
 
+function latestCoverageIndex(entries, customType) {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.type === "custom" && e.customType === customType) return i;
+  }
+  return -1;
+}
+
 function observerChunkEntries(entries, maxChunkTokens) {
   const marker = latestCoverageIndex(entries, OM_TYPES.observations);
-  const start = Math.max(0, marker + 1, branchStartIndex(entries));
+  const compactionIdx = entries.findLastIndex((e) => e.type === "compaction");
+  const start = Math.max(0, marker + 1, compactionIdx + 1);
   const window = entries.slice(start).filter(isSourceEntry);
   let totalTokens = 0;
   const kept = [];
@@ -524,20 +444,6 @@ function findSessions(limit) {
   return limit > 0 ? files.slice(0, limit) : files;
 }
 
-function parseEntries(filePath) {
-  const entries = [];
-  for (const line of readFileSync(filePath, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      entries.push(JSON.parse(trimmed));
-    } catch {
-      /* skip malformed */
-    }
-  }
-  return entries;
-}
-
 // ── single-pass analysis (computation + console + tmp report) ─────────────
 function analyzeOnce(useDefaults, limit) {
   const th = loadThresholds(useDefaults);
@@ -562,19 +468,37 @@ function analyzeOnce(useDefaults, limit) {
     stages.map((s) => [
       s.name,
       {
-        ratios: [], // est/usage over marker-present, usage>0 windows
-        estValues: [], // est over all windows with usage>0 (calibration surface)
-        usageValues: [], // usage over all windows with usage>0
+        ratios: [], // est/usage over CLEAN event windows with usage>0
+        estValues: [], // est over all measurable windows (calibration surface)
+        usageValues: [],
         estOver: 0, // est >= threshold (all windows)
         usageOver: 0, // usage >= threshold (all windows)
         late: 0, // est<thr but usage>=thr
         early: 0, // est>=thr but usage<thr
-        withMarker: 0,
-        noMarker: 0,
+        windows: 0, // event windows for this stage
         noUsage: 0,
       },
     ]),
   );
+
+  const decomp = Object.fromEntries(
+    ["observer", "reflector", "dropper"].map((s) => [
+      s,
+      {
+        density: [], // usage/est over CLEAN same-model same-segment spans
+        excluded: {
+          backtrack: 0,
+          crossCompaction: 0,
+          crossModel: 0,
+          nonPositiveDelta: 0,
+          tinySpan: 0,
+          danglingAnchor: 0,
+          noBaseline: 0,
+        },
+      },
+    ]),
+  );
+  const compactionDrift = []; // absoluteUsage - estSinceAnchor per compaction window
 
   const rows = []; // full per-window rows for the report file
   const obsSim = []; // observer input simulation rows
@@ -586,73 +510,211 @@ function analyzeOnce(useDefaults, limit) {
   console.log(
     `Analyzing ${sessions.length} session files under ${SESSIONS_DIR}\n` +
       `Thresholds: observe=${th.observe} reflect=${th.reflect} drop=${th.drop} compact=${th.compact}\n` +
-      `(est = current chars/4 estimate over the branch window; usage = proposed usage-based count; marker = index of last coverage marker / compaction, -1 = none)`,
+      `(event-based branch-aware replay: one window per compaction / coverage marker, evaluated on its ancestor path)`,
   );
   console.log(
-    "stage      est       usage     ratio  marker  est>=thr  usage>=thr  session",
+    "stage       est       usage     ratio  anchor   est>=thr  usage>=thr  session",
   );
 
   for (const [si, s] of sessions.entries()) {
     if ((si + 1) % 100 === 0)
       console.log(`… processed ${si + 1}/${sessions.length} sessions`);
-    const entries = parseEntries(s.path);
+    const parsed = parseSession(s.path);
+    const { entries, byId, ancestors } = parsed;
     const name = path
       .basename(s.path)
       .replace(/_019[a-f0-9-]+\.jsonl$/, "")
       .slice(-22);
     let maxCtx = 0;
     for (const e of entries) {
-      if (e.type !== "message" || !e.message) continue;
       const t = usageTokens(e.message);
       if (t !== undefined && t > maxCtx) maxCtx = t;
     }
     const ti = maxCtx > 0 ? tierOf(maxCtx) : -1;
-    for (const stage of stages) {
-      const marker =
-        stage.type === null
-          ? findLastCompactionIndex(entries)
-          : latestCoverageIndex(entries, stage.type);
-      const est = rawTokensAfterIndexBounded(entries, marker);
-      const usage =
-        stage.type === null
-          ? usageSinceLastCompaction(entries)
-          : usageDeltaSinceCoverage(entries, stage.type);
-      const ratio = usage > 0 ? est / usage : undefined;
-      const estOver = est >= stage.threshold;
-      const usageOver = usage >= stage.threshold;
 
-      const a = agg[stage.name];
-      if (marker >= 0) a.withMarker++;
-      else a.noMarker++;
-      if (usage > 0) {
-        if (marker >= 0) a.ratios.push(ratio);
-        a.estValues.push(est);
-        a.usageValues.push(usage);
-        if (ti >= 0) {
-          tierBuckets[ti].usage[stage.name].push(usage);
+    const events = [];
+    for (const c of parsed.compactions)
+      events.push({ kind: "compaction", idx: c.entry.__index, meta: c });
+    for (const m of parsed.markers)
+      events.push({ kind: "marker", idx: m.entry.__index, meta: m });
+    events.sort((a, b) => a.idx - b.idx);
+
+    const prevMarkerByStage = {};
+
+    for (const ev of events) {
+      const slice = sliceAt(ev.meta.entry, byId, ancestors);
+      const posOf = new Map();
+      for (let i = 0; i < slice.length; i++) posOf.set(slice[i].id, i);
+      const pu = prefixContextTokens(slice);
+      const pe = prefixSourceEstimate(slice);
+      const end = slice.length;
+
+      if (ev.kind === "compaction") {
+        const a = agg.compaction;
+        a.windows++;
+        const usageAbs = pu[end - 1];
+        const fkId = ev.meta.firstKeptEntryId;
+        let anchorResolved = true;
+        let startIdx = 0;
+        if (fkId && posOf.has(fkId)) {
+          startIdx = posOf.get(fkId);
+        } else {
+          anchorResolved = false;
+          startIdx = 0;
+        }
+        const est = pe[end] - pe[startIdx];
+        const usage = usageAbs ?? 0;
+        const ratio = usage > 0 ? est / usage : undefined;
+        const estOver = est >= th.compact;
+        const usageOver = usage >= th.compact;
+        if (usage > 0) {
+          a.estValues.push(est);
+          a.usageValues.push(usage);
+          if (ti >= 0) tierBuckets[ti].usage.compaction.push(usage);
+          compactionDrift.push({ drift: usage - est, usage, est });
+        }
+        if (usage === 0 && est === 0) a.noUsage++;
+        if (estOver) a.estOver++;
+        if (usageOver) a.usageOver++;
+        if (usageOver && !estOver) a.late++;
+        if (estOver && !usageOver) a.early++;
+        rows.push({
+          kind: "compaction",
+          stage: "compaction",
+          est,
+          usage,
+          ratio,
+          anchor: anchorResolved ? "kept" : "unresolved",
+          provenance: `${ev.meta.compactor ?? "?"}/${ev.meta.summaryMode ?? "rewrite"}${
+            ev.meta.sequence ? ` seq${ev.meta.sequence}` : ""
+          } hook=${ev.meta.fromHook}`,
+          tokensBefore: ev.meta.tokensBefore,
+          estOver,
+          usageOver,
+          session: name,
+        });
+        for (const k of Object.keys(prevMarkerByStage))
+          delete prevMarkerByStage[k];
+        continue;
+      }
+
+      const st = ev.meta.stage;
+      const stageCfg = stages.find((x) => x.name === st);
+      const a = agg[st];
+      a.windows++;
+      const selfPos = end - 1;
+      const coverRaw =
+        ev.meta.anchorIndex != null ? ev.meta.anchorIndex : undefined;
+      const coverPos =
+        ev.meta.coversUpToId && posOf.has(ev.meta.coversUpToId)
+          ? posOf.get(ev.meta.coversUpToId)
+          : undefined;
+      const prev = prevMarkerByStage[st];
+      prevMarkerByStage[st] = { pos: selfPos, id: ev.meta.entry.id, coverPos };
+
+      if (coverPos == null) {
+        decomp[st].excluded.danglingAnchor++;
+        continue;
+      }
+
+      let usageDelta;
+      let estDelta;
+      if (prev && prev.coverPos != null && prev.pos < selfPos) {
+        const baselinePos = prev.coverPos;
+        usageDelta = (pu[selfPos] ?? 0) - (pu[baselinePos] ?? 0);
+        estDelta = pe[coverPos + 1] - pe[baselinePos + 1];
+      }
+
+      if (usageDelta !== undefined && usageDelta > 0) {
+        a.estValues.push(estDelta);
+        a.usageValues.push(usageDelta);
+        if (ti >= 0) tierBuckets[ti].usage[st].push(usageDelta);
+        const estOver = estDelta >= stageCfg.threshold;
+        const usageOver = usageDelta >= stageCfg.threshold;
+        if (estOver) a.estOver++;
+        if (usageOver) a.usageOver++;
+        if (usageOver && !estOver) a.late++;
+        if (estOver && !usageOver) a.early++;
+      } else {
+        a.noUsage++;
+      }
+
+      if (prev == null) {
+        decomp[st].excluded.noBaseline++;
+        rows.push({
+          kind: "coverage",
+          stage: st,
+          est: estDelta ?? 0,
+          usage: usageDelta ?? 0,
+          ratio: undefined,
+          anchor: "first",
+          provenance: ev.meta.customType,
+          tokensBefore: "",
+          estOver: false,
+          usageOver: false,
+          session: name,
+        });
+        continue;
+      }
+
+      const ancSet = new Set(ancestors(ev.meta.entry));
+      if (!ancSet.has(prev.id)) {
+        decomp[st].excluded.backtrack++;
+        continue;
+      }
+      let crossed = false;
+      for (let i = prev.pos + 1; i < selfPos; i++) {
+        const t = slice[i]?.type;
+        if (t === "compaction") {
+          crossed = true;
+          break;
         }
       }
-      if (usage === 0 && est === 0) a.noUsage++;
-      if (estOver) a.estOver++;
-      if (usageOver) a.usageOver++;
-      if (usageOver && !estOver) a.late++;
-      if (estOver && !usageOver) a.early++;
-
+      if (crossed) {
+        decomp[st].excluded.crossCompaction++;
+        continue;
+      }
+      let modelSwitched = false;
+      for (let i = prev.pos + 1; i < selfPos; i++) {
+        if (slice[i]?.type === "model_change") {
+          modelSwitched = true;
+          break;
+        }
+      }
+      if (modelSwitched) {
+        decomp[st].excluded.crossModel++;
+        continue;
+      }
+      if (!(usageDelta > 0)) {
+        decomp[st].excluded.nonPositiveDelta++;
+        continue;
+      }
+      if (estDelta <= 300) {
+        decomp[st].excluded.tinySpan++;
+        continue;
+      }
+      decomp[st].density.push(usageDelta / estDelta);
+      const ratio = estDelta / usageDelta;
+      a.ratios.push(ratio);
       rows.push({
-        stage: stage.name,
-        est,
-        usage,
+        kind: "coverage",
+        stage: st,
+        est: estDelta,
+        usage: usageDelta,
         ratio,
-        marker,
-        estOver,
-        usageOver,
+        anchor: "clean",
+        provenance: ev.meta.customType,
+        tokensBefore: "",
+        estOver: estDelta >= stageCfg.threshold,
+        usageOver: usageDelta >= stageCfg.threshold,
         session: name,
       });
     }
     if (ti >= 0) tierBuckets[ti].maxCtx.push(maxCtx);
 
-    // Observer input simulation: what the observer would send upstream now.
-    const obsChunk = observerChunkEntries(entries, th.observerChunk);
+    // Observer input simulation: what the observer would send upstream now,
+    // computed on the ACTIVE branch tail (/tree backtracks excluded).
+    const obsChunk = observerChunkEntries(parsed.active, th.observerChunk);
     if (obsChunk.length > 0) {
       const b = classifyChunk(obsChunk);
       const chunkTokens =
@@ -684,9 +746,7 @@ function analyzeOnce(useDefaults, limit) {
   }
 
   // ── console aggregate ─────────────────────────────────────────────────────
-  console.log(
-    "\n── Aggregate (ratios over marker-present, usage>0 windows) ──",
-  );
+  console.log("\n── Aggregate (clean event windows, usage > 0) ──");
   for (const stage of stages) {
     const a = agg[stage.name];
     const ratios = [...a.ratios].sort((x, y) => x - y);
@@ -700,7 +760,33 @@ function analyzeOnce(useDefaults, limit) {
         ? `| fires LATE:${a.late} EARLY:${a.early}`
         : "| triggers agree";
     console.log(
-      `${stage.name.padEnd(10)} n=${String(ratios.length).padStart(3)}  est/usage median=${med} min=${min} max=${max}  | est>=thr:${a.estOver} usage>=thr:${a.usageOver} (windows: ${a.withMarker} marker / ${a.noMarker} no-marker)${a.noUsage ? ` no-usage:${a.noUsage}` : ""} ${trigger}`,
+      `${stage.name.padEnd(10)} n=${String(ratios.length).padStart(3)}  est/usage median=${med} min=${min} max=${max}  | est>=thr:${a.estOver} usage>=thr:${a.usageOver} (event windows: ${a.windows})${a.noUsage ? ` no-usage:${a.noUsage}` : ""} ${trigger}`,
+    );
+  }
+
+  // ── decomposition (scope overhead vs density, clean spans only) ───────────
+  console.log(
+    "\n── Measurement decomposition (density over CLEAN same-model same-segment spans) ──",
+  );
+  for (const s of ["observer", "reflector", "dropper"]) {
+    const d = [...decomp[s].density].sort((a, b) => a - b);
+    const ex = decomp[s].excluded;
+    const exSum = Object.values(ex).reduce((x, y) => x + y, 0);
+    const exStr =
+      exSum > 0
+        ? Object.entries(ex)
+            .filter(([, v]) => v > 0)
+            .map(([k, v]) => `${k}:${v}`)
+            .join(" ")
+        : "none";
+    console.log(
+      `${s.padEnd(10)} density(usage/est) n=${String(d.length).padStart(4)} median=${d.length ? d[Math.floor(d.length / 2)].toFixed(2) : "n/a"} p25=${fmtPct(d, 0.25)} p75=${fmtPct(d, 0.75)} p90=${fmtPct(d, 0.9)} | excluded ${exSum}: ${exStr}`,
+    );
+  }
+  {
+    const ds = compactionDrift.map((x) => x.drift).sort((a, b) => a - b);
+    console.log(
+      `compaction drift (absolute usage − est-since-anchor): n=${ds.length} p25=${fmtPct(ds, 0.25)} median=${fmtPct(ds, 0.5)} p75=${fmtPct(ds, 0.75)} p90=${fmtPct(ds, 0.9)}${ds.some((x) => x < 0) ? ` min=${fmtPct(ds, 0)}` : ""}\npositive compaction drift ≈ scope overhead (system+tools+summary) + density; coverage-stage medians above ≈ pure tokenizer density`,
     );
   }
 
@@ -866,22 +952,22 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
   );
   md.push(`- Generated: ${new Date().toISOString()}`);
   md.push("");
-  md.push("## Per-window rows");
+  md.push("## Per-window rows (event-based)");
   md.push("");
   md.push(
-    "| stage | est | usage | ratio | marker | est>=thr | usage>=thr | session |",
+    "| kind | stage | est | usage | ratio (est/usage) | anchor | provenance | tokensBefore | est>=thr | usage>=thr | session |",
   );
-  md.push("|---|---|---|---|---|---|---|---|");
+  md.push("|---|---|---|---|---|---|---|---|---|---|---|");
   for (const r of rows) {
     md.push(
-      `| ${r.stage} | ${r.est} | ${r.usage} | ${r.ratio !== undefined ? r.ratio.toFixed(2) : "n/a"} | ${r.marker} | ${r.estOver} | ${r.usageOver} | ${r.session} |`,
+      `| ${r.kind} | ${r.stage} | ${r.est} | ${r.usage} | ${r.ratio !== undefined ? r.ratio.toFixed(2) : "n/a"} | ${r.anchor} | ${r.provenance} | ${r.tokensBefore} | ${r.estOver ? 1 : 0} | ${r.usageOver ? 1 : 0} | ${r.session} |`,
     );
   }
   md.push("");
-  md.push("## Aggregate (ratios over marker-present, usage>0 windows)");
+  md.push("## Aggregate (clean event windows, usage > 0)");
   md.push("");
   md.push(
-    "| stage | n | median | min | max | est>=thr | usage>=thr | marker | no-marker | no-usage | LATE | EARLY |",
+    "| stage | n (clean) | median | min | max | est>=thr | usage>=thr | windows | no-usage | LATE | EARLY |",
   );
   md.push("|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const stage of stages) {
@@ -893,10 +979,44 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
     const min = ratios.length ? ratios[0].toFixed(2) : "n/a";
     const max = ratios.length ? ratios[ratios.length - 1].toFixed(2) : "n/a";
     md.push(
-      `| ${stage.name} | ${ratios.length} | ${med} | ${min} | ${max} | ${a.estOver} | ${a.usageOver} | ${a.withMarker} | ${a.noMarker} | ${a.noUsage} | ${a.late} | ${a.early} |`,
+      `| ${stage.name} | ${ratios.length} | ${med} | ${min} | ${max} | ${a.estOver} | ${a.usageOver} | ${a.windows} | ${a.noUsage} | ${a.late} | ${a.early} |`,
     );
   }
   md.push("");
+  md.push("## Measurement decomposition (2026-08 critique: scope vs density)");
+  md.push("");
+  md.push(
+    "Clean span = consecutive same-stage coverage anchors with no compaction, no model change and no /tree backtrack between them, both anchors resolved, positive usage delta, est delta > 300. Density = usageΔ/estΔ on that span (chars/4 OVERCOUNTS when < 1). Compaction drift = absolute last usage at fire − est since firstKeptEntryId; its positive part is dominated by scope overhead (system prompt + tool schemas + injected summaries) that the est counter never sees.",
+  );
+  md.push("");
+  md.push(
+    "| stage | clean pairs | density median | p25 | p75 | p90 | excluded (by reason) |",
+  );
+  md.push("|---|---|---|---|---|---|---|");
+  for (const s of ["observer", "reflector", "dropper"]) {
+    const d = [...decomp[s].density].sort((a, b) => a - b);
+    const ex = decomp[s].excluded;
+    const exStr =
+      Object.entries(ex)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(" ") || "none";
+    const pctv = (p) => (d.length ? percentile(d, p) : undefined);
+    md.push(
+      `| ${s} | ${d.length} | ${fmtNum(d.length ? d[Math.floor(d.length / 2)].toFixed(2) : undefined)} | ${fmtNum(pctv(0.25)?.toFixed(2))} | ${fmtNum(pctv(0.75)?.toFixed(2))} | ${fmtNum(pctv(0.9)?.toFixed(2))} | ${exStr} |`,
+    );
+  }
+  {
+    const ds = compactionDrift.map((x) => x.drift).sort((a, b) => a - b);
+    if (ds.length > 0) {
+      md.push("");
+      md.push(
+        `Compaction drift over ${ds.length} compaction windows: p25=${fmtPct(ds, 0.25)} median=${fmtPct(ds, 0.5)} p75=${fmtPct(ds, 0.75)} p90=${fmtPct(ds, 0.9)}. Migration guidance must split this from coverage-stage density — no single multiplier is valid.`,
+      );
+    }
+  }
+  md.push("");
+
   md.push("## Calibration (planning input for default threshold bumps)");
   md.push("");
   md.push("Interpretation:");
@@ -1022,6 +1142,8 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
     cal,
     obsSim,
     tierCal,
+    decomp,
+    compactionDrift,
     useDefaults,
     limit,
   };
@@ -1041,14 +1163,43 @@ function writeSummary(primary, secondary, outPath) {
   const fmtN = (v) => (v === undefined ? "n/a" : v.toLocaleString());
 
   const surface = (run, title) => {
-    const { th, stages, agg, cal, obsSim } = run;
+    const { th, stages, agg, cal, obsSim, decomp, compactionDrift } = run;
     const lines = [];
     lines.push(`## ${title}`);
     lines.push("");
-    lines.push("### Aggregate (ratios over marker-present, usage>0 windows)");
+    lines.push(
+      "### Measurement decomposition (clean same-model same-segment spans)",
+    );
     lines.push("");
     lines.push(
-      "| stage | threshold | n | median | min | max | est fires | usage fires | churn× | LATE | EARLY | marker | no-marker | no-usage |",
+      "| stage | clean pairs | density median | p25 | p75 | p90 | excluded |",
+    );
+    lines.push("|---|---|---|---|---|---|---|");
+    for (const s of ["observer", "reflector", "dropper"]) {
+      const d = [...decomp[s].density].sort((a, b) => a - b);
+      const ex = decomp[s].excluded;
+      const exStr =
+        Object.entries(ex)
+          .filter(([, v]) => v > 0)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(" ") || "none";
+      lines.push(
+        `| ${s} | ${d.length} | ${fmtN(d.length ? d[Math.floor(d.length / 2)].toFixed(2) : undefined)} | ${fmtN(d.length ? percentile(d, 0.25).toFixed(2) : undefined)} | ${fmtN(d.length ? percentile(d, 0.75).toFixed(2) : undefined)} | ${fmtN(d.length ? percentile(d, 0.9).toFixed(2) : undefined)} | ${exStr} |`,
+      );
+    }
+    {
+      const ds = compactionDrift.map((x) => x.drift).sort((a, b) => a - b);
+      if (ds.length > 0)
+        lines.push(
+          `- compaction drift (absolute usage − est-since-anchor): median ${fmtN(Math.round(ds[(ds.length - 1) >> 1]))}, p25 ${fmtN(Math.round(percentile(ds, 0.25)))}, p75 ${fmtN(Math.round(percentile(ds, 0.75)))}, p90 ${fmtN(Math.round(percentile(ds, 0.9)))}`,
+        );
+    }
+    lines.push("");
+    lines.push("");
+    lines.push("### Aggregate (clean windows, usage>0)");
+    lines.push("");
+    lines.push(
+      "| stage | threshold | n (clean) | median | min | max | est fires | usage fires | churn× | LATE | EARLY | windows | no-usage |",
     );
     lines.push("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for (const s of stages) {
@@ -1060,7 +1211,7 @@ function writeSummary(primary, secondary, outPath) {
       const minR = ratios.length ? ratios[0].toFixed(2) : "n/a";
       const maxR = ratios.length ? ratios[ratios.length - 1].toFixed(2) : "n/a";
       lines.push(
-        `| ${s.name} | ${s.threshold.toLocaleString()} | ${ratios.length} | ${medR} | ${minR} | ${maxR} | ${a.estOver} | ${a.usageOver} | ${(a.usageOver / a.estOver).toFixed(1)} | ${a.late} | ${a.early} | ${a.withMarker} | ${a.noMarker} | ${a.noUsage} |`,
+        `| ${s.name} | ${s.threshold.toLocaleString()} | ${ratios.length} | ${medR} | ${minR} | ${maxR} | ${a.estOver} | ${a.usageOver} | ${a.estOver ? (a.usageOver / a.estOver).toFixed(1) : "n/a"} | ${a.late} | ${a.early} | ${a.windows} | ${a.noUsage} |`,
       );
     }
     lines.push("");
