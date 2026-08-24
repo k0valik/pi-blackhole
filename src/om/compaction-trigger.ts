@@ -11,6 +11,7 @@ import { resolveCompactThreshold } from "./due.js";
 import { resolveSessionContextWindow } from "./model-budget.js";
 import {
   compactInlineAtTurnBoundary,
+  InlineCompactionUnavailableError,
   type InlineCompaction,
 } from "./inline-compaction.js";
 
@@ -69,12 +70,40 @@ function autoCompactionSkipReason(runtime: Runtime): string | null {
   return null;
 }
 
+export const MID_RUN_RETRY_MAX_DELAY_MS = 30_000;
+
+type RetryRuntime = {
+  midRunCompactionRetry: { failures: number; retryAfter: number };
+};
+
+/** Clear backoff state after a successful compaction or pressure relief. */
+export function resetMidRunRetry(runtime: RetryRuntime): void {
+  runtime.midRunCompactionRetry = { failures: 0, retryAfter: 0 };
+}
+
+/** Arm the next retry after `delay` ms (1s, 2s, … capped at 30s). Returns the delay. */
+export function recordMidRunFailure(runtime: RetryRuntime): number {
+  const failures = runtime.midRunCompactionRetry.failures + 1;
+  const delay = Math.min(
+    MID_RUN_RETRY_MAX_DELAY_MS,
+    1000 * 2 ** (failures - 1),
+  );
+  runtime.midRunCompactionRetry = {
+    failures,
+    retryAfter: Date.now() + delay,
+  };
+  return delay;
+}
+
+const retryInSeconds = (delayMs: number) =>
+  `; retrying in ${Math.ceil(delayMs / 1000)}s`;
+
 export function registerCompactionTrigger(
   pi: ExtensionAPI,
   runtime: Runtime,
   inlineCompact: InlineCompaction = compactInlineAtTurnBoundary,
 ): void {
-  pi.on("agent_start", () => {
+  pi.on("agent_start", (_event: any, ctx: any) => {
     // Reset the info gate — allow one info notification during the new turn.
     runtime.resetInfoGate();
 
@@ -85,6 +114,22 @@ export function registerCompactionTrigger(
       runtime.autoCompactionController.abort();
       runtime.autoCompactionController = null;
       runtime.compactInFlight = false;
+    }
+
+    // Resume mode was configured but the adapter is known-permanently
+    // unavailable — surface that once so the setting isn't silently inert.
+    if (
+      runtime.config.midRunCompaction === "resume" &&
+      runtime.inlineCompactionAdapterStatus?.supported === false &&
+      !runtime.inlineCompactionWarningEmitted
+    ) {
+      runtime.inlineCompactionWarningEmitted = true;
+      notifySafely(
+        ctx?.hasUI ?? false,
+        ctx?.ui,
+        `Observational memory: mid-run compaction (resume) unavailable: ${runtime.inlineCompactionAdapterStatus.reason}; using settled compaction fallback`,
+        "warning",
+      );
     }
   });
 
@@ -151,17 +196,36 @@ async function handleTurnEnd(
     ),
   );
   if (tokens < threshold) {
-    // Pressure relieved (a compaction ran) — lift any failure suspension.
-    runtime.midRunCompactionSuspended = false;
+    dbg("compaction_trigger.turn_end.below_threshold", {
+      tokens,
+      threshold,
+      basis,
+    });
+    // Pressure relieved (a compaction ran) — clear any failure backoff.
+    resetMidRunRetry(runtime);
     return;
   }
-  if (runtime.midRunCompactionSuspended) {
-    // A previous mid-run attempt failed/cancelled at this pressure level.
-    // Re-triggering every turn would retry the same failure and spam the user.
-    // Stay suspended until a compaction lowers pressure below the threshold.
+  if (Date.now() < runtime.midRunCompactionRetry.retryAfter) {
+    // A previous mid-run attempt failed recently; retrying every turn would
+    // thrash the same failure. Backoff self-heals: retries resume shortly.
     dbg("compaction_trigger.turn_end.skip", {
-      reason: "suspended_after_failure",
+      reason: "inline_retry_backoff",
       tokens,
+      failures: runtime.midRunCompactionRetry.failures,
+      retryAfter: runtime.midRunCompactionRetry.retryAfter,
+    });
+    return;
+  }
+  if (
+    mode === "resume" &&
+    runtime.inlineCompactionAdapterStatus?.supported === false
+  ) {
+    // The adapter already reported permanent unavailability — don't retry
+    // a condition that cannot change mid-session.
+    dbg("compaction_trigger.turn_end.skip", {
+      reason: "inline_adapter_unsupported",
+      tokens,
+      reason_detail: runtime.inlineCompactionAdapterStatus.reason,
     });
     return;
   }
@@ -185,6 +249,7 @@ async function handleTurnEnd(
   if (mode === "resume") {
     try {
       await inlineCompact(ctx.sessionManager);
+      resetMidRunRetry(runtime);
       dbg("compaction_trigger.turn_end.inline_complete");
       runtime.tryEmitInfo(
         hasUI,
@@ -193,14 +258,39 @@ async function handleTurnEnd(
       );
     } catch (error) {
       if (isStaleExtensionContextError(error)) throw error;
-      runtime.midRunCompactionSuspended = true;
       const message = getErrorMessage(error);
-      dbg("compaction_trigger.turn_end.inline_error", { message });
+      if (error instanceof InlineCompactionUnavailableError) {
+        // Permanent: this pi version doesn't expose the inline adapter API.
+        // Classify once instead of cycling through the retry/backoff path.
+        runtime.inlineCompactionAdapterStatus = {
+          supported: false,
+          reason: message,
+        };
+        dbg("compaction_trigger.turn_end.inline_adapter_unavailable", {
+          message,
+        });
+        if (!runtime.inlineCompactionWarningEmitted) {
+          runtime.inlineCompactionWarningEmitted = true;
+          notifySafely(
+            hasUI,
+            ui,
+            `Observational memory: ${message}; using settled compaction fallback`,
+            "warning",
+          );
+        }
+        return;
+      }
+      const delay = recordMidRunFailure(runtime);
+      dbg("compaction_trigger.turn_end.inline_error", {
+        message,
+        failures: runtime.midRunCompactionRetry.failures,
+        retryAfter: runtime.midRunCompactionRetry.retryAfter,
+      });
       if (message !== "Compaction cancelled") {
         notifySafely(
           hasUI,
           ui,
-          `Observational memory: transparent mid-run compaction failed: ${message}`,
+          `Observational memory: transparent mid-run compaction failed: ${message}${retryInSeconds(delay)}`,
           "error",
         );
       }
@@ -219,6 +309,7 @@ async function handleTurnEnd(
   ctx.compact({
     onComplete: () => {
       runtime.compactInFlight = false;
+      resetMidRunRetry(runtime);
       dbg("compaction_trigger.turn_end.pause_complete");
       runtime.tryEmitInfo(
         hasUI,
@@ -228,14 +319,18 @@ async function handleTurnEnd(
     },
     onError: (error: { message: string }) => {
       runtime.compactInFlight = false;
-      runtime.midRunCompactionSuspended = true;
+      const delay = recordMidRunFailure(runtime);
       const message = error?.message ?? String(error);
-      dbg("compaction_trigger.turn_end.pause_error", { message });
+      dbg("compaction_trigger.turn_end.pause_error", {
+        message,
+        failures: runtime.midRunCompactionRetry.failures,
+        retryAfter: runtime.midRunCompactionRetry.retryAfter,
+      });
       if (message !== "Compaction cancelled") {
         notifySafely(
           hasUI,
           ui,
-          `Observational memory: mid-run compaction failed: ${message}`,
+          `Observational memory: mid-run compaction failed: ${message}${retryInSeconds(delay)}`,
           "error",
         );
       }
@@ -327,10 +422,12 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
     });
     return;
   }
-  if (runtime.midRunCompactionSuspended) {
+  if (Date.now() < runtime.midRunCompactionRetry.retryAfter) {
     dbg("compaction_trigger.skip", {
-      reason: "suspended_after_mid_run_failure",
+      reason: "mid_run_retry_backoff",
       tokens,
+      failures: runtime.midRunCompactionRetry.failures,
+      retryAfter: runtime.midRunCompactionRetry.retryAfter,
     });
     return;
   }

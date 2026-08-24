@@ -193,6 +193,15 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
         : undefined;
     },
   },
+  compactionSummaryMode: {
+    var: "PI_BLACKHOLE_COMPACTION_SUMMARY_MODE",
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase();
+      return ["default", "append"].includes(trimmed)
+        ? (trimmed as "default" | "append")
+        : undefined;
+    },
+  },
   midRunCompaction: {
     var: "PI_BLACKHOLE_MID_RUN_COMPACTION",
     parse: (raw: string) => {

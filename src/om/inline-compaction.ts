@@ -535,31 +535,57 @@ function getToolCallId(block: unknown): string | undefined {
     : undefined;
 }
 
-function hasUnpairedToolCall(messages: unknown[]): boolean {
-  const pending = new Set<string>();
-
-  for (const message of messages) {
+function hasTrailingUnpairedToolCall(messages: unknown[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
     if (!message || typeof message !== "object") continue;
+
     const value = message as {
       role?: unknown;
       content?: unknown;
-      toolCallId?: unknown;
+      stopReason?: unknown;
     };
+    if (value.role !== "assistant") continue;
 
-    if (value.role === "assistant" && Array.isArray(value.content)) {
-      for (const block of value.content) {
-        const id = getToolCallId(block);
-        if (id) pending.add(id);
+    // A non-array content means the model produced a text response and moved on;
+    // any earlier unpaired tool calls were superseded by this turn.
+    if (!Array.isArray(value.content)) return false;
+
+    // Skip aborted/errored turns — Pi drops these from API replay and excludes
+    // their tool calls from pending tracking (see pi-ai `transform-messages.js`).
+    // Only the latest *successful* assistant tool batch can still be in flight.
+    const stopReason = value.stopReason;
+    if (stopReason === "error" || stopReason === "aborted") continue;
+
+    const pending = new Set<string>();
+    for (const block of value.content) {
+      const id = getToolCallId(block);
+      if (id) pending.add(id);
+    }
+    if (pending.size === 0) return false;
+
+    for (
+      let resultIndex = index + 1;
+      resultIndex < messages.length;
+      resultIndex += 1
+    ) {
+      const result = messages[resultIndex];
+      if (!result || typeof result !== "object") continue;
+      const resultValue = result as { role?: unknown; toolCallId?: unknown };
+      if (
+        resultValue.role === "toolResult" &&
+        typeof resultValue.toolCallId === "string"
+      ) {
+        pending.delete(resultValue.toolCallId);
       }
-      continue;
     }
 
-    if (value.role === "toolResult" && typeof value.toolCallId === "string") {
-      pending.delete(value.toolCallId);
-    }
+    // A later assistant message proves any older unmatched call was superseded,
+    // not still executing. Only the newest assistant tool batch can be in flight.
+    return pending.size > 0;
   }
 
-  return pending.size > 0;
+  return false;
 }
 
 /**
@@ -590,7 +616,7 @@ export async function compactInlineAtTurnBoundary(
   }
 
   const activeMessages = session.sessionManager.buildSessionContext().messages;
-  if (hasUnpairedToolCall(activeMessages)) {
+  if (hasTrailingUnpairedToolCall(activeMessages)) {
     throw new Error(
       "Cannot compact inline while a tool call is still in flight",
     );

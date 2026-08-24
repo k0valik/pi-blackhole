@@ -220,6 +220,45 @@ The exact algorithms are already implemented and battle-tested in `scripts/analy
 - **Why head/tail is right for thinking blocks (validated on real data):** large thinking blocks are structured — the **head (~20%) restates and recaps the user's task** ("now I have a comprehensive picture… let me review the known bugs"), the **middle** is the messy internal evaluation/planning/code-drafting (least valuable to the observer), and the **tail (~20%)** is the conclusion and the plan for the user-facing reply. Verified on 40 recent sessions (duplicate-checked: 2,621 entries / 2,621 unique IDs in the live session, zero dupes): **620 thinking blocks > 4096 chars** (69 > 16k); the largest is **90,516 chars (~22.6k tokens)**. The live pi-blackhole-dev session alone contributes **163 blocks > 4k / 15 > 16k** of its 640 total thinking blocks (~1.98M chars of thinking in one session — thinking is the dominant content type there). Open implementation-time decision: for extreme blocks a pure 20% can still keep a lot in absolute terms (20% of 90k = 18k chars of head alone), so consider an absolute cap (head = min(20%, ~2–4k chars)) — worth a quality check before finalizing.
 - Net for default users: **≈ same run frequency, lower tokens per run, truthful thresholds.** Power users keep custom thresholds (their frequency rises — surfaced via B).
 
+## Measurement critique (2026-08-23)
+
+Re-analysis during PR #58 review, while porting the usage-based compaction counter. The headline claim — *"underreports by 20–40% because chars/4"* — over-attributes to tokenizer density what is largely a **numerator-scope defect**, and the two mechanisms should not share one multiplier in migration guidance.
+
+### Corrected framing
+
+`est` (the production counters) sums chars/4 over **source entries only** since the anchor (`message` / `custom_message` / `branch_summary`). `usage.totalTokens` covers **everything the provider saw**: system prompt, tool schemas, and injected summary text. Those consume real window budget whether est sees them or not — est wasn't measuring context imperfectly; it measured a *smaller thing* and the trigger treated it as context. That is precisely why the never-fires regime existed.
+
+Decomposition of the observed ratios:
+
+1. **Structural blindness** — est misses system + tools + summary. Dominant for **compaction**, whose counter compares a window slice against *absolute* context; worst right after a rebuild (context = overhead + summary + small tail). Cancels out of the coverage stages' delta method.
+2. **Tokenizer density drift (~10–25%, content-dependent)** — what remains in the coverage-stage ratios; code/JSON tokenizes denser than 4 chars/token, prose slightly looser.
+3. **Degenerate anchors** — the min 0.00 / max 23.6× outliers (marker immediately before compaction etc.).
+
+### Spot-check replays (pi 0.84.0 estimator, 2026-08-23)
+
+- **Live young session, no compaction, whole branch:** est over all source entries = 47,927 vs last valid usage = 47,583 → **ratio 1.01**. Chars/4 is nearly exact absent overhead/anchor asymmetry (slight prose overcount offsetting uncounted overhead). Matches the naive expectation "81k reported ≈ 84k real".
+- **8 archived compacted sessions**, script semantics (est since `firstKeptEntryId` vs absolute last usage):
+
+| session | usage | est | ratio | summary |
+|---|---|---|---|---|
+| 2026-05-15T17-15-27 | 185,720 | 130,061 | 0.70 | ~4.3k tok |
+| 2026-06-21T17-05-05 | 141,066 | 99,697 | 0.71 | ~5.4k tok |
+| 2026-05-16T01-29-07 | 62,139 | 48,031 | 0.77 | ~4.5k tok |
+| 2026-05-21T20-39-05 | 165,993 | 131,051 | 0.79 | ~1.6k tok |
+| 2026-06-02T23-46-54 | 109,518 | 106,618 | 0.97 | ~3.1k tok |
+| 2026-06-12T16-59-09 | 77,651 | 25,278 | 0.33 | outlier anchor |
+| 2026-06-12T19-28-37 | 126,929 | 97,468 | 0.77 | ~3.6k tok |
+| 2026-06-13T11-47-10 | 150,234 | 109,635 | 0.73 | ~3.5k tok |
+
+Typical 0.70–0.79. Summary text alone (~1.2–5.4k tokens) cannot close gaps of 14–55k — most of the gap is system+tools+summary overhead plus density drift on code-heavy content. The coverage stages' medians (~0.80) ≈ true density drift, consistent with their deltas cancelling the fixed overhead on both baselines.
+
+### Consequences
+
+- **Fix direction unchanged and stronger:** usage anchoring removes structural blindness at the root (landed as the tavasti/plan-01 port).
+- **Calibration method unchanged:** fire-rate targets read off usage distributions remain valid — they are usage-based regardless of mechanism.
+- **Migration guidance must split the story:** compaction users' old thresholds counted maybe two-thirds of real context ("thresholds now mean real tokens"); coverage-stage users see ~1.2–1.25× density-only drift, not 1.45×.
+- **Script rework deferred to token-rework planning:** decompose the ratio via pi's own anchored `estimateContextTokens` logic, filter degenerate anchors, report per-stage density separately from scope effects.
+
 ## References
 
 - Fork commit: `tavasti@360f24a6d68b612cfc0858cc43e9514e8b5c9c97` — `https://github.com/tavasti/pi-blackhole/commit/360f24a`

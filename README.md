@@ -17,6 +17,18 @@ Blackhole merges the best ideas from [pi-vcc](https://github.com/sting8k/pi-vcc)
 
 ---
 
+### ✨ New in 0.4.8
+
+> **Mid-run auto-compaction (`midRunCompaction`)** — opt into transparent compaction during long tool loops without interrupting the agent. Set `midRunCompaction: "resume"` to compact and continue in the same run; `"pause"` to compact and stop; `"off"` (default) only checks when the run ends.
+>
+> **Append summary mode (`compactionSummaryMode`)** — keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in via `compactionSummaryMode: "append"`.
+
+### ⚠️ Upcoming config change
+
+> **Default compaction thresholds will become model-context-window-aware in an upcoming release.** Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values (anything you typed into the config) will continue to be respected verbatim. If you're using the defaults, no action is needed — the migration is automatic. If you've set custom thresholds, they'll keep working exactly as before.
+
+---
+
 ## Quick start
 
 ```bash
@@ -548,3 +560,13 @@ What blackhole adds and reworks on top:
 ## License
 
 MIT
+
+## Append-only compaction
+
+Set `compactionSummaryMode` to `"append"` to keep automatic Blackhole
+compaction summaries as immutable provider-visible segments. Explicit
+`/blackhole` folds the active chain into one clean segment and starts a new
+chain. The default value is `"default"`.
+
+See [`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md) for
+the fallback, branch, observational-memory, and cache-measurement rules.

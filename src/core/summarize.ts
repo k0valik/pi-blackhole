@@ -169,10 +169,24 @@ const mergePrevious = (prev: string, fresh: string): string => {
   return parts.join(SEPARATOR);
 };
 
-export const compile = (input: CompileInput): string => {
+const compileFresh = (
+  input: Pick<CompileInput, "messages" | "fileOps">,
+): string => {
   const blocks = filterNoise(normalize(input.messages));
   const data = buildSections({ blocks });
-  const fresh = formatSummary(data);
+  return formatSummary(data);
+};
+
+/** Build one fresh immutable VCC segment. It never reads an older summary. */
+export const compileSegment = (
+  input: Pick<CompileInput, "messages" | "fileOps">,
+): string => {
+  const fresh = compileFresh(input);
+  return fresh ? wrapLongLines(fresh) : "";
+};
+
+export const compile = (input: CompileInput): string => {
+  const fresh = compileFresh(input);
 
   // Strip OM content first (## Reflections / ## Observations + preamble),
   // then strip ALL recall notes from the previous summary using paragraph-level
@@ -202,15 +216,23 @@ export const compile = (input: CompileInput): string => {
  * into paragraphs (double-newline boundaries) and drop any paragraph that
  * contains the identifying sentence.
  */
-const stripRecallNotes = (text: string): string => {
+const RECALL_NOTE_MARKER =
+  "The conversation before this point has been compacted";
+
+/** Return the one mutable recall-note paragraph from a complete summary. */
+export const extractRecallNote = (text: string): string =>
+  text
+    .split(/\n\n+/)
+    .find((paragraph) => paragraph.includes(RECALL_NOTE_MARKER))
+    ?.trim() ?? "";
+
+export const stripRecallNotes = (text: string): string => {
   const paragraphs = text.split(/\n\n+/);
-  const kept = paragraphs.filter(
-    (p) => !p.includes("The conversation before this point has been compacted"),
-  );
+  const kept = paragraphs.filter((p) => !p.includes(RECALL_NOTE_MARKER));
   return kept.join("\n\n");
 };
 
-const stripOMContent = (text: string): string => {
+export const stripOMContent = (text: string): string => {
   // Remove everything from "## Reflections" or "## Observations" onward,
   // plus the instructions preamble that precedes them.
   // The preamble starts with "These are condensed memories from earlier in this session."

@@ -57,6 +57,15 @@ const FIELDS: FieldDef[] = [
       "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
   },
   {
+    key: "compactionSummaryMode",
+    label: "Summary history",
+    type: "enum",
+    section: "Compaction",
+    enumValues: ["default", "append"],
+    helpText:
+      "default=replace one complete summary, append=freeze auto segments and rebase on /blackhole",
+  },
+  {
     key: "tailBehavior",
     label: "Visible tail",
     type: "enum",

@@ -10,7 +10,17 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { writeFileSync } from "fs";
-import { compile } from "../core/summarize";
+import {
+  compile,
+  compileSegment,
+  extractRecallNote,
+  stripOMContent,
+  stripRecallNotes,
+} from "../core/summarize";
+import {
+  buildAppendOnlyDetails,
+  coverageForMessages,
+} from "../core/compaction-chain.js";
 import {
   getModelProvider,
   matchesSkippedProvider,
@@ -23,6 +33,7 @@ import {
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
 import {
+  effectiveContextWindow,
   resolveObservationsPoolMaxTokens,
   resolveSessionContextWindow,
 } from "../om/model-budget.js";
@@ -126,7 +137,14 @@ interface EntryWithMessage {
 export type OwnCutCancelReason = "no_live_messages" | "too_few_live_messages";
 
 export type OwnCutResult =
-  | { ok: true; messages: any[]; firstKeptEntryId: string; compactAll: boolean }
+  | {
+      ok: true;
+      messages: any[];
+      /** Session entry ids backing `messages`, in the same order. */
+      selectedIds: string[];
+      firstKeptEntryId: string;
+      compactAll: boolean;
+    }
   | { ok: false; reason: OwnCutCancelReason };
 
 export function buildOwnCut(
@@ -177,8 +195,19 @@ export function buildOwnCut(
     }
   }
 
-  // ── Pi's cut path: use Pi's firstKeptEntryId instead of last-user cut ──
-  if (tailBehavior === "pi-default" && piFirstKeptEntryId) {
+  // Minimal normally cuts at the last user message. If Pi found a later safe
+  // split-turn boundary, use it too so one oversized current turn is not kept whole.
+  let minimalCutIdx = liveMessages.length - 1;
+  while (
+    minimalCutIdx > 0 &&
+    liveMessages[minimalCutIdx]?.message.role !== "user"
+  ) {
+    minimalCutIdx--;
+  }
+  if (minimalCutIdx <= 0) minimalCutIdx = liveMessages.length; // compact-all
+
+  // ── Pi's cut path: always use in pi-default; in minimal only when later ──
+  if (piFirstKeptEntryId) {
     const cutInBranch = branchEntries.findIndex(
       (e: any) => e.id === piFirstKeptEntryId,
     );
@@ -186,15 +215,19 @@ export function buildOwnCut(
       const liveCutIdx = liveMessages.findIndex(
         (lm) => lm.entry.id === piFirstKeptEntryId,
       );
-      if (liveCutIdx > 0) {
+      if (
+        liveCutIdx > 0 &&
+        (tailBehavior === "pi-default" || liveCutIdx > minimalCutIdx)
+      ) {
         return {
           ok: true,
           messages: liveMessages.slice(0, liveCutIdx).map((e) => e.message),
+          selectedIds: liveMessages.slice(0, liveCutIdx).map((e) => e.entry.id),
           firstKeptEntryId: piFirstKeptEntryId,
           compactAll: false,
         };
       }
-      if (liveCutIdx === 0) {
+      if (liveCutIdx === 0 && tailBehavior === "pi-default") {
         // Pi's cut is at first live message.
         // Pi wants to keep everything, so only compact-all is acceptable (summarizes
         // everything for a fresh page).  If minimal path would aggressively cut
@@ -225,17 +258,23 @@ export function buildOwnCut(
           const resolvedLiveIdx = liveMessages.findIndex(
             (lm) => lm.entry.id === resolvedId,
           );
-          if (resolvedLiveIdx > 0) {
+          if (
+            resolvedLiveIdx > 0 &&
+            (tailBehavior === "pi-default" || resolvedLiveIdx > minimalCutIdx)
+          ) {
             return {
               ok: true,
               messages: liveMessages
                 .slice(0, resolvedLiveIdx)
                 .map((e) => e.message),
+              selectedIds: liveMessages
+                .slice(0, resolvedLiveIdx)
+                .map((e) => e.entry.id),
               firstKeptEntryId: resolvedId,
               compactAll: false,
             };
           }
-          if (resolvedLiveIdx === 0) {
+          if (resolvedLiveIdx === 0 && tailBehavior === "pi-default") {
             let lastUserIdx = liveMessages.length - 1;
             while (
               lastUserIdx > 0 &&
@@ -281,6 +320,7 @@ export function buildOwnCut(
     return {
       ok: true,
       messages: liveMessages.map((e) => e.message),
+      selectedIds: liveMessages.map((e) => e.entry.id),
       firstKeptEntryId: "",
       compactAll: true,
     };
@@ -289,6 +329,7 @@ export function buildOwnCut(
   return {
     ok: true,
     messages: liveMessages.slice(0, cutIdx).map((e) => e.message),
+    selectedIds: liveMessages.slice(0, cutIdx).map((e) => e.entry.id),
     firstKeptEntryId: liveMessages[cutIdx].entry.id,
     compactAll: false,
   };
@@ -497,6 +538,7 @@ export const registerBeforeCompactHook = (
     });
 
     const agentMessages = ownCut.messages;
+    const agentSelectedIds = ownCut.selectedIds;
     const firstKeptEntryId = ownCut.firstKeptEntryId;
     const messages = convertToLlm(agentMessages);
 
@@ -562,17 +604,22 @@ export const registerBeforeCompactHook = (
       smartFromKeep: 1,
     };
 
+    const fileOps = {
+      readFiles: [...preparation.fileOps.read],
+      modifiedFiles: [
+        ...preparation.fileOps.written,
+        ...preparation.fileOps.edited,
+      ],
+    };
     const summary = compile({
       messages,
       previousSummary: preparation.previousSummary,
-      fileOps: {
-        readFiles: [...preparation.fileOps.read],
-        modifiedFiles: [
-          ...preparation.fileOps.written,
-          ...preparation.fileOps.edited,
-        ],
-      },
+      fileOps,
     });
+    const freshSegmentSummary =
+      omRuntime.config.compactionSummaryMode === "append"
+        ? compileSegment({ messages, fileOps })
+        : "";
 
     const branchIds = branchEntries.map((e: any) => e.id);
     const cutIdx = branchIds.indexOf(firstKeptEntryId);
@@ -619,7 +666,7 @@ export const registerBeforeCompactHook = (
       messageCount: agentMessages.length,
     });
 
-    const details: PiVccCompactionDetails = {
+    const legacyDetails: PiVccCompactionDetails = {
       compactor: "blackhole",
       version: 1,
       sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
@@ -659,9 +706,72 @@ export const registerBeforeCompactHook = (
       omContent = renderSummary([], []);
     }
 
+    const fallbackSummary = summary + "\n\n" + omContent;
+    const warnAppendFallback = (reason: string) => {
+      trace("before_compact.append_fallback", { reason });
+      if (omRuntime.appendFallbackNotified) return;
+      omRuntime.appendFallbackNotified = true;
+      ctx?.ui?.notify?.(
+        `pi-blackhole: append summary mode fell back to a complete replacement summary (${reason}); run /blackhole to rebase back into append segments`,
+        "warning",
+      );
+    };
+    let details: PiVccCompactionDetails = legacyDetails;
+    if (omRuntime.config.compactionSummaryMode === "append") {
+      const currentCoverage = coverageForMessages(
+        branchEntries as any[],
+        agentSelectedIds,
+        firstKeptEntryId,
+      );
+      const aggregateSummary = stripRecallNotes(stripOMContent(summary)).trim();
+      const hasPriorCompaction = branchEntries.some(
+        (entry) => entry.type === "compaction",
+      );
+      const hasCompletePreviousSummary =
+        !hasPriorCompaction || Boolean(preparation.previousSummary);
+      if (
+        currentCoverage &&
+        freshSegmentSummary.trim().length > 0 &&
+        aggregateSummary.length > 0 &&
+        hasCompletePreviousSummary
+      ) {
+        const trailingSummary = [extractRecallNote(summary), omContent]
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+          .join("\n\n");
+        try {
+          details = buildAppendOnlyDetails({
+            branchEntries: branchEntries as any[],
+            manualRebase: isPiVcc,
+            freshSummary: freshSegmentSummary,
+            aggregateSummary,
+            trailingSummary,
+            currentCoverage,
+            tokensBefore: preparation.tokensBefore,
+            sections: legacyDetails.sections,
+            previousSummaryUsed: legacyDetails.previousSummaryUsed,
+            contextWindowTokens: ctx.model
+              ? effectiveContextWindow(ctx.model)
+              : undefined,
+          });
+        } catch (error) {
+          warnAppendFallback(
+            `invalid-chain: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      } else {
+        warnAppendFallback(
+          !currentCoverage
+            ? "coverage"
+            : !hasCompletePreviousSummary
+              ? "missing-previous-summary"
+              : "empty-summary",
+        );
+      }
+    }
     return {
       compaction: {
-        summary: summary + "\n\n" + omContent,
+        summary: fallbackSummary,
         details: { ...details, "om.folded": omDetails },
         tokensBefore: preparation.tokensBefore,
         firstKeptEntryId,

@@ -165,6 +165,19 @@ export const config = new ConfigManager<UnifiedConfig>({
       },
     },
     {
+      key: "compactionSummaryMode",
+      type: "enum",
+      label: "Summary history",
+      description:
+        "default=replace one complete summary, append=freeze automatic segments and rebase on /blackhole",
+      value: cfg.compactionSummaryMode,
+      options: ["default", "append"],
+      optionLabels: {
+        default: "default — one complete replacement summary",
+        append: "append — immutable auto segments; /blackhole rebases",
+      },
+    },
+    {
       key: "tailBehavior",
       type: "enum",
       tab: "settings",
@@ -493,6 +506,16 @@ export const config = new ConfigManager<UnifiedConfig>({
       }
     }
 
+    const envCompactionSummaryMode =
+      process.env.PI_BLACKHOLE_COMPACTION_SUMMARY_MODE;
+    if (envCompactionSummaryMode !== undefined) {
+      const trimmed = envCompactionSummaryMode.trim().toLowerCase();
+      if (!["default", "append"].includes(trimmed)) {
+        console.warn(
+          `blackhole: invalid PI_BLACKHOLE_COMPACTION_SUMMARY_MODE value "${envCompactionSummaryMode}"; ignoring`,
+        );
+      }
+    }
     const envMidRunCompaction = process.env.PI_BLACKHOLE_MID_RUN_COMPACTION;
     if (envMidRunCompaction !== undefined) {
       const trimmed = envMidRunCompaction.trim().toLowerCase();

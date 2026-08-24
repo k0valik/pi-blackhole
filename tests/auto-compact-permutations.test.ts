@@ -64,6 +64,7 @@ function captureFullSystem(config: PermutationConfig) {
         /* stale ctx */
       }
     }),
+    midRunCompactionRetry: { failures: 0, retryAfter: 0 },
     config: {
       compactAfterTokens: 3,
       passive: config.passive,
