@@ -409,6 +409,65 @@ Chrollo's `parseLine` keeps only user/assistant message lines — `om.*` custom 
 
 ---
 
+## §19 — Machine recon receipts (2026-08-25, branch `feat/project-recall`)
+
+Empirical validation of §17/Appendix A assumptions against the real corpus (`~/.pi/agent/sessions`, 1202 files / 1100MB / 1 corrupt line; `~/.pi/agent/pi-blackhole`, 420 pending/stale files). Throwaway scripts under `/tmp/opencode/recon/`; findings below are measured, not estimated.
+
+### 19.1 Corpus inventory
+
+| Signal | Value |
+|---|---|
+| Sessions carrying om markers | 305 of 1202 (571MB), range 2026-05-11 → 2026-08-14 |
+| `om.observations.recorded` | 297 entries → **17,646 observations, 100% shape-valid** against current validators |
+| Relevance spread | high 9919 / medium 4829 / critical 1789 / low 1109 |
+| Observation content mass | ~759k est tokens (3.0M chars) |
+| `om.reflections.recorded` | 221 entries → 2396 reflections; `supportingObservationIds` resolve vs same-file obs ids at **99.9%** |
+| `om.observations.dropped` | only 12 entries / 1200 ids — dropper status signal is thin |
+| Legacy `om.observation` | 8 entries, different shape (`data.records`, `YYYY-MM-DD HH:MM` timestamps, no tokenCount/coversUpToId) → tiny export shim needed |
+| `om.folded` | **zero occurrences in the wild** → MemoryDetails handling can be deferred |
+| Internal linkage | `sourceEntryIds` resolve in-file 99.97%, `coversUpToId` 99.87% |
+| Pending files | 2204 obs + 531 refl + 42 drops across 86 batch-bearing files (+330 cursor-only shells from the known June 19–24 manual-mode recording gap — ignore that window); **249 orphaned** (no matching session file) still holding real data → export must include orphans and prefer main over `.stale` |
+
+### 19.2 Compaction is a view boundary, not deletion (docs corrected)
+
+Claim found in session-forensics skill + `scripts/om-session-parser.mjs` header was wrong. Measured: pre-compaction-boundary `coversUpToId` resolves 200/200, pre-boundary `sourceEntryIds` 956/956 across sampled compacted sessions; parser reads all lines (0 mismatches). pi appends a `compaction` entry with `firstKeptEntryId`; `buildSessionContext` slices the view only. Fixed: skill SKILL.md (4 spots), parser comments (on `feat/token-rework`, where the script lives). Consequence for this plan: whole-file scanning sees full history; D7 race safety only needs to exclude the *active* file.
+
+### 19.3 Two id spaces (wiring note for §17.4)
+
+Observation/reflection `id`s are 12-hex **memory ids**; observations' `sourceEntryIds` are **entry ids**; reflections' `supportingObservationIds` point at observation memory ids. The project ledger index must key both spaces.
+
+### 19.4 Duplication analysis (recon nr.2 — author's slicing guidance applied)
+
+Author guidance: relevance tiers feed RRF criticality, timestamps feed recency/scoring, memory ids carry no rendered value → output slices to content only. Measured duplication:
+
+| Metric | Value |
+|---|---|
+| Exact-normalized duplicate copies | **47.9% of all obs** (8554 redundant); tokens 767k → 371k by hash dedup alone |
+| Fuzzy lev@0.92 adds | only ~4% further savings (387k vs 371k); insensitive across 0.90–0.95 |
+| Cluster profile @0.92 | 9740 clusters, 74.2% singletons; dup clusters: 1805 span >1 file, 705 same-file bursts |
+| Mega-clusters (50–84×) | all trace to **one logical session copied into 3 scope dirs × within-file repeat bursts** (member timestamps span ~2 minutes) |
+| Cross-scope session copies | 51 session ids present in >1 scope dir (50× three-way, all project-move artifacts) |
+| Low/med boilerplate repeats (author's hypothesis) | real but small: 759 groups of 2–3; every large group traces back to copy inflation |
+
+Design consequences:
+1. **Exact-normalized dedup FIRST** (cheap content hash) — halves the corpus, kills fork/move inflation and record bursts. Levenshtein clustering is a refinement (paraphrase merge + display cap ≤3 per A.1), not the main lever.
+2. **Session-id dedup**: same header `session.id` in multiple scope dirs = one logical session (keep newest mtime). This also mitigates the project-identity fragmentation (this repo's history spans `projects/pi-blackhole-dev`, `~/pi-blackhole-dev`, `.pi/agent/extensions/pi-blackhole`).
+3. **Cluster-size boost must be damped** (`log(1+distinctLogicalSessions)`): raw repetition counts pipeline artifacts and single-episode bursts, not long-horizon recurrence. Linear boosting would be badly wrong.
+4. Relevance tiers survive as rank inputs even among duplicates; low-value boilerplate repeats exist but rarely exceed 2–3×.
+5. Export sizing: global rep-only ≈ 371k est tokens (~1.5MB raw) → A.1's "50–100kb distilled" needs relevance+recency filtering and/or per-project scoping on top of dedup.
+
+### 19.5 Latency receipt
+
+Pure-Node whole-corpus scan (parse every line of all 1202 files): 9.4s. rg over one project's marker-bearing subset will be far below that; D2's bounded single-pass discipline is comfortable at this corpus size.
+
+### 19.6 Project scoping + reflection elevation (author notes, 2026-08-25)
+
+- **One scope folder = one project.** Corpus walks only the cwd-encoded scope dir (`--home-kovalik-projects-pi-blackhole-dev--`), plus the git-root-encoded dir as secondary candidate when it differs. Other projects' session files are never opened — speed + true "current project" scoping.
+- **Reflections outrank all raw observations.** Pipeline semantics: the reflector is a second LLM pass that reviewed, dropped, and promoted observations before distilling them, so a reflection carries verified value from the project's perspective. `/blackhole-export` renders the Reflections section above every observation tier and scores reflections with high-tier weight × an evidence-mass multiplier `1+log2(1+supportingObservationIds.length)` (damped, per §19.4).
+- Cheap prefilter discipline: attributed session files are skipped before JSON parsing when a buffered read shows no `om.` substring at all.
+
+---
+
 ## Appendix A — `/blackhole export` — distilled project memory dump (author concept, 2026-08-20)
 
 Closely tied to the project-recall plan: same treatment, reuses the same primitives (chrollo search/normalize, tf-idf/RRF/recency ranking, levenshtein dedup, unified observation corpus from §17) and builds on it.
