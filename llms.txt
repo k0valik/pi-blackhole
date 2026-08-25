@@ -537,6 +537,7 @@ These are processed in `loadUnifiedConfig()` in `unified-config.ts`. The passive
 | `/blackhole-memory view` | Show visible memories (after compaction trimming), copied to clipboard |
 | `/blackhole-memory full` | Show ALL recorded memories including dropped observations, copied to clipboard |
 | `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file`, `mode:touched` |
+| `/blackhole-export [out:<path>]` | Export distilled project memory (observations/reflections across past sessions + pending buffers) to import-ready markdown, deduped and ranked |
 | `/blackhole cleanup` | Scan and interactively clean up orphaned `*-pending.json` files |
 
 ---

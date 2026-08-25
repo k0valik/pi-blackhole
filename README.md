@@ -82,6 +82,8 @@ https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
 /blackhole-memory [status|view|full]  Memory pipeline status & token counters
 /blackhole-recall <query> [page:N] [scope:all] [mode:file|touched]
                                       Search session history — also available to the agent as the `recall` tool
+/blackhole-export [out:<path>]        Export distilled project memory (observations/reflections
+                                      across past sessions + pending buffers) to import-ready markdown
 ```
 
 ---
