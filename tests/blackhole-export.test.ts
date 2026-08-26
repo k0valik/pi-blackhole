@@ -265,6 +265,27 @@ function createFixtures(): void {
     }),
     "utf-8",
   );
+  writeFileSync(
+    join(bhDir, "orphan456-pending.json"),
+    JSON.stringify({
+      observationBatches: [
+        {
+          coversUpToId: "gone2",
+          data: {
+            observations: [
+              {
+                id: "ffff00000002",
+                content: "Orphan memory recovered from lost session",
+                relevance: "medium",
+                timestamp: daysAgo(20),
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    "utf-8",
+  );
 }
 
 function createMockEnv() {
@@ -327,7 +348,7 @@ describe("/blackhole-export", () => {
     expect(md).toContain("## High");
     expect(md).toContain(`- ${PNPM}`);
     expect(md.match(/Use pnpm for all package installs/g)?.length).toBe(1);
-    expect(md).toContain("seen across 2 sessions");
+    expect(md).toContain("across 2 sessions");
     // Fuzzy near-dupe renders as rep + one capped variant (plan A.1: at most 2-3)
     expect(md.match(/markdown file to(o)? disk/g)?.length).toBe(2);
 
@@ -412,6 +433,6 @@ describe("/blackhole-export", () => {
     expect(corpus.sessionsConsidered).toBe(3);
     expect(corpus.filesWithMarkers).toBe(2);
     expect(corpus.knownSessionIds.has("ses-1")).toBe(true);
-    expect(corpus.orphanedSessions).toBe(1);
+    expect(corpus.orphanedSessions).toBe(2);
   });
 });

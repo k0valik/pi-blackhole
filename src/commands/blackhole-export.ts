@@ -22,6 +22,8 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
     description:
       "Export distilled project memory (observations/reflections from past sessions) to markdown. Usage: /blackhole-export [out:<path>]",
     handler: async (args: string, ctx) => {
+      ctx.ui.notify("Exporting project memory…", "info");
+
       const outMatch = args.match(/\bout:(\S+)/);
       const now = new Date();
       const outPath = outMatch
@@ -72,7 +74,10 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         `Project memory exported to ${outPath}`,
         "",
         `- sessions scanned: ${stats.sessionsConsidered} (${stats.filesWithMarkers} with memory entries)`,
-        `- observations: ${stats.observationsTotal} → ${stats.observationsUnique} unique (${stats.duplicatesCollapsed} duplicates collapsed)`,
+        `- observations: ${stats.observationsTotal} → ${stats.observationsRendered} rendered (${stats.duplicatesCollapsed} duplicates collapsed, ${stats.observationsFiltered} below viability gate)`,
+        stats.topicGroups > 0
+          ? `- organized into ${stats.topicGroups} topic sections`
+          : null,
         `- reflections: ${stats.reflectionsTotal}`,
       ];
       if (stats.orphanedObservations > 0 || stats.orphanedReflections > 0) {
@@ -88,14 +93,11 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         "The file is plain markdown — curate it, then import into any memory system.",
       );
 
-      pi.sendMessage(
-        {
-          customType: "blackhole-export",
-          content: lines.join("\n"),
-          display: true,
-        },
-        { triggerTurn: true },
-      );
+      pi.sendMessage({
+        customType: "blackhole-export",
+        content: lines.join("\n"),
+        display: true,
+      });
     },
   });
 };

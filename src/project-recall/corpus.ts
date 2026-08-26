@@ -56,7 +56,7 @@ export interface CorpusObservation {
 
 export interface CorpusReflection {
   content: string;
-  supportingCount: number;
+  supportingObservationIds: string[];
   timestamp: string | null;
   sessionId: string;
   source: MemorySource;
@@ -225,9 +225,9 @@ function extractFromEntries(
         if (typeof r.content !== "string" || !r.content.trim()) continue;
         reflections.push({
           content: r.content,
-          supportingCount: Array.isArray(r.supportingObservationIds)
-            ? r.supportingObservationIds.length
-            : 0,
+          supportingObservationIds: Array.isArray(r.supportingObservationIds)
+            ? (r.supportingObservationIds as string[])
+            : [],
           timestamp: entryTs,
           sessionId,
           source: "branch",
@@ -282,9 +282,9 @@ function extractFromPendingState(
       if (typeof r.content !== "string" || !r.content.trim()) continue;
       reflections.push({
         content: r.content,
-        supportingCount: Array.isArray(r.supportingObservationIds)
-          ? r.supportingObservationIds.length
-          : 0,
+        supportingObservationIds: Array.isArray(r.supportingObservationIds)
+          ? (r.supportingObservationIds as string[])
+          : [],
         timestamp: null,
         sessionId,
         source,

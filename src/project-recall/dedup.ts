@@ -5,6 +5,10 @@
  *  - exact normalized-content grouping first (halves real corpora; kills
  *    fork/move inflation and pipeline record bursts),
  *  - levenshtein clustering as a *refinement* over group representatives,
+ *  - Sørensen-Dice token-set similarity as a second refinement pass over the
+ *    remaining reps (catches paraphrases that share vocabulary but reorder
+ *    words — where edit distance alone falls short), combined with a floor
+ *    on Levenshtein so pure keyword overlap cannot merge distinct facts,
  *  - recurrence signal is damped: log(1 + distinctSessions), never raw counts.
  */
 import type { CorpusObservation, CorpusReflection } from "./corpus.js";
@@ -12,6 +16,142 @@ import type { Relevance } from "../om/ledger/types.js";
 
 const NORM_CAP = 400;
 const FUZZY_THRESHOLD = 0.92;
+const SORENSEN_FUZZY_THRESHOLD = 0.75;
+const SORENSEN_MIN_LEVENSHTEIN = 0.6;
+
+/**
+ * Tokens stripped before similarity scoring — "user"/"agent" appear in the
+ * vast majority of observations and would dominate token-set overlap.
+ */
+export const STOP_WORDS: ReadonlySet<string> = new Set([
+  "user",
+  "agent",
+  "the",
+  "a",
+  "an",
+  "to",
+  "of",
+  "in",
+  "for",
+  "on",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "it",
+  "its",
+  "this",
+  "that",
+  "these",
+  "those",
+  "and",
+  "but",
+  "or",
+  "with",
+  "at",
+  "from",
+  "as",
+  "into",
+  "through",
+  "during",
+  "before",
+  "after",
+  "above",
+  "below",
+  "between",
+  "out",
+  "off",
+  "over",
+  "under",
+  "again",
+  "further",
+  "then",
+  "once",
+  "here",
+  "there",
+  "when",
+  "where",
+  "why",
+  "how",
+  "all",
+  "any",
+  "each",
+  "every",
+  "both",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "no",
+  "nor",
+  "not",
+  "only",
+  "own",
+  "same",
+  "so",
+  "than",
+  "too",
+  "very",
+  "just",
+  "about",
+  "also",
+  "because",
+  "until",
+  "while",
+  "which",
+  "who",
+  "whom",
+  "i",
+  "me",
+  "my",
+  "we",
+  "our",
+  "you",
+  "your",
+  "he",
+  "she",
+  "they",
+  "them",
+  "their",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "can",
+  "shall",
+  "need",
+  "used",
+  "using",
+  "one",
+  "two",
+  "new",
+  "old",
+  "via",
+  "per",
+  "etc",
+]);
+
+/** Normalized, stop-word-stripped token list for a piece of content. */
+export function tokenizeContent(content: string): string[] {
+  return content
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t) && !/^\d+$/.test(t));
+}
 
 export function normalizeContent(content: string): string {
   return content
@@ -64,6 +204,26 @@ function bigramJaccard(
   return inter / (A.size + B.size - inter);
 }
 
+/**
+ * Sørensen-Dice coefficient over stop-word-stripped token sets.
+ * 2*|intersection|/(|A|+|B|). High when two observations share most
+ * content-bearing vocabulary even with different word order.
+ */
+export function sorensenDiceTokenSimilarity(a: string, b: string): number {
+  return sorensenDiceSets(
+    new Set(tokenizeContent(a)),
+    new Set(tokenizeContent(b)),
+  );
+}
+
+/** Set-based Sørensen-Dice (avoids re-tokenizing inside O(n²) loops). */
+export function sorensenDiceSets(A: Set<string>, B: Set<string>): number {
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return (2 * inter) / (A.size + B.size);
+}
+
 const TIER_RANK: Record<Relevance, number> = {
   critical: 4,
   high: 3,
@@ -79,6 +239,11 @@ export interface MemoryCluster<T> {
   occurrences: number;
   distinctSessions: number;
   bestRelevance: Relevance;
+  /**
+   * Max Sørensen-Dice token-set similarity to any other cluster's rep.
+   * Used as a consensus reranking signal (0–1 range, 0 when singleton).
+   */
+  maxRelatedSimilarity: number;
 }
 
 interface ClusterableItem {
@@ -118,12 +283,15 @@ class UnionFind {
 
 /**
  * Cluster observations: exact normalized grouping, then optional fuzzy merge
- * of group representatives. `maxVariants` bounds how many near-identical
- * members may appear alongside the representative in rendered output.
+ * of group representatives (bigram-Jaccard prefilter → Levenshtein@0.92),
+ * then optional Sørensen-Dice token-set merge over remaining reps
+ * (Sørensen-Dice ≥ 0.75 + Levenshtein ≥ 0.60). `maxVariants` bounds how
+ * many near-identical members may appear alongside the representative in
+ * rendered output.
  */
 export function clusterObservations(
   items: CorpusObservation[],
-  opts?: { fuzzy?: boolean; maxVariants?: number },
+  opts?: { fuzzy?: boolean; sorensen?: boolean; maxVariants?: number },
 ): Array<MemoryCluster<CorpusObservation>> {
   const maxVariants = opts?.maxVariants ?? 2;
 
@@ -172,6 +340,49 @@ export function clusterObservations(
     allGroups = [...merged.values()];
   }
 
+  // Pass 3: Sørensen-Dice token-set similarity merges tightly related
+  // clusters that the Levenshtein pass missed (paraphrases with word-order
+  // changes). Requires a floor on Levenshtein to prevent pure keyword overlap
+  // from merging distinct facts.
+  if (opts?.sorensen && allGroups.length > 1) {
+    const uf = new UnionFind(allGroups.length);
+    // Precompute reps + token sets for O(n²) efficiency
+    const groupReps = allGroups.map((g) =>
+      normalizeContent(pickRep(g.members).content),
+    );
+    const repTokens = groupReps.map((s) => new Set(tokenizeContent(s)));
+    for (let i = 0; i < allGroups.length; i++) {
+      for (let j = i + 1; j < allGroups.length; j++) {
+        const a = groupReps[i];
+        const b = groupReps[j];
+        const la = a.length;
+        const lb = b.length;
+        if (
+          Math.abs(la - lb) >
+          (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)
+        )
+          continue;
+        if (levenshteinSimilarity(a, b) < SORENSEN_MIN_LEVENSHTEIN) continue;
+        if (
+          sorensenDiceSets(repTokens[i], repTokens[j]) >=
+          SORENSEN_FUZZY_THRESHOLD
+        )
+          uf.union(i, j);
+      }
+    }
+    const merged = new Map<number, Group>();
+    allGroups.forEach((g, i) => {
+      const root = uf.find(i);
+      const acc = merged.get(root);
+      if (acc) {
+        acc.members.push(...g.members);
+      } else {
+        merged.set(root, { key: g.key, members: [...g.members] });
+      }
+    });
+    allGroups = [...merged.values()];
+  }
+
   const clusters: Array<MemoryCluster<CorpusObservation>> = [];
   for (const group of allGroups) {
     const { members } = group;
@@ -196,7 +407,24 @@ export function clusterObservations(
       occurrences: members.length,
       distinctSessions: new Set(members.map((m) => m.sessionId)).size,
       bestRelevance,
+      maxRelatedSimilarity: 0,
     });
+  }
+
+  // Consensus rerank signal: max Sørensen-Dice to any other cluster.
+  if (clusters.length > 1) {
+    const repTokenSets = clusters.map(
+      (c) => new Set(tokenizeContent(c.rep.content)),
+    );
+    for (let i = 0; i < clusters.length; i++) {
+      let maxSim = 0;
+      for (let j = 0; j < clusters.length; j++) {
+        if (i === j) continue;
+        const sim = sorensenDiceSets(repTokenSets[i], repTokenSets[j]);
+        if (sim > maxSim) maxSim = sim;
+      }
+      clusters[i].maxRelatedSimilarity = maxSim;
+    }
   }
   return clusters;
 }
@@ -221,6 +449,7 @@ export function clusterReflections(
       occurrences: members.length,
       distinctSessions: new Set(members.map((m) => m.sessionId)).size,
       bestRelevance: "medium",
+      maxRelatedSimilarity: 0,
     });
   }
   return clusters;
