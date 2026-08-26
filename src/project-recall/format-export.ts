@@ -253,9 +253,8 @@ type TopicAssignment = Map<MemoryCluster<CorpusObservation>, string>;
 /**
  * Tokens commonly appearing in compaction/pipeline artifact headers that
  * should be stripped from topic token sets (but not from dedup, where they
- * help merge similar compaction artifacts). They are NOT in the global
- * STOP_WORDS because dedup benefits from having them (two compaction
- * summaries mentioning "session goal" should merge).
+ * help merge similar compaction artifacts). Also strips agent meta-utterances
+ * and event verbs that carry no topical signal.
  */
 const TOPIC_STOP_WORDS = new Set([
   // compaction section headers
@@ -266,6 +265,33 @@ const TOPIC_STOP_WORDS = new Set([
   "original",
   "session",
   "summary",
+  // agent meta-utterances / filler speech
+  "let",
+  "reading",
+  "examining",
+  "looking",
+  "need",
+  "going",
+  "want",
+  "instructs",
+  "instructed",
+  "stated",
+  "decided",
+  "completed",
+  "implemented",
+  "updated",
+  "created",
+  "rewrote",
+  "fixed",
+  "added",
+  "removed",
+  "identified",
+  "confirmed",
+  "verified",
+  "proposed",
+  "diagnosed",
+  "began",
+  "begun",
 ]);
 
 /**
@@ -456,6 +482,101 @@ function computeTopicLabel(
   return label.length > 40 ? label.slice(0, 40) : label;
 }
 
+/**
+ * Reflection-first topic assignment: cluster reflections by Sørensen-Dice
+ * similarity and label each component with TF-IDF on reflection text.
+ * These labels become the primary topic vocabulary; observations inherit
+ * them via supportingObservationIds.
+ */
+function assignReflectionTopics(
+  reflClusters: Array<MemoryCluster<CorpusReflection>>,
+): Map<MemoryCluster<CorpusReflection>, string> {
+  if (reflClusters.length < MIN_TOPIC_SIZE) return new Map();
+
+  const tokenSets = reflClusters.map((c) => {
+    const tokens = tokenizeContent(flatten(c.rep.content));
+    return new Set(tokens.filter((t) => !TOPIC_STOP_WORDS.has(t)));
+  });
+
+  const df = new Map<string, number>();
+  for (const set of tokenSets) {
+    const deduped = new Set(set);
+    for (const t of deduped) df.set(t, (df.get(t) ?? 0) + 1);
+  }
+  const total = reflClusters.length;
+
+  const level1 = connectedComponents(
+    Array.from({ length: reflClusters.length }, (_, i) => i),
+    tokenSets,
+    TOPIC_SIMILARITY_THRESHOLD,
+  );
+
+  const topics = splitComponents(
+    level1,
+    tokenSets,
+    df,
+    total,
+    TOPIC_SIMILARITY_THRESHOLD,
+    0,
+  );
+  if (topics.length === 0) return new Map();
+
+  topics.sort((a, b) => b.indices.length - a.indices.length);
+
+  const assignment = new Map<MemoryCluster<CorpusReflection>, string>();
+  for (const topic of topics)
+    for (const idx of topic.indices)
+      assignment.set(reflClusters[idx], topic.label);
+  return assignment;
+}
+
+/**
+ * Map observation clusters to topic labels by walking supportingObservationIds
+ * from reflection clusters. An observation inherits the topic of the
+ * highest-tier reflection that cites it.
+ */
+function buildObservationTopicMap(
+  reflTopicAssignments: Map<MemoryCluster<CorpusReflection>, string>,
+  obsClusters: Array<MemoryCluster<CorpusObservation>>,
+  observations: CorpusObservation[],
+): Map<MemoryCluster<CorpusObservation>, string> {
+  const obsIdToCluster = new Map<string, MemoryCluster<CorpusObservation>>();
+  for (const cluster of obsClusters) {
+    if (cluster.rep.id) obsIdToCluster.set(cluster.rep.id, cluster);
+    for (const extra of cluster.extras) {
+      if (extra.id) obsIdToCluster.set(extra.id, cluster);
+    }
+  }
+
+  const obsTier = new Map<string, Relevance>();
+  for (const o of observations) {
+    if (o.id) obsTier.set(o.id, o.relevance);
+  }
+
+  // Track best topic per observation cluster, keyed by reflection tier rank
+  const best = new Map<
+    MemoryCluster<CorpusObservation>,
+    { label: string; tierRank: number }
+  >();
+
+  for (const [reflCluster, topic] of reflTopicAssignments) {
+    const reflTier = inferReflectionTier(reflCluster, observations);
+    const tierRank = TIER_RANK[reflTier];
+    for (const obsId of reflCluster.rep.supportingObservationIds) {
+      const obsCluster = obsIdToCluster.get(obsId);
+      if (!obsCluster) continue;
+      const existing = best.get(obsCluster);
+      if (!existing || tierRank > existing.tierRank) {
+        best.set(obsCluster, { label: topic, tierRank });
+      }
+    }
+  }
+
+  const result = new Map<MemoryCluster<CorpusObservation>, string>();
+  for (const [cluster, { label }] of best) result.set(cluster, label);
+  return result;
+}
+
 // ── Bullet rendering ──────────────────────────────────────────
 
 /** Emit markdown bullet lines from a pre-scored cluster array. */
@@ -568,8 +689,27 @@ export function buildExportMarkdown(
     (c) => c.distinctSessions >= 2,
   );
 
-  // Topic assignment via similarity-graph clustering
-  const topicAssignments = assignTopics(viable);
+  // Reflection-first topic assignment: reflections label the topics,
+  // observations inherit via supportingObservationIds; unseeded
+  // observations fall back to observation-cluster TF-IDF labels.
+  const reflTopicAssignments = assignReflectionTopics(reflClusters);
+  const reflectionDerivedTopics = buildObservationTopicMap(
+    reflTopicAssignments,
+    viable,
+    branchAndPendingObs,
+  );
+
+  // Fallback: observation-cluster topics for unassigned observations
+  const unassignedObs = viable.filter((c) => !reflectionDerivedTopics.has(c));
+  const fallbackTopicAssignments = assignTopics(unassignedObs);
+
+  // Merge: reflection-derived topics take precedence
+  const topicAssignments = new Map(reflectionDerivedTopics);
+  for (const [cluster, label] of fallbackTopicAssignments) {
+    if (!topicAssignments.has(cluster)) {
+      topicAssignments.set(cluster, label);
+    }
+  }
   const uniqueTopicLabels = new Set(topicAssignments.values());
   const topicGroups = uniqueTopicLabels.size;
 
@@ -672,12 +812,18 @@ export function buildExportMarkdown(
       "",
     ];
     if (viableOrphans.length > 0) {
+      const orphanTopicAssignments = assignTopics(viableOrphans);
       body.push(
         `**${viableOrphans.length} observations** (${orphanObs.length} raw, only cross-session survivors shown):`,
         "",
       );
       body.push(
-        ...renderScoredBullets(viableOrphans, coverageIndex, now, new Map()),
+        ...renderScoredBullets(
+          viableOrphans,
+          coverageIndex,
+          now,
+          orphanTopicAssignments,
+        ),
       );
       body.push("");
     }
