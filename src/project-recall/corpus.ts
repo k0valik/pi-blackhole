@@ -261,6 +261,24 @@ function extractFromPendingState(
   reflections: CorpusReflection[],
   droppedIds: Set<string>,
 ): void {
+  // Reflections in pending files have no individual timestamp; fall back
+  // to the newest observation timestamp in the same file so they render
+  // with a useful (N ago) suffix in the export.
+  let maxObsTs: number | null = null;
+  for (const batch of state.observationBatches ?? []) {
+    for (const o of batch.data?.observations ?? []) {
+      const ts = parseTimestamp((o as { timestamp?: unknown }).timestamp);
+      if (ts != null) {
+        const ms = Date.parse(ts);
+        if (!Number.isNaN(ms) && (maxObsTs === null || ms > maxObsTs)) {
+          maxObsTs = ms;
+        }
+      }
+    }
+  }
+  const reflectionTimestamp =
+    maxObsTs != null ? new Date(maxObsTs).toISOString() : null;
+
   for (const batch of state.observationBatches ?? []) {
     for (const o of batch.data?.observations ?? []) {
       if (typeof o.content !== "string" || !o.content.trim()) continue;
@@ -285,7 +303,7 @@ function extractFromPendingState(
         supportingObservationIds: Array.isArray(r.supportingObservationIds)
           ? (r.supportingObservationIds as string[])
           : [],
-        timestamp: null,
+        timestamp: reflectionTimestamp,
         sessionId,
         source,
       });
@@ -293,7 +311,7 @@ function extractFromPendingState(
   }
   for (const batch of state.droppedBatches ?? []) {
     if (Array.isArray(batch.data?.observationIds)) {
-      for (const id of batch.data.observationIds as unknown[]) {
+      for (const id of batch.data?.observationIds as unknown[]) {
         if (typeof id === "string") droppedIds.add(id);
       }
     }

@@ -27,12 +27,16 @@ export const STOP_WORDS: ReadonlySet<string> = new Set([
   "user",
   "agent",
   "assistant",
-  "blackhole",
   // relevance labels are rank words, not topics
   "critical",
   "high",
   "medium",
   "low",
+  // generic path components (scope dirs, cwd paths)
+  "home",
+  "projects",
+  "github",
+  "git",
   "the",
   "a",
   "an",

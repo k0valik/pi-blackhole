@@ -33,6 +33,7 @@ const TIER_WEIGHT: Record<Relevance, number> = {
   low: 1,
 };
 const TIER_ORDER: Relevance[] = ["critical", "high", "medium", "low"];
+const TIER_RANK = TIER_WEIGHT; // alias for clarity in reflection tier inference
 /** D4 recency decay exponent. */
 const RECENCY_DECAY_EXP = 0.3;
 /** Coverage multiplier weight (observations validated by reflections). */
@@ -52,7 +53,7 @@ const MAX_COMPONENT_SIZE = 30;
 /** Max split depth (threshold climbs 0.25 → 0.85 over 6 steps). */
 const MAX_SPLIT_DEPTH = 6;
 /** Minimum clusters in a connected component to form a topic group. */
-const MIN_TOPIC_SIZE = 3;
+const MIN_TOPIC_SIZE = 5;
 
 export function relativeTime(
   timestamp: string | null,
@@ -101,6 +102,34 @@ function clusterScore<T extends Scoreable>(
     (1 + COVERAGE_WEIGHT * Math.log2(1 + coverage)) *
     (1 + CONSENSUS_WEIGHT * cluster.maxRelatedSimilarity)
   );
+}
+
+/**
+ * Infer a reflection's relevance tier from the highest-tier observation it
+ * cites. Falls back to "medium" when the reflection has no supporting
+ * observations or none of them can be resolved in the corpus.
+ */
+function inferReflectionTier(
+  cluster: MemoryCluster<CorpusReflection>,
+  observations: CorpusObservation[],
+): Relevance {
+  if (cluster.rep.supportingObservationIds.length === 0) return "medium";
+  const obsTier = new Map<string, Relevance>();
+  for (const o of observations) {
+    if (o.id) obsTier.set(o.id, o.relevance);
+  }
+  let best: Relevance = "low";
+  let bestRank = 0;
+  for (const id of cluster.rep.supportingObservationIds) {
+    const rel = obsTier.get(id);
+    if (!rel) continue;
+    const rank = TIER_RANK[rel];
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = rel;
+    }
+  }
+  return best;
 }
 
 /**
@@ -564,16 +593,40 @@ export function buildExportMarkdown(
     ].join("\n"),
   );
 
-  // ── 2. Reflections (standalone top section) ───────────────
-  if (reflClusters.length > 0) {
-    const reflScored = reflClusters
-      .map((cluster) => ({ cluster, score: reflectionScore(cluster, now) }))
-      .sort((a, b) => b.score - a.score);
-    const lines = reflScored.map(({ cluster }) => {
-      const age = relativeTime(cluster.rep.timestamp, now);
-      return `- ${flatten(cluster.rep.content)}${age ? ` *(${age})*` : ""}`;
-    });
-    sections.push(["## Reflections", "", ...lines, ""].join("\n"));
+  // ── 2. Reflections (standalone top section, tier subheaders) ─
+  if (reflClusters.length > 0 || orphanRefl.length > 0) {
+    sections.push(["## Reflections", ""].join("\n"));
+
+    const renderReflectionTier = (
+      tier: Relevance,
+      clusters: Array<MemoryCluster<CorpusReflection>>,
+      obsPool: CorpusObservation[],
+    ) => {
+      const tierClusters = clusters.filter(
+        (c) => inferReflectionTier(c, obsPool) === tier,
+      );
+      if (tierClusters.length === 0) return;
+      const label =
+        tier.charAt(0).toUpperCase() + tier.slice(1) + " reflections";
+      const scored = tierClusters
+        .map((cluster) => ({ cluster, score: reflectionScore(cluster, now) }))
+        .sort((a, b) => b.score - a.score);
+      const lines = scored.map(({ cluster }) => {
+        const age = relativeTime(cluster.rep.timestamp, now);
+        return `- ${flatten(cluster.rep.content)}${age ? ` *(${age})*` : ""}`;
+      });
+      sections.push([`### ${label}`, "", ...lines, ""].join("\n"));
+    };
+
+    for (const tier of TIER_ORDER)
+      renderReflectionTier(tier, reflClusters, branchAndPendingObs);
+
+    if (orphanRefl.length > 0) {
+      const lines = orphanRefl.map((r) => `- ${flatten(r.content)}`);
+      sections.push(
+        ["### Unattributed reflections", "", ...lines, ""].join("\n"),
+      );
+    }
   }
 
   // ── 3. Tier sections with topic badges ────────────────────
