@@ -14,10 +14,10 @@
 import type { CorpusObservation, CorpusReflection } from "./corpus.js";
 import type { Relevance } from "../om/ledger/types.js";
 
-const NORM_CAP = 400;
-const FUZZY_THRESHOLD = 0.92;
-const SORENSEN_FUZZY_THRESHOLD = 0.75;
-const SORENSEN_MIN_LEVENSHTEIN = 0.6;
+const NORM_CAP = 600;
+const FUZZY_THRESHOLD = 0.88;
+const SORENSEN_FUZZY_THRESHOLD = 0.7;
+const SORENSEN_MIN_LEVENSHTEIN = 0.45;
 
 /**
  * Tokens stripped before similarity scoring — "user"/"agent" appear in the

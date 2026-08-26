@@ -248,6 +248,9 @@ interface PendingBatch {
 }
 
 interface PendingState {
+  observation?: PendingBatch;
+  reflection?: PendingBatch;
+  dropped?: PendingBatch;
   observationBatches?: PendingBatch[];
   reflectionBatches?: PendingBatch[];
   droppedBatches?: PendingBatch[];
@@ -264,8 +267,28 @@ function extractFromPendingState(
   // Reflections in pending files have no individual timestamp; fall back
   // to the newest observation timestamp in the same file so they render
   // with a useful (N ago) suffix in the export.
+  // Consider both batched and singular observation forms for timestamp fallback.
+  const allObsBatches: PendingBatch[] =
+    state.observationBatches && state.observationBatches.length > 0
+      ? state.observationBatches
+      : state.observation
+        ? [state.observation]
+        : [];
+  const allReflBatches: PendingBatch[] =
+    state.reflectionBatches && state.reflectionBatches.length > 0
+      ? state.reflectionBatches
+      : state.reflection
+        ? [state.reflection]
+        : [];
+  const allDroppedBatches: PendingBatch[] =
+    state.droppedBatches && state.droppedBatches.length > 0
+      ? state.droppedBatches
+      : state.dropped
+        ? [state.dropped]
+        : [];
+
   let maxObsTs: number | null = null;
-  for (const batch of state.observationBatches ?? []) {
+  for (const batch of allObsBatches) {
     for (const o of batch.data?.observations ?? []) {
       const ts = parseTimestamp((o as { timestamp?: unknown }).timestamp);
       if (ts != null) {
@@ -279,7 +302,7 @@ function extractFromPendingState(
   const reflectionTimestamp =
     maxObsTs != null ? new Date(maxObsTs).toISOString() : null;
 
-  for (const batch of state.observationBatches ?? []) {
+  for (const batch of allObsBatches) {
     for (const o of batch.data?.observations ?? []) {
       if (typeof o.content !== "string" || !o.content.trim()) continue;
       observations.push({
@@ -295,7 +318,7 @@ function extractFromPendingState(
       });
     }
   }
-  for (const batch of state.reflectionBatches ?? []) {
+  for (const batch of allReflBatches) {
     for (const r of batch.data?.reflections ?? []) {
       if (typeof r.content !== "string" || !r.content.trim()) continue;
       reflections.push({
@@ -309,7 +332,7 @@ function extractFromPendingState(
       });
     }
   }
-  for (const batch of state.droppedBatches ?? []) {
+  for (const batch of allDroppedBatches) {
     if (Array.isArray(batch.data?.observationIds)) {
       for (const id of batch.data?.observationIds as unknown[]) {
         if (typeof id === "string") droppedIds.add(id);
@@ -407,6 +430,12 @@ export function buildProjectMemoryCorpus(
   }
 
   // Phase 2b: pending buffers, attributed or orphaned
+  // Pending files are global (one dir for all projects). A pending file
+  // whose sessionId is not in the project-scoped knownSessionIds may be:
+  //  - foreign: session still exists under another project's scope dir
+  //  - truly orphaned: no session JSONL exists anywhere
+  // Only the latter should appear in the "Unattributed" section; foreign
+  // pending files are ignored for this project's export.
   const pendingDir = join(agentDir, PENDING_DIR);
   if (existsSync(pendingDir)) {
     let files: string[];
@@ -421,6 +450,56 @@ export function buildProjectMemoryCorpus(
         mains.add(file.slice(0, -PENDING_SUFFIX.length));
       }
     }
+
+    // Build a global session-id index for orphan vs foreign disambiguation.
+    // This is a single scan of ~/.pi/agent/sessions/*/*.jsonl — cheap
+    // (~1k files) and only needed when pending files exist.
+    let globalSessionIds: Set<string> | null = null;
+    const ensureGlobalIds = (): Set<string> => {
+      if (globalSessionIds) return globalSessionIds;
+      globalSessionIds = new Set<string>(corpus.knownSessionIds);
+      const sessionsRoot = join(agentDir, "sessions");
+      let scopes: string[];
+      try {
+        scopes = readdirSync(sessionsRoot);
+      } catch {
+        return globalSessionIds;
+      }
+      for (const scope of scopes) {
+        const scopePath = join(sessionsRoot, scope);
+        let st: ReturnType<typeof statSync> | null = null;
+        try {
+          st = statSync(scopePath);
+        } catch {
+          continue;
+        }
+        if (!st.isDirectory()) continue;
+        // Skip already-scanned project scopes to avoid re-reading
+        // headers — we already have those ids in knownSessionIds.
+        const isProjectScope =
+          scope === encodeScopeDir(options.cwd) ||
+          (options.gitRoot &&
+            options.gitRoot !== options.cwd &&
+            scope === encodeScopeDir(options.gitRoot));
+        if (isProjectScope) continue;
+        let scopeFiles: string[];
+        try {
+          scopeFiles = readdirSync(scopePath);
+        } catch {
+          continue;
+        }
+        for (const f of scopeFiles) {
+          if (!f.endsWith(".jsonl")) continue;
+          // session id is suffix after last '_' (timestamp prefix) or full name
+          const sid = f.includes("_")
+            ? f.slice(f.lastIndexOf("_") + 1, -6)
+            : f.slice(0, -6);
+          if (sid) globalSessionIds.add(sid);
+        }
+      }
+      return globalSessionIds;
+    };
+
     for (const file of files) {
       const isMain = file.endsWith(PENDING_SUFFIX);
       const isStale = file.endsWith(STALE_SUFFIX);
@@ -445,7 +524,15 @@ export function buildProjectMemoryCorpus(
         (Array.isArray(state.reflectionBatches) &&
           state.reflectionBatches.length > 0) ||
         (Array.isArray(state.droppedBatches) &&
-          state.droppedBatches.length > 0);
+          state.droppedBatches.length > 0) ||
+        // Legacy / singular form: older pending files may only have the
+        // singular observation/reflection/dropped keys without batch arrays.
+        (typeof (state as Record<string, unknown>).observation === "object" &&
+          (state as Record<string, unknown>).observation !== null) ||
+        (typeof (state as Record<string, unknown>).reflection === "object" &&
+          (state as Record<string, unknown>).reflection !== null) ||
+        (typeof (state as Record<string, unknown>).dropped === "object" &&
+          (state as Record<string, unknown>).dropped !== null);
       if (!hasBatches) continue;
 
       if (corpus.knownSessionIds.has(sessionId)) {
@@ -458,6 +545,11 @@ export function buildProjectMemoryCorpus(
           corpus.droppedIds,
         );
       } else {
+        // Distinguish foreign (session exists elsewhere) from truly orphaned
+        // (no session file anywhere). Only the latter is rendered as
+        // "Unattributed pending memory"; foreign pending is ignored.
+        const gids = ensureGlobalIds();
+        if (gids.has(sessionId)) continue;
         corpus.orphanedSessions++;
         extractFromPendingState(
           state,

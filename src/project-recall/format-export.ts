@@ -7,10 +7,13 @@
  * with TF-IDF topic labeling.
  *
  * Ranking discipline (§19 receipts): relevance tier is the primary rank
- * input, recency decay `1/(1+days)^0.3` (D4) modulates within tiers,
- * recurrence is damped to log(1 + distinctSessions), coverage (reflection
- * validation) boosts by log(1+coverage), and consensus (max Sørensen-Dice
- * to a sibling cluster) adds a small weight.
+ * input, tier-dependent recency decay `1/(1+days)^exp` (critical 0.25 →
+ * low 0.34, D4 base 0.3) modulates within tiers, recurrence is damped to
+ * log(1 + distinctSessions) with burst penalty for high
+ * occurrences/session, coverage (reflection validation) boosts by
+ * log(1+coverage), consensus (max Sørensen-Dice to a sibling cluster)
+ * adds a small weight, and information density (token count) mildly
+ * rewards substantive observations.
  */
 import type {
   CorpusObservation,
@@ -34,12 +37,23 @@ const TIER_WEIGHT: Record<Relevance, number> = {
 };
 const TIER_ORDER: Relevance[] = ["critical", "high", "medium", "low"];
 const TIER_RANK = TIER_WEIGHT; // alias for clarity in reflection tier inference
-/** D4 recency decay exponent. */
+/** D4 recency decay exponent (base for medium tier). */
 const RECENCY_DECAY_EXP = 0.3;
+/** Tier-dependent decay exponents: critical fades slower than low. */
+const TIER_DECAY_EXP: Record<Relevance, number> = {
+  critical: 0.25,
+  high: 0.28,
+  medium: 0.31,
+  low: 0.34,
+};
 /** Coverage multiplier weight (observations validated by reflections). */
 const COVERAGE_WEIGHT = 0.3;
 /** Consensus rerank weight (max Sørensen-Dice to a sibling cluster). */
 const CONSENSUS_WEIGHT = 0.2;
+/** Burst penalty weight: down-ranks clusters with high occurrences/session ratio. */
+const BURST_PENALTY_WEIGHT = 0.15;
+/** Information-density weight: rewards token-rich observations. */
+const LENGTH_WEIGHT = 0.08;
 /**
  * Sørensen-Dice threshold for the level-1 topic similarity graph edge.
  * Two clusters share an edge when their stop-word-stripped token sets
@@ -77,16 +91,36 @@ export function relativeTime(
   return `${Math.floor(days / 365)}y ago`;
 }
 
-function recencyDecay(timestamp: string | null, nowMs: number): number {
+function recencyDecay(
+  timestamp: string | null,
+  nowMs: number,
+  tier?: Relevance,
+): number {
   if (!timestamp) return 0.5;
   const t = Date.parse(timestamp);
   if (Number.isNaN(t)) return 0.5;
   const days = Math.max(0, (nowMs - t) / 86400000);
-  return 1 / Math.pow(1 + days, RECENCY_DECAY_EXP);
+  const exp = tier
+    ? (TIER_DECAY_EXP[tier] ?? RECENCY_DECAY_EXP)
+    : RECENCY_DECAY_EXP;
+  return 1 / Math.pow(1 + days, exp);
 }
 
 interface Scoreable {
   timestamp: string | null;
+  content: string;
+}
+
+function burstPenalty(cluster: MemoryCluster<Scoreable>): number {
+  if (cluster.distinctSessions === 0) return 1;
+  const ratio = cluster.occurrences / cluster.distinctSessions;
+  if (ratio <= 1.5) return 1;
+  return 1 / (1 + BURST_PENALTY_WEIGHT * Math.log2(ratio));
+}
+
+function lengthFactor(content: string): number {
+  const tokens = tokenizeContent(content).length;
+  return 1 + LENGTH_WEIGHT * Math.log2(1 + tokens / 8);
 }
 
 function clusterScore<T extends Scoreable>(
@@ -97,10 +131,12 @@ function clusterScore<T extends Scoreable>(
 ): number {
   return (
     TIER_WEIGHT[tier] *
-    recencyDecay(cluster.rep.timestamp, nowMs) *
+    recencyDecay(cluster.rep.timestamp, nowMs, tier) *
     (1 + Math.log2(1 + cluster.distinctSessions)) *
     (1 + COVERAGE_WEIGHT * Math.log2(1 + coverage)) *
-    (1 + CONSENSUS_WEIGHT * cluster.maxRelatedSimilarity)
+    (1 + CONSENSUS_WEIGHT * cluster.maxRelatedSimilarity) *
+    burstPenalty(cluster as MemoryCluster<Scoreable>) *
+    lengthFactor(cluster.rep.content)
   );
 }
 
@@ -135,18 +171,24 @@ function inferReflectionTier(
 /**
  * Reflections are reflector-curated: a second LLM pass reviewed, dropped, and
  * promoted observations before distilling them, so they carry verified value
- * and rank with at least high-tier weight plus an evidence-mass multiplier
- * from their supporting observations (§17.3).
+ * and rank with a tier-aware weight (inferred from supporting observations,
+ * floor at high) plus an evidence-mass multiplier from their supporting
+ * observations (§17.3).
  */
 function reflectionScore(
   cluster: MemoryCluster<CorpusReflection>,
   nowMs: number,
+  observations: CorpusObservation[],
 ): number {
+  const tier = inferReflectionTier(cluster, observations);
+  const weight = Math.max(TIER_WEIGHT[tier], TIER_WEIGHT.high);
   return (
-    TIER_WEIGHT.high *
-    recencyDecay(cluster.rep.timestamp, nowMs) *
+    weight *
+    recencyDecay(cluster.rep.timestamp, nowMs, tier) *
     (1 + Math.log2(1 + cluster.distinctSessions)) *
-    (1 + Math.log2(1 + cluster.rep.supportingObservationIds.length))
+    (1 + Math.log2(1 + cluster.rep.supportingObservationIds.length)) *
+    burstPenalty(cluster as MemoryCluster<Scoreable>) *
+    lengthFactor(cluster.rep.content)
   );
 }
 
@@ -292,6 +334,25 @@ const TOPIC_STOP_WORDS = new Set([
   "diagnosed",
   "began",
   "begun",
+  // generic git/project scaffolding that produces opaque labels
+  "branch",
+  "branches",
+  "main",
+  "feat",
+  "fix",
+  "chore",
+  "commit",
+  "commits",
+  "insertion",
+  "insertions",
+  "deletion",
+  "deletions",
+  "diff",
+  "pr",
+  "file",
+  "code",
+  "docs",
+  "document",
 ]);
 
 /**
@@ -355,10 +416,11 @@ function assignTopics(
 
   // Cache token sets for all clusters, filtering out compaction-artifact
   // words that would glue unrelated clusters (O(n) precomputation)
-  const tokenSets = clusters.map((c) => {
+  const orderedTokens = clusters.map((c) => {
     const tokens = tokenizeContent(flatten(c.rep.content));
-    return new Set(tokens.filter((t) => !TOPIC_STOP_WORDS.has(t)));
+    return tokens.filter((t) => !TOPIC_STOP_WORDS.has(t));
   });
+  const tokenSets = orderedTokens.map((arr) => new Set(arr));
 
   // Global document frequencies for TF-IDF labeling (computed once)
   const df = new Map<string, number>();
@@ -378,6 +440,7 @@ function assignTopics(
   const topics = splitComponents(
     level1,
     tokenSets,
+    orderedTokens,
     df,
     totalClusters,
     TOPIC_SIMILARITY_THRESHOLD,
@@ -402,6 +465,7 @@ function assignTopics(
 function splitComponents(
   components: number[][],
   tokenSets: Set<string>[],
+  orderedTokens: string[][],
   df: Map<string, number>,
   totalClusters: number,
   threshold: number,
@@ -412,7 +476,13 @@ function splitComponents(
     if (comp.length <= MAX_COMPONENT_SIZE) {
       if (comp.length >= MIN_TOPIC_SIZE) {
         topics.push({
-          label: computeTopicLabel(comp, tokenSets, df, totalClusters),
+          label: computeTopicLabel(
+            comp,
+            tokenSets,
+            orderedTokens,
+            df,
+            totalClusters,
+          ),
           indices: comp,
         });
       }
@@ -422,7 +492,13 @@ function splitComponents(
     const nextThreshold = threshold + TOPIC_SPLIT_STEP;
     if (nextThreshold >= 0.9 || depth >= MAX_SPLIT_DEPTH) {
       topics.push({
-        label: computeTopicLabel(comp, tokenSets, df, totalClusters),
+        label: computeTopicLabel(
+          comp,
+          tokenSets,
+          orderedTokens,
+          df,
+          totalClusters,
+        ),
         indices: comp,
       });
       continue;
@@ -431,7 +507,13 @@ function splitComponents(
     if (sub.length <= 1) {
       // Threshold raise did not fragment — accept as-is
       topics.push({
-        label: computeTopicLabel(comp, tokenSets, df, totalClusters),
+        label: computeTopicLabel(
+          comp,
+          tokenSets,
+          orderedTokens,
+          df,
+          totalClusters,
+        ),
         indices: comp,
       });
       continue;
@@ -440,6 +522,7 @@ function splitComponents(
       ...splitComponents(
         sub,
         tokenSets,
+        orderedTokens,
         df,
         totalClusters,
         nextThreshold,
@@ -451,18 +534,43 @@ function splitComponents(
 }
 
 /**
- * TF-IDF topic label: picks the top-2 tokens by TF·IDF within the topic.
- * IDF = log(N / df) uses the precomputed global document-frequency map —
- * this suppresses project-wide noise words (e.g., "config", "commit") and
- * surfaces the keywords that distinguish each sub-theme.
+ * TF-IDF topic label: prefers the most frequent ordered bigram in the topic
+ * when it is dominant (appears in ≥30% of members and ≥3 times), otherwise
+ * falls back to top-2 tokens by TF·IDF within the topic.
+ * IDF = log(N / df) suppresses project-wide noise words.
+ * Short 3-char tokens are penalized and prefix-duplicates are deduped.
  */
 function computeTopicLabel(
   indices: number[],
   tokenSets: Set<string>[],
+  orderedTokens: string[][],
   df: Map<string, number>,
   totalClusters: number,
 ): string {
-  // Term frequency within the topic group
+  // Try bigram first: most frequent ordered adjacent pair in topic
+  const bigramCounts = new Map<string, number>();
+  for (const idx of indices) {
+    const arr = orderedTokens[idx];
+    for (let i = 0; i < arr.length - 1; i++) {
+      const bg = `${arr[i]} ${arr[i + 1]}`;
+      bigramCounts.set(bg, (bigramCounts.get(bg) ?? 0) + 1);
+    }
+  }
+  if (bigramCounts.size > 0) {
+    const sortedBigrams = [...bigramCounts.entries()].sort(
+      (a, b) => b[1] - a[1],
+    );
+    const [topBigram, topCount] = sortedBigrams[0];
+    const threshold = Math.max(3, Math.ceil(indices.length * 0.3));
+    if (topCount >= threshold) {
+      const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+      const label = topBigram.split(" ").map(capitalize).join(" ");
+      if (label.length > 40) return label.slice(0, 40);
+      return label;
+    }
+  }
+
+  // Fallback: top-2 TF-IDF tokens
   const tf = new Map<string, number>();
   for (const idx of indices)
     for (const t of tokenSets[idx]) tf.set(t, (tf.get(t) ?? 0) + 1);
@@ -470,15 +578,33 @@ function computeTopicLabel(
   const scored = [...tf.entries()]
     .map(([token, count]) => ({
       token,
-      score: count * Math.log(totalClusters / (df.get(token) ?? 1)),
+      score:
+        count *
+        Math.log(totalClusters / (df.get(token) ?? 1)) *
+        (token.length <= 3 ? 0.6 : 1),
     }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 2);
+    .sort((a, b) => b.score - a.score);
 
   if (scored.length === 0) return "Observations";
 
+  const picked: typeof scored = [];
+  for (const cand of scored) {
+    if (picked.length >= 2) break;
+    const dup = picked.some(
+      (p) =>
+        p.token.startsWith(cand.token) ||
+        cand.token.startsWith(p.token) ||
+        (p.token.length >= 4 &&
+          cand.token.length >= 4 &&
+          p.token.slice(0, 4) === cand.token.slice(0, 4)),
+    );
+    if (dup) continue;
+    picked.push(cand);
+  }
+  const final = picked.length > 0 ? picked : scored.slice(0, 2);
+
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const label = scored.map((s) => capitalize(s.token)).join(" ");
+  const label = final.map((s) => capitalize(s.token)).join(" ");
   return label.length > 40 ? label.slice(0, 40) : label;
 }
 
@@ -493,10 +619,11 @@ function assignReflectionTopics(
 ): Map<MemoryCluster<CorpusReflection>, string> {
   if (reflClusters.length < MIN_TOPIC_SIZE) return new Map();
 
-  const tokenSets = reflClusters.map((c) => {
+  const orderedTokens = reflClusters.map((c) => {
     const tokens = tokenizeContent(flatten(c.rep.content));
-    return new Set(tokens.filter((t) => !TOPIC_STOP_WORDS.has(t)));
+    return tokens.filter((t) => !TOPIC_STOP_WORDS.has(t));
   });
+  const tokenSets = orderedTokens.map((arr) => new Set(arr));
 
   const df = new Map<string, number>();
   for (const set of tokenSets) {
@@ -514,6 +641,7 @@ function assignReflectionTopics(
   const topics = splitComponents(
     level1,
     tokenSets,
+    orderedTokens,
     df,
     total,
     TOPIC_SIMILARITY_THRESHOLD,
@@ -749,7 +877,10 @@ export function buildExportMarkdown(
       const label =
         tier.charAt(0).toUpperCase() + tier.slice(1) + " reflections";
       const scored = tierClusters
-        .map((cluster) => ({ cluster, score: reflectionScore(cluster, now) }))
+        .map((cluster) => ({
+          cluster,
+          score: reflectionScore(cluster, now, obsPool),
+        }))
         .sort((a, b) => b.score - a.score);
       const lines = scored.map(({ cluster }) => {
         const age = relativeTime(cluster.rep.timestamp, now);
