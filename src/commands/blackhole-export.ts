@@ -76,7 +76,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         `- sessions scanned: ${stats.sessionsConsidered} (${stats.filesWithMarkers} with memory entries)`,
         `- observations: ${stats.observationsTotal} → ${stats.observationsRendered} rendered (${stats.duplicatesCollapsed} duplicates collapsed, ${stats.observationsFiltered} below viability gate)`,
         stats.topicGroups > 0
-          ? `- organized into ${stats.topicGroups} topic sections`
+          ? `- ${stats.topicGroups} topic groups identified; each observation shows its **topic badge**`
           : null,
         `- reflections: ${stats.reflectionsTotal}`,
       ];

@@ -26,6 +26,13 @@ const SORENSEN_MIN_LEVENSHTEIN = 0.6;
 export const STOP_WORDS: ReadonlySet<string> = new Set([
   "user",
   "agent",
+  "assistant",
+  "blackhole",
+  // relevance labels are rank words, not topics
+  "critical",
+  "high",
+  "medium",
+  "low",
   "the",
   "a",
   "an",
@@ -146,15 +153,86 @@ export const STOP_WORDS: ReadonlySet<string> = new Set([
 
 /** Normalized, stop-word-stripped token list for a piece of content. */
 export function tokenizeContent(content: string): string[] {
-  return content
+  // Expand common contractions so "don't" and "do not" share tokens
+  const expanded = content
+    .replace(/\bdon't\b/gi, "do not")
+    .replace(/\bcan't\b/gi, "cannot")
+    .replace(/\bwon't\b/gi, "will not")
+    .replace(/\bisn't\b/gi, "is not")
+    .replace(/\baren't\b/gi, "are not")
+    .replace(/\bwasn't\b/gi, "was not")
+    .replace(/\bweren't\b/gi, "were not")
+    .replace(/\bhasn't\b/gi, "has not")
+    .replace(/\bhaven't\b/gi, "have not")
+    .replace(/\bhadn't\b/gi, "had not")
+    .replace(/\bdoesn't\b/gi, "does not")
+    .replace(/\bdidn't\b/gi, "did not")
+    .replace(/\bcouldn't\b/gi, "could not")
+    .replace(/\bshouldn't\b/gi, "should not")
+    .replace(/\bwouldn't\b/gi, "would not")
+    .replace(/\bmustn't\b/gi, "must not")
+    .replace(/\bneedn't\b/gi, "need not")
+    .replace(/\bit's\b/gi, "it is")
+    .replace(/\bthat's\b/gi, "that is")
+    .replace(/\bwhat's\b/gi, "what is")
+    .replace(/\bthere's\b/gi, "there is")
+    .replace(/\bhere's\b/gi, "here is")
+    .replace(/\bhow's\b/gi, "how is")
+    .replace(/\bwho's\b/gi, "who is")
+    .replace(/\bi'm\b/gi, "i am")
+    .replace(/\byou're\b/gi, "you are")
+    .replace(/\bwe're\b/gi, "we are")
+    .replace(/\bthey're\b/gi, "they are");
+  // Split camelCase and PascalCase before stripping non-alpha
+  const splitCamel = expanded.replace(/([a-z])([A-Z])/g, "$1 $2");
+  return splitCamel
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t) && !/^\d+$/.test(t));
+    .filter(
+      (t) =>
+        t.length >= 3 &&
+        !STOP_WORDS.has(t) &&
+        !/^\d+$/.test(t) &&
+        // Filter commit-like hex sequences (a7a15b5a, 837530d7, etc.)
+        !/^[a-f0-9]{7,}$/i.test(t) &&
+        // Filter single letters attached to parens/hyphens
+        !/^[a-z]$/.test(t),
+    );
 }
 
 export function normalizeContent(content: string): string {
-  return content
+  // Expand common contractions so "don't" and "do not" normalize identically
+  const expanded = content
+    .replace(/\bdon't\b/gi, "do not")
+    .replace(/\bcan't\b/gi, "cannot")
+    .replace(/\bwon't\b/gi, "will not")
+    .replace(/\bisn't\b/gi, "is not")
+    .replace(/\baren't\b/gi, "are not")
+    .replace(/\bwasn't\b/gi, "was not")
+    .replace(/\bweren't\b/gi, "were not")
+    .replace(/\bhasn't\b/gi, "has not")
+    .replace(/\bhaven't\b/gi, "have not")
+    .replace(/\bhadn't\b/gi, "had not")
+    .replace(/\bdoesn't\b/gi, "does not")
+    .replace(/\bdidn't\b/gi, "did not")
+    .replace(/\bcouldn't\b/gi, "could not")
+    .replace(/\bshouldn't\b/gi, "should not")
+    .replace(/\bwouldn't\b/gi, "would not")
+    .replace(/\bmustn't\b/gi, "must not")
+    .replace(/\bneedn't\b/gi, "need not")
+    .replace(/\bit's\b/gi, "it is")
+    .replace(/\bthat's\b/gi, "that is")
+    .replace(/\bwhat's\b/gi, "what is")
+    .replace(/\bthere's\b/gi, "there is")
+    .replace(/\bhere's\b/gi, "here is")
+    .replace(/\bhow's\b/gi, "how is")
+    .replace(/\bwho's\b/gi, "who is")
+    .replace(/\bi'm\b/gi, "i am")
+    .replace(/\byou're\b/gi, "you are")
+    .replace(/\bwe're\b/gi, "we are")
+    .replace(/\bthey're\b/gi, "they are");
+  return expanded
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
