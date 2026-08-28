@@ -113,25 +113,19 @@ describe("§2.1 Tab / action-row cycling", () => {
     expect(body.render(80).join("\n")).toContain("▸ Global");
     // Shift+Tab → Session tab
     body.handleInput?.("\x1b[Z");
-    expect(body.render(80).join("\n")).toContain("▸ Session");
+    expect(body.render(80).join("\n")).toContain("▶ Session");
     // Shift+Tab → Project Local tab
     body.handleInput?.("\x1b[Z");
-    expect(body.render(80).join("\n")).toContain("▸ Project Local");
+    expect(body.render(80).join("\n")).toContain("▶ Project Local");
     // Shift+Tab → Global tab (wrap)
     body.handleInput?.("\x1b[Z");
-    expect(body.render(80).join("\n")).toContain("▸ Global");
+    expect(body.render(80).join("\n")).toContain("▶ Global");
   });
 
   it("C2: Enter on a focused tab returns focus to field zone and toggles the field", () => {
     const onChange = vi.fn();
     const fields: Field[] = [
-      {
-        key: "enabled",
-        type: "boolean",
-        label: "Enabled",
-        value: false,
-        tab: "tab2",
-      },
+      { key: "enabled", type: "boolean", label: "Enabled", value: false, tab: "tab2" },
     ];
     const tabs = [
       { id: "tab1", label: "Tab 1" },
@@ -144,7 +138,7 @@ describe("§2.1 Tab / action-row cycling", () => {
     body.render(80);
     // Tab once: focus lands on Tab 2
     body.handleInput?.("\t");
-    expect(body.render(80).join("\n")).toContain("▸ Tab 2");
+    expect(body.render(80).join("\n")).toContain("▶ Tab 2");
     // Press Enter — returns focus to field zone, does NOT toggle yet
     body.handleInput?.("\r");
     // Focus returned to field zone — active tab is still Tab 2
@@ -162,13 +156,7 @@ describe("§2.1 Tab / action-row cycling", () => {
     const close = vi.fn();
     const onChange = vi.fn();
     const fields: Field[] = [
-      {
-        key: "enabled",
-        type: "boolean",
-        label: "Enabled",
-        value: false,
-        tab: "tab2",
-      },
+      { key: "enabled", type: "boolean", label: "Enabled", value: false, tab: "tab2" },
     ];
     const tabs = [
       { id: "tab1", label: "Tab 1" },

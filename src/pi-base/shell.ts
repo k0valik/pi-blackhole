@@ -110,3 +110,33 @@ export function stripQuotes(s: string): string {
   }
   return s;
 }
+
+/** Split a command string into arguments, stripping surrounding quotes. */
+export function splitCommand(cmd: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: string | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      if (c === quote) {
+        quote = null;
+      } else {
+        current += c;
+      }
+    } else if (c === "'" || c === '"') {
+      quote = c;
+    } else if (c === " ") {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+    } else {
+      current += c;
+    }
+  }
+  if (current) {
+    args.push(current);
+  }
+  return args;
+}

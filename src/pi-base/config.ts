@@ -13,8 +13,11 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { getPiAgentDir } from "./paths.js";
+import { dirname, join, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { getExtensionsDir } from "./paths.js";
+
+export { getExtensionsDir } from "./paths.js";
 
 interface CacheHit {
   mtime: number;
@@ -38,14 +41,7 @@ function cacheSet(key: string, value: CacheHit): void {
 
 // ── Path helpers ──────────────────────────────────────────────────────
 
-/**
- * Canonical config directory: ~/.pi/agent/extensions/
- */
 const PROTECTED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-export function getExtensionsDir(): string {
-  return join(getPiAgentDir(), "extensions");
-}
 
 function resolveConfigDir(configDir: string | undefined): string {
   return configDir ?? getExtensionsDir();
@@ -53,7 +49,12 @@ function resolveConfigDir(configDir: string | undefined): string {
 
 /** Check if a directory path points to a real user home (not a test temp). */
 function isRealDir(dir: string): boolean {
-  return !dir.startsWith("/tmp") && !dir.startsWith("/var/folders");
+  if (dir.startsWith("/tmp") || dir.startsWith("/var/folders")) return false;
+  // Cross-platform: os.tmpdir() is /tmp on Linux, /var/folders/... on macOS,
+  // and C:\Users\<user>\AppData\Local\Temp on Windows — the prefix check
+  // covers all of them, including paths that don't start with "/tmp".
+  const systemTmp = tmpdir();
+  return dir !== systemTmp && !dir.startsWith(systemTmp + sep);
 }
 
 /**
@@ -178,6 +179,11 @@ export function deleteConfig(filename: string, configDir?: string): void {
   } catch {
     // No-op if file doesn't exist or can't be deleted
   }
+}
+
+/** Clear the config file cache. Exposed for testing. */
+export function clearConfigFileCache(): void {
+  _configCache.clear();
 }
 
 // ── deepMerge ─────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
  * Inline string-editor state machine for single-line value editing inside
  * settings rows.
  *
- * Ported from the helpers in vstack's `extension-manager.ts`. This file is
+ * This file is
  * **pure logic** — no terminal access, no theme, no rendering — so it can
  * be exercised in `bun test` / `vitest` without a TUI.
  *
@@ -26,9 +26,7 @@
 
 import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
 
-const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
-  granularity: "grapheme",
-});
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** Shared yank buffer for storing killed text. */
 let yankBuffer = "";

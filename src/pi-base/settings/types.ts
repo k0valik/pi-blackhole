@@ -1,4 +1,6 @@
-/** *
+/**
+ * Public types for the `@k0valik/pi-base` settings modal.
+ *
  * The modal accepts a flat array of `Field`s (or, when `tabs` is set,
  * one such array per tab) and a single `onChange` callback. Every
  * built-in field is a discriminated-union variant of `Field`. Callers
@@ -347,12 +349,7 @@ export interface FieldRenderer<F extends Field = Field, V = unknown> {
   /** Render the right-hand value cell for one row. */
   renderValue(
     row: FieldRow<F, V>,
-    args: {
-      width: number;
-      selected: boolean;
-      isEditing: boolean;
-      ctx: FieldRenderContext;
-    },
+    args: { width: number; selected: boolean; isEditing: boolean; ctx: FieldRenderContext },
   ): string;
   /** Footer-hint pieces shown when this row is focused. */
   hints(row: FieldRow<F, V>, args: { isEditing: boolean }): FieldKeyHint[];
@@ -364,11 +361,7 @@ export interface FieldRenderer<F extends Field = Field, V = unknown> {
   handleKey(
     row: FieldRow<F, V>,
     data: string,
-    args: {
-      isEditing: boolean;
-      ctx: FieldRenderContext;
-      setEditing: (v: boolean) => void;
-    },
+    args: { isEditing: boolean; ctx: FieldRenderContext; setEditing: (v: boolean) => void },
   ): FieldKeyResult<V>;
 }
 
@@ -418,6 +411,8 @@ export interface SettingsModalOptions<F extends Field = Field> {
   initialTab?: string;
   /** Show a fuzzy-search bar above the list. */
   enableSearch?: boolean;
+  /** Customizable placeholder shown in the search box when empty. */
+  searchPlaceholder?: string;
   /** Theme overrides (mostly used for callers with fixed-palette aesthetics). */
   theme?: SettingsTheme;
   /** Override the overlay positioning (defaults: anchor center, 92% × 85%). */

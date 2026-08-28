@@ -31,6 +31,7 @@ export const config = new ConfigManager<UnifiedConfig>({
   id: "pi-blackhole",
   label: "pi-blackhole",
   filename: CONFIG_FILENAME,
+  configDir: GLOBAL_CONFIG_DIR,
   defaults: DEFAULTS,
   scopes: { global: true, project: true, session: true },
   sessionConfig: { entryType: "session-config-pi-blackhole" },
@@ -438,7 +439,7 @@ export async function openBlackholeSettings(ctx: ExtensionContext): Promise<void
         available: true,
       },
     ],
-    async (id) => {
+    async (id: string) => {
       if (id === "changelog") await openChangelogView(ctx);
     },
   );

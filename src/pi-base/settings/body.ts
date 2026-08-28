@@ -17,20 +17,33 @@
  */
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  type Component,
+  type TUI,
+  fuzzyMatch,
+} from "@earendil-works/pi-tui";
+import { validateFieldValue } from "./validate-field.ts";
 import type {
   Field,
+  FieldKeyHint,
   FieldRenderContext,
   SettingsModalOptions,
   SettingsModalBodyComponent,
   Tab,
+  VisibilityContext,
 } from "./types";
 import { RENDERERS } from "./fields/index";
 import {
+  divider,
+  formatHintLine,
   frame,
   frameContentWidth,
   pad,
   responsiveInnerRows,
+  wrapLine,
   type FrameOptions,
   DEFAULT_PADDING_X,
 } from "./frame";
@@ -40,11 +53,20 @@ import {
   totalVisibleItems,
   updateVisibleIndices,
   visibleRowIndices,
+  clampSelection,
   focusedIndex,
   focusedRow,
 } from "./navigation.ts";
 import { buildVisibilityContext, isDirty, commitValue, allValues } from "./values.ts";
-import { renderFooter, renderBody } from "./render.ts";
+import {
+  renderTabBar,
+  renderSearchBar,
+  renderFooter,
+  renderRow,
+  renderBody,
+  renderFieldDesc,
+  estimateDescriptionRows,
+} from "./render.ts";
 import { createConfirm } from "./confirm.ts";
 
 const PREFERRED_INNER_ROWS = 45;
@@ -246,28 +268,28 @@ export function createSettingsModalBody<F extends Field>(
     if (readOnly) return;
     const row = focusedRow(state);
     if (!row) return;
-    if (row.field.type === "section") return;
     const renderer = rendererFor(row.field);
-    if (!renderer) return;
     try {
-      const result = renderer.handleKey(
-        { field: row.field as never, value: row.value as never },
-        data,
-        {
-          isEditing: row.isEditing,
-          ctx: fieldRenderContext,
-          setEditing: (v) => setEditing(row, v),
-        },
-      );
-      if (result.commit !== undefined) commitValue(state, row, result.commit);
-      if (result.submenu) {
-        mountOverlay(
-          result.submenu((value) => {
-            dismissOverlay();
-            if (value !== undefined) commitValue(state, row, value);
-          }),
-          `${row.field.key} →`,
+      if (renderer) {
+        const result = renderer.handleKey(
+          { field: row.field as never, value: row.value as never },
+          data,
+          {
+            isEditing: row.isEditing,
+            ctx: fieldRenderContext,
+            setEditing: (v) => setEditing(row, v),
+          },
         );
+        if (result.commit !== undefined) commitValue(state, row, result.commit);
+        if (result.submenu) {
+          mountOverlay(
+            result.submenu((value) => {
+              dismissOverlay();
+              if (value !== undefined) commitValue(state, row, value);
+            }),
+            `${row.field.key} →`,
+          );
+        }
       }
     } catch (err) {
       notifyError(state, state.args.ctx, err);
@@ -447,8 +469,19 @@ export function createSettingsModalBody<F extends Field>(
       } else if (state.tabActionFocus < state.tabs.length) {
         state.tabActionFocus = (state.tabActionFocus + 1) % stopCount;
       } else if (readOnly) {
+        // Stay in action zone, advance the active tab
         const currentTabIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
-        state.tabActionFocus = currentTabIdx >= 0 ? (currentTabIdx + 1) % state.tabs.length : 0;
+        const nextTabIdx = currentTabIdx >= 0 ? (currentTabIdx + 1) % state.tabs.length : 0;
+        const nextTab = state.tabs[nextTabIdx];
+        if (nextTab && nextTab.id !== state.activeTabId) {
+          state.activeTabId = nextTab.id;
+          state.fieldSelected = 0;
+          state.scroll = 0;
+          updateVisibleIndices(state, buildVisibilityContext);
+          state.options.onActiveTabChange?.(nextTab.id);
+        }
+        state.args.tui.requestRender();
+        return;
       } else {
         state.tabActionFocus = (state.tabActionFocus + 1) % stopCount;
       }
@@ -480,11 +513,22 @@ export function createSettingsModalBody<F extends Field>(
       } else if (state.tabActionFocus < state.tabs.length) {
         state.tabActionFocus = (state.tabActionFocus - 1 + stopCount) % stopCount;
       } else if (readOnly) {
+        // Stay in action zone, go to previous tab
         const currentTabIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
-        state.tabActionFocus =
+        const prevTabIdx =
           currentTabIdx >= 0
             ? (currentTabIdx - 1 + state.tabs.length) % state.tabs.length
             : state.tabs.length - 1;
+        const prevTab = state.tabs[prevTabIdx];
+        if (prevTab && prevTab.id !== state.activeTabId) {
+          state.activeTabId = prevTab.id;
+          state.fieldSelected = 0;
+          state.scroll = 0;
+          updateVisibleIndices(state, buildVisibilityContext);
+          state.options.onActiveTabChange?.(prevTab.id);
+        }
+        state.args.tui.requestRender();
+        return;
       } else {
         state.tabActionFocus = (state.tabActionFocus - 1 + stopCount) % stopCount;
       }

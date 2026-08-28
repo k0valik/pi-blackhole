@@ -77,8 +77,13 @@ export function pad(text: string, width: number): string {
  */
 export function wrapLine(line: string, width: number): string[] {
   const safeWidth = Math.max(1, width);
-  const normalized = String(line ?? "").replace(/\t/g, "  ");
-  const wrapped = normalized.split(/\r?\n/).flatMap((part) => {
+  const rawStr = String(line ?? "");
+  const normalized = rawStr.includes("\t") ? rawStr.replace(/\t/g, "  ") : rawStr;
+  const parts =
+    normalized.includes("\n") || normalized.includes("\r")
+      ? normalized.split(/\r?\n/)
+      : [normalized];
+  const wrapped = parts.flatMap((part) => {
     const rows = wrapTextWithAnsi(part, safeWidth);
     return rows.length > 0 ? rows : [""];
   });

@@ -48,6 +48,17 @@ export default [
     },
   },
   {
+    // Vendored pi-base: upstream uses oxlint, not eslint -- disable
+    // no-unused-vars here to keep verbatim re-vendor diff minimal.
+    // BH's own code (src/core, src/om, etc.) still has the rule via
+    // the previous block; this just relaxes the vendored tree.
+    files: ["src/pi-base/**/*.ts"],
+    ignores: ["src/pi-base/**/*.test.ts"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
+  {
     // Tests: not part of tsconfig.json yet (tsc over tests/ surfaces ~153
     // pre-existing type errors, tracked as a separate cleanup), so lint them
     // without type-aware rules but still catch unused vars.

@@ -45,7 +45,9 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
         if (i > 0) bodyLines.push("");
 
         const prefix = isSelected ? args.theme.fg("accent", "▌ ") : "  ";
-        let label = entry.label;
+        const numPrefix =
+          availableIndex >= 0 && availableEntries.length <= 9 ? `${availableIndex + 1}. ` : "";
+        let label = `${numPrefix}${entry.label}`;
         if (!entry.available) {
           label = args.theme.fg("dim", label);
         } else if (isSelected) {
@@ -60,11 +62,18 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
 
       bodyLines.push("");
 
-      const hints: KeyHint[] = [
-        { key: "↑↓", label: "select" },
-        { key: "enter", label: "confirm" },
-        { key: "esc", label: "cancel" },
-      ];
+      const hints: KeyHint[] = [];
+      if (availableEntries.length > 0) {
+        hints.push({ key: "↑↓", label: "select" });
+        if (availableEntries.length > 1 && availableEntries.length <= 9) {
+          hints.push({ key: `1-${availableEntries.length}`, label: "choose" });
+        }
+        if (availableEntries.length > 2) {
+          hints.push({ key: "home/end", label: "top/bottom" });
+        }
+        hints.push({ key: "enter/space", label: "confirm" });
+      }
+      hints.push({ key: "esc", label: "cancel" });
       bodyLines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
 
       return frame(bodyLines, width, args.theme, {
@@ -93,7 +102,9 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
       if (i > 0) lines.push("");
 
       const prefix = isSelected ? args.theme.fg("accent", "▌ ") : "  ";
-      let label = entry.label;
+      const numPrefix =
+        availableIndex >= 0 && availableEntries.length <= 9 ? `${availableIndex + 1}. ` : "";
+      let label = `${numPrefix}${entry.label}`;
       if (!entry.available) {
         label = args.theme.fg("dim", label);
       } else if (isSelected) {
@@ -107,11 +118,18 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
     }
 
     lines.push("");
-    const hints: KeyHint[] = [
-      { key: "↑↓", label: "select" },
-      { key: "enter", label: "confirm" },
-      { key: "esc", label: "cancel" },
-    ];
+    const hints: KeyHint[] = [];
+    if (availableEntries.length > 0) {
+      hints.push({ key: "↑↓", label: "select" });
+      if (availableEntries.length > 1 && availableEntries.length <= 9) {
+        hints.push({ key: `1-${availableEntries.length}`, label: "choose" });
+      }
+      if (availableEntries.length > 2) {
+        hints.push({ key: "home/end", label: "top/bottom" });
+      }
+      hints.push({ key: "enter/space", label: "confirm" });
+    }
+    hints.push({ key: "esc", label: "cancel" });
     lines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
     return lines;
   };
@@ -131,12 +149,22 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
       args.tui.requestRender();
       return;
     }
+    if (matchesKey(data, "home")) {
+      selectedAvailableIndex = 0;
+      args.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, "end")) {
+      selectedAvailableIndex = availableEntries.length - 1;
+      args.tui.requestRender();
+      return;
+    }
     if (matchesKey(data, "down")) {
       selectedAvailableIndex = (selectedAvailableIndex + 1) % availableEntries.length;
       args.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "enter") || matchesKey(data, "return")) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       const selected = availableEntries[selectedAvailableIndex]!;
       args.done({ kind: "select", id: selected.id });
       return;
@@ -144,6 +172,14 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
     if (matchesKey(data, "escape")) {
       args.done({ kind: "cancel" });
       return;
+    }
+    if (/^[1-9]$/.test(data)) {
+      const idx = parseInt(data, 10) - 1;
+      if (idx >= 0 && idx < availableEntries.length) {
+        const selected = availableEntries[idx]!;
+        args.done({ kind: "select", id: selected.id });
+        return;
+      }
     }
   };
 
