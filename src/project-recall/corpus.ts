@@ -567,3 +567,258 @@ export function buildProjectMemoryCorpus(
 
   return corpus;
 }
+
+export interface CorpusProgress {
+  scanned: number;
+  total: number;
+  phase: "scanning" | "pending";
+}
+
+const YIELD_EVERY_FILES = 10;
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Async variant that yields to the event loop every few files so the TUI
+ * can paint progress notifies. Sync version is kept for tests / callers
+ * that need zero overhead on small corpora.
+ */
+export async function buildProjectMemoryCorpusAsync(
+  options: BuildCorpusOptions,
+  onProgress?: (p: CorpusProgress) => void,
+): Promise<ProjectCorpus> {
+  const agentDir = options.agentDir ?? getAgentDir();
+  const projectRoot = options.gitRoot || options.cwd;
+  const activeSessionFile = options.activeSessionFile
+    ? existsSync(options.activeSessionFile)
+      ? options.activeSessionFile
+      : undefined
+    : undefined;
+
+  const corpus: ProjectCorpus = {
+    projectRoot,
+    sessionsConsidered: 0,
+    filesWithMarkers: 0,
+    observations: [],
+    reflections: [],
+    droppedIds: new Set<string>(),
+    knownSessionIds: new Set<string>(),
+    orphanedSessions: 0,
+  };
+
+  const candidateDirs = [
+    ...new Set([
+      encodeScopeDir(options.cwd),
+      ...(options.gitRoot && options.gitRoot !== options.cwd
+        ? [encodeScopeDir(options.gitRoot)]
+        : []),
+    ]),
+  ].map((scope) => join(agentDir, "sessions", scope));
+
+  // Enumerate candidates up-front so we can report the total.
+  const candidateFiles: string[] = [];
+  const seenFiles = new Set<string>();
+  for (const scopeDir of candidateDirs) {
+    let files: string[];
+    try {
+      if (!statSync(scopeDir).isDirectory()) continue;
+      files = readdirSync(scopeDir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      if (seenFiles.has(file)) continue;
+      seenFiles.add(file);
+      const filePath = join(scopeDir, file);
+      if (activeSessionFile && filePath === activeSessionFile) continue;
+      candidateFiles.push(filePath);
+    }
+  }
+
+  const total = candidateFiles.length;
+  if (onProgress && total > 0) {
+    onProgress({ scanned: 0, total, phase: "scanning" });
+  }
+
+  let scanned = 0;
+  for (const filePath of candidateFiles) {
+    scanned++;
+    const file = filePath.slice(filePath.lastIndexOf("/") + 1);
+    corpus.sessionsConsidered++;
+    const header = parseSessionHeader(readFirstLine(filePath));
+    const sessionId = header?.id || file.slice(0, -6);
+    corpus.knownSessionIds.add(sessionId);
+
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, "utf-8");
+    } catch {
+      if (scanned % YIELD_EVERY_FILES === 0) await yieldToEventLoop();
+      if (onProgress && scanned % 25 === 0) {
+        onProgress({ scanned, total, phase: "scanning" });
+      }
+      continue;
+    }
+    if (!raw.includes("om.")) {
+      if (scanned % YIELD_EVERY_FILES === 0) await yieldToEventLoop();
+      if (onProgress && scanned % 25 === 0) {
+        onProgress({ scanned, total, phase: "scanning" });
+      }
+      continue;
+    }
+    corpus.filesWithMarkers++;
+
+    const entries: Array<Record<string, unknown>> = [];
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        entries.push(JSON.parse(trimmed));
+      } catch {
+        /* corrupt lines silently dropped */
+      }
+    }
+    extractFromEntries(
+      entries,
+      sessionId,
+      corpus.observations,
+      corpus.reflections,
+      corpus.droppedIds,
+    );
+
+    if (scanned % YIELD_EVERY_FILES === 0) await yieldToEventLoop();
+    if (onProgress && scanned % 25 === 0) {
+      onProgress({ scanned, total, phase: "scanning" });
+    }
+  }
+  if (onProgress && total > 0) {
+    onProgress({ scanned: total, total, phase: "scanning" });
+  }
+
+  // Phase 2b: pending buffers (global). Yields periodically.
+  const pendingDir = join(agentDir, PENDING_DIR);
+  if (existsSync(pendingDir)) {
+    let files: string[];
+    try {
+      files = readdirSync(pendingDir);
+    } catch {
+      files = [];
+    }
+    const mains = new Set<string>();
+    for (const file of files) {
+      if (file.endsWith(PENDING_SUFFIX)) {
+        mains.add(file.slice(0, -PENDING_SUFFIX.length));
+      }
+    }
+
+    let globalSessionIds: Set<string> | null = null;
+    const ensureGlobalIds = (): Set<string> => {
+      if (globalSessionIds) return globalSessionIds;
+      globalSessionIds = new Set<string>(corpus.knownSessionIds);
+      const sessionsRoot = join(agentDir, "sessions");
+      let scopes: string[];
+      try {
+        scopes = readdirSync(sessionsRoot);
+      } catch {
+        return globalSessionIds;
+      }
+      for (const scope of scopes) {
+        const scopePath = join(sessionsRoot, scope);
+        let st: ReturnType<typeof statSync> | null = null;
+        try {
+          st = statSync(scopePath);
+        } catch {
+          continue;
+        }
+        if (!st.isDirectory()) continue;
+        const isProjectScope =
+          scope === encodeScopeDir(options.cwd) ||
+          (options.gitRoot &&
+            options.gitRoot !== options.cwd &&
+            scope === encodeScopeDir(options.gitRoot));
+        if (isProjectScope) continue;
+        let scopeFiles: string[];
+        try {
+          scopeFiles = readdirSync(scopePath);
+        } catch {
+          continue;
+        }
+        for (const f of scopeFiles) {
+          if (!f.endsWith(".jsonl")) continue;
+          const header = parseSessionHeader(readFirstLine(join(scopePath, f)));
+          const sid =
+            header?.id ||
+            (f.includes("_")
+              ? f.slice(f.lastIndexOf("_") + 1, -6)
+              : f.slice(0, -6));
+          if (sid) globalSessionIds.add(sid);
+        }
+      }
+      return globalSessionIds;
+    };
+
+    let pendingProcessed = 0;
+    for (const file of files) {
+      const isMain = file.endsWith(PENDING_SUFFIX);
+      const isStale = file.endsWith(STALE_SUFFIX);
+      if (!isMain && !isStale) continue;
+      const sessionId = isMain
+        ? file.slice(0, -PENDING_SUFFIX.length)
+        : file.slice(0, -STALE_SUFFIX.length);
+      if (!sessionId) continue;
+      if (isStale && mains.has(sessionId)) continue;
+
+      let state: PendingState;
+      try {
+        state = JSON.parse(readFileSync(join(pendingDir, file), "utf-8"));
+      } catch {
+        continue;
+      }
+
+      const hasBatches =
+        (Array.isArray(state.observationBatches) &&
+          state.observationBatches.length > 0) ||
+        (Array.isArray(state.reflectionBatches) &&
+          state.reflectionBatches.length > 0) ||
+        (Array.isArray(state.droppedBatches) &&
+          state.droppedBatches.length > 0) ||
+        (typeof (state as Record<string, unknown>).observation === "object" &&
+          (state as Record<string, unknown>).observation !== null) ||
+        (typeof (state as Record<string, unknown>).reflection === "object" &&
+          (state as Record<string, unknown>).reflection !== null) ||
+        (typeof (state as Record<string, unknown>).dropped === "object" &&
+          (state as Record<string, unknown>).dropped !== null);
+      if (!hasBatches) continue;
+
+      if (corpus.knownSessionIds.has(sessionId)) {
+        extractFromPendingState(
+          state,
+          sessionId,
+          "pending",
+          corpus.observations,
+          corpus.reflections,
+          corpus.droppedIds,
+        );
+      } else {
+        const gids = ensureGlobalIds();
+        if (gids.has(sessionId)) continue;
+        corpus.orphanedSessions++;
+        extractFromPendingState(
+          state,
+          sessionId,
+          "orphan",
+          corpus.observations,
+          corpus.reflections,
+          corpus.droppedIds,
+        );
+      }
+      pendingProcessed++;
+      if (pendingProcessed % 10 === 0) await yieldToEventLoop();
+    }
+  }
+
+  return corpus;
+}

@@ -775,6 +775,10 @@ function renderScoredBullets(
 
 // ── Main export function ──────────────────────────────────────
 
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 export function buildExportMarkdown(
   corpus: ProjectCorpus,
   opts?: { now?: number; title?: string },
@@ -997,4 +1001,20 @@ export function buildExportMarkdown(
   ].join("\n");
 
   return { markdown: header + sections.join("\n"), stats };
+}
+
+export async function buildExportMarkdownAsync(
+  corpus: ProjectCorpus,
+  opts?: { now?: number; title?: string },
+): Promise<{ markdown: string; stats: ExportStats }> {
+  // Yield between heavy phases so the TUI can paint.
+  await yieldToEventLoop();
+  // Delegate to the sync implementation but slice yields around the hot sections.
+  // The sync call itself is CPU-heavy; we at least yield before/after.
+  // For finer granularity, the sync function's hot loops (clustering / topic
+  // assignment) would need internal yielding — acceptable to yield at phase
+  // boundaries for now: corpus scanning is the dominant block (35s–2min).
+  const result = buildExportMarkdown(corpus, opts);
+  await yieldToEventLoop();
+  return result;
 }
