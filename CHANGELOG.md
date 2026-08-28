@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- **Distilled project-memory export (`/blackhole-export`).** ([#65](https://github.com/k0valik/pi-blackhole/pull/65)) New command that scans project-scoped session JSONL files plus global OM pending buffers, deduplicates/clusters observations, and writes a single import-ready Markdown file (tiered as `Reflections → Critical → High → Medium → Low` plus an `Unattributed pending memory` section for orphaned buffers). Scoring is tier-weighted with recency decay, log-scaled recurrence and evidence-mass boosts, consensus rerank, burst penalty and length factor; viability gating keeps low/medium only with multi-session support or length/quality, high/critical always. Hierarchical topic assignment via Sørensen-Dice graph + TF-IDF labeling; three-pass dedup (exact normalized, Levenshtein@0.88 after bigram-Jaccard prefilter, Sørensen-Dice@0.70 with Levenshtein floor). Output parsing via `out:<path>.md` or a timestamped default; deterministic and stateless. New modules `src/project-recall/corpus.ts`, `dedup.ts`, `format-export.ts`, `session-dir.ts` and handler `src/commands/blackhole-export.ts` (wired in `index.ts`). Appendix A slice of the project-recall plan — future project-aware recall search remains out of scope for this release.
+
 ### Fixed
 
 - **Capture `AgentSession` from bundled Pi CLI entrypoint.** ([#62](https://github.com/k0valik/pi-blackhole/pull/62), thanks @daoguademeng) `installHostInlineCompactionAdapter` now resolves the host `AgentSession` from the bundled CLI's runtime chunk (when the entrypoint is `dist/bundle/cli.js`) in addition to `dist/index.js`, so inline (mid-run) compaction works when Pi is launched via its bundled CLI instead of silently falling back to settled compaction.

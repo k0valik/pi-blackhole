@@ -48,8 +48,8 @@ Both halves share a single hook and a single output. Together they keep the agen
 >
 > - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
 > - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
-> - **Real provider usage for token counting** — `compactAfterTokens` is now evaluated against actual `totalTokens` from the last assistant message instead of a chars/4 estimate.
-> - **Mid-run exponential backoff** — single transient failure no longer wedges auto-compaction for the rest of the pressure episode.
+> - **`/blackhole-export` — distilled project-memory export** ([#65](https://github.com/k0valik/pi-blackhole/pull/65)) — scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
+> - **Robust compaction-failure handling** — unified `session_compact_failed` (pi >=0.84.3) with correct attribution, overflow-retry visibility, and noise filtering; plus bundled-CLI `AgentSession` resolution so inline compaction works from `dist/bundle/cli.js` ([#62](https://github.com/k0valik/pi-blackhole/pull/62)).
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
