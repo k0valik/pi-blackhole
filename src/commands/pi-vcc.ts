@@ -29,6 +29,7 @@ import {
   config,
   GLOBAL_CONFIG_DIR,
 } from "../pi-base/blackhole-settings.js";
+import { openChangelogView } from "../changelog/changelog.js";
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   const prefixMatch = (value: string, prefix: string): boolean => {
@@ -38,12 +39,16 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   pi.registerCommand("blackhole", {
     description:
       "Manual compact with structural summary. Subcommands: [settings] config overlay, " +
-      "[cleanup] remove orphaned files, [om-off]/[om-on] disable/enable observational memory.",
+      "[changelog] display changelog, [cleanup] remove orphaned files, [om-off]/[om-on] disable/enable observational memory.",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         {
           value: "settings",
           label: "Open configuration overlay [settings]",
+        },
+        {
+          value: "changelog",
+          label: "Display changelog [changelog]",
         },
         {
           value: "cleanup",
@@ -69,6 +74,10 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       if (trimmed === "configure" || trimmed === "settings") {
         // Open the config overlay ("configure" kept as a hidden alias)
         await openBlackholeSettings(ctx);
+        return;
+      }
+      if (trimmed === "changelog") {
+        await openChangelogView(ctx);
         return;
       }
       if (trimmed === "cleanup") {
@@ -126,6 +135,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       const SUBCOMMAND_NAMES = [
         "configure",
         "settings",
+        "changelog",
         "cleanup",
         "om-off",
         "om-on",

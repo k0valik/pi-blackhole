@@ -28,7 +28,10 @@ import {
   PENDING_SENTINEL,
   getRawSessionConfig,
 } from "./config.js";
-import { openConfigFlow } from "./settings/config-flow.js";
+import {
+  openConfigFlow,
+  type ExtraSelectorEntry,
+} from "./settings/config-flow.js";
 import { validateFieldValue } from "./settings/validate-field.ts";
 import type { Field } from "./settings/types.ts";
 import type {
@@ -1063,51 +1066,57 @@ export class ConfigManager<T extends object> {
     onSave: (updated: T) => void,
     configDir?: string,
     onChange?: (key: string, value: unknown) => void,
+    extraEntries?: ExtraSelectorEntry[],
+    onExtraSelect?: (id: string) => Promise<void> | void,
   ): Promise<void> {
     this.warnOnMalformedConfig(ctx, cwd, configDir);
     const scopes = this.getScopes();
     const sessionInitialized = this._ensureSession(ctx, cwd);
     const sources = this.scopeSources(cwd, configDir);
-    await openConfigFlow({
-      label: this.opts.label,
-      ctx,
-      cwd,
-      scopes,
-      sessionInitialized,
-      sessionNote: sources.find((s) => s.scope === "session")?.note ?? "",
-      defaults: this.opts.defaults as Record<string, unknown>,
-      env: this.opts.env as Record<string, string | EnvParser> | undefined,
-      buildFields: (values) => {
-        const fields = this.opts.fields(values as T);
-        const configDefaults = this.opts.defaults as Record<string, unknown>;
-        for (const field of fields) {
-          if (field.type === "action" || field.type === "custom") continue;
-          if ((field as { default?: unknown }).default === undefined) {
-            const key = String(field.key);
-            if (key in configDefaults) {
-              (field as { default?: unknown }).default = configDefaults[key];
+    await openConfigFlow(
+      {
+        label: this.opts.label,
+        ctx,
+        cwd,
+        scopes,
+        sessionInitialized,
+        sessionNote: sources.find((s) => s.scope === "session")?.note ?? "",
+        defaults: this.opts.defaults as Record<string, unknown>,
+        env: this.opts.env as Record<string, string | EnvParser> | undefined,
+        buildFields: (values) => {
+          const fields = this.opts.fields(values as T);
+          const configDefaults = this.opts.defaults as Record<string, unknown>;
+          for (const field of fields) {
+            if (field.type === "action" || field.type === "custom") continue;
+            if ((field as { default?: unknown }).default === undefined) {
+              const key = String(field.key);
+              if (key in configDefaults) {
+                (field as { default?: unknown }).default = configDefaults[key];
+              }
             }
           }
-        }
-        return fields;
+          return fields;
+        },
+        layerValues: (s) =>
+          this.layerValues(s, cwd, configDir) as Record<string, unknown>,
+        inspect: () => this.inspect(cwd, configDir),
+        scopeSources: () => this.scopeSources(cwd, configDir),
+        save: async (values, scope) => {
+          const updated = this.opts.validate
+            ? this.opts.validate(values as Record<string, unknown>)
+            : (values as T);
+          const res = this.save(updated, scope, cwd, configDir);
+          onSave(updated);
+          return res;
+        },
+        resetScope: (scope) => this.resetScope(scope, cwd, configDir),
+        deleteScope: (scope) => this.deleteScope(scope, cwd, configDir),
+        onSaved: () => {},
+        onChange,
       },
-      layerValues: (s) =>
-        this.layerValues(s, cwd, configDir) as Record<string, unknown>,
-      inspect: () => this.inspect(cwd, configDir),
-      scopeSources: () => this.scopeSources(cwd, configDir),
-      save: async (values, scope) => {
-        const updated = this.opts.validate
-          ? this.opts.validate(values as Record<string, unknown>)
-          : (values as T);
-        const res = this.save(updated, scope, cwd, configDir);
-        onSave(updated);
-        return res;
-      },
-      resetScope: (scope) => this.resetScope(scope, cwd, configDir),
-      deleteScope: (scope) => this.deleteScope(scope, cwd, configDir),
-      onSaved: () => {},
-      onChange,
-    });
+      extraEntries,
+      onExtraSelect,
+    );
   }
 
   /**

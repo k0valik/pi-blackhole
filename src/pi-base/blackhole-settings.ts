@@ -19,6 +19,7 @@ import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import { DEFAULTS, type UnifiedConfig } from "../core/unified-config.js";
+import { openChangelogView } from "../changelog/changelog.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
 
@@ -458,5 +459,16 @@ export async function openBlackholeSettings(
       // Caller (pi-vcc.ts) reloads runtime.config after save.
     },
     GLOBAL_CONFIG_DIR,
+    undefined,
+    [
+      {
+        id: "changelog",
+        label: "Display Changelog",
+        available: true,
+      },
+    ],
+    async (id) => {
+      if (id === "changelog") await openChangelogView(ctx);
+    },
   );
 }

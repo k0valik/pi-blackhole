@@ -79,11 +79,21 @@ const SELECTOR_ENTRY_LABELS: Record<string, string> = {
   session: "Configure Session settings",
 };
 
+// ── Extra selector entries (generic extension point for consumers) ─────
+
+export interface ExtraSelectorEntry {
+  id: string;
+  label: string;
+  available: boolean;
+  note?: string;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function buildSelectorEntries(
   params: ConfigFlowParams,
   includeDisplayAll = true,
+  extraEntries: ExtraSelectorEntry[] = [],
 ): Array<{ id: string; label: string; available: boolean; note?: string }> {
   const available: Record<string, boolean> = {
     global: params.scopes.global,
@@ -121,6 +131,10 @@ function buildSelectorEntries(
     });
   }
 
+  if (extraEntries.length > 0) {
+    entries.push(...extraEntries);
+  }
+
   return entries;
 }
 
@@ -130,12 +144,18 @@ function winnerLabel(winner: string): string {
 
 // ── Entry point ────────────────────────────────────────────────────────
 
-export async function openConfigFlow(params: ConfigFlowParams): Promise<void> {
-  const result = await openSelector(params);
+export async function openConfigFlow(
+  params: ConfigFlowParams,
+  extraEntries: ExtraSelectorEntry[] = [],
+  onExtraSelect?: (id: string) => Promise<void> | void,
+): Promise<void> {
+  const result = await openSelector(params, true, extraEntries);
   if (result.kind === "cancel") return;
 
   if (result.id === "display-all") {
     await openDisplayAll(params);
+  } else if (extraEntries.some((e) => e.id === result.id)) {
+    if (onExtraSelect) await onExtraSelect(result.id);
   } else {
     await openEditMode(params, result.id);
   }
@@ -146,8 +166,9 @@ export async function openConfigFlow(params: ConfigFlowParams): Promise<void> {
 function openSelector(
   params: ConfigFlowParams,
   includeDisplayAll = true,
+  extraEntries: ExtraSelectorEntry[] = [],
 ): Promise<ScopeSelectorResult> {
-  const entries = buildSelectorEntries(params, includeDisplayAll);
+  const entries = buildSelectorEntries(params, includeDisplayAll, extraEntries);
   const { ctx } = params;
 
   return new Promise<ScopeSelectorResult>((resolve) => {
