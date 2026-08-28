@@ -14,6 +14,7 @@ import { registerCompactionContextHook } from "./src/hooks/compaction-context.js
 import { registerPiVccCommand } from "./src/commands/pi-vcc";
 import { registerMemoryCommand } from "./src/commands/memory";
 import { registerVccRecallCommand } from "./src/commands/vcc-recall";
+import { registerBlackholeExportCommand } from "./src/commands/blackhole-export";
 import { registerConsolidationTrigger } from "./src/om/consolidation.js";
 import { registerCompactionTrigger } from "./src/om/compaction-trigger.js";
 import { registerRecallTool } from "./src/tools/recall";
@@ -61,6 +62,7 @@ export default async (pi: ExtensionAPI) => {
   registerPiVccCommand(pi, omRuntime); // /pi-vcc (needs runtime for noAutoCompact flush)
   registerMemoryCommand(pi, omRuntime); // /blackhole-memory [status|view|full]
   registerVccRecallCommand(pi); // /blackhole-recall <query>
+  registerBlackholeExportCommand(pi); // /blackhole-export [out:<path>]
 
   // Tools
   registerRecallTool(pi); // unified recall (#N + [12char])

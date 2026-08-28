@@ -61,13 +61,18 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `/blackhole` | Compact the conversation. Subcommands: `settings` / `configure` (overlay), `om-off` / `om-on` (observational memory toggle), `cleanup` (remove orphaned pending files). |
-| `/blackhole-memory` (or `status`) | Pipeline status: token progress, observation/reflection counts, pending data, last errors. |
-| `/blackhole-memory view` | Show visible observations and reflections (after compaction trimming), copied to clipboard. |
-| `/blackhole-memory full` | Show **all** recorded memory (including dropped observations), copied to clipboard. |
-| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file\|touched`, regex. |
+| Command | Description & Options |
+| --- | --- |
+| `/blackhole` | Manual compact — deterministic structural summary |
+| `/blackhole settings` | Open the configuration overlay *(Alias: `/blackhole configure`)* |
+| `/blackhole cleanup` | Remove orphaned pending files |
+| `/blackhole om-off` | Disable observational memory |
+| `/blackhole om-on` | Enable observational memory |
+| `/blackhole-memory` | Memory pipeline status & token counters *(Same as `/blackhole-memory status`)* |
+| `/blackhole-memory view` | Show visible observations and reflections (after compaction trimming), copied to clipboard |
+| `/blackhole-memory full` | Show **all** recorded memory (including dropped observations), copied to clipboard |
+| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file|touched`, regex *(Also available to agent as `recall` tool)* |
+| `/blackhole-export` | Export distilled project memory (observations/reflections across past sessions + pending buffers) to import-ready markdown *(Options: `out:<path>.md`)* |
 
 All commands work regardless of `compaction` mode — only *when* auto-compaction fires changes. See [Compaction modes](#compaction-modes) below.
 
