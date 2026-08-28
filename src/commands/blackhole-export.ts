@@ -4,7 +4,7 @@
  * into an import-ready markdown artifact. plan-07 Appendix A.
  */
 import { writeFileSync } from "node:fs";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { buildProjectMemoryCorpus } from "../project-recall/corpus.js";
@@ -24,7 +24,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
     handler: async (args: string, ctx) => {
       ctx.ui.notify("Exporting project memory…", "info");
 
-      const outMatch = args.match(/\bout:(\S+)/);
+      const outMatch = args.match(/\bout:([^\s?#'"]+)/);
       const now = new Date();
       const outPath = outMatch
         ? isAbsolute(outMatch[1])
@@ -32,7 +32,26 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
           : join(ctx.cwd, outMatch[1])
         : defaultOutPath(ctx.cwd, now);
 
-      const gitRoot = await findGitRoot(ctx.cwd);
+      const resolvedOut = resolve(outPath);
+      const allowedRoots = [resolve(ctx.cwd)];
+      const agentDirPath = getAgentDir();
+      if (agentDirPath) allowedRoots.push(resolve(agentDirPath));
+      const isAllowed = allowedRoots.some((root) => {
+        const rel = relative(root, resolvedOut);
+        return !rel.startsWith("..") && !isAbsolute(rel);
+      });
+      if (!isAllowed) {
+        ctx.ui.notify(
+          `Export path escapes allowed directories: ${outPath}`,
+          "error",
+        );
+        return;
+      }
+
+      const { root: gitRoot, warning: gitWarning } = await findGitRoot(ctx.cwd);
+      if (gitWarning) {
+        ctx.ui.notify(gitWarning, "warning");
+      }
       const activeSessionFile =
         ctx.sessionManager.getSessionFile() ?? undefined;
 

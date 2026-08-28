@@ -383,6 +383,19 @@ describe("/blackhole-export", () => {
     ).toContain("# Project memory export");
   });
 
+  it("rejects out:<path> that escapes allowed directories", async () => {
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    await env.handlerMap.get("blackhole-export")!("out:../escape.md", env.ctx);
+    expect(
+      readdirSync(projectCwd).filter((f) => f.endsWith(".md")),
+    ).toHaveLength(0);
+    expect(env.ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("escapes allowed directories"),
+      "error",
+    );
+  });
+
   it("notifies without writing when the project has no memory", async () => {
     rmSync(agentDir, { recursive: true, force: true });
     mkdirSync(agentDir, { recursive: true });
@@ -404,6 +417,44 @@ describe("/blackhole-export", () => {
     expect(
       readdirSync(projectCwd).filter((f) => f.endsWith(".md")),
     ).toHaveLength(0);
+  });
+
+  it("inferReflectionTier falls back to medium when no observation resolves", async () => {
+    const { buildProjectMemoryCorpus } =
+      await import("../src/project-recall/corpus.js");
+    const { buildExportMarkdown } =
+      await import("../src/project-recall/format-export.js");
+
+    const scope = encodeScopeDir(projectCwd);
+    writeSession(scope, "refl-only.jsonl", [
+      sessionHeader("ses-refl"),
+      messageEntry("mr1", "user", "test"),
+      JSON.stringify({
+        type: "custom",
+        id: "cust-refl",
+        timestamp: daysAgo(1),
+        customType: "om.reflections.recorded",
+        data: {
+          reflections: [
+            {
+              id: "refl-1",
+              content: "Unsupported reflection",
+              supportingObservationIds: ["nonexistent-id"],
+              tokenCount: 5,
+            },
+          ],
+          coversUpToId: "mr1",
+        },
+      }),
+    ]);
+
+    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    const { markdown } = buildExportMarkdown(corpus, {
+      now: Date.now(),
+      title: "proj",
+    });
+    expect(markdown).toContain("### Medium reflections");
+    expect(markdown).not.toContain("### Low reflections");
   });
 
   it("relativeTime formats sensibly", () => {

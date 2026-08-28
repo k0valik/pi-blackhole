@@ -140,6 +140,16 @@ function clusterScore<T extends Scoreable>(
   );
 }
 
+function buildObsTierMap(
+  observations: CorpusObservation[],
+): Map<string, Relevance> {
+  const map = new Map<string, Relevance>();
+  for (const o of observations) {
+    if (o.id) map.set(o.id, o.relevance);
+  }
+  return map;
+}
+
 /**
  * Infer a reflection's relevance tier from the highest-tier observation it
  * cites. Falls back to "medium" when the reflection has no supporting
@@ -147,14 +157,10 @@ function clusterScore<T extends Scoreable>(
  */
 function inferReflectionTier(
   cluster: MemoryCluster<CorpusReflection>,
-  observations: CorpusObservation[],
+  obsTier: Map<string, Relevance>,
 ): Relevance {
   if (cluster.rep.supportingObservationIds.length === 0) return "medium";
-  const obsTier = new Map<string, Relevance>();
-  for (const o of observations) {
-    if (o.id) obsTier.set(o.id, o.relevance);
-  }
-  let best: Relevance = "low";
+  let best: Relevance = "medium";
   let bestRank = 0;
   for (const id of cluster.rep.supportingObservationIds) {
     const rel = obsTier.get(id);
@@ -171,17 +177,16 @@ function inferReflectionTier(
 /**
  * Reflections are reflector-curated: a second LLM pass reviewed, dropped, and
  * promoted observations before distilling them, so they carry verified value
- * and rank with a tier-aware weight (inferred from supporting observations,
- * floor at high) plus an evidence-mass multiplier from their supporting
- * observations (§17.3).
+ * and rank with a tier-aware weight (inferred from supporting observations)
+ * plus an evidence-mass multiplier from their supporting observations (§17.3).
  */
 function reflectionScore(
   cluster: MemoryCluster<CorpusReflection>,
   nowMs: number,
-  observations: CorpusObservation[],
+  obsTier: Map<string, Relevance>,
 ): number {
-  const tier = inferReflectionTier(cluster, observations);
-  const weight = Math.max(TIER_WEIGHT[tier], TIER_WEIGHT.high);
+  const tier = inferReflectionTier(cluster, obsTier);
+  const weight = TIER_WEIGHT[tier];
   return (
     weight *
     recencyDecay(cluster.rep.timestamp, nowMs, tier) *
@@ -676,10 +681,7 @@ function buildObservationTopicMap(
     }
   }
 
-  const obsTier = new Map<string, Relevance>();
-  for (const o of observations) {
-    if (o.id) obsTier.set(o.id, o.relevance);
-  }
+  const obsTier = buildObsTierMap(observations);
 
   // Track best topic per observation cluster, keyed by reflection tier rank
   const best = new Map<
@@ -688,7 +690,7 @@ function buildObservationTopicMap(
   >();
 
   for (const [reflCluster, topic] of reflTopicAssignments) {
-    const reflTier = inferReflectionTier(reflCluster, observations);
+    const reflTier = inferReflectionTier(reflCluster, obsTier);
     const tierRank = TIER_RANK[reflTier];
     for (const obsId of reflCluster.rep.supportingObservationIds) {
       const obsCluster = obsIdToCluster.get(obsId);
@@ -870,8 +872,9 @@ export function buildExportMarkdown(
       clusters: Array<MemoryCluster<CorpusReflection>>,
       obsPool: CorpusObservation[],
     ) => {
+      const obsTier = buildObsTierMap(obsPool);
       const tierClusters = clusters.filter(
-        (c) => inferReflectionTier(c, obsPool) === tier,
+        (c) => inferReflectionTier(c, obsTier) === tier,
       );
       if (tierClusters.length === 0) return;
       const label =
@@ -879,7 +882,7 @@ export function buildExportMarkdown(
       const scored = tierClusters
         .map((cluster) => ({
           cluster,
-          score: reflectionScore(cluster, now, obsPool),
+          score: reflectionScore(cluster, now, obsTier),
         }))
         .sort((a, b) => b.score - a.score);
       const lines = scored.map(({ cluster }) => {
@@ -970,7 +973,7 @@ export function buildExportMarkdown(
   const stats: ExportStats = {
     sessionsConsidered: corpus.sessionsConsidered,
     filesWithMarkers: corpus.filesWithMarkers,
-    observationsTotal: corpus.observations.length,
+    observationsTotal: branchAndPendingObs.length + orphanObs.length,
     observationsClustered: obsClusters.length,
     observationsRendered: viable.length,
     observationsFiltered,

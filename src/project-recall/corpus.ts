@@ -490,10 +490,12 @@ export function buildProjectMemoryCorpus(
         }
         for (const f of scopeFiles) {
           if (!f.endsWith(".jsonl")) continue;
-          // session id is suffix after last '_' (timestamp prefix) or full name
-          const sid = f.includes("_")
-            ? f.slice(f.lastIndexOf("_") + 1, -6)
-            : f.slice(0, -6);
+          const header = parseSessionHeader(readFirstLine(join(scopePath, f)));
+          const sid =
+            header?.id ||
+            (f.includes("_")
+              ? f.slice(f.lastIndexOf("_") + 1, -6)
+              : f.slice(0, -6));
           if (sid) globalSessionIds.add(sid);
         }
       }

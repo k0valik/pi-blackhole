@@ -9,8 +9,13 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+interface FindGitRootResult {
+  root: string | null;
+  warning?: string;
+}
+
 /** Absolute path of the enclosing git worktree top-level, or null. */
-export async function findGitRoot(cwd: string): Promise<string | null> {
+export async function findGitRoot(cwd: string): Promise<FindGitRootResult> {
   try {
     const { stdout } = await execFileAsync(
       "git",
@@ -21,8 +26,15 @@ export async function findGitRoot(cwd: string): Promise<string | null> {
       },
     );
     const root = stdout.trim();
-    return root || null;
-  } catch {
-    return null;
+    return { root: root || null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("ENOENT") || message.includes("EAGAIN")) {
+      return {
+        root: null,
+        warning: `[pi-blackhole] git lookup failed for ${cwd}: ${message}; falling back to cwd-only scoping`,
+      };
+    }
+    return { root: null };
   }
 }
