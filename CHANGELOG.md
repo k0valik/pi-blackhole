@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Fixed
+
+- **Capture `AgentSession` from bundled Pi CLI entrypoint.** ([#62](https://github.com/k0valik/pi-blackhole/pull/62), thanks @daoguademeng) `installHostInlineCompactionAdapter` now resolves the host `AgentSession` from the bundled CLI's runtime chunk (when the entrypoint is `dist/bundle/cli.js`) in addition to `dist/index.js`, so inline (mid-run) compaction works when Pi is launched via its bundled CLI instead of silently falling back to settled compaction.
+- **Unified `session_compact_failed` handling (pi >=0.84.3).** Ported from [ceblan/pi-blackhole#ceb-dev](https://github.com/ceblan/pi-blackhole/compare/main...ceblan:pi-blackhole:ceb-dev) (thanks @ceblan / Carlos Estrada): new `src/hooks/compact-failed.ts` closes gaps in failure coverage — structured `compact_failed.received` trace with corrected `attributedFromExtension` (`fromExtension || compactWasPiVcc || lastCompactCancelled`), defensive `compactInFlight` + `autoCompactionController` reset (aborts orphaned idle-wait so it cannot launch a second compaction after a later turn), overflow-retry `willRetry` visibility (`"overflow compaction aborted, retrying turn"`), and `compactionEngine: pi-default` noise filtering. `Runtime.lastCompactCancelled` is set on every `{ cancel: true }` from `before-compact` and consumed attempt-scoped with `compactWasPiVcc` (leak-free lifecycle: set at `session_before_compact` start, consumed on `session_compact` success or `session_compact_failed`). Covers pi #8328 overflow path.
+
+---
+
 ## [0.4.8] - 2026-08-23
 
 ### Added

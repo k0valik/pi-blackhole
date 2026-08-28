@@ -1,73 +1,61 @@
 # pi-blackhole
 
+**Deterministic compaction + session-aware observational memory for [Pi](https://github.com/earendil-works/pi) — in one unified extension.**
 
-
-**Algorithmic compaction + session-aware observational memory for [Pi](https://github.com/badlogic/pi-mono) — in one unified extension.**
-
-Blackhole merges the best ideas from [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memory](https://github.com/elpapi42/pi-observational-memory) into something that's become its own beast entirely. Deterministic compaction that costs nothing. A memory layer that survives compactions. Per-worker model fallback chains with persisted cooldowns. Manual flush mode. All configured from one JSON file.
-
-> **Why this exists:** I liked both extensions but they fought each other — OM hooked into Pi's default compaction and blocked vcc from working. So I merged them, made them share a single hook and output, and added everything both were missing: fallback chains, cooldowns, a memory toggle, and a manual mode for people who want to control when context gets compressed.
->
-> The codebase has since diverged heavily from both upstreams, but tries to keep up-to-date with any fixes from them.
-
-📖 See [`CHANGELOG.md`](CHANGELOG.md) for release history.
-⚙️ See [`CONFIG.md`](CONFIG.md) for the full configuration reference.
-🔄 See [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) if upgrading from an older version.
-📜 See [`OLD_CONFIG.md`](OLD_CONFIG.md) for the legacy config documentation.
+`/blackhole` replaces Pi's LLM-based `/compact` with an algorithmic structural summary — fast, zero-cost. Three background workers (Observer, Reflector, Dropper) capture durable facts and decisions that survive across compactions. Per-worker model fallback chains with persisted cooldowns. Manual flush mode. One JSON file to configure it all.
 
 ---
 
-### ✨ New in 0.4.8
-
-> **Mid-run auto-compaction (`midRunCompaction`)** — opt into transparent compaction during long tool loops without interrupting the agent. Set `midRunCompaction: "resume"` to compact and continue in the same run; `"pause"` to compact and stop; `"off"` (default) only checks when the run ends.
->
-> **Append summary mode (`compactionSummaryMode`)** — keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in via `compactionSummaryMode: "append"`.
-
-### ⚠️ Upcoming config change
-
-> **Default compaction thresholds will become model-context-window-aware in an upcoming release.** Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values (anything you typed into the config) will continue to be respected verbatim. If you're using the defaults, no action is needed — the migration is automatic. If you've set custom thresholds, they'll keep working exactly as before.
-
----
-
-## Quick start
+## Install
 
 ```bash
-# Install from npm (recommended)
+# From npm (recommended)
 pi install npm:pi-blackhole
 
 # Or directly from GitHub
 pi install git:github.com/k0valik/pi-blackhole
 ```
 
-If you have standalone pi-vcc or pi-observational-memory installed, remove them first — they conflict and will prevent blackhole from working. You don't loose any features from either extension:
+If you have standalone `pi-vcc` or `pi-observational-memory` installed, remove them first — they conflict and will prevent blackhole from loading:
 
 ```bash
 pi uninstall npm / git:https://github.com/sting8k/pi-vcc
 pi uninstall npm / git:https://github.com/elpapi42/pi-observational-memory
 ```
 
-Then `/reload` or restart Pi.
+Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json` is created with sensible defaults — no setup required for the default behavior. Config merges global → project → env → session (session is ephemeral). See **[`CONFIG.md`](CONFIG.md)** for tuning or run `/blackhole settings` to open the interactive overlay.
 
-### Automated setup
-
-Pass [`llms.txt`](llms.txt) to your agent and it will walk you through configuration step by step — no need to read all the docs.
-
-### Lockstep with upstreams
-
-pi-blackhole tracks both upstream repositories via a [lockstep audit system](.pi/skills/lockstep/SKILL.md). Every new commit from [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-observational-memory](https://github.com/elpapi42/pi-observational-memory) is classified as safe-to-port, modified (needs review), rewritten (skip), or orphan (needs mapping). Bugfixes and compatible improvements get ported; intentional divergences stay. Nothing is blindly merged — every ported change is reviewed per-commit with human approval. See `.pi/skills/lockstep/` for the full workflow.
+> **Want a guided setup?** Pass [`llms.txt`](llms.txt) to your agent — it will walk you through the interview, including picking cheap fallback models for your providers.
 
 ---
 
-## Demo
+## What it does
 
-`/blackhole` collapses ~143k tokens of conversation into a ~6.3k structured summary (YMMV based on your settings). `/blackhole-memory` shows pipeline status. `/blackhole-recall` searches history the agent can also reach via its `recall` tool and incrementally search previous conversation history.
+Long engineering sessions degrade. Pi's native `/compact` calls an LLM to write a free-form prose summary — then compacts that summary, then compacts the next. After a few cycles, load-bearing details vanish: why a decision was made, which approaches were rejected, what the user clarified early on. The session is still alive; the agent has stopped carrying the real context.
 
+`pi-blackhole` solves this in two complementary ways:
 
+- **Algorithmic compaction** — a deterministic, zero-cost `compile()` pipeline extracts structured sections (goal, files, commits, preferences, brief transcript) and replaces the old conversation with one compact block. No LLM is called for compaction itself.
+- **Observational memory** — three background workers (Observer → Reflector → Dropper) run during the session, capturing timestamped facts and distilling durable reflections in a session ledger that survives every compaction.
 
-https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
+Both halves share a single hook and a single output. Together they keep the agent's context sharp across arbitrarily long sessions — without the cost, drift, or erosion of repeated LLM-based summarization.
 
+---
 
+## ✨ What's new
 
+> **Latest release: [0.4.8](CHANGELOG.md#048---2026-08-23)**
+>
+> - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
+> - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
+> - **Real provider usage for token counting** — `compactAfterTokens` is now evaluated against actual `totalTokens` from the last assistant message instead of a chars/4 estimate.
+> - **Mid-run exponential backoff** — single transient failure no longer wedges auto-compaction for the rest of the pressure episode.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
+
+### ⚠️ Upcoming change
+
+> **Default compaction thresholds will become model-context-window-aware** in an upcoming release. Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values will continue to be respected verbatim. If you're using the defaults, no action is needed; the migration is automatic.
 
 ---
 
@@ -85,36 +73,107 @@ https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
 /blackhole-export [out:<path>]        Export distilled project memory (observations/reflections
                                       across past sessions + pending buffers) to import-ready markdown
 ```
+| Command | What it does |
+|---|---|
+| `/blackhole` | Compact the conversation. Subcommands: `settings` / `configure` (overlay), `om-off` / `om-on` (observational memory toggle), `cleanup` (remove orphaned pending files). |
+| `/blackhole-memory` (or `status`) | Pipeline status: token progress, observation/reflection counts, pending data, last errors. |
+| `/blackhole-memory view` | Show visible observations and reflections (after compaction trimming), copied to clipboard. |
+| `/blackhole-memory full` | Show **all** recorded memory (including dropped observations), copied to clipboard. |
+| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file\|touched`, regex. |
+
+All commands work regardless of `compaction` mode — only *when* auto-compaction fires changes. See [Compaction modes](#compaction-modes) below.
+
+### The `recall` tool (agent-facing)
+
+The agent gets one unified `recall` tool that handles every form of historical lookup. Searches read the raw session file directly, bypassing compaction.
+
+| Input | What it does |
+|---|---|
+| `[12-char hex]` | Recover source evidence for a specific observation or reflection ID from the session ledger. |
+| `#N` | Expand a session entry by index (show full content, not truncated). |
+| `#N:path` | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows the next 30; `#42:auth.ts:full` shows everything). |
+| Free text | BM25-ranked search across transcript and/or file content. Rare terms weighted higher. |
+| `mode:file` | Search only write/edit file content. |
+| `mode:touched` | Aggregate all files written/edited across the session, grouped by path. |
+| Regex | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`). |
+| `scope:all` | Search across all session lineages (default: active lineage only). |
+
+When the agent expands a session entry (`#N`), related observations and reflections from the session ledger are automatically shown alongside the expanded content — so the agent gets the raw transcript *and* the durable fact layer in one call.
+
+The `/blackhole-recall` command exposes the same engine to the user. Results are shown as a collapsible message and auto-fed to the agent as context.
 
 ---
 
-## The problem it solves
+## Compaction modes
 
-Long engineering sessions degrade. Pi's native compaction calls an LLM to write free-form prose summaries — then compacts those summaries, then compacts *those* summaries. After enough cycles, load-bearing details vanish: why a decision was made, what approaches were already rejected, what the user clarified earlier.
+Two modes, one shared goal: keep your agent's context sharp without manual housekeeping. (`compaction: "off"` is a third escape hatch that hands everything back to Pi.)
 
-The session is still alive. The agent is no longer carrying the real context.
+| | Auto (default) | Manual (`compaction: "manual"`) | Off (`compaction: "off"`) |
+|---|---|---|---|
+| Workers run? | Yes | Yes | Yes (unless `memory: false`) |
+| Observations go to | Conversation markers (invisible in TUI) | Per-session disk buffers | Conversation markers |
+| Auto-compact on `agent_end` | Yes — blackhole fires at `compactAfterTokens` | No | No (Pi handles it) |
+| `/compact` (Pi built-in) | Replaced by blackhole | Pi handles | Pi handles |
+| `/blackhole` | Optional | **Required** to flush + compact | Optional, but works |
+| Use case | "Install and forget" | "I want to control when context gets compressed" | "Let Pi handle it, but I want `/blackhole` when I need it" |
 
-The two upstream projects each solve one half:
+Manual mode is the maintainer's daily driver: workers still run, but observations accumulate in `<sessionId>-pending.json` files instead of cluttering the conversation. `/blackhole` flushes the buffer, runs algorithmic compaction, and injects durable reflections in one shot.
 
-- **pi-vcc** replaces Pi's LLM-based compaction with a deterministic, zero-cost algorithmic summary. Fast, reproducible, no hallucination risk. But repeated compactions still erode detail — it's still a summary.
-- **pi-observational-memory** captures timestamped observations and durable reflections in a session ledger that survives across compactions. But its compaction path still calls an LLM — costing money and risking drift on every compact.
+`compaction: "off"` + `memory: false` (or `PI_BLACKHOLE_PASSIVE=true`) completely disables all background workers and blackhole's auto-compaction — useful for debugging or comparing against Pi's native path. Explicit `/blackhole` still works in this mode.
 
-**pi-blackhole** puts vcc in the compaction slot and OM in the memory layer, where each does what it's designed for.
+### How does `/blackhole` compare to `/compact`?
+
+- `/compact` calls an LLM to write a free-form summary — costly, lossy, no memory layer.
+- `/blackhole` uses algorithmic section extraction (goals, files, commits, preferences…) **plus** injects observations and reflections from the session ledger. No LLM is involved in the compaction itself. Fast, deterministic, memory-preserving - the observational memory pipeline's arrived results apply instantly on compaction.
+
+`/blackhole` is essentially a single `/compact` that just works — especially in manual mode.
 
 ---
 
 ## How it works
 
-When you run `/blackhole` (or when auto-compaction fires), two things happen in one shot:
+When `/blackhole` fires (manually or via the auto-trigger), two things happen in one shot:
 
-1. **The vcc pipeline** analyzes the transcript tail and produces a structured summary: session goal, file changes, commits, outstanding blockers, user preferences, and a rolling brief transcript.
+1. **The vcc pipeline** analyzes the transcript tail and produces a structured summary: session goal, file changes, commits, outstanding blockers, user preferences, and a rolling brief transcript. Deterministic — same input always produces the same output.
 2. **Observational memory injection** renders accumulated observations and reflections from the session ledger and appends them below the summary.
 
 The agent receives a deterministic recap of recent work *plus* durable facts from the full session history — in a single replacement block. No LLM was called for the compaction itself.
 
+---
+
+## Quick start config
+
+Defaults target ~128k context models and work out of the box — no tuning required. To keep costs low, set cheap models for the background workers (the only required change for most setups):
+
+```json
+{
+  "observerModel":  { "provider": "openrouter", "id": "qwen/qwen3-next-80b-a3b-instruct:free" },
+  "reflectorModel": { "provider": "cerebras",   "id": "gpt-oss-120b" },
+  "dropperModel":   { "provider": "cerebras",   "id": "gpt-oss-120b" }
+}
+```
+
+Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the workers **do not** fall back to your session model — this avoids surprise cost and cache busting. Enable it with `sessionFallback: true` (default) or set `model` as a shared fallback. See [`CONFIG.md` → Model Configuration](CONFIG.md#model-configuration).
+
+Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
+
+Full reference — every key, default, and env override — lives in:
+
+- 📘 **[`CONFIG.md`](CONFIG.md)** — authoritative config reference. Start here for tuning.
+- 🤖 **[`llms.txt`](llms.txt)** — agent-facing interview. Pass it to your agent for a guided setup.
+- 📦 **[`example-config.json`](example-config.json)** — annotated example with fallback rationale and `thinking` levels.
+
+---
+
+## Demo
+
+`/blackhole` collapses ~143k tokens of conversation into a ~6.3k structured summary (YMMV based on your settings). `/blackhole-memory` shows pipeline status. `/blackhole-recall` searches history — the agent can do the same via its `recall` tool.
+
+https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
+
 ### The three memory workers
 
-Three background workers (separate LLM calls) run automatically during the session (when `memory: true`, which is the default):
+Three background workers (separate LLM calls) run automatically during the session when `memory: true` (the default):
 
 - **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` newest-first to prevent context blowup on long sessions. Runs most frequently.
 - **Reflector** — distills new observations into durable reflections: stable facts, patterns, and constraints that survive future compactions. Runs less often.
@@ -124,25 +183,22 @@ Three background workers (separate LLM calls) run automatically during the sessi
 [Conversation turn] ──> (accumulated tokens >= observeAfterTokens)
                             │
                             v
-                    1. OBSERVER
-                       (extracts timestamped observations via agent loop)
+                    1. OBSERVER   (extracts timestamped observations)
                             │
                             v
-                    2. REFLECTOR
-                       (synthesizes durable reflections via agent loop)
+                    2. REFLECTOR  (synthesizes durable reflections)
                             │
                             v
-                    3. DROPPER
-                       (prunes low-value observations, keeps reflections)
+                    3. DROPPER    (prunes low-value observations)
 ```
 
 Each worker uses an `agentLoop` with tool-calling capabilities — they don't just make a single LLM call. The observer, for example, can call `record_observations` multiple times per run to work through a chunk incrementally.
 
-### Graceful degradation
-
 If any stage fails (model error, rate limit, timeout), remaining stages are skipped and the full pipeline retries on the next `agent_start` or `turn_end`. A 30-second retry gate prevents hammering failing APIs. Within each stage, the runtime tries all configured fallback models before giving up — each failed model is cooled down and skipped in subsequent attempts.
 
-### What the agent sees after compaction
+---
+
+## What the agent sees after compaction
 
 After compaction, the agent sees something like this (sections appear only when relevant — a session with no git commits won't show `[Commits]`):
 
@@ -174,8 +230,6 @@ Root cause is a missing token refresh...
 ...transcript continues...
 
 ---
-
----
 The conversation before this point has been compacted into the summary above.
 Details not captured here — exact code, error messages, file paths — are only recoverable via `recall`.
 Use `recall` to search the session history. Do not redo work already completed.
@@ -188,322 +242,14 @@ Use `recall` to search the session history. Do not redo work already completed.
 [b2c3d4e5f6a1] 2026-05-23 [medium] GraphQL migration completed; user confirmed working.
 
 ----
-Bracketed ids in reflections and observations connect to their source session entries. These are condensed memories from earlier in this session.
+Bracketed ids in reflections and observations connect to their source session entries.
+These are condensed memories from earlier in this session.
 When entries conflict, the most recent observation reflects the latest known state.
-Use `recall` with an id to retrieve original context, or `#N:path` drill-down to explore file content from referenced entries.
-When exact source context is needed for precision or traceability, use the `recall` tool with the relevant observation or reflection id. This is especially useful when a reflection materially affects a decision or is too compressed to continue confidently.
+Use `recall` with an id to retrieve original context.
 ----
 ```
 
-> **Note:** The OM injection format uses `## Reflections` and `## Observations` Markdown headers followed by a brief footer. Each observation and reflection has a 12-char hex identifier you can use with the `recall` tool to recover source evidence, as well as the agent can search based on them and get relevant context back. When no observations or reflections exist, only a short recall-guidance footer is appended.
-
----
-
-## Compaction modes
-
-Two modes, one shared goal: keep your agent's context sharp without manual housekeeping.
-
-- **Auto mode (default):** install and forget. Workers run, observations are appended as invisible conversation markers, compaction fires automatically when tokens exceed threshold.
-- **Manual mode (`compaction: "manual"` — the maintainer's daily driver):** same workers, same pipeline. But observations go to per-session disk buffers and compaction only happens when you run `/blackhole`. Cleaner conversation, manual schedule.
-
-The tradeoff is simplicity vs cleanliness:
-
-| | Auto (default) | Manual (`compaction: "manual"`) |
-|---|---|---|
-| Workers run? | Yes | Yes |
-| Observations go to | Conversation markers (invisible in TUI) | Disk (`<sessionId>-pending.json`) |
-| Observations accumulate across runs | Branch markers (replaced each cycle) | Pending batches accumulated — `/blackhole-memory` shows pending counts |
-| Auto-compact on `agent_end` | Yes | No |
-| `/blackhole` | Optional — use it whenever you want | Required to flush + compact |
-| Conversation history | OM marker entries between turns (they exist but don't clutter the display) | Clean — nothing between turns |
-| Use case | "I don't want to think about it" | "I want to control when context gets compressed" |
-
-**Does `/blackhole` work like a single `/compact` that Just Works?**
-
-Yes, that's exactly the idea, especially in manual mode. When you feel context is getting full or accuracy is slipping, type `/blackhole`. It flushes any accumulated observations from disk, runs algorithmic vcc compaction (zero LLM cost), and injects your durable reflections into the replacement block. One command, everything gets compressed while keeping your session memory alive.
-
-The difference from Pi's built-in `/compact`:
-- `/compact` calls an LLM to write a free-form summary — costly, lossy, no memory layer.
-- `/blackhole` uses algorithmic section extraction (goals, files, commits, preferences...) plus injects observations/reflections from the session ledger. No LLM involved in the compaction itself. Fast, deterministic, memory-preserving.
-
-### Fully disabled
-
-Set `compaction: "off"` and `memory: false` (or the environment variable `PI_BLACKHOLE_PASSIVE=true` which sets both) to completely disable all background workers and blackhole's auto-compaction trigger. Pi handles auto-compaction normally. Explicit `/blackhole` still uses blackhole's pipeline. This is useful for debugging or if you want manual-only blackhole involvement.
-
-### Without observational memory (vcc-only)
-
-Set `memory: false` or run `/blackhole om-off` for pure vcc compaction — no background workers, no memory injection. The compaction still uses the algorithmic vcc pipeline (not Pi's LLM-based compaction). Re-enable with `/blackhole om-on` or setting `memory: true`.
-
-This is a lighter alternative to `compaction: "off"`: workers are off but blackhole's compaction engine still handles compaction.
-
----
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `/blackhole` | Compact the conversation. Subcommands: `configure` (settings overlay), `om-off` / `om-on` toggle observational memory. |
-| `/blackhole-memory` (or `status`) | Pipeline status: token progress, observation/reflection counts, pending data, last errors |
-| `/blackhole-memory view` | Show visible observations and reflections (after compaction trimming), copied to clipboard |
-| `/blackhole-memory full` | Show ALL recorded memory (including dropped observations), copied to clipboard |
-| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file|transcript|touched` |
-
-## Tools
-
-The agent gets a unified `recall` tool that handles three types of input:
-
-| Input | What it does |
-|---|---|
-| `[12-char hex]` | Recover source evidence for a specific observation or reflection ID from the session ledger |
-| `#N` | Expand a session entry by index (show full content) |
-| `#N:path` | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows next 30; `#42:auth.ts:full` shows everything) |
-| Free text | BM25-ranked OR search across transcript and/or file content. Rare terms weighted higher. |
-| `mode:file` | Search only write/edit file content |
-| `mode:touched` | Aggregate all files written/edited, grouped by path with entry indices |
-| Regex | Pattern search (e.g. `fork.*pi-vcc`, `hook|inject`) |
-| `scope:all` | Search across all session lineages, not just the active one |
-
----
-
-## Configuration
-
-All settings in a single JSON file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`** — auto-created with defaults on first startup. See [`CONFIG.md`](CONFIG.md) for the full reference with detailed explanations for every knob. An annotated example config is at [`example-config.json`](example-config.json).
-
-**Invalid JSON protection:** If the config file has a syntax error (trailing comma, partial write, sync conflict), the overlay (`/blackhole configure`) shows a red error banner and blocks save to prevent wiping your model configs. A yellow warning is also shown in the TUI. Fix the JSON directly in the file, then reopen the overlay.
-
-**Overlay reload:** Changes saved via `/blackhole configure` take effect immediately — no session restart needed. The runtime reloads config from disk after every successful overlay save.
-
-Quick start — just set custom models (if you want):
-
-```json
-{
-  "observerModel":  { "provider": "openrouter", "id": "qwen/qwen3-next-80b-a3b-instruct:free" },
-  "reflectorModel": { "provider": "cerebras",   "id": "gpt-oss-120b" },
-  "dropperModel":   { "provider": "cerebras",   "id": "gpt-oss-120b" }
-}
-```
-
-Everything else has sensible defaults.
-
-### Settings at a glance
-
-| Setting | Default | What it controls |
-|---|---|---|
-| `compaction` | `"auto"` | When compaction triggers: `"auto"` (blackhole auto-fires), `"manual"` (only `/blackhole`), `"off"` (Pi handles auto + `/compact`, `/blackhole` still works) |
-| `compactionEngine` | `"blackhole"` | Which engine handles auto-compaction: `"blackhole"` or `"pi-default"`. Only meaningful when `compaction: "auto"` — for `"manual"`/`"off"` the hook lets Pi handle everything except `/blackhole` |
-| `tailBehavior` | `"minimal"` | How much stays visible after compaction: `"minimal"` (last user message only, default) or `"pi-default"` (gentle, ~20k tokens). Both `/blackhole` and auto-triggered default to `"minimal"`; set explicitly to opt into gentler cut |
-| `midRunCompaction` | `"off"` | `"resume"` *(experimental)* opts into transparent compaction during long tool loops without replacing the active run; `"pause"` interrupts, compacts, and stops; `"off"` only checks when the run ends. Transparent mode fails closed on unsupported Pi internals. |
-| `memory` | `true` | `false` = OM workers off + no memory injection (compaction still runs) |
-| `model` | — | Base fallback model for all workers (last resort before session model) |
-| `observerModel` / `observerFallbackModels` | — / `[]` | Primary + fallback models for observer (extracts facts) |
-| `reflectorModel` / `reflectorFallbackModels` | — / `[]` | Primary + fallback models for reflector (synthesizes reflections) |
-| `dropperModel` / `dropperFallbackModels` | — / `[]` | Primary + fallback models for dropper (prunes observations) |
-| `sessionFallback` | `true` | When false, skip session model fallback when all OM model candidates are exhausted. Default true for backward compatibility. |
-| *(per model)* `thinking` | `"low"` | Thinking/reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| *(per model)* `cooldownHours` | `1` | How long to skip this model after a retryable error |
-| *(per model)* `contextWindow` | *(inherited from Pi)* | Override context window for this model. If unset, inherits from Pi's model registry. When set, the OM pipeline checks if the estimated input fits before calling the model — if not, the next fallback is tried. |
-| `observeAfterTokens` | `15000` | Min accumulated tokens before observer runs |
-| `reflectAfterTokens` | `25000` | Min accumulated tokens before reflector + dropper run |
-| `compactAfterTokens` | `81000` | Auto-compaction threshold (when `compaction: "auto"`) |
-| `observerChunkMaxTokens` | `40000` | Max observer input per run (newest-first) |
-| `observerPreambleMaxTokens` | `0` (auto) | Preamble cap for observer in `compaction: "manual"` mode (auto = 30% of chunk) |
-| `observationsPoolMaxTokens` | `20000` | Max active observation pool before dropper prunes |
-| `observationsPoolTargetTokens` | `10000` | Target size dropper aims for after pruning (derived: half of pool max) |
-| `reflectorInputMaxTokens` | `80000` | Max reflector input budget |
-| `dropperInputMaxTokens` | `80000` | Max dropper input budget |
-| `dropperPressureThreshold` | `0.70` | Fraction of `reflectorInputMaxTokens` at which dropper runs even without new data (pressure relief valve) |
-| `agentMaxTurns` | `16` | Max agent-loop turns per worker per run |
-| `providerIdleTimeoutMs` | unset | Body-idle timeout for background provider streams (ms); `0` = disabled, unset = inherit pi's default |
-| `debug` | `false` | Pre-compaction snapshot to `/tmp/pi-blackhole-debug.json` |
-| `debugLog` | `false` | Continuous JSONL debug log to `~/.pi/agent/pi-blackhole/debug.ndjson` |
-
-**Environment override:** `PI_BLACKHOLE_PASSIVE=true` sets `compaction: "off"` + `memory: false` without touching the config file. Also accepts legacy `PI_VCC_OM_PASSIVE` / `PI_OBSERVATIONAL_MEMORY_PASSIVE`.
-
-### Configuration presets
-
-The defaults above target a **medium-context** setup (~128k context window, e.g. GPT-4o, Claude Sonnet).
-Paste the appropriate block into your config to match your main session model's context size.
-
-#### Low context (~32k-64k — older models, fast budget models)
-
-```json
-{
-  "observeAfterTokens": 5000,
-  "reflectAfterTokens": 10000,
-  "compactAfterTokens": 30000,
-  "observerChunkMaxTokens": 15000,
-  "observerPreambleMaxTokens": 0,
-  "observationsPoolMaxTokens": 8000,
-  "reflectorInputMaxTokens": 30000,
-  "dropperInputMaxTokens": 30000,
-  "dropperPressureThreshold": 0.70
-}
-```
-
-#### Medium context (~128k — GPT-4o, Claude Sonnet, Gemini Pro; this is the default)
-
-These are the built-in defaults. If you reset your config, these are what you get:
-
-```json
-{
-  "observeAfterTokens": 15000,
-  "reflectAfterTokens": 25000,
-  "compactAfterTokens": 81000,
-  "observerChunkMaxTokens": 40000,
-  "observerPreambleMaxTokens": 0,
-  "observationsPoolMaxTokens": 20000,
-  "reflectorInputMaxTokens": 80000,
-  "dropperInputMaxTokens": 80000,
-  "dropperPressureThreshold": 0.70
-}
-```
-
-#### High context (~200k+ — Claude Opus, Gemini Ultra, large local models)
-
-```json
-{
-  "observeAfterTokens": 20000,
-  "reflectAfterTokens": 40000,
-  "compactAfterTokens": 180000,
-  "observerChunkMaxTokens": 80000,
-  "observerPreambleMaxTokens": 0,
-  "observationsPoolMaxTokens": 40000,
-  "reflectorInputMaxTokens": 160000,
-  "dropperInputMaxTokens": 160000,
-  "dropperPressureThreshold": 0.70
-}
-```
-
-**What to tune first:** `compactAfterTokens` should be significantly below your model's total context window — aim for ~60-70%. If the agent loses context before compaction fires, lower it. If compaction fires too often and breaks flow, raise it. The other thresholds scale proportionally.
-
-### Tip: comments in config
-
-The config preserves unknown keys when loaded, so you can add `_comment` or `_notes` fields to document your choices inline. They're ignored by the parser.
-
-```json
-{
-  "_comment": "Tuned for my Cerebras + OpenRouter free model setup",
-  "observerModel": { "provider": "openrouter", "id": "qwen/qwen3-next-80b-a3b-instruct:free", "thinking": "low" }
-}
-```
-
-**Note:** The `/blackhole configure` overlay only manages the keys it knows about. All other keys (including `observerModel`, `reflectorModel`, `dropperModel`, and their fallback arrays) are preserved on save when the file has valid JSON. If the file has invalid JSON, save is blocked entirely — the overlay will not overwrite the file.
-
----
-
-## Model fallback chains
-
-Each worker has a primary model and an ordered fallback list. On any error — rate limit, timeout, API failure, 5xx — the failed model is cooled down and the next candidate is tried. If all candidates are exhausted, the pipeline aborts and retries on the next trigger event. The session model is always the last resort and is never cooled down.
-
-```
-[Worker fails: 429 / timeout / 5xx / connection error]
-         │
-         v
-  Add model to cooldown list
-  (persisted to pi-blackhole-cooldown.json)
-         │
-         v
-  Try next fallback candidate
-         │
-         v
-  [All candidates exhausted?]
-         │              │
-        yes             no ──> try next
-         │
-         v
-  Fall back to session model (never cooled down)
-```
-
-Cooldowns survive Pi restarts — they're persisted to `~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json`. Each entry records the model identifier, the triggering error, which stage failed, and the expiry timestamp.
-
-### Resolution order
-
-For each stage, the runtime builds a candidate list from:
-
-1. **Primary stage model** (`observerModel`, `reflectorModel`, `dropperModel`)
-2. **Stage fallback models** (`observerFallbackModels`, etc.) — tried in order
-3. **Base model** (`model` — shared across all workers)
-4. **Session model** (the model used for your main conversation — always the last resort)
-
-Models with active cooldowns are transparently skipped. The runtime tries up to 10 model resolutions per stage before giving up entirely.
-
-### Example: full resolution chain
-
-With a fully configured setup:
-
-```
-Observer:  qwen3-next-80b (openrouter) → gemma4:31b-cloud (ollama) → gemma-4-31b-it:free (openrouter) → base model → session model
-Reflector: gpt-oss-120b (cerebras) → glm-4.7 (z.ai) → gpt-oss-120b:free (openrouter) → base model → session model
-Dropper:   gpt-oss-120b (cerebras) → glm-4.7 (z.ai) → gpt-oss-120b:free (openrouter) → base model → session model
-```
-
-### Per-model thinking levels
-
-Each model config supports a `thinking` field that controls reasoning effort:
-
-```json
-{
-  "observerModel": {
-    "provider": "openrouter",
-    "id": "qwen/qwen3-next-80b-a3b-instruct:free",
-    "thinking": "low",       ← reasoning effort for this specific model
-    "cooldownHours": 12       ← custom cooldown duration
-  }
-}
-```
-
-Valid values: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`. Not all models support every level.
-
-### Retryable error detection
-
-The runtime uses a regex to detect retryable errors — it looks for patterns like `rate limit`, `429`, `5xx`, `timeout`, `service unavailable`, `connection error`, `websocket closed`, etc. Non-retryable errors (auth failures, invalid model IDs) immediately skip that candidate and move to the next.
-
-### 30-second retry gate
-
-After any stage fails completely, the pipeline waits 30 seconds before attempting another consolidation run. This prevents rapid retry loops that would waste API calls on the same failing models.
-
----
-
-## Recall
-
-Pi's default compaction discards old messages permanently — after compaction, the agent only sees the summary. Blackhole preserves searchable history through two surfaces.
-
-### `recall` tool (agent-facing)
-
-The agent gets one unified tool that searches session history, expands entries, drills into file content, and looks up observational memory. Searches read the raw session file directly, bypassing compaction.
-
-| Input | What it does |
-|---|---|
-| `[12-char hex]` | Recover source evidence for an observation or reflection ID from the session ledger |
-| `#N` | Expand a session entry by index (show full content, not truncated) |
-| `#N:path` | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows next 30; `#42:auth.ts:full` shows everything) |
-| Free text | BM25-ranked OR search across transcript + file indicators. Rare terms weighted higher. |
-| `mode:file` | Search only write/edit file content |
-| `mode:touched` | Aggregate all files written/edited across the session, grouped by path with entry indices |
-| Regex | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`) |
-| `scope:all` | Search across all session lineages (default: active lineage only) |
-
-**OM coupling:** When expanding session entries (`#N`), the tool automatically looks up related observations and reflections from the session ledger. If any of your expanded entries are referenced as source evidence by an observation, those observations are shown alongside the expanded content.
-
-### `/blackhole-recall` command (user-facing)
-
-Results are shown as a collapsible message and auto-fed to the agent as context. Same engine as the `recall` tool.
-
-```
-/blackhole-recall auth token                        # active-lineage search, ranked
-/blackhole-recall auth token page:2                 # paginated (5 results/page)
-/blackhole-recall hook|inject                       # regex
-/blackhole-recall fail.*build scope:all             # regex across all lineages
-/blackhole-recall mode:file                         # search only write/edit file content
-/blackhole-recall mode:touched                      # aggregate view of all files touched
-/blackhole-recall                                   # recent 25 entries
-```
-
-### Details
-
-**File drill-down** reads the raw session JSONL to extract file content from tool call operations. Supports offset/limit paging so you can browse long files. Note: edit diffs are not indexed for text search — drill-down reads them from the raw session as original full-file writes.
-
-**Touched mode** (`mode:touched`) aggregates all files written, edited, or read across the session, grouped by path. Each entry shows which tool operation touched the file and the line count. Useful for getting a lay of the land after a long session.
+> **Note:** The OM injection format uses `## Reflections` and `## Observations` Markdown headers followed by a brief footer. Each observation and reflection has a 12-char hex identifier the agent (and you, via `/blackhole-recall`) can use to recover source evidence. When no observations or reflections exist, only the short recall-guidance footer is appended.
 
 ---
 
@@ -536,37 +282,54 @@ rm -rf ~/.pi/agent/pi-blackhole
 
 ---
 
+## Documentation map
+
+| Doc | Audience | What's in it |
+|---|---|---|
+| **[`README.md`](README.md)** | You, now | Install, commands, the pitch, the value, the demo. |
+| **[`CHANGELOG.md`](CHANGELOG.md)** | You | Every release, what changed, who contributed. |
+| **[`CONFIG.md`](CONFIG.md)** | You, when tuning | Every config key with type, default, behavior, and env-var overrides. |
+| **[`llms.txt`](llms.txt)** | Your agent | Step-by-step guided setup interview, anti-patterns, exact file paths, internal constants. |
+| **[`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md)** | You, if upgrading | Old → new config key mapping, semantic changes, automatic migration behavior. |
+| **[`OLD_CONFIG.md`](OLD_CONFIG.md)** | Reference only | The legacy pi-vcc / pi-observational-memory config surface. Kept for historical context. |
+| **[`example-config.json`](example-config.json)** | You | Annotated example config with comments. |
+| **[`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md)** | You, if curious | Rules for `compactionSummaryMode: "append"`. |
+
+> **Note:** Files under `docs/` are working documentation for contributors and are not published to npm. The README, CHANGELOG, CONFIG, llms, and the two migration files are the public surface.
+
+---
+
+## Migration from an older version
+
+If you're upgrading from a pre-0.4.0 config (the old `pi-vcc` / `pi-observational-memory` keys, or an early `pi-blackhole` config with `overrideDefaultCompaction` / `noAutoCompact` / `passive`): see **[`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md)** for the key mapping, semantic changes, and notes on automatic migration.
+
+The short version: old keys are auto-migrated in memory at load time and the on-disk file is never mutated. Set the new keys explicitly via `/blackhole settings` (alias `/blackhole configure`) to silence the migration notification.
+
+The legacy config surface is documented at **[`OLD_CONFIG.md`](OLD_CONFIG.md)** for reference only — no new keys are added there.
+
+---
+
 ## Credits
 
-pi-blackhole started as a merge of two upstream projects, but has since diverged significantly. The codebase still carries DNA from both:
+`pi-blackhole` started as a merge of two upstream projects but has since diverged significantly. The codebase still carries DNA from both:
 
-- **[pi-vcc](https://github.com/sting8k/pi-vcc)** by @sting8k — algorithmic conversation compaction (the `compile()` pipeline, section extraction, recall core)
-- **[pi-observational-memory](https://github.com/elpapi42/pi-observational-memory)** by @elpapi42 — session-ledger-based observation/reflection capture, memory agents, ledger folding
+- **[pi-vcc](https://github.com/sting8k/pi-vcc)** by @sting8k — algorithmic conversation compaction (the `compile()` pipeline, section extraction, recall core).
+- **[pi-observational-memory](https://github.com/elpapi42/pi-observational-memory)** by @elpapi42 — session-ledger-based observation/reflection capture, memory agents, ledger folding.
 
 What blackhole adds and reworks on top:
 
-- **Unified configuration** — one JSON file, not two
-- **Per-worker model fallback chains** with persisted cooldowns that survive Pi restarts
-- **Manual flush mode** — `compaction: "manual"` saves observations to per-session disk buffers
-- **Conflict resolution** — OM hooks into vcc's compaction, not Pi's default
-- **Memory toggle** (`/blackhole om-off` / `/blackhole om-on`) — disable the memory layer without uninstalling
-- **Per-session pending state** — isolated per-session JSON files, no cross-session contamination
-- **Custom provider bridge** — consolidation agents loaded via jiti can still use provider stream functions registered by other extensions
-- **Retryable error detection with per-model cooldowns** — models that fail get cooled down, fallbacks tried automatically, 30-second retry gate prevents spam
-- **Improved observer/reflector/dropper prompts** — each heavily customized with detailed extraction rules, relevance guidance, and error handling
-- **OM-recall coupling** — when expanding session entries via `recall`, related observations and reflections are automatically shown
-- **Thinking level support** — per-model `thinking` field for reasoning effort control
+- **Unified configuration** — one JSON file, not two.
+- **Per-worker model fallback chains** with persisted cooldowns that survive Pi restarts.
+- **Manual flush mode** — `compaction: "manual"` saves observations to per-session disk buffers.
+- **Conflict resolution** — OM hooks into vcc's compaction, not Pi's default.
+- **Memory toggle** (`/blackhole om-off` / `/blackhole om-on`) — disable the memory layer without uninstalling.
+- **Per-session pending state** — isolated per-session JSON files, no cross-session contamination.
+- **Custom provider bridge** — consolidation agents loaded via jiti can still use provider stream functions registered by other extensions.
+- **Retryable error detection with per-model cooldowns** — models that fail get cooled down, fallbacks tried automatically, 30-second retry gate prevents spam.
+- **Improved observer/reflector/dropper prompts** — each heavily customized with detailed extraction rules, relevance guidance, and error handling.
+- **OM-recall coupling** — when expanding session entries via `recall`, related observations and reflections are automatically shown.
+- **Thinking level support** — per-model `thinking` field for reasoning effort control.
 
 ## License
 
 MIT
-
-## Append-only compaction
-
-Set `compactionSummaryMode` to `"append"` to keep automatic Blackhole
-compaction summaries as immutable provider-visible segments. Explicit
-`/blackhole` folds the active chain into one clean segment and starts a new
-chain. The default value is `"default"`.
-
-See [`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md) for
-the fallback, branch, observational-memory, and cache-measurement rules.

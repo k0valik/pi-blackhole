@@ -435,32 +435,76 @@ export function parseHostFramePaths(stack: string): string[] {
   return paths;
 }
 
+function findBundledRuntimeModule(
+  entrypoint: string,
+  packageRoot: string,
+): string | undefined {
+  let resolvedEntrypoint: string;
+  let source: string;
+  try {
+    resolvedEntrypoint = realpathSync(entrypoint);
+    source = readFileSync(resolvedEntrypoint, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  const namedImport = /\bimport\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g;
+  for (const match of source.matchAll(namedImport)) {
+    const names = match[1]
+      .split(",")
+      .map((name) => name.trim().split(/\s+as\s+/)[0]);
+    const specifier = match[2];
+    if (!names.includes("main") || !specifier.startsWith(".")) continue;
+
+    try {
+      const candidate = realpathSync(
+        join(dirname(resolvedEntrypoint), specifier),
+      );
+      if (findPiPackageRoot(candidate) === packageRoot) return candidate;
+    } catch {
+      // Keep searching other named imports before falling back to dist/index.js.
+    }
+  }
+
+  return undefined;
+}
+
 export async function installHostInlineCompactionAdapter(
   options: HostInlineCompactionInstallOptions = {},
 ): Promise<InlineCompactionAdapterStatus> {
   const packageRoots = new Set<string>();
+  const hostPaths = new Set<string>();
   const stack = options.stack ?? new Error().stack ?? "";
-  for (const framePath of parseHostFramePaths(stack)) {
-    const root = findPiPackageRoot(framePath);
+  for (const framePath of parseHostFramePaths(stack)) hostPaths.add(framePath);
+
+  const entrypoint = options.entrypoint ?? process.argv[1];
+  if (entrypoint) hostPaths.add(entrypoint);
+
+  for (const hostPath of hostPaths) {
+    const root = findPiPackageRoot(hostPath);
     if (root) packageRoots.add(root);
   }
 
-  const entrypoint = options.entrypoint ?? process.argv[1];
-  if (entrypoint) {
-    const root = findPiPackageRoot(entrypoint);
-    if (root) packageRoots.add(root);
+  const modulePaths = new Set<string>();
+  for (const packageRoot of packageRoots) {
+    modulePaths.add(join(packageRoot, "dist", "index.js"));
+    for (const hostPath of hostPaths) {
+      if (findPiPackageRoot(hostPath) !== packageRoot) continue;
+      const bundledRuntime = findBundledRuntimeModule(hostPath, packageRoot);
+      if (bundledRuntime) modulePaths.add(bundledRuntime);
+    }
   }
-  getRegistry().hostCandidateCount = packageRoots.size;
+  getRegistry().hostCandidateCount = modulePaths.size;
 
   let supportedStatus: InlineCompactionAdapterStatus | undefined;
   const failureReasons: string[] = [];
-  for (const packageRoot of packageRoots) {
+  for (const modulePath of modulePaths) {
     try {
-      const hostModule = (await import(
-        pathToFileURL(join(packageRoot, "dist", "index.js")).href
-      )) as { AgentSession?: PatchableSessionClass };
+      const hostModule = (await import(pathToFileURL(modulePath).href)) as {
+        AgentSession?: PatchableSessionClass;
+      };
       if (!hostModule.AgentSession) {
-        failureReasons.push(`${packageRoot}: AgentSession export missing`);
+        failureReasons.push(`${modulePath}: AgentSession export missing`);
         continue;
       }
 
@@ -469,12 +513,10 @@ export async function installHostInlineCompactionAdapter(
       });
       if (status.supported) supportedStatus ??= status;
       else
-        failureReasons.push(
-          `${packageRoot}: ${status.reason ?? "unsupported"}`,
-        );
+        failureReasons.push(`${modulePath}: ${status.reason ?? "unsupported"}`);
     } catch (error) {
       failureReasons.push(
-        `${packageRoot}: ${error instanceof Error ? error.message : String(error)}`,
+        `${modulePath}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

@@ -169,8 +169,17 @@ export class Runtime {
   lastConsolidationErrorAt: number | undefined;
   /** Stats from the most recent compaction run (session-scoped via handler closure). */
   compactionStats: CompactionStats | null = null;
-  /** Whether the most recent compaction was triggered by /blackhole (vs auto-compact). */
+  /** Whether the current compaction attempt was triggered by /blackhole.
+   *  Overwritten at every session_before_compact and consumed by either the
+   *  session_compact or session_compact_failed handler, preventing stale
+   *  attribution from leaking into a later pi-default attempt. */
   compactWasPiVcc = false;
+  /** True when the current session_before_compact returned { cancel: true } from
+   *  blackhole's own-cut guards. Set immediately before the cancel return and reset
+   *  at the start of every session_before_compact; consumed by the
+   *  session_compact_failed handler to attribute aborted compactions that pi
+   *  mislabels as fromExtension: false (pi only flags content-bearing compactions). */
+  lastCompactCancelled = false;
   /** Set after the first append-mode fallback warning; one signal per session. */
   appendFallbackNotified = false;
   /** In‑memory pipeline cursors — authoritative copy for gating decisions. */

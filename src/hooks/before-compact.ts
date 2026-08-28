@@ -343,6 +343,12 @@ export const registerBeforeCompactHook = (
 ) => {
   pi.on("session_before_compact", (event, ctx) => {
     const { preparation, branchEntries, customInstructions } = event;
+    const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
+
+    // Establish attribution for this attempt before config/context access can
+    // throw. Every attempt overwrites stale state; success/failure hooks consume it.
+    omRuntime.compactWasPiVcc = isPiVcc;
+    omRuntime.lastCompactCancelled = false;
     omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) =>
       ctx.ui?.notify?.(msg, "warning"),
     );
@@ -364,7 +370,7 @@ export const registerBeforeCompactHook = (
 
     trace("before_compact.enter", {
       customInstructions,
-      isPiVcc: customInstructions === PI_VCC_COMPACT_INSTRUCTION,
+      isPiVcc,
       overrideDefaultCompaction: omRuntime.config.overrideDefaultCompaction,
       manualMode:
         omRuntime.config.compaction === "manual" ||
@@ -375,7 +381,6 @@ export const registerBeforeCompactHook = (
 
     // Always handle explicit /blackhole marker.
     // Otherwise, only handle when user opted in via settings.
-    const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
 
     // NEW: Unified compaction guards
     // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
@@ -418,6 +423,7 @@ export const registerBeforeCompactHook = (
         trace("before_compact.cancel", {
           reason: "manual mode and not /blackhole",
         });
+        omRuntime.lastCompactCancelled = true;
         return { cancel: true };
       }
     }
@@ -523,6 +529,7 @@ export const registerBeforeCompactHook = (
       try {
         ctx?.ui?.notify?.(REASON_MESSAGES[ownCut.reason], "warning");
       } catch {}
+      omRuntime.lastCompactCancelled = true;
       return { cancel: true };
     }
 
@@ -670,8 +677,6 @@ export const registerBeforeCompactHook = (
       previousSummaryUsed: Boolean(preparation.previousSummary),
     };
 
-    omRuntime.compactWasPiVcc = isPiVcc;
-
     // ── Inject observational-memory content ───────────────────────────
     let omContent: string;
     let omDetails: Record<string, unknown> | undefined;
@@ -772,8 +777,10 @@ export const registerBeforeCompactHook = (
   // Fire success toast for /compact path only (delayed to let UI settle).
   // /blackhole path uses its own onComplete callback in the command handler.
   pi.on("session_compact", (event, ctx) => {
+    const compactWasPiVcc = omRuntime.compactWasPiVcc;
+    omRuntime.compactWasPiVcc = false;
     if (!event.fromExtension) return;
-    if (omRuntime.compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
+    if (compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
     const stats = omRuntime.compactionStats;
     if (!stats) return;
     const sessionId = ctx.sessionManager.getSessionId();
