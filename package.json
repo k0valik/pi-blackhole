@@ -59,6 +59,21 @@
       "./index.ts"
     ]
   },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml,mjs}": [
+      "prettier --write"
+    ]
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": false,
+    "trailingComma": "all",
+    "printWidth": 80
+  },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.84.0",
     "@earendil-works/pi-ai": "0.84.0",
