@@ -409,6 +409,19 @@ describe("/blackhole-export", () => {
     }
   });
 
+  it("rejects out:<path> without .md extension", async () => {
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    await env.handlerMap.get("blackhole-export")!("out:export.txt", env.ctx);
+    expect(
+      readdirSync(projectCwd).filter((f) => f.endsWith(".txt")),
+    ).toHaveLength(0);
+    expect(env.ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("must be a markdown file"),
+      "error",
+    );
+  });
+
   it("notifies without writing when the project has no memory", async () => {
     rmSync(agentDir, { recursive: true, force: true });
     mkdirSync(agentDir, { recursive: true });

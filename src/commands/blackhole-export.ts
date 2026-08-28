@@ -20,9 +20,12 @@ function defaultOutPath(cwd: string, now: Date): string {
 export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
   pi.registerCommand("blackhole-export", {
     description:
-      "Export distilled project memory (observations/reflections from past sessions) to markdown. Usage: /blackhole-export [out:<path>]",
+      "Export distilled project memory (observations/reflections from past sessions) to markdown. Usage: /blackhole-export [out:<path>]. If no out: is provided, writes to the project local cwd.",
     handler: async (args: string, ctx) => {
-      ctx.ui.notify("Exporting project memory…", "info");
+      ctx.ui.notify(
+        "Exporting project memory… this may take a few minutes depending on the number of session files for the project.",
+        "info",
+      );
 
       const outMatch = args.match(/\bout:(\S+)/);
       const now = new Date();
@@ -31,6 +34,14 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
           ? outMatch[1]
           : join(ctx.cwd, outMatch[1])
         : defaultOutPath(ctx.cwd, now);
+
+      if (outMatch && !outPath.toLowerCase().endsWith(".md")) {
+        ctx.ui.notify(
+          `Export path must be a markdown file: ${outPath}. Use out:<path-to-file>.md`,
+          "error",
+        );
+        return;
+      }
 
       const resolvedOut = resolve(outPath);
       const userOut = outMatch?.[1];
