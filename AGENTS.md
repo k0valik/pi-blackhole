@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Pi extension package: algorithmic compaction (pi-vcc) + observational memory (pi-observational-memory), merged and heavily diverged. See README.md (features), CONFIG.md (config reference), docs/ (architecture, vcc, om, recall, append-compaction).
+Pi extension package: algorithmic compaction (pi-vcc) + observational memory (pi-observational-memory), merged and heavily diverged. See README.md (features), docs/CONFIG.md (config reference), docs/ (architecture, vcc, om, recall, append-compaction, CHANGELOG).
 
 ## Commands
 
@@ -43,10 +43,10 @@ pnpm check         # typecheck + lint
 
 ## Workflow conventions
 
-- Working branch is `dev`; `main` is the npm-published release branch. Releases: finalize CHANGELOG on `dev`, merge `dev` → `main` with `--no-ff`, bump version + tag `v*` on `main` (tag triggers `publish.yml`), then merge `main` back into `dev` (post-release sync). See `.pi/skills/git-ops/SKILL.md`.
+- Working branch is `dev`; `main` is the npm-published release branch. Releases: finalize docs/CHANGELOG.md on `dev`, merge `dev` → `main` with `--no-ff`, bump version + tag `v*` on `main` (tag triggers `publish.yml`), then merge `main` back into `dev` (post-release sync). See `.pi/skills/git-ops/SKILL.md`.
 - Conventional commits (`feat:`, `fix:`, `chore(release):`, `build(deps-dev):` with scopes like `(pi-base)`, `(recall)`, `(export)`).
-- CHANGELOG.md is hand-maintained (keepachangelog style with a Dependencies section). `## [Unreleased]` on `dev` becomes `## [X.Y.Z] - YYYY-MM-DD` on release.
-- Docs consistency: every number in README.md / CONFIG.md / llms.txt must match `src/core/unified-config.ts` defaults — cross-check when changing defaults. `docs/` mirrors the same source of truth.
+- docs/CHANGELOG.md is hand-maintained (keepachangelog style with a Dependencies section). `## [Unreleased]` on `dev` becomes `## [X.Y.Z] - YYYY-MM-DD` on release.
+- Docs consistency: every number in README.md / docs/CONFIG.md / llms.txt must match `src/core/unified-config.ts` defaults — cross-check when changing defaults. `docs/` mirrors the same source of truth.
 
 ## Debugging / runtime
 

@@ -23,7 +23,7 @@ pi uninstall npm / git:https://github.com/sting8k/pi-vcc
 pi uninstall npm / git:https://github.com/elpapi42/pi-observational-memory
 ```
 
-Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json` is created with sensible defaults — no setup required for the default behavior. Config merges global → project → env → session (session is ephemeral). See **[`CONFIG.md`](CONFIG.md)** for tuning or run `/blackhole settings` to open the interactive overlay.
+Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json` is created with sensible defaults — no setup required for the default behavior. Config merges global → project → env → session (session is ephemeral). See **[`docs/CONFIG.md`](docs/CONFIG.md)** for tuning or run `/blackhole settings` to open the interactive overlay.
 
 > **Want a guided setup?** Pass [`llms.txt`](llms.txt) to your agent — it will walk you through the interview, including picking cheap fallback models for your providers.
 
@@ -44,14 +44,14 @@ Both halves share a single hook and a single output. Together they keep the agen
 
 ## ✨ What's new
 
-> **Latest release: [0.4.8](CHANGELOG.md#048---2026-08-23)**
+> **Latest release: [0.4.8](docs/CHANGELOG.md#048---2026-08-23)**
 >
 > - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
 > - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
 > - **`/blackhole-export` — distilled project-memory export** ([#65](https://github.com/k0valik/pi-blackhole/pull/65)) — scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
 > - **Robust compaction-failure handling** — unified `session_compact_failed` (pi >=0.84.3) with correct attribution, overflow-retry visibility, and noise filtering; plus bundled-CLI `AgentSession` resolution so inline compaction works from `dist/bundle/cli.js` ([#62](https://github.com/k0valik/pi-blackhole/pull/62)).
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
+See [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for the full history.
 
 ### ⚠️ Upcoming change
 
@@ -146,13 +146,13 @@ Defaults target ~128k context models and work out of the box — no tuning requi
 }
 ```
 
-Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the workers **do not** fall back to your session model — this avoids surprise cost and cache busting. Enable it with `sessionFallback: true` (default) or set `model` as a shared fallback. See [`CONFIG.md` → Model Configuration](CONFIG.md#model-configuration).
+Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the workers **do not** fall back to your session model — this avoids surprise cost and cache busting. Enable it with `sessionFallback: true` (default) or set `model` as a shared fallback. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
 
 Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
 
 Full reference — every key, default, and env override — lives in:
 
-- 📘 **[`CONFIG.md`](CONFIG.md)** — authoritative config reference. Start here for tuning.
+- 📘 **[`docs/CONFIG.md`](docs/CONFIG.md)** — authoritative config reference. Start here for tuning.
 - 🤖 **[`llms.txt`](llms.txt)** — agent-facing interview. Pass it to your agent for a guided setup.
 - 📦 **[`example-config.json`](example-config.json)** — annotated example with fallback rationale and `thinking` levels.
 
@@ -280,25 +280,25 @@ rm -rf ~/.pi/agent/pi-blackhole
 | Doc | Audience | What's in it |
 |---|---|---|
 | **[`README.md`](README.md)** | You, now | Install, commands, the pitch, the value, the demo. |
-| **[`CHANGELOG.md`](CHANGELOG.md)** | You | Every release, what changed, who contributed. |
-| **[`CONFIG.md`](CONFIG.md)** | You, when tuning | Every config key with type, default, behavior, and env-var overrides. |
+| **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)** | You | Every release, what changed, who contributed. |
+| **[`docs/CONFIG.md`](docs/CONFIG.md)** | You, when tuning | Every config key with type, default, behavior, and env-var overrides. |
 | **[`llms.txt`](llms.txt)** | Your agent | Step-by-step guided setup interview, anti-patterns, exact file paths, internal constants. |
-| **[`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md)** | You, if upgrading | Old → new config key mapping, semantic changes, automatic migration behavior. |
-| **[`OLD_CONFIG.md`](OLD_CONFIG.md)** | Reference only | The legacy pi-vcc / pi-observational-memory config surface. Kept for historical context. |
+| **[`docs/MIGRATION-GUIDE.md`](docs/MIGRATION-GUIDE.md)** | You, if upgrading | Old → new config key mapping, semantic changes, automatic migration behavior. |
+| **[`docs/OLD_CONFIG.md`](docs/OLD_CONFIG.md)** | Reference only | The legacy pi-vcc / pi-observational-memory config surface. Kept for historical context. |
 | **[`example-config.json`](example-config.json)** | You | Annotated example config with comments. |
 | **[`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md)** | You, if curious | Rules for `compactionSummaryMode: "append"`. |
 
-> **Note:** Files under `docs/` are working documentation for contributors and are not published to npm. The README, CHANGELOG, CONFIG, llms, and the two migration files are the public surface.
+> **Note:** All docs except `README.md` and `llms.txt` live under `docs/` — product docs (`architecture.md`, `CONFIG.md`, `CHANGELOG.md`, etc.) and `archived_docs/` is local-only (gitignored).
 
 ---
 
 ## Migration from an older version
 
-If you're upgrading from a pre-0.4.0 config (the old `pi-vcc` / `pi-observational-memory` keys, or an early `pi-blackhole` config with `overrideDefaultCompaction` / `noAutoCompact` / `passive`): see **[`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md)** for the key mapping, semantic changes, and notes on automatic migration.
+If you're upgrading from a pre-0.4.0 config (the old `pi-vcc` / `pi-observational-memory` keys, or an early `pi-blackhole` config with `overrideDefaultCompaction` / `noAutoCompact` / `passive`): see **[`docs/MIGRATION-GUIDE.md`](docs/MIGRATION-GUIDE.md)** for the key mapping, semantic changes, and notes on automatic migration.
 
 The short version: old keys are auto-migrated in memory at load time and the on-disk file is never mutated. Set the new keys explicitly via `/blackhole settings` (alias `/blackhole configure`) to silence the migration notification.
 
-The legacy config surface is documented at **[`OLD_CONFIG.md`](OLD_CONFIG.md)** for reference only — no new keys are added there.
+The legacy config surface is documented at **[`docs/OLD_CONFIG.md`](docs/OLD_CONFIG.md)** for reference only — no new keys are added there.
 
 ---
 
