@@ -15,6 +15,7 @@ import {
   type SelectItem,
 } from "@earendil-works/pi-tui";
 import { formatHintLine } from "../frame";
+import { deleteWordBackward } from "../inline-edit";
 import type { EnumField, FieldRenderContext, FieldRenderer, SubmenuFactory } from "../types";
 
 const DEFAULT_CYCLE_THRESHOLD = 4;
@@ -24,16 +25,16 @@ function labelFor(field: EnumField, value: string): string {
   return field.optionLabels?.[value] ?? value;
 }
 
-function nextCycleValue(field: EnumField, _current: string): string {
-  if (field.options.length === 0) return _current;
-  const idx = field.options.indexOf(_current as never);
+function nextCycleValue(field: EnumField, current: string): string {
+  if (field.options.length === 0) return current;
+  const idx = field.options.indexOf(current as never);
   const nextIdx = (idx + 1 + field.options.length) % field.options.length;
   return field.options[nextIdx]!;
 }
 
-function prevCycleValue(field: EnumField, _current: string): string {
-  if (field.options.length === 0) return _current;
-  const idx = field.options.indexOf(_current as never);
+function prevCycleValue(field: EnumField, current: string): string {
+  if (field.options.length === 0) return current;
+  const idx = field.options.indexOf(current as never);
   const prevIdx = (idx - 1 + field.options.length) % field.options.length;
   return field.options[prevIdx]!;
 }
@@ -49,10 +50,14 @@ function makeEnumSubmenu(
   }
 
   return (done) => {
-    const items: SelectItem[] = field.options.map((value, idx) => ({
-      value,
-      label: `${idx + 1}. ${labelFor(field, value)}`,
-    }));
+    const items: SelectItem[] = field.options.map((value, idx) => {
+      const isActive = value === current;
+      const activeSuffix = isActive ? `  ${ctx.theme.fg("success", "✔")}` : "";
+      return {
+        value,
+        label: `${idx + 1}. ${labelFor(field, value)}${activeSuffix}`,
+      };
+    });
     const list = new SelectList(
       items,
       Math.min(items.length, MAX_VISIBLE_ROWS),
@@ -71,6 +76,7 @@ function makeEnumSubmenu(
           { key: "↑↓", label: "select" },
           ...(items.length > 1 ? [{ key: `1-${Math.min(9, items.length)}`, label: "choose" }] : []),
           { key: "enter/space", label: "save" },
+          ...(field.default !== undefined ? [{ key: "alt+r", label: "reset" }] : []),
           { key: "esc", label: "cancel" },
         ];
         const hintText = `  ${formatHintLine(hints, ctx.theme)}`;
@@ -81,6 +87,21 @@ function makeEnumSubmenu(
         list.invalidate();
       },
       handleInput(data: string): void {
+        if (matchesKey(data, "alt+r") && field.default !== undefined) {
+          const defaultIdx = field.options.indexOf(field.default);
+          if (defaultIdx >= 0) {
+            list.setSelectedIndex(defaultIdx);
+            ctx.tui.requestRender();
+          }
+          return;
+        }
+        if (data === " ") {
+          const item = list.getSelectedItem();
+          if (item) {
+            done(item.value);
+            return;
+          }
+        }
         const num = parseInt(data, 10);
         if (data.length === 1 && !isNaN(num) && num >= 1 && num <= Math.min(9, items.length)) {
           const item = items[num - 1];
@@ -103,7 +124,7 @@ function makeEnumSubmenu(
  */
 function makeSearchableEnumSubmenu(
   field: EnumField,
-  _current: string,
+  current: string,
   ctx: FieldRenderContext,
 ): SubmenuFactory<string> {
   return (done) => {
@@ -116,23 +137,50 @@ function makeSearchableEnumSubmenu(
     let selected = 0;
 
     function filteredItems(): SelectItem[] {
-      if (!search.trim()) return allItems;
+      if (!search.trim()) {
+        return allItems.map((item, idx) => ({
+          ...item,
+          label: `${idx + 1}. ${item.label}`,
+        }));
+      }
       const q = search.toLowerCase();
       return allItems.filter(
         (item) => item.label.toLowerCase().includes(q) || item.value.toLowerCase().includes(q),
       );
     }
 
+    function clampSelected(): void {
+      const items = filteredItems();
+      if (selected >= items.length) selected = Math.max(0, items.length - 1);
+    }
+
     const component: Component = {
       render(width: number): string[] {
         const lines: string[] = [];
         const items = filteredItems();
-        const searchPrompt = `Search: ${search}${ctx.theme.inverse(" ")}`;
+        const cursor = ctx.theme.inverse(" ");
+        const hasMatches = items.length > 0;
+
+        let searchPrompt: string;
+        if (!search) {
+          searchPrompt = `Search: ${cursor}${ctx.theme.fg("muted", "type to filter…")}`;
+        } else {
+          const queryColor = hasMatches ? "accent" : "warning";
+          searchPrompt = `Search: ${ctx.theme.fg(queryColor, search)}${cursor}`;
+        }
+
         lines.push(ctx.theme.bg("toolPendingBg", truncateToWidth(searchPrompt, width, "…", true)));
         lines.push("");
 
         if (items.length === 0) {
-          lines.push(ctx.theme.fg("muted", "  No matching options."));
+          if (search) {
+            const prefix = ctx.theme.fg("muted", "  No matching options for '");
+            const q = ctx.theme.fg("warning", search);
+            const suffix = ctx.theme.fg("muted", "'. (press esc or ctrl+u to clear)");
+            lines.push(`${prefix}${q}${suffix}`);
+          } else {
+            lines.push(ctx.theme.fg("muted", "  No options available. (press esc to cancel)"));
+          }
         } else {
           const maxVisible = MAX_VISIBLE_ROWS;
           const scroll = Math.max(
@@ -143,10 +191,13 @@ function makeSearchableEnumSubmenu(
           for (let i = 0; i < slice.length; i++) {
             const isSelected = scroll + i === selected;
             const prefix = isSelected ? ctx.theme.fg("accent", "▌ ") : "  ";
+            const item = slice[i]!;
+            const isActive = item.value === current;
+            const activeSuffix = isActive ? `  ${ctx.theme.fg("success", "✔")}` : "";
             const display = isSelected
-              ? ctx.theme.fg("accent", slice[i]!.label)
-              : ctx.theme.fg("muted", slice[i]!.label);
-            const line = `${prefix}${display}`;
+              ? ctx.theme.fg("accent", item.label)
+              : ctx.theme.fg("muted", item.label);
+            const line = `${prefix}${display}${activeSuffix}`;
             lines.push(
               isSelected
                 ? ctx.theme.bg("selectedBg", truncateToWidth(line, width, "…", true))
@@ -156,39 +207,119 @@ function makeSearchableEnumSubmenu(
         }
 
         lines.push("");
-        const hints = [
-          { key: "↑↓", label: "select" },
-          { key: "enter", label: "save" },
-          { key: "esc", label: "cancel" },
-        ];
-        if (search) hints.unshift({ key: "type", label: "to filter" });
-        lines.push(`  ${formatHintLine(hints, ctx.theme)}`);
+        const hints = [{ key: "↑↓", label: "select" }];
+
+        if (!search && items.length > 1) {
+          hints.push({ key: `1-${Math.min(9, items.length)}`, label: "choose" });
+        }
+
+        hints.push({ key: "enter", label: "save" });
+
+        if (field.default !== undefined) {
+          hints.push({ key: "alt+r", label: "reset" });
+        }
+
+        if (search) {
+          hints.push({ key: "ctrl+w", label: "delete word" });
+          hints.push({ key: "ctrl+u", label: "clear" });
+          hints.push({ key: "esc", label: "clear filter" });
+        } else {
+          hints.push({ key: "esc", label: "cancel" });
+        }
+
+        const hintText = formatHintLine(hints, ctx.theme);
+        lines.push(`  ${truncateToWidth(hintText, width, "…", true)}`);
         return lines;
       },
       invalidate(): void {
         // no external state to invalidate
       },
       handleInput(data: string): void {
+        const items = filteredItems();
+
+        if (matchesKey(data, "alt+r") && field.default !== undefined) {
+          search = "";
+          const newItems = filteredItems();
+          const defaultIdx = newItems.findIndex((item) => item.value === field.default);
+          if (defaultIdx >= 0) {
+            selected = defaultIdx;
+          }
+          ctx.tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, "home")) {
+          selected = 0;
+          ctx.tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, "end")) {
+          selected = Math.max(0, items.length - 1);
+          ctx.tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, "pageUp")) {
+          selected = Math.max(0, selected - MAX_VISIBLE_ROWS);
+          ctx.tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, "pageDown")) {
+          selected = Math.min(Math.max(0, items.length - 1), selected + MAX_VISIBLE_ROWS);
+          ctx.tui.requestRender();
+          return;
+        }
+
+        if (!search.trim()) {
+          const num = parseInt(data, 10);
+          if (data.length === 1 && !isNaN(num) && num >= 1 && num <= Math.min(9, items.length)) {
+            const item = items[num - 1];
+            if (item) {
+              done(item.value);
+              return;
+            }
+          }
+        }
+
         if (matchesKey(data, "up")) {
           selected = Math.max(0, selected - 1);
           ctx.tui.requestRender();
           return;
         }
         if (matchesKey(data, "down")) {
-          const items = filteredItems();
           selected = Math.min(selected + 1, Math.max(0, items.length - 1));
           ctx.tui.requestRender();
           return;
         }
         if (matchesKey(data, "enter") || matchesKey(data, "return")) {
-          const items = filteredItems();
           if (items.length > 0) {
             done(items[Math.min(selected, items.length - 1)]!.value);
           }
           return;
         }
         if (matchesKey(data, "escape")) {
-          done();
+          if (search !== "") {
+            const selectedValue = items[selected]?.value;
+            search = "";
+            const newItems = filteredItems();
+            const newIndex = selectedValue
+              ? newItems.findIndex((item) => item.value === selectedValue)
+              : -1;
+            selected = newIndex >= 0 ? newIndex : 0;
+            ctx.tui.requestRender();
+          } else {
+            done();
+          }
+          return;
+        }
+        if (matchesKey(data, "ctrl+u")) {
+          search = "";
+          selected = 0;
+          ctx.tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, "ctrl+w")) {
+          search = deleteWordBackward(search);
+          selected = 0;
+          ctx.tui.requestRender();
           return;
         }
         if (matchesKey(data, "backspace") || matchesKey(data, "ctrl+h")) {
@@ -213,9 +344,13 @@ export const enumRenderer: FieldRenderer<EnumField, string> = {
   renderValue(row, { selected, ctx }) {
     const text = labelFor(row.field, row.value);
     if (row.field.disabled) {
-      return ctx.theme.fg("muted", text);
+      const desc = row.field.valueDescriptions?.[row.value];
+      const suffix = desc ? ` (${desc})` : "";
+      return ctx.theme.fg("muted", text + suffix);
     }
-    return ctx.theme.fg(selected ? "accent" : "muted", text);
+    const desc = row.field.valueDescriptions?.[row.value];
+    const suffix = desc ? ` ${ctx.theme.fg("dim", `(${desc})`)}` : "";
+    return ctx.theme.fg(selected ? "accent" : "muted", text) + suffix;
   },
   hints(row) {
     if (row.field.disabled) return [];

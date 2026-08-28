@@ -252,7 +252,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     expect(body.render(80).join("\n")).toContain("@k0valik/pi-cache ●");
   });
 
-  // Bug fix: reverting a value to its initial state clears dirty
+  // Reverting a value to its initial state clears dirty
   it("buffered mode: reverting a value to its initial state clears dirty", () => {
     const onSave = vi.fn();
     const close = vi.fn();
@@ -274,7 +274,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  // Bug fix: onChange throw should not mark field dirty
+  // OnChange throw should not mark field dirty
   it("buffered mode: onChange throw does not mark field dirty", () => {
     const onChange = vi.fn().mockImplementation(() => {
       throw new Error("onChange rejected");
@@ -298,7 +298,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("onChange rejected", "error");
   });
 
-  // ── Ctrl+C mid-edit (ported from blackhole) ──
+  // ── Ctrl+C mid-edit ──
   it("buffered mode: ctrl+c mid-string-edit opens confirm submenu when dirty", () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();

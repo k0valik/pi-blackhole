@@ -18,12 +18,18 @@ export const readonlyRenderer: FieldRenderer<ReadonlyField, string> = {
   type: "readonly",
   renderValue(row, args) {
     const value = row.value;
+    if (row.field.disabled) {
+      return args.ctx.theme.fg("muted", value);
+    }
     if (row.field.emphasis) {
       return args.ctx.theme.fg("accent", value);
     }
     return args.selected ? args.ctx.theme.fg("text", value) : args.ctx.theme.fg("muted", value);
   },
   hints(row) {
+    if (row.field.disabled) {
+      return [];
+    }
     if (row.field.hint) {
       return [{ key: "info", label: row.field.hint }];
     }

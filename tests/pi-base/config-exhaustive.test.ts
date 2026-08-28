@@ -6,7 +6,8 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   deepMerge,
@@ -35,9 +36,15 @@ function setupDirs(label: string) {
 // ── getExtensionsDir ─────────────────────────────────────────────────
 
 describe("getExtensionsDir", () => {
-  it("returns a path ending in extensions", () => {
+  it("returns a path ending in extensions (or the per-process vitest temp dir)", () => {
     const dir = getExtensionsDir();
-    expect(dir).toMatch(/extensions\/?$/);
+    const redirected = process.env.VITEST === "true" && !process.env.PI_CODING_AGENT_DIR;
+    if (redirected) {
+      expect(dir.startsWith(tmpdir())).toBe(true);
+      expect(basename(dir)).toMatch(/^pi-agent-extensions-/);
+    } else {
+      expect(dir).toMatch(/extensions\/?$/);
+    }
   });
 });
 

@@ -29,6 +29,7 @@ export {
 };
 
 /** Map of field discriminator → renderer. */
+
 type RenderableField = Exclude<Field, { type: "section" }>;
 export const RENDERERS: Record<RenderableField["type"], FieldRenderer<any, any>> = {
   boolean: booleanRenderer,

@@ -48,18 +48,13 @@ describe("createScopeSelector", () => {
     { id: "session", label: "Session", available: true as const },
   ];
 
-  it("renders entries and their notes", () => {
+  it("renders entries and their notes with numeric prefixes and footer hint", () => {
     const done = vi.fn();
     const comp = createScopeSelector({
       title: "Test",
       entries: [
         ...baseEntries,
-        {
-          id: "env",
-          label: "Env",
-          available: true,
-          note: "(disabled by extension)",
-        },
+        { id: "env", label: "Env", available: true, note: "(disabled by extension)" },
       ],
       tui: fakeTui(),
       theme: fakeTheme(),
@@ -67,11 +62,27 @@ describe("createScopeSelector", () => {
     });
 
     const output = comp.render(width).join("\n");
-    expect(output).toContain("Global");
-    expect(output).toContain("Project");
-    expect(output).toContain("Session");
-    expect(output).toContain("Env");
+    expect(output).toContain("1. Global");
+    expect(output).toContain("2. Project");
+    expect(output).toContain("3. Session");
+    expect(output).toContain("4. Env");
     expect(output).toContain("(disabled by extension)");
+    expect(output).toContain("1-4 choose");
+  });
+
+  it("supports single-keypress numeric shortcuts", () => {
+    const done = vi.fn();
+    const comp = createScopeSelector({
+      title: "Test",
+      entries: baseEntries,
+      tui: fakeTui(),
+      theme: fakeTheme(),
+      done,
+    });
+
+    comp.render(width);
+    comp.handleInput?.("2");
+    expect(done).toHaveBeenCalledWith({ kind: "select", id: "project" });
   });
 
   it("renders unavailable entries dimmed", () => {
@@ -89,12 +100,7 @@ describe("createScopeSelector", () => {
       title: "Test",
       entries: [
         ...baseEntries,
-        {
-          id: "session",
-          label: "Session",
-          available: false,
-          note: "not initialized",
-        },
+        { id: "session", label: "Session", available: false, note: "not initialized" },
       ],
       tui: fakeTui(),
       theme: captureTheme,
@@ -127,6 +133,38 @@ describe("createScopeSelector", () => {
 
     comp.handleInput?.("\x1b[B"); // down from C -> wraps to A
     expect(tui.requestRender).toHaveBeenCalledTimes(2);
+  });
+
+  it("supports home and end key navigation", () => {
+    const done = vi.fn();
+    const tui = fakeTui();
+    const comp = createScopeSelector({
+      title: "Test",
+      entries: baseEntries,
+      tui,
+      theme: fakeTheme(),
+      done,
+    });
+
+    comp.render(width);
+    comp.handleInput?.("\x1b[F"); // end key sequence -> jumps to Session (last available)
+    comp.handleInput?.("\r"); // enter
+    expect(done).toHaveBeenCalledWith({ kind: "select", id: "session" });
+
+    const doneHome = vi.fn();
+    const compHome = createScopeSelector({
+      title: "Test",
+      entries: baseEntries,
+      tui: fakeTui(),
+      theme: fakeTheme(),
+      done: doneHome,
+    });
+
+    compHome.render(width);
+    compHome.handleInput?.("\x1b[B"); // down to Project
+    compHome.handleInput?.("\x1b[H"); // home key sequence -> jumps back to Global
+    compHome.handleInput?.("\r"); // enter
+    expect(doneHome).toHaveBeenCalledWith({ kind: "select", id: "global" });
   });
 
   it("Enter returns the selected id", () => {

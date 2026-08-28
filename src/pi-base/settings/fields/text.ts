@@ -8,7 +8,7 @@
  *   the Editor directly.
  */
 
-import { Editor, type Component } from "@earendil-works/pi-tui";
+import { Editor, type Component, matchesKey } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
@@ -72,38 +72,53 @@ function makeTextSubmenu(current: string, ctx: FieldRenderContext): SubmenuFacto
     editor.onChange = () => ctx.tui.requestRender();
 
     const component: Component = {
-      render(_width: number): string[] {
-        const lines = editor.render(80);
+      render(width: number): string[] {
+        const lines = editor.render(width);
         lines.push("");
-        lines.push(
-          ctx.theme.fg(
-            "dim",
-            formatHintLine(
-              [
-                { key: "ctrl+s", label: "save" },
-                { key: "esc", label: "cancel" },
-              ],
-              ctx.theme,
-            ),
-          ),
-        );
+        const hints = [
+          { key: "ctrl+s", label: "save" },
+          { key: "esc", label: "cancel" },
+          { key: "ctrl+w", label: "delete word" },
+          { key: "ctrl+u", label: "clear" },
+          { key: "alt+r", label: "reset" },
+        ];
+        const hintLine = ctx.theme.fg("dim", formatHintLine(hints, ctx.theme));
+        lines.push(truncateToWidth(hintLine, width, "…", true));
         return lines;
       },
       invalidate(): void {
         editor.invalidate();
       },
       handleInput(data: string): void {
-        if (data === "\x13") {
-          // Ctrl+S
+        if (matchesKey(data, "ctrl+s")) {
           done(editor.getExpandedText());
           return;
         }
-        if (data === "\x1b") {
-          // Escape
+        if (matchesKey(data, "escape")) {
           done();
           return;
         }
-        editor.handleInput(data);
+        if (matchesKey(data, "ctrl+u")) {
+          editor.setText("");
+          ctx.tui.requestRender();
+          return;
+        }
+        if (matchesKey(data, "alt+r")) {
+          editor.setText(current);
+          ctx.tui.requestRender();
+          return;
+        }
+
+        let inputData = data;
+        if (
+          matchesKey(data, "backspace") ||
+          matchesKey(data, "ctrl+h") ||
+          data === "\x7f" ||
+          data === "\x08"
+        ) {
+          inputData = "\x7f";
+        }
+        editor.handleInput(inputData);
         ctx.tui.requestRender();
       },
     };

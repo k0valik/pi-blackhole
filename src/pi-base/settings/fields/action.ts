@@ -11,7 +11,7 @@ export const actionRenderer: FieldRenderer<ActionField, void> = {
   renderValue(row, { selected, ctx }) {
     const text = row.field.display ?? "(run)";
     if (row.field.disabled) {
-      return ctx.theme.fg("muted", text);
+      return ctx.theme.fg("muted", `${text} (unavailable)`);
     }
     return ctx.theme.fg(selected ? "accent" : "muted", text);
   },

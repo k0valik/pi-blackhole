@@ -36,6 +36,7 @@ export function buildParentIdMap(entries: FileEntry[]): Map<string, string | nul
   const map = new Map<string, string | null>();
   for (const entry of entries) {
     if (entry.type === "session") continue;
+
     const base = entry as SessionEntryBase;
     map.set(base.id, base.parentId ?? null);
   }

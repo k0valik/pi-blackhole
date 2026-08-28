@@ -78,6 +78,12 @@ export interface ConfigManagerOptions<T extends object = object> {
     project?: boolean; // default true
     session?: boolean; // default true
   };
+  /**
+   * Default global config directory. When set, all methods resolve the global
+   * scope against it instead of `getExtensionsDir()`, unless an explicit
+   * per-call `configDir` argument is passed (which takes precedence).
+   */
+  configDir?: string;
 }
 
 export interface ConfigLoadWarning {
@@ -132,9 +138,11 @@ export class ConfigManager<T extends object> {
   private _sessionPersist: "persisted" | "pending" | "unavailable" = "unavailable";
   private _sessionManager: SessionManagerFacade | undefined;
   private _pendingCwd: string | undefined;
+  private _defaultConfigDir: string | undefined;
 
   constructor(opts: ConfigManagerOptions<T>) {
     this.opts = opts;
+    this._defaultConfigDir = opts.configDir;
     if (!opts.filename && !opts.id) {
       throw new Error(
         "ConfigManager requires either `id` or `filename` in options. " +
@@ -146,11 +154,7 @@ export class ConfigManager<T extends object> {
 
   /** Resolved scope availability (opts.scopes with defaults applied). */
   getScopes(): { global: boolean; project: boolean; session: boolean } {
-    const s = this.opts.scopes ?? {
-      global: true,
-      project: true,
-      session: true,
-    };
+    const s = this.opts.scopes ?? { global: true, project: true, session: true };
     return {
       global: s.global !== false,
       project: s.project !== false,
@@ -436,7 +440,7 @@ export class ConfigManager<T extends object> {
 
     const loaded = loadConfig(this._filename, this.opts.defaults, {
       cwd,
-      configDir,
+      configDir: configDir ?? this._defaultConfigDir,
       merge: "deep",
     });
 
@@ -468,11 +472,7 @@ export class ConfigManager<T extends object> {
     const withEnv = this.applyEnvOverrides(config);
 
     // Layer 5: session overrides (highest priority)
-    const scopes = this.opts.scopes ?? {
-      global: true,
-      project: true,
-      session: true,
-    };
+    const scopes = this.opts.scopes ?? { global: true, project: true, session: true };
     const sessionEnabled = this.opts.sessionConfig !== false && scopes.session !== false;
     const namespace = this._getEntryType();
     const final = sessionEnabled ? this.applySessionOverrides(withEnv, cwd, namespace) : withEnv;
@@ -539,7 +539,7 @@ export class ConfigManager<T extends object> {
     cwd?: string,
     configDir?: string,
   ): T {
-    const dir = configDir ?? getExtensionsDir();
+    const dir = configDir ?? this._defaultConfigDir ?? getExtensionsDir();
     const defaults = this.opts.defaults as Record<string, unknown>;
 
     // Base: defaults ← global
@@ -581,11 +581,7 @@ export class ConfigManager<T extends object> {
     }
 
     // Layer 4: session (highest priority)
-    const scopes = this.opts.scopes ?? {
-      global: true,
-      project: true,
-      session: true,
-    };
+    const scopes = this.opts.scopes ?? { global: true, project: true, session: true };
     const sessionEnabled = this.opts.sessionConfig !== false && scopes.session !== false;
     const namespace = this._getEntryType();
     if (sessionEnabled) {
@@ -603,7 +599,7 @@ export class ConfigManager<T extends object> {
    * Inspect per-layer contributions and per-key winners.
    */
   inspect(cwd?: string, configDir?: string): ConfigInspection<T> {
-    const dir = configDir ?? getExtensionsDir();
+    const dir = configDir ?? this._defaultConfigDir ?? getExtensionsDir();
 
     const defaultsLayer = { ...this.opts.defaults } as Partial<T>;
     const globalLayer = (readConfig<Record<string, unknown>>(this._filename, dir) ??
@@ -633,11 +629,7 @@ export class ConfigManager<T extends object> {
 
     // Session layer: current leaf's session config, or {} when opted out / uninitialized.
     const sessionLayer: Partial<T> = {} as Partial<T>;
-    const scopes = this.opts.scopes ?? {
-      global: true,
-      project: true,
-      session: true,
-    };
+    const scopes = this.opts.scopes ?? { global: true, project: true, session: true };
     const sessionEnabled = this.opts.sessionConfig !== false && scopes.session !== false;
     const namespace = this._getEntryType();
     if (sessionEnabled && this._sessionId && this._leafId) {
@@ -692,14 +684,10 @@ export class ConfigManager<T extends object> {
    */
   scopeSources(cwd?: string, configDir?: string): ScopeSource[] {
     const sources: ScopeSource[] = [];
-    const scopes = this.opts.scopes ?? {
-      global: true,
-      project: true,
-      session: true,
-    };
+    const scopes = this.opts.scopes ?? { global: true, project: true, session: true };
 
     if (scopes.global !== false) {
-      const globalDir = configDir ?? getExtensionsDir();
+      const globalDir = configDir ?? this._defaultConfigDir ?? getExtensionsDir();
       const globalPath = join(globalDir, this._filename);
       const globalExists = existsSync(globalPath);
       sources.push({
@@ -843,7 +831,10 @@ export class ConfigManager<T extends object> {
       throw new Error("cwd is required for project-scoped config save");
     }
 
-    const dir = scope === "project" && cwd ? join(cwd, ".pi") : (configDir ?? getExtensionsDir());
+    const dir =
+      scope === "project" && cwd
+        ? join(cwd, ".pi")
+        : (configDir ?? this._defaultConfigDir ?? getExtensionsDir());
     const targetPath = join(dir, this._filename);
     const created = !existsSync(targetPath);
 
@@ -955,6 +946,7 @@ export class ConfigManager<T extends object> {
     extraEntries?: ExtraSelectorEntry[],
     onExtraSelect?: (id: string) => Promise<void> | void,
   ): Promise<void> {
+    configDir = configDir ?? this._defaultConfigDir;
     this.warnOnMalformedConfig(ctx, cwd, configDir);
     const scopes = this.getScopes();
     const sessionInitialized = this._ensureSession(ctx, cwd);
@@ -1030,7 +1022,10 @@ export class ConfigManager<T extends object> {
     if (scope === "project" && !cwd) {
       throw new Error("cwd is required for project-scoped config reset");
     }
-    const dir = scope === "project" && cwd ? join(cwd, ".pi") : (configDir ?? getExtensionsDir());
+    const dir =
+      scope === "project" && cwd
+        ? join(cwd, ".pi")
+        : (configDir ?? this._defaultConfigDir ?? getExtensionsDir());
     const knownKeys = new Set(Object.keys(this.opts.defaults));
     const existing = readConfig<Record<string, unknown>>(this._filename, dir);
     const unknownKeys: Record<string, unknown> = {};
@@ -1067,7 +1062,10 @@ export class ConfigManager<T extends object> {
     if (scope === "project" && !cwd) {
       throw new Error("cwd is required for project-scoped config delete");
     }
-    const dir = scope === "project" && cwd ? join(cwd, ".pi") : (configDir ?? getExtensionsDir());
+    const dir =
+      scope === "project" && cwd
+        ? join(cwd, ".pi")
+        : (configDir ?? this._defaultConfigDir ?? getExtensionsDir());
     deleteConfig(this._filename, dir);
   }
 

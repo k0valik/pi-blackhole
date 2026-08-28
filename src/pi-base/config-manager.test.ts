@@ -6,7 +6,8 @@
 
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { ConfigManager, type ConfigManagerOptions } from "./config-manager.ts";
 import {
   deepEqual,
@@ -14,7 +15,16 @@ import {
   getExtensionsDir,
   setSessionConfig,
   clearAllSessionConfigs,
+  clearConfigFileCache,
+  writeConfig,
 } from "./config.ts";
+import { resetPiAgentDirCache } from "./paths.ts";
+import {
+  createTestConfigDir,
+  createTestConfigManager,
+  resetConfigTestState,
+  createTestAgentDir,
+} from "./config-test-helpers.ts";
 import { parseSessionEntries } from "@earendil-works/pi-coding-agent";
 import { createSettingsModal } from "./settings/modal.ts";
 
@@ -47,14 +57,7 @@ const DEFAULTS: TestConfig = { enabled: true, threshold: 5 };
 
 const FIELDS = (cfg: TestConfig): Field[] => [
   { key: "enabled", type: "boolean", label: "Enabled", value: cfg.enabled },
-  {
-    key: "threshold",
-    type: "number",
-    label: "Threshold",
-    value: cfg.threshold,
-    min: 1,
-    max: 10,
-  },
+  { key: "threshold", type: "number", label: "Threshold", value: cfg.threshold, min: 1, max: 10 },
 ];
 
 function createManager(opts?: Partial<ConfigManagerOptions<TestConfig>>) {
@@ -86,9 +89,7 @@ function initSession(
 ) {
   const fileEntries = entriesFor(leafId);
   (
-    mgr as unknown as {
-      initSession: (sid: string, lid: string, entries: FileEntry[]) => void;
-    }
+    mgr as unknown as { initSession: (sid: string, lid: string, entries: FileEntry[]) => void }
   ).initSession(sessionId, leafId, fileEntries);
 }
 
@@ -392,9 +393,7 @@ describe("ConfigManager.load()", () => {
   });
 
   it("env override does not apply when env var is unset", () => {
-    const mgr = createManager({
-      env: { threshold: "PI_TEST_THRESHOLD_UNSET" },
-    });
+    const mgr = createManager({ env: { threshold: "PI_TEST_THRESHOLD_UNSET" } });
     const result = mgr.load(undefined, tempDir);
     expect(result.threshold).toBe(DEFAULTS.threshold);
   });
@@ -517,12 +516,7 @@ describe("ConfigManager.save()", () => {
     // Unknown keys differ from the (empty) defaults, so they get written.
     mgr.save(DEFAULTS, "global", undefined, tempDir);
     const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
-    expect(saved).toEqual({
-      enabled: true,
-      threshold: 5,
-      customFormat: true,
-      extraList: [1, 2],
-    });
+    expect(saved).toEqual({ enabled: true, threshold: 5, customFormat: true, extraList: [1, 2] });
   });
 
   it("does not add phantom unknown keys when no file existed before save", () => {
@@ -537,11 +531,7 @@ describe("ConfigManager.save()", () => {
     const mgr = createManager();
     mgr.save({ enabled: false, threshold: 3 }, "project", tempDir);
     const saved = JSON.parse(readFileSync(join(tempDir, ".pi", "test-config.json"), "utf-8"));
-    expect(saved).toEqual({
-      enabled: false,
-      threshold: 3,
-      customLabel: "test",
-    });
+    expect(saved).toEqual({ enabled: false, threshold: 3, customLabel: "test" });
   });
 
   it("does not overwrite unchanged known keys when only one field changed", () => {
@@ -584,11 +574,7 @@ describe("ConfigManager.openSettings()", () => {
     expect(mockOpenConfigFlow).toHaveBeenCalledTimes(1);
     const params = mockOpenConfigFlow.mock.calls[0][0];
     expect(params.label).toBe("Test");
-    expect(params.scopes).toEqual({
-      global: true,
-      project: true,
-      session: true,
-    });
+    expect(params.scopes).toEqual({ global: true, project: true, session: true });
     expect(params.sessionInitialized).toBe(false);
     expect(params.defaults).toEqual(DEFAULTS);
     expect(params.buildFields).toBeTypeOf("function");
@@ -765,10 +751,7 @@ describe("ConfigManager._ensureSession()", () => {
       getSessionId: () => "sid-1",
       getEntries: () => entriesFor("leaf-1"),
     });
-    const mgr = createManager({
-      sessionConfig: true,
-      scopes: { session: false },
-    });
+    const mgr = createManager({ sessionConfig: true, scopes: { session: false } });
 
     await mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
 
@@ -873,10 +856,7 @@ describe("ConfigManager._ensureSession()", () => {
       expect(appendEntry).toHaveBeenCalledTimes(1);
       expect(appendEntry).toHaveBeenCalledWith(
         "session-config-test",
-        expect.objectContaining({
-          leafId: "leaf-1",
-          config: expect.any(Object),
-        }),
+        expect.objectContaining({ leafId: "leaf-1", config: expect.any(Object) }),
       );
 
       // State is now persisted
@@ -1177,10 +1157,7 @@ describe("ConfigManager._ensureSession()", () => {
       expect(appendEntry).toHaveBeenCalledTimes(1);
       expect(appendEntry).toHaveBeenCalledWith(
         "session-config-test",
-        expect.objectContaining({
-          leafId: "leaf-1",
-          config: { enabled: false, threshold: 8 },
-        }),
+        expect.objectContaining({ leafId: "leaf-1", config: { enabled: false, threshold: 8 } }),
       );
     });
 
@@ -1362,9 +1339,7 @@ describe("ConfigManager.layerValues()", () => {
   });
 
   it("does not apply env when env var is unset for 'env' scope", () => {
-    const mgr = createManager({
-      env: { threshold: "PI_TEST_THRESHOLD_UNSET" },
-    });
+    const mgr = createManager({ env: { threshold: "PI_TEST_THRESHOLD_UNSET" } });
     const result = mgr.layerValues("env", undefined, tempDir);
     expect(result.threshold).toBe(DEFAULTS.threshold);
   });
@@ -1373,9 +1348,7 @@ describe("ConfigManager.layerValues()", () => {
     writeGlobal({ threshold: 9 });
     const mgr = createManager({ sessionConfig: true });
     initSession(mgr);
-    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", {
-      threshold: 3,
-    });
+    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
     const result = mgr.layerValues("session", tempDir, tempDir);
     expect(result.threshold).toBe(3);
   });
@@ -1419,9 +1392,7 @@ describe("ConfigManager.inspect()", () => {
       sessionConfig: true,
     });
     initSession(mgr);
-    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", {
-      threshold: 3,
-    });
+    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
     const result = mgr.inspect(tempDir, tempDir);
     expect(result.winners.threshold).toBe("session");
     delete process.env.PI_TEST_THRESHOLD;
@@ -1457,9 +1428,7 @@ describe("ConfigManager.inspect()", () => {
   });
 
   it("env layer is empty when env var is unset", () => {
-    const mgr = createManager({
-      env: { threshold: "PI_TEST_THRESHOLD_UNSET" },
-    });
+    const mgr = createManager({ env: { threshold: "PI_TEST_THRESHOLD_UNSET" } });
     const result = mgr.inspect(undefined, tempDir);
     expect(result.layers.env).toEqual({});
   });
@@ -1506,9 +1475,7 @@ describe("ConfigManager.scopeSources()", () => {
   });
 
   it("omits opted-out scopes", () => {
-    const mgr = createManager({
-      scopes: { global: true, project: false, session: false },
-    });
+    const mgr = createManager({ scopes: { global: true, project: false, session: false } });
     const sources = mgr.scopeSources(tempDir, tempDir);
     expect(sources.map((s) => s.scope)).toEqual(["global"]);
   });
@@ -1595,9 +1562,7 @@ describe("ConfigManager.initSession opt-out guard", () => {
     });
     // initSession is a no-op when session is opted out
     initSession(mgr);
-    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", {
-      threshold: 3,
-    });
+    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
     const result = mgr.load(tempDir, tempDir);
     expect(result.threshold).toBe(DEFAULTS.threshold);
   });
@@ -1620,9 +1585,7 @@ describe("ConfigManager.initSession opt-out guard", () => {
       scopes: { session: true },
     });
     initSession(mgr);
-    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", {
-      threshold: 3,
-    });
+    setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
     const result = mgr.load(tempDir, tempDir);
     expect(result.threshold).toBe(DEFAULTS.threshold);
   });
@@ -1667,9 +1630,7 @@ describe("ConfigManager session config", () => {
   ) {
     const fileEntries = entriesFor(leafId);
     (
-      mgr as unknown as {
-        initSession: (sid: string, lid: string, entries: FileEntry[]) => void;
-      }
+      mgr as unknown as { initSession: (sid: string, lid: string, entries: FileEntry[]) => void }
     ).initSession(sessionId, leafId, fileEntries);
   }
 
@@ -1678,10 +1639,7 @@ describe("ConfigManager session config", () => {
   describe("load() priority", () => {
     it("session overrides env overrides", () => {
       process.env.PI_TEST_THRESHOLD = "8";
-      const mgr = createManager({
-        env: { threshold: "PI_TEST_THRESHOLD" },
-        sessionConfig: true,
-      });
+      const mgr = createManager({ env: { threshold: "PI_TEST_THRESHOLD" }, sessionConfig: true });
       initSession(mgr);
       setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       const result = mgr.load(tempDir, tempDir);
@@ -1858,4 +1816,256 @@ describe("ConfigManager session config", () => {
   });
 
   // ── openSettings() ───────────────────────────────────────────────────
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Tests — test-mode path safety
+// ─────────────────────────────────────────────────────────────────────
+
+describe("test-mode path safety", () => {
+  afterEach(() => {
+    // Restore env and caches even if a test fails
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    delete process.env.PI_CODING_AGENT_DIR;
+    delete process.env.VITEST;
+    // Reset to original values
+    if (origAgentDir !== undefined) process.env.PI_CODING_AGENT_DIR = origAgentDir;
+    if (origVitest !== undefined) process.env.VITEST = origVitest;
+    // Reset caches
+    resetPiAgentDirCache();
+  });
+
+  it("getExtensionsDir() returns a temp path in vitest when PI_CODING_AGENT_DIR is unset", () => {
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    delete process.env.PI_CODING_AGENT_DIR;
+    process.env.VITEST = "true";
+    try {
+      resetPiAgentDirCache();
+      const dir = getExtensionsDir();
+      expect(dirname(dir)).toBe(tmpdir());
+    } finally {
+      if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      if (origVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = origVitest;
+      resetPiAgentDirCache();
+    }
+  });
+
+  it("respects explicit PI_CODING_AGENT_DIR even in vitest", () => {
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    process.env.PI_CODING_AGENT_DIR = "/tmp/custom-pi";
+    process.env.VITEST = "true";
+    try {
+      resetPiAgentDirCache();
+      const dir = getExtensionsDir();
+      expect(dir).toBe("/tmp/custom-pi/extensions");
+    } finally {
+      if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      if (origVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = origVitest;
+      resetPiAgentDirCache();
+    }
+  });
+
+  it("getExtensionsDir() returns a temp path in vitest without PI_CODING_AGENT_DIR", () => {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    delete process.env.PI_CODING_AGENT_DIR;
+    process.env.VITEST = "true";
+    try {
+      resetPiAgentDirCache();
+      const dir = getExtensionsDir();
+      if (home) {
+        expect(dir.startsWith(home)).toBe(false);
+      }
+      expect(dirname(dir)).toBe(tmpdir());
+    } finally {
+      if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      if (origVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = origVitest;
+      resetPiAgentDirCache();
+    }
+  });
+
+  it("getExtensionsDir() returns a unique per-process temp dir in vitest without PI_CODING_AGENT_DIR", () => {
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    delete process.env.PI_CODING_AGENT_DIR;
+    process.env.VITEST = "true";
+    try {
+      resetPiAgentDirCache();
+      const dir = getExtensionsDir();
+      // Under the system temp, not a fixed shared name: each vitest worker
+      // process gets its own directory so test runs cannot pollute each
+      // other (a fresh clone must behave like a used machine).
+      expect(dirname(dir)).toBe(tmpdir());
+      expect(basename(dir)).toMatch(/^pi-agent-extensions-/);
+      expect(existsSync(dir)).toBe(true);
+      // Stable within the same process.
+      expect(getExtensionsDir()).toBe(dir);
+    } finally {
+      if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      if (origVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = origVitest;
+      resetPiAgentDirCache();
+    }
+  });
+
+  it("writeConfig succeeds in vitest when the resolved dir is under the system temp", () => {
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    delete process.env.PI_CODING_AGENT_DIR;
+    process.env.VITEST = "true";
+    const probePath = join(getExtensionsDir(), "pi-base-guard-probe.json");
+    try {
+      resetPiAgentDirCache();
+      clearConfigFileCache();
+      // Cross-platform pin: on Windows tmpdir() does not start with /tmp or
+      // /var/folders — the guard must still treat it as a temp directory.
+      expect(writeConfig("pi-base-guard-probe.json", { ok: true })).toBe(true);
+      expect(existsSync(probePath)).toBe(true);
+    } finally {
+      if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      if (origVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = origVitest;
+      resetPiAgentDirCache();
+      clearConfigFileCache();
+      rmSync(probePath, { force: true });
+    }
+  });
+
+  it("writeConfig blocks a real-home-like dir in vitest without explicit configDir", () => {
+    const origAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const origVitest = process.env.VITEST;
+    const fakeAgentDir = join(homedir(), ".pi-guard-test");
+    process.env.PI_CODING_AGENT_DIR = fakeAgentDir;
+    process.env.VITEST = "true";
+    try {
+      resetPiAgentDirCache();
+      clearConfigFileCache();
+      expect(writeConfig("pi-base-guard-probe.json", { ok: true })).toBe(false);
+      expect(existsSync(join(fakeAgentDir, "extensions", "pi-base-guard-probe.json"))).toBe(false);
+    } finally {
+      if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = origAgentDir;
+      if (origVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = origVitest;
+      resetPiAgentDirCache();
+      clearConfigFileCache();
+    }
+  });
+
+  it("createTestConfigDir creates a temp dir with a config file", () => {
+    const dir = createTestConfigDir("test-config.json", { threshold: 99 });
+    try {
+      const mgr = createManager();
+      const result = mgr.load(undefined, dir);
+      expect(result.threshold).toBe(99);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("createTestConfigManager pre-wires the manager so load() reads the fixture", () => {
+    const { manager, configDir } = createTestConfigManager(
+      { id: "helper", label: "Helper", defaults: DEFAULTS, fields: FIELDS },
+      { threshold: 7 },
+    );
+    try {
+      expect(manager.load().threshold).toBe(7);
+      expect(manager.load(undefined, configDir).threshold).toBe(7);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("createTestAgentDir sets a temp PI_CODING_AGENT_DIR and cleans up", async () => {
+    const { dir, cleanup } = createTestAgentDir("pi-agent-test-");
+    try {
+      const { getExtensionsDir } = await import("./paths.ts");
+      expect(getExtensionsDir()).toBe(join(dir, "extensions"));
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("resetConfigTestState clears cache and session configs", () => {
+    // Pre-populate session config
+    setSessionConfig("session-config-test", "/tmp", "sid", "leaf-1", { threshold: 3 });
+    const mgr = createManager({ sessionConfig: true });
+    initSession(mgr, "sid", "leaf-1");
+    mgr.save({ enabled: false, threshold: 8 }, "session", "/tmp", "/tmp");
+    expect(mgr.load("/tmp", "/tmp").threshold).toBe(8);
+
+    // Reset
+    resetConfigTestState();
+
+    // Session config cleared
+    const mgr2 = createManager({ sessionConfig: true });
+    initSession(mgr2, "sid", "leaf-1");
+    expect(mgr2.load("/tmp", "/tmp").threshold).toBe(DEFAULTS.threshold);
+  });
+});
+
+describe("ConfigManager configDir option", () => {
+  it("load() reads from the configured configDir without a per-call argument", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-base-cfg-opt-load-"));
+    try {
+      writeFileSync(join(dir, "test-config.json"), JSON.stringify({ threshold: 9 }));
+      const mgr = createManager({ configDir: dir });
+      expect(mgr.load().threshold).toBe(9);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("save() writes to the configured configDir and load() sees the change", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-base-cfg-opt-save-"));
+    try {
+      const mgr = createManager({ configDir: dir });
+      mgr.save({ enabled: false, threshold: 2 }, "global");
+      expect(readFileSync(join(dir, "test-config.json"), "utf-8")).toContain('"threshold": 2');
+      const reloaded = createManager({ configDir: dir }).load();
+      expect(reloaded.enabled).toBe(false);
+      expect(reloaded.threshold).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("explicit per-call configDir overrides the instance default", () => {
+    const optionDir = mkdtempSync(join(tmpdir(), "pi-base-cfg-opt-a-"));
+    const callDir = mkdtempSync(join(tmpdir(), "pi-base-cfg-opt-b-"));
+    try {
+      writeFileSync(join(callDir, "test-config.json"), JSON.stringify({ threshold: 3 }));
+      const mgr = createManager({ configDir: optionDir });
+      expect(mgr.load(undefined, callDir).threshold).toBe(3);
+    } finally {
+      rmSync(optionDir, { recursive: true, force: true });
+      rmSync(callDir, { recursive: true, force: true });
+    }
+  });
+
+  it("layerValues() and scopeSources() resolve through the configured configDir", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-base-cfg-opt-layer-"));
+    try {
+      writeFileSync(join(dir, "test-config.json"), JSON.stringify({ threshold: 4 }));
+      const mgr = createManager({ configDir: dir });
+      expect(mgr.layerValues("global").threshold).toBe(4);
+      const sources = mgr.scopeSources();
+      expect(sources[0].path).toBe(join(dir, "test-config.json"));
+      expect(sources[0].exists).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

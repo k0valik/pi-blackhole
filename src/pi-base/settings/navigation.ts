@@ -12,6 +12,9 @@ export function updateVisibleIndices(
 ): void {
   const query = state.search.trim().toLowerCase();
   const out: number[] = [];
+  const scope = state.activeTabId ?? "global";
+  let visCtx: VisibilityContext | undefined;
+
   for (let i = 0; i < state.rows.length; i += 1) {
     const row = state.rows[i]!;
     if (state.activeTabId !== undefined && state.tabs.length > 0) {
@@ -20,8 +23,10 @@ export function updateVisibleIndices(
       if (rowTab !== state.activeTabId) continue;
     }
     if (row.field.visibleWhen) {
-      const scope = state.activeTabId ?? "global";
-      if (!row.field.visibleWhen(buildCtx(state, row.field, scope))) continue;
+      if (!visCtx) {
+        visCtx = buildCtx(state, row.field, scope);
+      }
+      if (!row.field.visibleWhen(visCtx)) continue;
     }
     if (!query) {
       out.push(i);

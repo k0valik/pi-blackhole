@@ -89,9 +89,7 @@ describe("session config store", () => {
   it("round-trips setSessionConfig -> getSessionConfig", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a2", { threshold: 10 });
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({ threshold: 10 });
   });
 
   // ── isolation ───────────────────────────────────────────────────────
@@ -100,36 +98,24 @@ describe("session config store", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     setSessionConfig("test", "/cwd", "sid-1", "a2", { threshold: 20 });
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({
-      threshold: 10,
-    });
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({
-      threshold: 20,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({ threshold: 10 });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({ threshold: 20 });
   });
 
   it("isolates different sessionIds", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     setSessionConfig("test", "/cwd", "sid-2", "a1", { threshold: 20 });
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({
-      threshold: 10,
-    });
-    expect(getSessionConfig("test", "/cwd", "sid-2", "a1", entries)).toEqual({
-      threshold: 20,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({ threshold: 10 });
+    expect(getSessionConfig("test", "/cwd", "sid-2", "a1", entries)).toEqual({ threshold: 20 });
   });
 
   it("isolates different cwds", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd1", "sid-1", "a1", { threshold: 10 });
     setSessionConfig("test", "/cwd2", "sid-1", "a1", { threshold: 20 });
-    expect(getSessionConfig("test", "/cwd1", "sid-1", "a1", entries)).toEqual({
-      threshold: 10,
-    });
-    expect(getSessionConfig("test", "/cwd2", "sid-1", "a1", entries)).toEqual({
-      threshold: 20,
-    });
+    expect(getSessionConfig("test", "/cwd1", "sid-1", "a1", entries)).toEqual({ threshold: 10 });
+    expect(getSessionConfig("test", "/cwd2", "sid-1", "a1", entries)).toEqual({ threshold: 20 });
   });
 
   // ── parent-chain inheritance ────────────────────────────────────────
@@ -138,18 +124,14 @@ describe("session config store", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     // a2's parent is a1; a2 has no own config
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({ threshold: 10 });
   });
 
   it("inherits from grandparent when parent has no config", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     // a3's parent is a2, a2's parent is a1; a2 has no config
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a3", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a3", entries)).toEqual({ threshold: 10 });
   });
 
   it("prefers own config over parent config", () => {
@@ -157,9 +139,7 @@ describe("session config store", () => {
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     setSessionConfig("test", "/cwd", "sid-1", "a2", { threshold: 20 });
     // a3's parent is a2, a2 has config { threshold: 20 }
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a3", entries)).toEqual({
-      threshold: 20,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a3", entries)).toEqual({ threshold: 20 });
   });
 
   it("does not inherit across branches (different root)", () => {
@@ -174,12 +154,8 @@ describe("session config store", () => {
     const entries = parse(SESSION_HEADER + BRANCH_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     // b1 branches from a1 (parentId = "a1")
-    expect(getSessionConfig("test", "/cwd", "sid-1", "b1", entries)).toEqual({
-      threshold: 10,
-    });
-    expect(getSessionConfig("test", "/cwd", "sid-1", "b2", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "b1", entries)).toEqual({ threshold: 10 });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "b2", entries)).toEqual({ threshold: 10 });
   });
 
   // ── clearSessionConfig ──────────────────────────────────────────────
@@ -190,22 +166,16 @@ describe("session config store", () => {
     setSessionConfig("test", "/cwd", "sid-1", "a2", { threshold: 20 });
     clearSessionConfig("test", "/cwd", "sid-1", "a2");
     // a2 no longer has its own config; falls through to a1
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({ threshold: 10 });
     // a1 is untouched
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({ threshold: 10 });
   });
 
   it("clearSessionConfig on leaf with no config is a no-op", () => {
     const entries = parse(SESSION_HEADER + LINEAR_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     clearSessionConfig("test", "/cwd", "sid-1", "a3");
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a3", entries)).toEqual({
-      threshold: 10,
-    });
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a3", entries)).toEqual({ threshold: 10 });
   });
 
   // ── clearAllSessionConfigs ──────────────────────────────────────────
@@ -229,9 +199,7 @@ describe("session config store", () => {
     const sessionId = "sid-with-dashes";
     const leafId = "a4"; // valid leaf in fixture
     setSessionConfig("test", cwd, sessionId, leafId, { threshold: 99 });
-    expect(getSessionConfig("test", cwd, sessionId, leafId, entries)).toEqual({
-      threshold: 99,
-    });
+    expect(getSessionConfig("test", cwd, sessionId, leafId, entries)).toEqual({ threshold: 99 });
   });
 
   it("does not conflate keys that share substrings", () => {
@@ -240,15 +208,9 @@ describe("session config store", () => {
     setSessionConfig("test", "/cwd-a", "sid", "a1", { v: 1 });
     setSessionConfig("test", "/cwd", "sid-a", "a1", { v: 2 });
     setSessionConfig("test", "/cwd", "sid", "a1", { v: 3 });
-    expect(getSessionConfig("test", "/cwd-a", "sid", "a1", entries)).toEqual({
-      v: 1,
-    });
-    expect(getSessionConfig("test", "/cwd", "sid-a", "a1", entries)).toEqual({
-      v: 2,
-    });
-    expect(getSessionConfig("test", "/cwd", "sid", "a1", entries)).toEqual({
-      v: 3,
-    });
+    expect(getSessionConfig("test", "/cwd-a", "sid", "a1", entries)).toEqual({ v: 1 });
+    expect(getSessionConfig("test", "/cwd", "sid-a", "a1", entries)).toEqual({ v: 2 });
+    expect(getSessionConfig("test", "/cwd", "sid", "a1", entries)).toEqual({ v: 3 });
   });
 
   // ── deep clone on set ───────────────────────────────────────────────

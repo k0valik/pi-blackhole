@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-misused-promises */
 /**
  * Config flow — pre-selector → edit mode | display-all.
  *
@@ -13,6 +14,7 @@ import { createConfirm } from "./confirm.ts";
 import { createScopeSelector, type ScopeSelectorResult } from "./scope-selector.ts";
 import { createSettingsModalBody } from "./body.ts";
 import type { SettingsModalBodyComponent } from "./types.ts";
+import { frame, frameContentWidth, responsiveInnerRows, DEFAULT_PADDING_X } from "./frame.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -94,14 +96,15 @@ function buildSelectorEntries(
     session: params.scopes.session && params.sessionInitialized,
   };
 
-  const entries = SCOPE_IDS.map((id) => {
+  const entries: Array<{ id: string; label: string; available: boolean; note?: string }> = [];
+
+  if (includeDisplayAll) {
+    entries.push({ id: "display-all", label: "Display all settings", available: true });
+  }
+
+  for (const id of SCOPE_IDS) {
     const ok = available[id];
-    const entry: {
-      id: string;
-      label: string;
-      available: boolean;
-      note?: string;
-    } = {
+    const entry: { id: string; label: string; available: boolean; note?: string } = {
       id: id as string,
       label: SELECTOR_ENTRY_LABELS[id],
       available: ok,
@@ -113,15 +116,7 @@ function buildSelectorEntries(
           : "(disabled by extension)"
         : undefined,
     };
-    return entry;
-  });
-
-  if (includeDisplayAll) {
-    entries.push({
-      id: "display-all",
-      label: "Display all settings",
-      available: true,
-    });
+    entries.push(entry);
   }
 
   if (extraEntries.length > 0) {
@@ -221,6 +216,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
   const scopeLabel = EDIT_MODE_TITLES[scope] ?? scope;
   const sources = params.scopeSources();
   const sourceEntry = sources.find((s) => s.scope === scope);
+  const subtitle = scope === "session" ? params.sessionNote : (sourceEntry?.note ?? "");
   // Path note for edit mode: static label for env/defaults, resolved
   // path (or pending note) for file-based scopes.
   const editPathNote =
@@ -430,11 +426,8 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
                 ],
           onSave: () => handlers.onSave(tui, theme, done),
           onChange: handlers.onChange,
-          // eslint-disable-next-line @typescript-eslint/no-misused-promises
           onRequestExit: () => handlers.onRequestExit(tui, theme, done),
-          onAction: (id) => {
-            void handlers.onAction(id, tui, theme, done);
-          },
+          onAction: (id) => handlers.onAction(id, tui, theme, done),
         },
         {
           tui,
@@ -471,6 +464,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
     tabDefs.push({ id: "session", scope: "session", label: "Session" });
   }
   tabDefs.push({ id: "defaults", scope: "defaults", label: "Defaults" });
+
+  const subtitle = sources.map((s) => `${s.label}: ${s.note}`).join("\n");
 
   // Per-tab path/location notes rendered under the subtitle.
   const tabPathNotes: Record<string, string> = {};
@@ -513,9 +508,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
   await params.ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) => {
       // Mutable path note so onActiveTabChange can update it after mount.
-      const pathNoteRef: { current: string } = {
-        current: tabPathNotes[currentTabId],
-      };
+      const pathNoteRef: { current: string } = { current: tabPathNotes[currentTabId] };
       const body = createSettingsModalBody(
         {
           title: params.label,
@@ -525,8 +518,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
           readOnly: true,
           pathNote: pathNoteRef.current,
           actions: [
-            { id: "cancel", label: "Cancel" },
             { id: "edit", label: "Edit" },
+            { id: "cancel", label: "Cancel" },
           ],
           onAction(id: string) {
             switch (id) {
@@ -563,7 +556,6 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
                 }
                 break;
             }
-            return undefined;
           },
           onActiveTabChange(tabId: string) {
             currentTabId = tabId;

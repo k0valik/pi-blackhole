@@ -50,8 +50,8 @@ describe("createConfirm", () => {
 
     const lines = comp.render(width).join("\n");
     expect(lines).toContain("Confirm");
-    expect(lines).toContain("▌ Confirm");
-    expect(lines).toContain("  Cancel");
+    expect(lines).toContain("▌ 1. Confirm");
+    expect(lines).toContain("  2. Cancel");
   });
 
   it("pre-selects Cancel when danger is true", () => {
@@ -62,8 +62,29 @@ describe("createConfirm", () => {
     });
 
     const lines = comp.render(width).join("\n");
-    expect(lines).toContain("▌ Cancel");
-    expect(lines).toContain("  Confirm");
+    expect(lines).toContain("▌ 1. Cancel");
+    expect(lines).toContain("  2. Confirm");
+  });
+
+  it("1 or 2 numeric input immediately confirms/cancels respectively", () => {
+    const done = vi.fn();
+    const comp = createConfirm({ message: ["Save?"] }, done, {
+      tui: fakeTui(),
+      theme: fakeTheme(),
+    });
+
+    comp.render(width);
+    comp.handleInput?.("2");
+    expect(done).toHaveBeenCalledWith(false);
+
+    const done2 = vi.fn();
+    const comp2 = createConfirm({ message: ["Save?"] }, done2, {
+      tui: fakeTui(),
+      theme: fakeTheme(),
+    });
+    comp2.render(width);
+    comp2.handleInput?.("1");
+    expect(done2).toHaveBeenCalledWith(true);
   });
 
   it("Enter on Confirm calls done(true)", () => {
@@ -103,13 +124,22 @@ describe("createConfirm", () => {
     expect(done).toHaveBeenCalledWith(false);
   });
 
+  it("ctrl+c calls done(false)", () => {
+    const done = vi.fn();
+    const comp = createConfirm({ message: ["Save?"] }, done, {
+      tui: fakeTui(),
+      theme: fakeTheme(),
+    });
+
+    comp.render(width);
+    comp.handleInput?.("\x03");
+    expect(done).toHaveBeenCalledWith(false);
+  });
+
   it("↑/↓ moves selection and requests a render", () => {
     const done = vi.fn();
     const tui = fakeTui();
-    const comp = createConfirm({ message: ["Save?"] }, done, {
-      tui,
-      theme: fakeTheme(),
-    });
+    const comp = createConfirm({ message: ["Save?"] }, done, { tui, theme: fakeTheme() });
 
     comp.render(width);
     comp.handleInput?.("\x1b[B"); // down
@@ -122,10 +152,7 @@ describe("createConfirm", () => {
   it("←/→ also move selection", () => {
     const done = vi.fn();
     const tui = fakeTui();
-    const comp = createConfirm({ message: ["Save?"] }, done, {
-      tui,
-      theme: fakeTheme(),
-    });
+    const comp = createConfirm({ message: ["Save?"] }, done, { tui, theme: fakeTheme() });
 
     comp.render(width);
     comp.handleInput?.("\x1b[D"); // left
@@ -170,5 +197,36 @@ describe("createConfirm", () => {
 
     comp.render(width);
     expect(seen).toContain("warning");
+  });
+
+  it("y or n keyboard shortcuts immediately confirm or cancel", () => {
+    const doneYes = vi.fn();
+    const compYes = createConfirm({ message: ["Proceed?"] }, doneYes, {
+      tui: fakeTui(),
+      theme: fakeTheme(),
+    });
+    compYes.render(width);
+    compYes.handleInput?.("y");
+    expect(doneYes).toHaveBeenCalledWith(true);
+
+    const doneNo = vi.fn();
+    const compNo = createConfirm({ message: ["Proceed?"] }, doneNo, {
+      tui: fakeTui(),
+      theme: fakeTheme(),
+    });
+    compNo.render(width);
+    compNo.handleInput?.("n");
+    expect(doneNo).toHaveBeenCalledWith(false);
+  });
+
+  it("displays 1-2/y/n choose hint in the footer", () => {
+    const done = vi.fn();
+    const comp = createConfirm({ message: ["Save?"] }, done, {
+      tui: fakeTui(),
+      theme: fakeTheme(),
+    });
+
+    const lines = comp.render(width).join("\n");
+    expect(lines).toContain("1-2/y/n");
   });
 });
