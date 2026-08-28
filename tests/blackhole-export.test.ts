@@ -383,7 +383,7 @@ describe("/blackhole-export", () => {
     ).toContain("# Project memory export");
   });
 
-  it("rejects out:<path> that escapes allowed directories", async () => {
+  it("rejects out:<path> that escapes current directory", async () => {
     const env = createMockEnv();
     registerBlackholeExportCommand(env.pi);
     await env.handlerMap.get("blackhole-export")!("out:../escape.md", env.ctx);
@@ -391,9 +391,22 @@ describe("/blackhole-export", () => {
       readdirSync(projectCwd).filter((f) => f.endsWith(".md")),
     ).toHaveLength(0);
     expect(env.ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("escapes allowed directories"),
+      expect.stringContaining("escapes current directory"),
       "error",
     );
+  });
+
+  it("allows absolute out:<path> on any platform", async () => {
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    const absPath = join(tmpdir(), `blackhole-export-${Date.now()}.md`);
+    await env.handlerMap.get("blackhole-export")!(`out:${absPath}`, env.ctx);
+    expect(readFileSync(absPath, "utf-8")).toContain("# Project memory export");
+    try {
+      rmSync(absPath);
+    } catch {
+      /* best-effort cleanup */
+    }
   });
 
   it("notifies without writing when the project has no memory", async () => {

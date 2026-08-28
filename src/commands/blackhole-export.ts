@@ -24,7 +24,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
     handler: async (args: string, ctx) => {
       ctx.ui.notify("Exporting project memory…", "info");
 
-      const outMatch = args.match(/\bout:([^\s?#'"]+)/);
+      const outMatch = args.match(/\bout:(\S+)/);
       const now = new Date();
       const outPath = outMatch
         ? isAbsolute(outMatch[1])
@@ -33,19 +33,16 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         : defaultOutPath(ctx.cwd, now);
 
       const resolvedOut = resolve(outPath);
-      const allowedRoots = [resolve(ctx.cwd)];
-      const agentDirPath = getAgentDir();
-      if (agentDirPath) allowedRoots.push(resolve(agentDirPath));
-      const isAllowed = allowedRoots.some((root) => {
-        const rel = relative(root, resolvedOut);
-        return !rel.startsWith("..") && !isAbsolute(rel);
-      });
-      if (!isAllowed) {
-        ctx.ui.notify(
-          `Export path escapes allowed directories: ${outPath}`,
-          "error",
-        );
-        return;
+      const userOut = outMatch?.[1];
+      if (userOut && !isAbsolute(userOut)) {
+        const rel = relative(resolve(ctx.cwd), resolvedOut);
+        if (rel.startsWith("..") || isAbsolute(rel)) {
+          ctx.ui.notify(
+            `Export path escapes current directory: ${outPath}`,
+            "error",
+          );
+          return;
+        }
       }
 
       const { root: gitRoot, warning: gitWarning } = await findGitRoot(ctx.cwd);

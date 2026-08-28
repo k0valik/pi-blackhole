@@ -28,8 +28,9 @@ export async function findGitRoot(cwd: string): Promise<FindGitRootResult> {
     const root = stdout.trim();
     return { root: root || null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("ENOENT") || message.includes("EAGAIN")) {
+    const errnoError = error as NodeJS.ErrnoException;
+    if (errnoError.code === "ENOENT" || errnoError.code === "EAGAIN") {
+      const message = errnoError.message ?? String(error);
       return {
         root: null,
         warning: `[pi-blackhole] git lookup failed for ${cwd}: ${message}; falling back to cwd-only scoping`,
