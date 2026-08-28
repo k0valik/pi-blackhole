@@ -266,24 +266,19 @@ describe("vcc-normalize and filter-noise edge cases", () => {
     });
 
     it("handles mixed noise and valid content in user message", () => {
-      const text =
-        "IMPORTANT: TodoWrite was not called yet. But I want you to fix it.";
+      const text = "IMPORTANT: TodoWrite was not called yet. But I want you to fix it.";
       const blocks: any[] = [{ kind: "user", text, sourceIndex: 0 }];
       const filtered = filterNoise(blocks);
       expect(filtered).toHaveLength(0);
     });
 
     it("handles WebSearch tool as noise", () => {
-      const blocks: any[] = [
-        { kind: "tool_call", name: "WebSearch", args: {}, sourceIndex: 0 },
-      ];
+      const blocks: any[] = [{ kind: "tool_call", name: "WebSearch", args: {}, sourceIndex: 0 }];
       expect(filterNoise(blocks)).toHaveLength(0);
     });
 
     it("handles AskUser tool as noise", () => {
-      const blocks: any[] = [
-        { kind: "tool_call", name: "AskUser", args: {}, sourceIndex: 0 },
-      ];
+      const blocks: any[] = [{ kind: "tool_call", name: "AskUser", args: {}, sourceIndex: 0 }];
       expect(filterNoise(blocks)).toHaveLength(0);
     });
 
@@ -295,16 +290,14 @@ describe("vcc-normalize and filter-noise edge cases", () => {
     });
 
     it("handles nested-looking but actually sequential XML wrappers", () => {
-      const text =
-        "<system-reminder>A</system-reminder><system-reminder>B</system-reminder>C";
+      const text = "<system-reminder>A</system-reminder><system-reminder>B</system-reminder>C";
       const blocks: any[] = [{ kind: "user", text, sourceIndex: 0 }];
       const filtered = filterNoise(blocks);
       expect(filtered[0].text).toBe("C");
     });
 
     it("handles context-window-usage wrapper", () => {
-      const text =
-        "<context-window-usage>tokens: 100</context-window-usage>Work";
+      const text = "<context-window-usage>tokens: 100</context-window-usage>Work";
       const blocks: any[] = [{ kind: "user", text, sourceIndex: 0 }];
       const filtered = filterNoise(blocks);
       expect(filtered[0].text).toBe("Work");
@@ -326,9 +319,7 @@ describe("vcc-normalize and filter-noise edge cases", () => {
     });
 
     it("handles ExitSpecMode tool as noise", () => {
-      const blocks: any[] = [
-        { kind: "tool_call", name: "ExitSpecMode", args: {}, sourceIndex: 0 },
-      ];
+      const blocks: any[] = [{ kind: "tool_call", name: "ExitSpecMode", args: {}, sourceIndex: 0 }];
       expect(filterNoise(blocks)).toHaveLength(0);
     });
 
@@ -339,9 +330,7 @@ describe("vcc-normalize and filter-noise edge cases", () => {
     });
 
     it("preserves tool_result if it is not a noise tool", () => {
-      const blocks: any[] = [
-        { kind: "tool_result", name: "read", text: "data", sourceIndex: 0 },
-      ];
+      const blocks: any[] = [{ kind: "tool_result", name: "read", text: "data", sourceIndex: 0 }];
       expect(filterNoise(blocks)).toHaveLength(1);
     });
 

@@ -163,14 +163,10 @@ describe("createConfirm", () => {
     } as Theme;
 
     const done = vi.fn();
-    const comp = createConfirm(
-      { message: ["This is dangerous."], danger: true },
-      done,
-      {
-        tui: fakeTui(),
-        theme: captureTheme,
-      },
-    );
+    const comp = createConfirm({ message: ["This is dangerous."], danger: true }, done, {
+      tui: fakeTui(),
+      theme: captureTheme,
+    });
 
     comp.render(width);
     expect(seen).toContain("warning");

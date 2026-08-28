@@ -11,11 +11,7 @@ import {
   type V3MemoryCustomType,
 } from "./types.js";
 
-const SOURCE_ENTRY_TYPES = new Set([
-  "message",
-  "custom_message",
-  "branch_summary",
-]);
+const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
 
 export function isSourceEntry(entry: Entry): boolean {
   return SOURCE_ENTRY_TYPES.has(entry.type);
@@ -27,10 +23,7 @@ export function entryIndexById(entries: Entry[]): Map<string, number> {
   return idToIndex;
 }
 
-export function entryIndexForId(
-  entries: Entry[],
-  entryId: string | undefined,
-): number {
+export function entryIndexForId(entries: Entry[], entryId: string | undefined): number {
   if (!entryId) return -1;
   const idx = entryIndexById(entries).get(entryId);
   return idx ?? -1;
@@ -49,20 +42,14 @@ function isValidCoverageEntry(
   customType: V3MemoryCustomType,
 ): entry is Entry & { data: { coversUpToId: string } } {
   if (entry.type !== "custom" || entry.customType !== customType) return false;
-  if (!isObject(entry.data) || typeof entry.data.coversUpToId !== "string")
-    return false;
+  if (!isObject(entry.data) || typeof entry.data.coversUpToId !== "string") return false;
 
-  if (customType === OM_OBSERVATIONS_RECORDED)
-    return isNonEmptyArray(entry.data.observations);
-  if (customType === OM_REFLECTIONS_RECORDED)
-    return isNonEmptyArray(entry.data.reflections);
+  if (customType === OM_OBSERVATIONS_RECORDED) return isNonEmptyArray(entry.data.observations);
+  if (customType === OM_REFLECTIONS_RECORDED) return isNonEmptyArray(entry.data.reflections);
   return isNonEmptyArray(entry.data.observationIds);
 }
 
-export function latestCoverageIndex(
-  entries: Entry[],
-  customType: V3MemoryCustomType,
-): number {
+export function latestCoverageIndex(entries: Entry[], customType: V3MemoryCustomType): number {
   const idToIndex = entryIndexById(entries);
   let latest = -1;
 
@@ -108,8 +95,7 @@ export function earlierCoverageMarkerId(
   const idToIndex = entryIndexById(entries);
   const firstIndex = idToIndex.get(firstId);
   const secondIndex = idToIndex.get(secondId);
-  if (firstIndex === undefined)
-    return secondIndex === undefined ? undefined : secondId;
+  if (firstIndex === undefined) return secondIndex === undefined ? undefined : secondId;
   if (secondIndex === undefined) return firstId;
   return firstIndex <= secondIndex ? firstId : secondId;
 }
@@ -122,10 +108,7 @@ export function rawTokensAfterIndex(entries: Entry[], index: number): number {
   return total;
 }
 
-export function rawTokensSinceCoverage(
-  entries: Entry[],
-  customType: V3MemoryCustomType,
-): number {
+export function rawTokensSinceCoverage(entries: Entry[], customType: V3MemoryCustomType): number {
   return rawTokensAfterIndex(entries, latestCoverageIndex(entries, customType));
 }
 
@@ -156,11 +139,7 @@ export function findLastCompactionIndex(entries: Entry[]): number {
  * The compaction entry itself is never a usage source (its summary call
  * carries pre-compaction usage, see realContextTokens).
  */
-export function lastValidUsageIndex(
-  entries: Entry[],
-  beforeIndex: number,
-  fromIndex = 0,
-): number {
+export function lastValidUsageIndex(entries: Entry[], beforeIndex: number, fromIndex = 0): number {
   for (let i = Math.min(beforeIndex, entries.length - 1); i >= fromIndex; i--) {
     if (getUsageTokens(entries[i].message) !== undefined) return i;
   }
@@ -181,11 +160,7 @@ export function lastValidUsageIndex(
 export function realContextTokens(entries: Entry[]): number | undefined {
   const compactionIndex = findLastCompactionIndex(entries);
   const scanStart = compactionIndex === -1 ? 0 : compactionIndex + 1;
-  const usageIndex = lastValidUsageIndex(
-    entries,
-    entries.length - 1,
-    scanStart,
-  );
+  const usageIndex = lastValidUsageIndex(entries, entries.length - 1, scanStart);
   if (usageIndex === -1) return undefined;
 
   const usage = getUsageTokens(entries[usageIndex].message);
@@ -203,8 +178,7 @@ export function rawTokensSinceLastCompaction(entries: Entry[]): number {
   const firstKeptEntryId = entries[compactionIndex].firstKeptEntryId;
   const firstKeptIndex = entryIndexForId(entries, firstKeptEntryId);
 
-  if (firstKeptIndex === -1)
-    return rawTokensAfterIndex(entries, compactionIndex);
+  if (firstKeptIndex === -1) return rawTokensAfterIndex(entries, compactionIndex);
   return rawTokensAfterIndex(entries, firstKeptIndex - 1);
 }
 
@@ -213,10 +187,7 @@ export function rawTokensSinceLastCompaction(entries: Entry[]): number {
  * Walks the branch and collects observations from OM_OBSERVATIONS_RECORDED
  * entries that were appended AFTER the given index.
  */
-export function observationsCreatedAfterIndex(
-  entries: Entry[],
-  sinceIndex: number,
-): Observation[] {
+export function observationsCreatedAfterIndex(entries: Entry[], sinceIndex: number): Observation[] {
   const observations: Observation[] = [];
   const seen = new Set<string>();
 
@@ -238,10 +209,7 @@ export function observationsCreatedAfterIndex(
 /**
  * Extract reflections created since the given entry index.
  */
-export function reflectionsCreatedAfterIndex(
-  entries: Entry[],
-  sinceIndex: number,
-): Reflection[] {
+export function reflectionsCreatedAfterIndex(entries: Entry[], sinceIndex: number): Reflection[] {
   const reflections: Reflection[] = [];
   const seen = new Set<string>();
 

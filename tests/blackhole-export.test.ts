@@ -4,20 +4,11 @@
  * agentDir; no network, no real sessions.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-  readFileSync,
-  readdirSync,
-} from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const testRoot = join(
-  tmpdir(),
-  `pi-blackhole-export-test-${process.pid}-${Date.now()}`,
-);
+const testRoot = join(tmpdir(), `pi-blackhole-export-test-${process.pid}-${Date.now()}`);
 const agentDir = join(testRoot, "agent");
 const projectCwd = join(testRoot, "proj");
 
@@ -29,8 +20,7 @@ import { registerBlackholeExportCommand } from "../src/commands/blackhole-export
 import { relativeTime } from "../src/project-recall/format-export.js";
 import { encodeScopeDir } from "../src/project-recall/corpus.js";
 
-const daysAgo = (n: number) =>
-  new Date(Date.now() - n * 86400000).toISOString();
+const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
 
 function sessionHeader(id: string): string {
   return JSON.stringify({
@@ -52,11 +42,7 @@ function messageEntry(id: string, role: string, text: string): string {
 }
 
 let custCounter = 0;
-function customEntry(
-  customType: string,
-  data: Record<string, unknown>,
-  ts: string,
-): string {
+function customEntry(customType: string, data: Record<string, unknown>, ts: string): string {
   return JSON.stringify({
     type: "custom",
     id: `cust-${++custCounter}`,
@@ -70,8 +56,7 @@ const obsRecorded = (
   observations: Array<Record<string, unknown>>,
   coversUpToId: string,
   ts: string,
-) =>
-  customEntry("om.observations.recorded", { observations, coversUpToId }, ts);
+) => customEntry("om.observations.recorded", { observations, coversUpToId }, ts);
 
 function writeSession(scope: string, file: string, lines: string[]): void {
   const dir = join(agentDir, "sessions", scope);
@@ -290,16 +275,10 @@ function createFixtures(): void {
 
 function createMockEnv() {
   const sentMessages: Array<{ content: string; customType: string }> = [];
-  const handlerMap = new Map<
-    string,
-    (args: string, ctx: unknown) => Promise<void>
-  >();
+  const handlerMap = new Map<string, (args: string, ctx: unknown) => Promise<void>>();
   const pi: any = {
     registerCommand: vi.fn(
-      (
-        name: string,
-        def: { handler: (args: string, ctx: unknown) => Promise<void> },
-      ) => {
+      (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
         handlerMap.set(name, def.handler);
       },
     ),
@@ -358,9 +337,7 @@ describe("/blackhole-export", () => {
     expect(md).toContain("## Reflections");
     expect(md).toContain("Build tooling hygiene is settled");
     // Reflector-curated insights outrank raw observations (author note, §19.6)
-    expect(md.indexOf("## Reflections")).toBeLessThan(
-      md.indexOf("## Critical"),
-    );
+    expect(md.indexOf("## Reflections")).toBeLessThan(md.indexOf("## Critical"));
 
     expect(md).toContain("## Unattributed pending memory");
     expect(md).toContain("Orphan memory recovered from lost session");
@@ -374,22 +351,17 @@ describe("/blackhole-export", () => {
   it("honors out:<path> argument", async () => {
     const env = createMockEnv();
     registerBlackholeExportCommand(env.pi);
-    await env.handlerMap.get("blackhole-export")!(
-      "out:custom-export.md",
-      env.ctx,
+    await env.handlerMap.get("blackhole-export")!("out:custom-export.md", env.ctx);
+    expect(readFileSync(join(projectCwd, "custom-export.md"), "utf-8")).toContain(
+      "# Project memory export",
     );
-    expect(
-      readFileSync(join(projectCwd, "custom-export.md"), "utf-8"),
-    ).toContain("# Project memory export");
   });
 
   it("rejects out:<path> that escapes current directory", async () => {
     const env = createMockEnv();
     registerBlackholeExportCommand(env.pi);
     await env.handlerMap.get("blackhole-export")!("out:../escape.md", env.ctx);
-    expect(
-      readdirSync(projectCwd).filter((f) => f.endsWith(".md")),
-    ).toHaveLength(0);
+    expect(readdirSync(projectCwd).filter((f) => f.endsWith(".md"))).toHaveLength(0);
     expect(env.ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("escapes current directory"),
       "error",
@@ -413,9 +385,7 @@ describe("/blackhole-export", () => {
     const env = createMockEnv();
     registerBlackholeExportCommand(env.pi);
     await env.handlerMap.get("blackhole-export")!("out:export.txt", env.ctx);
-    expect(
-      readdirSync(projectCwd).filter((f) => f.endsWith(".txt")),
-    ).toHaveLength(0);
+    expect(readdirSync(projectCwd).filter((f) => f.endsWith(".txt"))).toHaveLength(0);
     expect(env.ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("must be a markdown file"),
       "error",
@@ -440,16 +410,12 @@ describe("/blackhole-export", () => {
       expect.stringContaining("No observational memory"),
       "warning",
     );
-    expect(
-      readdirSync(projectCwd).filter((f) => f.endsWith(".md")),
-    ).toHaveLength(0);
+    expect(readdirSync(projectCwd).filter((f) => f.endsWith(".md"))).toHaveLength(0);
   });
 
   it("inferReflectionTier falls back to medium when no observation resolves", async () => {
-    const { buildProjectMemoryCorpus } =
-      await import("../src/project-recall/corpus.js");
-    const { buildExportMarkdown } =
-      await import("../src/project-recall/format-export.js");
+    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+    const { buildExportMarkdown } = await import("../src/project-recall/format-export.js");
 
     const scope = encodeScopeDir(projectCwd);
     writeSession(scope, "refl-only.jsonl", [
@@ -485,27 +451,16 @@ describe("/blackhole-export", () => {
 
   it("relativeTime formats sensibly", () => {
     const now = Date.now();
-    expect(relativeTime(new Date(now - 30 * 1000).toISOString(), now)).toBe(
-      "just now",
-    );
-    expect(relativeTime(new Date(now - 5 * 60000).toISOString(), now)).toBe(
-      "5m ago",
-    );
-    expect(relativeTime(new Date(now - 3 * 3600000).toISOString(), now)).toBe(
-      "3h ago",
-    );
-    expect(relativeTime(new Date(now - 3 * 86400000).toISOString(), now)).toBe(
-      "3d ago",
-    );
-    expect(relativeTime(new Date(now - 21 * 86400000).toISOString(), now)).toBe(
-      "3w ago",
-    );
+    expect(relativeTime(new Date(now - 30 * 1000).toISOString(), now)).toBe("just now");
+    expect(relativeTime(new Date(now - 5 * 60000).toISOString(), now)).toBe("5m ago");
+    expect(relativeTime(new Date(now - 3 * 3600000).toISOString(), now)).toBe("3h ago");
+    expect(relativeTime(new Date(now - 3 * 86400000).toISOString(), now)).toBe("3d ago");
+    expect(relativeTime(new Date(now - 21 * 86400000).toISOString(), now)).toBe("3w ago");
     expect(relativeTime(null, now)).toBeNull();
   });
 
   it("prefilter keeps marker-less sessions cheap but counted", async () => {
-    const { buildProjectMemoryCorpus } =
-      await import("../src/project-recall/corpus.js");
+    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
     const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
     expect(corpus.sessionsConsidered).toBe(3);
     expect(corpus.filesWithMarkers).toBe(2);

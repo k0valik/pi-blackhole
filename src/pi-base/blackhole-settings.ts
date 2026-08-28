@@ -55,8 +55,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "compactionEngine",
       type: "enum",
       label: "Compaction engine",
-      description:
-        "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
+      description: "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
       value: cfg.compactionEngine,
       options: ["blackhole", "pi-default"],
       optionLabels: {
@@ -120,8 +119,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "memory",
       type: "boolean",
       label: "Observational memory",
-      description:
-        "Enable OM workers (observer, reflector, dropper) and content injection",
+      description: "Enable OM workers (observer, reflector, dropper) and content injection",
       value: cfg.memory,
       valueDescriptions: {
         on: "Active — OM workers + content injection enabled",
@@ -140,8 +138,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "observeAfterTokens",
       type: "number",
       label: "Observer threshold",
-      description:
-        "Tokens accumulated since last observer run before triggering next observe",
+      description: "Tokens accumulated since last observer run before triggering next observe",
       value: cfg.observeAfterTokens,
       min: 1_000,
       max: 200_000,
@@ -151,8 +148,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "reflectAfterTokens",
       type: "number",
       label: "Reflect + dropper threshold",
-      description:
-        "Tokens accumulated since last reflect before triggering reflector and dropper",
+      description: "Tokens accumulated since last reflect before triggering reflector and dropper",
       value: cfg.reflectAfterTokens,
       min: 1_000,
       max: 200_000,
@@ -162,8 +158,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "observationsPoolMaxTokens",
       type: "number",
       label: "Observation pool max",
-      description:
-        "Max tokens in observation pool before dropper prunes (fold pressure)",
+      description: "Max tokens in observation pool before dropper prunes (fold pressure)",
       value: cfg.observationsPoolMaxTokens,
       min: 1_000,
       max: 200_000,
@@ -173,8 +168,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "observationsPoolTargetTokens",
       type: "number",
       label: "Observation pool target",
-      description:
-        "Target tokens after dropper prunes (defaults to half of pool max)",
+      description: "Target tokens after dropper prunes (defaults to half of pool max)",
       value: cfg.observationsPoolTargetTokens,
       min: 500,
       max: 200_000,
@@ -184,8 +178,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "reflectorInputMaxTokens",
       type: "number",
       label: "Reflector input max",
-      description:
-        "Max prompt tokens for reflector model input (rolling window cap)",
+      description: "Max prompt tokens for reflector model input (rolling window cap)",
       value: cfg.reflectorInputMaxTokens,
       min: 1_000,
       max: 500_000,
@@ -195,8 +188,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "dropperInputMaxTokens",
       type: "number",
       label: "Dropper input max",
-      description:
-        "Max prompt tokens for dropper model input (rolling window cap)",
+      description: "Max prompt tokens for dropper model input (rolling window cap)",
       value: cfg.dropperInputMaxTokens,
       min: 1_000,
       max: 500_000,
@@ -216,8 +208,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "observerPreambleMaxTokens",
       type: "number",
       label: "Observer preamble max",
-      description:
-        "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
+      description: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
       value: cfg.observerPreambleMaxTokens,
       min: 0,
       max: 100_000,
@@ -280,8 +271,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "debug",
       type: "boolean",
       label: "Debug snapshots",
-      description:
-        "Write detailed debug snapshots to /tmp/pi-blackhole-debug.json",
+      description: "Write detailed debug snapshots to /tmp/pi-blackhole-debug.json",
       value: cfg.debug,
     },
     {
@@ -302,10 +292,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     const parsed = { ...raw } as Partial<UnifiedConfig>;
 
     // ── Migration: legacy keys → new surface ──
-    if (
-      parsed.compaction === undefined &&
-      parsed.compactionEngine === undefined
-    ) {
+    if (parsed.compaction === undefined && parsed.compactionEngine === undefined) {
       if (parsed.passive === true) {
         parsed.compaction = "off";
         parsed.memory = false;
@@ -364,8 +351,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       }
     }
 
-    const envCompactionSummaryMode =
-      process.env.PI_BLACKHOLE_COMPACTION_SUMMARY_MODE;
+    const envCompactionSummaryMode = process.env.PI_BLACKHOLE_COMPACTION_SUMMARY_MODE;
     if (envCompactionSummaryMode !== undefined) {
       const trimmed = envCompactionSummaryMode.trim().toLowerCase();
       if (!["default", "append"].includes(trimmed)) {
@@ -410,25 +396,14 @@ export const config = new ConfigManager<UnifiedConfig>({
 
     // dropperPressureThreshold — must be in (0, 1]
     const dpt = merged.dropperPressureThreshold;
-    if (
-      typeof dpt !== "number" ||
-      !Number.isFinite(dpt) ||
-      dpt <= 0 ||
-      dpt > 1
-    ) {
+    if (typeof dpt !== "number" || !Number.isFinite(dpt) || dpt <= 0 || dpt > 1) {
       merged.dropperPressureThreshold = DEFAULTS.dropperPressureThreshold;
     }
 
     // dropperPoolFullnessThreshold — must be in (0, 1]
     const dpf = merged.dropperPoolFullnessThreshold;
-    if (
-      typeof dpf !== "number" ||
-      !Number.isFinite(dpf) ||
-      dpf <= 0 ||
-      dpf > 1
-    ) {
-      merged.dropperPoolFullnessThreshold =
-        DEFAULTS.dropperPoolFullnessThreshold;
+    if (typeof dpf !== "number" || !Number.isFinite(dpf) || dpf <= 0 || dpf > 1) {
+      merged.dropperPoolFullnessThreshold = DEFAULTS.dropperPoolFullnessThreshold;
     }
 
     // observationsPoolTargetTokens — must be < max
@@ -436,9 +411,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       merged.observationsPoolTargetTokens === undefined ||
       merged.observationsPoolTargetTokens >= merged.observationsPoolMaxTokens
     ) {
-      merged.observationsPoolTargetTokens = Math.floor(
-        merged.observationsPoolMaxTokens / 2,
-      );
+      merged.observationsPoolTargetTokens = Math.floor(merged.observationsPoolMaxTokens / 2);
     }
 
     return merged;
@@ -449,9 +422,7 @@ export const config = new ConfigManager<UnifiedConfig>({
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
-export async function openBlackholeSettings(
-  ctx: ExtensionContext,
-): Promise<void> {
+export async function openBlackholeSettings(ctx: ExtensionContext): Promise<void> {
   await config.openSettings(
     ctx,
     ctx.cwd,

@@ -44,10 +44,7 @@ export default [
 
       // Baseline correctness
       "no-unused-vars": "off", // handled by tsconfig noUnusedLocals
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
   {
@@ -64,10 +61,7 @@ export default [
     },
     rules: {
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
   {
@@ -81,10 +75,7 @@ export default [
     },
     rules: {
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
 ];

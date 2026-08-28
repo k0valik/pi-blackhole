@@ -12,12 +12,7 @@
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type {
-  Component,
-  KeybindingsManager,
-  OverlayOptions,
-  TUI,
-} from "@earendil-works/pi-tui";
+import type { Component, KeybindingsManager, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 
 // ─────────────────────────────────────────────────────────────────────
 // Visibility context for visibleWhen
@@ -474,11 +469,7 @@ export interface SettingsModalOptions<F extends Field = Field> {
    * with the reorderable ones do NOT participate and do NOT shift the
    * peer index.
    */
-  onReorder?: (info: {
-    fieldKey: string;
-    fromIndex: number;
-    toIndex: number;
-  }) => void;
+  onReorder?: (info: { fieldKey: string; fromIndex: number; toIndex: number }) => void;
   /**
    * Optional footer actions rendered as a pill strip below the rows.
    * Tab/Shift+Tab cycle through tabs then actions. Enter on an enabled

@@ -104,12 +104,10 @@ export function createStatusOverlay(
   ];
 
   const errorItems: { label: string; value: string }[] = [];
-  if (info.lastObserverError)
-    errorItems.push({ label: "Observer", value: info.lastObserverError });
+  if (info.lastObserverError) errorItems.push({ label: "Observer", value: info.lastObserverError });
   if (info.lastReflectorError)
     errorItems.push({ label: "Reflector", value: info.lastReflectorError });
-  if (info.lastDropperError)
-    errorItems.push({ label: "Dropper", value: info.lastDropperError });
+  if (info.lastDropperError) errorItems.push({ label: "Dropper", value: info.lastDropperError });
 
   const actionItems = [
     { label: "Open configure overlay", value: "configure" as const },
@@ -122,16 +120,12 @@ export function createStatusOverlay(
   const selectableErrorCount = errorItems.length;
   const selectableActionCount = actionItems.length;
   const totalSelectable =
-    selectableConfigCount +
-    selectablePipelineCount +
-    selectableErrorCount +
-    selectableActionCount;
+    selectableConfigCount + selectablePipelineCount + selectableErrorCount + selectableActionCount;
 
   // Render helpers: map a contiguous nav index to the display positions
   // (section headers are inserted at render time, not in the nav model)
   const navIsAction = (idx: number) =>
-    idx >=
-    selectableConfigCount + selectablePipelineCount + selectableErrorCount;
+    idx >= selectableConfigCount + selectablePipelineCount + selectableErrorCount;
 
   let selectedIndex = 0;
   let cachedLines: string[] | undefined;
@@ -154,10 +148,7 @@ export function createStatusOverlay(
     if (matchesKey(data, "enter") || matchesKey(data, "space")) {
       if (navIsAction(selectedIndex)) {
         const actionIdx =
-          selectedIndex -
-          selectableConfigCount -
-          selectablePipelineCount -
-          selectableErrorCount;
+          selectedIndex - selectableConfigCount - selectablePipelineCount - selectableErrorCount;
         const action = actionItems[actionIdx]!;
         done({ action: action.value });
         return;
@@ -196,10 +187,7 @@ export function createStatusOverlay(
     // Top border + header
     lines.push(fg("border", `╭${"─".repeat(w - 2)}╮`));
     lines.push(
-      fg(
-        "border",
-        `│ ${accent("Blackhole Status")}${" ".repeat(Math.max(0, innerW + 1 - 16))}│`,
-      ),
+      fg("border", `│ ${accent("Blackhole Status")}${" ".repeat(Math.max(0, innerW + 1 - 16))}│`),
     );
     lines.push(fg("border", `├${"─".repeat(w - 2)}┤`));
 
@@ -221,12 +209,10 @@ export function createStatusOverlay(
                 : dim(item.value);
           break;
         case "Engine":
-          value =
-            item.value === "blackhole" ? success(item.value) : dim(item.value);
+          value = item.value === "blackhole" ? success(item.value) : dim(item.value);
           break;
         case "Memory":
-          value =
-            item.value === "Enabled" ? success("Enabled") : muted("Disabled");
+          value = item.value === "Enabled" ? success("Enabled") : muted("Disabled");
           break;
         default:
           value = dim(item.value);
@@ -252,15 +238,11 @@ export function createStatusOverlay(
       lines.push(border(line(` ${dim("─── Last Errors ───")}`)));
       for (let i = 0; i < errorItems.length; i++) {
         const item = errorItems[i]!;
-        const isSelected =
-          selectedIndex === selectableConfigCount + selectablePipelineCount + i;
+        const isSelected = selectedIndex === selectableConfigCount + selectablePipelineCount + i;
         const prefix = isSelected ? accent(" ›") : "  ";
         const label = isSelected ? accent(`${item.label}:`) : `${item.label}:`;
-        const truncated =
-          item.value.length > 40 ? item.value.slice(0, 37) + "..." : item.value;
-        lines.push(
-          border(line(`${prefix} ${pad(label, 16)} ${error(truncated)}`)),
-        );
+        const truncated = item.value.length > 40 ? item.value.slice(0, 37) + "..." : item.value;
+        lines.push(border(line(`${prefix} ${pad(label, 16)} ${error(truncated)}`)));
       }
     }
 
@@ -272,10 +254,7 @@ export function createStatusOverlay(
       const item = actionItems[i]!;
       const isSelected =
         selectedIndex ===
-        selectableConfigCount +
-          selectablePipelineCount +
-          selectableErrorCount +
-          i;
+        selectableConfigCount + selectablePipelineCount + selectableErrorCount + i;
       const prefix = isSelected ? accent(" ▶") : "   ";
       const text = isSelected ? accent(item.label) : dim(item.label);
       lines.push(border(line(`${prefix} ${text}`)));

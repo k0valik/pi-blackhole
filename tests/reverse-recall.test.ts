@@ -13,10 +13,7 @@ import type { RenderedEntry } from "../src/core/render-entries.js";
 // ── Helpers (mirrored from recall.test.ts) ────────────────────────────────
 
 function hexId(label: string): string {
-  const raw = Array.from(label).reduce(
-    (h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0,
-    0,
-  );
+  const raw = Array.from(label).reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
   return Math.abs(raw).toString(16).padStart(12, "0").slice(0, 12);
 }
 
@@ -100,8 +97,7 @@ function dropEntry(
 
 describe("findObservationsForEntryIds", () => {
   it("finds observation by matching sourceEntryId", async () => {
-    const { findObservationsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs = makeObservation("a1b2c3d4e5f6", ["src00000001", "src00000002"]);
     const entries: Entry[] = [
       makeEntry("src00000001", "message", {
@@ -119,27 +115,21 @@ describe("findObservationsForEntryIds", () => {
   });
 
   it("returns empty for non-referenced entry IDs", async () => {
-    const { findObservationsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs = makeObservation("obs1", ["src00000001"]);
-    const entries: Entry[] = [
-      makeEntry("src00000001", "message"),
-      recordEntry("e1", [obs]),
-    ];
+    const entries: Entry[] = [makeEntry("src00000001", "message"), recordEntry("e1", [obs])];
     const result = findObservationsForEntryIds(entries, ["nonexistent"]);
     expect(result).toHaveLength(0);
   });
 
   it("returns empty when no branch entries provided", async () => {
-    const { findObservationsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
     const result = findObservationsForEntryIds([], ["src00000001"]);
     expect(result).toHaveLength(0);
   });
 
   it("matches multiple observations for the same entry", async () => {
-    const { findObservationsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs1 = makeObservation(OBS_ID_A, ["src00000001"]);
     const obs2 = makeObservation(OBS_ID_B, ["src00000001", "src00000002"]);
     const entries: Entry[] = [
@@ -155,8 +145,7 @@ describe("findObservationsForEntryIds", () => {
   });
 
   it("marks observation as dropped", async () => {
-    const { findObservationsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs = makeObservation(OBS_ID_C, ["src00000001"]);
     const entries: Entry[] = [
       makeEntry("src00000001", "message"),
@@ -169,8 +158,7 @@ describe("findObservationsForEntryIds", () => {
   });
 
   it("finds observations for multiple target entry IDs at once", async () => {
-    const { findObservationsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs1 = makeObservation(OBS_ID_A, ["src00000001"]);
     const obs2 = makeObservation(OBS_ID_B, ["src00000002"]);
     const entries: Entry[] = [
@@ -179,10 +167,7 @@ describe("findObservationsForEntryIds", () => {
       recordEntry("e1", [obs1]),
       recordEntry("e2", [obs2]),
     ];
-    const result = findObservationsForEntryIds(entries, [
-      "src00000001",
-      "src00000002",
-    ]);
+    const result = findObservationsForEntryIds(entries, ["src00000001", "src00000002"]);
     expect(result).toHaveLength(2);
   });
 });
@@ -191,8 +176,7 @@ describe("findObservationsForEntryIds", () => {
 
 describe("findReflectionsForEntryIds", () => {
   it("finds reflection whose supporting observation references the target entry", async () => {
-    const { findReflectionsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findReflectionsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs = makeObservation(OBS_ID_A, ["src00000001"]);
     const ref = makeReflection(REF_ID, [obs.id]);
     const entries: Entry[] = [
@@ -206,8 +190,7 @@ describe("findReflectionsForEntryIds", () => {
   });
 
   it("returns empty when no observations reference the target", async () => {
-    const { findReflectionsForEntryIds } =
-      await import("../src/om/reverse-recall.js");
+    const { findReflectionsForEntryIds } = await import("../src/om/reverse-recall.js");
     const obs = makeObservation(OBS_ID_A, ["src00000001"]);
     const ref = makeReflection(REF_ID, [obs.id]);
     const entries: Entry[] = [
@@ -224,8 +207,7 @@ describe("findReflectionsForEntryIds", () => {
 
 describe("formatRelatedObservations", () => {
   it("formats observations with metadata", async () => {
-    const { formatRelatedObservations } =
-      await import("../src/om/reverse-recall.js");
+    const { formatRelatedObservations } = await import("../src/om/reverse-recall.js");
     const result = formatRelatedObservations(
       [
         {
@@ -247,8 +229,7 @@ describe("formatRelatedObservations", () => {
   });
 
   it("shows [dropped] for dropped observations", async () => {
-    const { formatRelatedObservations } =
-      await import("../src/om/reverse-recall.js");
+    const { formatRelatedObservations } = await import("../src/om/reverse-recall.js");
     const result = formatRelatedObservations(
       [
         {
@@ -266,8 +247,7 @@ describe("formatRelatedObservations", () => {
   });
 
   it("returns empty string when no observations or reflections", async () => {
-    const { formatRelatedObservations } =
-      await import("../src/om/reverse-recall.js");
+    const { formatRelatedObservations } = await import("../src/om/reverse-recall.js");
     const result = formatRelatedObservations([], []);
     expect(result).toBe("");
   });
@@ -299,19 +279,14 @@ describe("buildIndexMap / formatEntryIndexAnnotation", () => {
       { index: 5, id: "entry-c", role: "user", summary: "C" },
     ];
     const map = buildIndexMap(rendered);
-    const annotation = formatEntryIndexAnnotation(
-      ["entry-a", "entry-c", "entry-b"],
-      map,
-    );
+    const annotation = formatEntryIndexAnnotation(["entry-a", "entry-c", "entry-b"], map);
     expect(annotation).toBe("(at index #0, #1, #5)");
   });
 
   it("returns empty string when no source entries are in the map", async () => {
     const { formatEntryIndexAnnotation, buildIndexMap } =
       await import("../src/om/reverse-recall.js");
-    const rendered: RenderedEntry[] = [
-      { index: 0, id: "entry-a", role: "user", summary: "A" },
-    ];
+    const rendered: RenderedEntry[] = [{ index: 0, id: "entry-a", role: "user", summary: "A" }];
     const map = buildIndexMap(rendered);
     const annotation = formatEntryIndexAnnotation(["nonexistent"], map);
     expect(annotation).toBe("");
@@ -324,10 +299,7 @@ describe("buildIndexMap / formatEntryIndexAnnotation", () => {
       { index: 3, id: "known-entry", role: "user", summary: "Hello" },
     ];
     const map = buildIndexMap(rendered);
-    const annotation = formatEntryIndexAnnotation(
-      ["known-entry", "unknown"],
-      map,
-    );
+    const annotation = formatEntryIndexAnnotation(["known-entry", "unknown"], map);
     expect(annotation).toBe("(at index #3)");
   });
 });

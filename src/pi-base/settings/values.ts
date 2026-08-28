@@ -27,9 +27,7 @@ export function isDirty(state: BodyState): boolean {
 export function syncDirtyState(state: BodyState, key: string): void {
   if (!state.isBuffered) return;
   const initial = state.initialValues.get(key);
-  const current = state.rows.find(
-    (r: InternalRow) => r.field.key === key,
-  )?.value;
+  const current = state.rows.find((r: InternalRow) => r.field.key === key)?.value;
   const isClean =
     typeof initial === "object" && initial !== null
       ? JSON.stringify(current) === JSON.stringify(initial)
@@ -41,11 +39,7 @@ export function syncDirtyState(state: BodyState, key: string): void {
   }
 }
 
-export function commitValue(
-  state: BodyState,
-  row: InternalRow,
-  value: unknown,
-): void {
+export function commitValue(state: BodyState, row: InternalRow, value: unknown): void {
   const previous = row.value;
   const key = row.field.key;
 

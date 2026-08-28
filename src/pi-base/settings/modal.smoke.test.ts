@@ -136,9 +136,7 @@ describe("createSettingsModalBody — happy paths", () => {
   it("Enter on a boolean field toggles its value via onChange", () => {
     const onChange = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "muted", type: "boolean", label: "Muted", value: false },
-    ];
+    const fields: Field[] = [{ key: "muted", type: "boolean", label: "Muted", value: false }];
     const body = createSettingsModalBody(
       { fields, onChange },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close },
@@ -148,18 +146,12 @@ describe("createSettingsModalBody — happy paths", () => {
     body.handleInput?.("\r"); // Enter
 
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(
-      "muted",
-      true,
-      expect.objectContaining({ key: "muted" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("muted", true, expect.objectContaining({ key: "muted" }));
   });
 
   it("left/right arrow keys on a boolean field set its value absolutely via onChange", () => {
     const onChange = vi.fn();
-    const fields: Field[] = [
-      { key: "muted", type: "boolean", label: "Muted", value: false },
-    ];
+    const fields: Field[] = [{ key: "muted", type: "boolean", label: "Muted", value: false }];
     const body = createSettingsModalBody(
       { fields, onChange },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -169,18 +161,12 @@ describe("createSettingsModalBody — happy paths", () => {
 
     // Press right -> turns on (true)
     body.handleInput?.("\x1b[C"); // Right
-    expect(onChange).toHaveBeenCalledWith(
-      "muted",
-      true,
-      expect.objectContaining({ key: "muted" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("muted", true, expect.objectContaining({ key: "muted" }));
 
     onChange.mockClear();
 
     // Now starting with true
-    const fieldsTrue: Field[] = [
-      { key: "muted", type: "boolean", label: "Muted", value: true },
-    ];
+    const fieldsTrue: Field[] = [{ key: "muted", type: "boolean", label: "Muted", value: true }];
     const bodyTrue = createSettingsModalBody(
       { fields: fieldsTrue, onChange },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -270,9 +256,7 @@ describe("createSettingsModalBody — happy paths", () => {
   it("Esc closes the modal (no value commit)", () => {
     const onChange = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const body = createSettingsModalBody(
       { fields, onChange },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close },
@@ -348,9 +332,7 @@ describe("createSettingsModalBody — happy paths", () => {
       name: "Fake",
       provider: "anthropic",
       thinkingLevelMap: { xhigh: "60000", high: "30000" },
-    } as unknown as import("@earendil-works/pi-ai").Model<
-      import("@earendil-works/pi-ai").Api
-    >;
+    } as unknown as import("@earendil-works/pi-ai").Model<import("@earendil-works/pi-ai").Api>;
     const fields: Field[] = [
       {
         key: "m",
@@ -636,9 +618,7 @@ describe("createSettingsModalBody — happy paths", () => {
   });
 
   it("renders search bar placeholder and footer hints when search is enabled", () => {
-    const fields: Field[] = [
-      { key: "bool", type: "boolean", label: "Bool", value: false },
-    ];
+    const fields: Field[] = [{ key: "bool", type: "boolean", label: "Bool", value: false }];
     const body = createSettingsModalBody(
       { title: "test", fields, enableSearch: true },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -661,9 +641,7 @@ describe("createSettingsModalBody — happy paths", () => {
   });
 
   it("allows search bar input typing even when there are zero search matches", () => {
-    const fields: Field[] = [
-      { key: "bool", type: "boolean", label: "Bool", value: false },
-    ];
+    const fields: Field[] = [{ key: "bool", type: "boolean", label: "Bool", value: false }];
     const body = createSettingsModalBody(
       { title: "test", fields, enableSearch: true },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -684,9 +662,7 @@ describe("createSettingsModalBody — happy paths", () => {
   });
 
   it("pressing escape when search has active text clears the search query and resets selection instead of closing the modal", () => {
-    const fields: Field[] = [
-      { key: "bool", type: "boolean", label: "Bool", value: false },
-    ];
+    const fields: Field[] = [{ key: "bool", type: "boolean", label: "Bool", value: false }];
     const close = vi.fn();
     const body = createSettingsModalBody(
       { title: "test", fields, enableSearch: true },
@@ -711,9 +687,7 @@ describe("createSettingsModalBody — happy paths", () => {
   });
 
   it("pressing escape when search is already empty closes the modal", () => {
-    const fields: Field[] = [
-      { key: "bool", type: "boolean", label: "Bool", value: false },
-    ];
+    const fields: Field[] = [{ key: "bool", type: "boolean", label: "Bool", value: false }];
     const close = vi.fn();
     const body = createSettingsModalBody(
       { title: "test", fields, enableSearch: true },
@@ -730,9 +704,7 @@ describe("createSettingsModalBody — happy paths", () => {
   it("search uses fuzzy matching so non-consecutive queries still match", () => {
     // "Bool" contains "b", "o", "l" in order but not consecutively
     // as the substring "bol". Fuzzy matching should still find it.
-    const fields: Field[] = [
-      { key: "bool", type: "boolean", label: "Bool", value: false },
-    ];
+    const fields: Field[] = [{ key: "bool", type: "boolean", label: "Bool", value: false }];
     const body = createSettingsModalBody(
       { title: "test", fields, enableSearch: true },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -855,9 +827,7 @@ describe("createSettingsModalBody — happy paths", () => {
   });
 
   it("colors the search query with warning color when there are zero search matches", () => {
-    const fields: Field[] = [
-      { key: "bool", type: "boolean", label: "Bool", value: false },
-    ];
+    const fields: Field[] = [{ key: "bool", type: "boolean", label: "Bool", value: false }];
     const seenColors: { color: string; text: string }[] = [];
     const captureTheme: Theme = {
       ...fakeTheme(),
@@ -878,9 +848,7 @@ describe("createSettingsModalBody — happy paths", () => {
     body.render(80);
 
     // Find if 'x' was colored with 'warning'
-    const warningMatch = seenColors.find(
-      (c) => c.text === "x" && c.color === "warning",
-    );
+    const warningMatch = seenColors.find((c) => c.text === "x" && c.color === "warning");
     expect(warningMatch).toBeDefined();
 
     // Now user types 'b' (part of 'Bool'), which matches, so the warning color should NOT be used
@@ -979,9 +947,7 @@ describe("createSettingsModalBody — happy paths", () => {
     );
 
     const output = body.render(80).join("\n");
-    expect(output).toContain(
-      "Set the timeout value. (range: 1 to 100, integer only)",
-    );
+    expect(output).toContain("Set the timeout value. (range: 1 to 100, integer only)");
   });
 
   it("appends min or max and integer constraints to NumberField descriptions", () => {
@@ -1058,11 +1024,7 @@ describe("createSettingsModalBody — happy paths", () => {
     body.handleInput?.("\x1br"); // alt+r
 
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(
-      "num",
-      5,
-      expect.objectContaining({ key: "num" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("num", 5, expect.objectContaining({ key: "num" }));
   });
 
   it("pressing alt+r does not reset the value if the field is disabled or currently editing", () => {
@@ -1140,21 +1102,13 @@ describe("createSettingsModalBody — happy paths", () => {
 
     // Right -> step up to 15
     body.handleInput?.("\x1b[C");
-    expect(onChange).toHaveBeenCalledWith(
-      "num",
-      15,
-      expect.objectContaining({ key: "num" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("num", 15, expect.objectContaining({ key: "num" }));
 
     onChange.mockClear();
 
     // Left from 15 -> step down to 10
     body.handleInput?.("\x1b[D");
-    expect(onChange).toHaveBeenCalledWith(
-      "num",
-      10,
-      expect.objectContaining({ key: "num" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("num", 10, expect.objectContaining({ key: "num" }));
   });
 });
 
@@ -1165,9 +1119,7 @@ describe("createSettingsModalBody — happy paths", () => {
 describe("generic body APIs", () => {
   it("actions render as pill strip and Tab cycles through them", () => {
     const onAction = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [{ id: "t1", label: "Tab 1" }];
     const actions = [
       { id: "save", label: "Save" },
@@ -1194,9 +1146,7 @@ describe("generic body APIs", () => {
 
   it("Enter on enabled action calls onAction", () => {
     const onAction = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const actions = [{ id: "save", label: "Save" }];
     const body = createSettingsModalBody(
       { fields, actions, onAction },
@@ -1213,9 +1163,7 @@ describe("generic body APIs", () => {
   it("disabled action is a no-op on Enter and remains a Tab stop", () => {
     const onAction = vi.fn();
     const isDisabled = true;
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const actions = [{ id: "save", label: "Save", disabled: () => isDisabled }];
     const body = createSettingsModalBody(
       { fields, actions, onAction },
@@ -1231,9 +1179,7 @@ describe("generic body APIs", () => {
 
   it("onRequestExit defers dirty Esc instead of mounting built-in confirm", () => {
     const onRequestExit = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const body = createSettingsModalBody(
       { fields, mode: "buffered", onSave: vi.fn(), onRequestExit },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -1244,16 +1190,12 @@ describe("generic body APIs", () => {
     body.handleInput?.("\x1b"); // Escape
 
     expect(onRequestExit).toHaveBeenCalledTimes(1);
-    expect(body.render(80).join("\n")).not.toContain(
-      "You have unsaved changes.",
-    );
+    expect(body.render(80).join("\n")).not.toContain("You have unsaved changes.");
   });
 
   it("readOnly blocks edits but renders rows normally", () => {
     const onChange = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const body = createSettingsModalBody(
       { fields, readOnly: true, onChange },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -1266,9 +1208,7 @@ describe("generic body APIs", () => {
   });
 
   it("readOnly suppresses row-specific footer hints", () => {
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const body = createSettingsModalBody(
       { fields, readOnly: true },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -1299,9 +1239,7 @@ describe("generic body APIs", () => {
   });
 
   it("mountOverlay and dismissOverlay control the overlay slot", () => {
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const body = createSettingsModalBody(
       { fields },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -1321,9 +1259,7 @@ describe("generic body APIs", () => {
 
   it("onActiveTabChange fires after every active tab change, not on mount", () => {
     const onActiveTabChange = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [
       { id: "tab1", label: "Tab 1" },
       { id: "tab2", label: "Tab 2" },
@@ -1345,9 +1281,7 @@ describe("generic body APIs", () => {
   it("left/right arrow keys cycle through tabs and actions when tabActionFocus is active", () => {
     const onAction = vi.fn();
     const onActiveTabChange = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [
       { id: "t1", label: "Tab 1" },
       { id: "t2", label: "Tab 2" },
@@ -1392,9 +1326,7 @@ describe("generic body APIs", () => {
   });
 
   it("left/right in readOnly field zone enters the action row", () => {
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [{ id: "t1", label: "Tab 1" }];
     const actions = [
       { id: "save", label: "Save" },
@@ -1423,9 +1355,7 @@ describe("generic body APIs", () => {
   });
 
   it("left/right from readOnly tab focus enters the action row", () => {
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [{ id: "t1", label: "Tab 1" }];
     const actions = [
       { id: "save", label: "Save" },
@@ -1452,9 +1382,7 @@ describe("generic body APIs", () => {
 
   it("Tab in readOnly cycles through tabs; Shift+Tab cycles backward", () => {
     const onActiveTabChange = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [
       { id: "t1", label: "Tab 1" },
       { id: "t2", label: "Tab 2" },
@@ -1490,9 +1418,7 @@ describe("generic body APIs", () => {
 
   it("left/right in non-readOnly field zone with tabs still delegates to field renderer", () => {
     const onChange = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const tabs = [{ id: "t1", label: "Tab 1" }];
     const actions = [{ id: "save", label: "Save" }];
     const body = createSettingsModalBody(
@@ -1503,11 +1429,7 @@ describe("generic body APIs", () => {
     body.render(80);
     // Field zone with non-readOnly: → toggles boolean, does NOT enter action ring
     body.handleInput?.("\x1b[C");
-    expect(onChange).toHaveBeenCalledWith(
-      "x",
-      true,
-      expect.objectContaining({ key: "x" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("x", true, expect.objectContaining({ key: "x" }));
     // Focus stays in field zone (no action pill highlighted)
     expect(body.render(80).join("\n")).not.toContain("Save" + "\x1b[7m"); // not inverse-highlighted
   });
@@ -1515,9 +1437,7 @@ describe("generic body APIs", () => {
   it("closeOnSave: false keeps modal open after successful onSave", () => {
     const onSave = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
     const body = createSettingsModalBody(
       { title: "test", fields, mode: "buffered", onSave, closeOnSave: false },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close },

@@ -15,8 +15,7 @@ export const loadSessionMessages = (file: string): LoadedSession => {
   const sessionEntries = entries.filter((entry) => entry.type !== "header");
   const context = buildSessionContext(sessionEntries as any);
   const messages = (context.messages as any[]).filter(
-    (msg): msg is Message =>
-      msg && typeof msg.role === "string" && "content" in msg,
+    (msg): msg is Message => msg && typeof msg.role === "string" && "content" in msg,
   );
   return {
     messageCount: messages.length,

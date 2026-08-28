@@ -5,14 +5,7 @@
  */
 
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import {
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigManager, type ConfigManagerOptions } from "./config-manager.ts";
 import {
@@ -32,11 +25,7 @@ vi.mock("./settings/config-flow.js", () => ({
 }));
 
 import type { Field, SettingsModalOptions } from "./settings/types.ts";
-import type {
-  Theme,
-  ExtensionContext,
-  FileEntry,
-} from "@earendil-works/pi-coding-agent";
+import type { Theme, ExtensionContext, FileEntry } from "@earendil-works/pi-coding-agent";
 
 // ─────────────────────────────────────────────────────────────────────
 // Session JSONL fixtures (parsed by pi's own parseSessionEntries)
@@ -79,10 +68,7 @@ function createManager(opts?: Partial<ConfigManagerOptions<TestConfig>>) {
   });
 }
 
-function entriesFor(
-  leafId: string,
-  parentId: string | null = null,
-): FileEntry[] {
+function entriesFor(leafId: string, parentId: string | null = null): FileEntry[] {
   const parentLine = parentId
     ? `{"type":"message","id":"${parentId}","parentId":null,"timestamp":"2024-01-01T00:00:01.000Z","message":{"role":"user","content":"p"}}\n`
     : "";
@@ -156,12 +142,7 @@ describe("ConfigManager constructor", () => {
       defaults: DEFAULTS,
       fields: FIELDS,
     });
-    const result = mgr.save(
-      { enabled: false, threshold: 5 },
-      "global",
-      undefined,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
     expect(result.path).toBe(join(tempDir, "my-ext-config.json"));
   });
 
@@ -184,12 +165,7 @@ describe("ConfigManager constructor", () => {
       defaults: DEFAULTS,
       fields: FIELDS,
     });
-    const result = mgr.save(
-      { enabled: false, threshold: 5 },
-      "global",
-      undefined,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
     expect(result.path).toBe(join(tempDir, "custom-config.json"));
   });
 });
@@ -264,9 +240,7 @@ describe("deepEqual", () => {
   });
 
   it("returns true for nested objects", () => {
-    expect(deepEqual({ a: { b: { c: 1 } } }, { a: { b: { c: 1 } } })).toBe(
-      true,
-    );
+    expect(deepEqual({ a: { b: { c: 1 } } }, { a: { b: { c: 1 } } })).toBe(true);
   });
 
   it("returns false for nested objects with different values", () => {
@@ -377,10 +351,7 @@ describe("ConfigManager.load()", () => {
     writeGlobal({ threshold: 99 });
     const validate = vi.fn((raw: Record<string, unknown>) => ({
       enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
-      threshold:
-        typeof raw.threshold === "number"
-          ? Math.min(10, Math.max(1, raw.threshold))
-          : 5,
+      threshold: typeof raw.threshold === "number" ? Math.min(10, Math.max(1, raw.threshold)) : 5,
     }));
     const mgr = createManager({ validate });
     const result = mgr.load(undefined, tempDir);
@@ -411,8 +382,7 @@ describe("ConfigManager.load()", () => {
       env: {
         threshold: {
           var: "PI_TEST_THRESHOLD",
-          parse: (raw: string) =>
-            Math.min(10, Math.max(1, Number.parseFloat(raw))),
+          parse: (raw: string) => Math.min(10, Math.max(1, Number.parseFloat(raw))),
         },
       },
     });
@@ -474,9 +444,7 @@ describe("ConfigManager.save()", () => {
   it("writes all fields when no file existed before save", () => {
     const mgr = createManager();
     mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     // No file existed → every field differs from the empty baseline
     expect(saved).toEqual({ enabled: false, threshold: 5 });
     expect(Object.keys(saved)).toEqual(["enabled", "threshold"]);
@@ -485,9 +453,7 @@ describe("ConfigManager.save()", () => {
   it("writes all fields when all differ from defaults (no file existed)", () => {
     const mgr = createManager();
     mgr.save({ enabled: false, threshold: 10 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: false, threshold: 10 });
   });
 
@@ -496,9 +462,7 @@ describe("ConfigManager.save()", () => {
     writeGlobal({ enabled: false, threshold: 3 });
     const mgr = createManager();
     mgr.save({ enabled: true, threshold: 7 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: true, threshold: 7 });
   });
 
@@ -507,9 +471,7 @@ describe("ConfigManager.save()", () => {
     const mgr = createManager();
     // Only enabled changed; threshold stayed the same
     mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: false, threshold: 5 });
   });
 
@@ -518,9 +480,7 @@ describe("ConfigManager.save()", () => {
     const mgr = createManager();
     mgr.save({ enabled: false, threshold: 7 }, "global", undefined, tempDir);
     // No write needed — file is already up-to-date
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: false, threshold: 7 });
     // File should NOT have been re-touched (mtime unchanged same content)
     const written = readFileSync(join(tempDir, "test-config.json"), "utf-8");
@@ -530,9 +490,7 @@ describe("ConfigManager.save()", () => {
   it("writes to project directory with diff semantics", () => {
     const mgr = createManager();
     mgr.save({ enabled: true, threshold: 7 }, "project", tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, ".pi", "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, ".pi", "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: true, threshold: 7 });
     expect(Object.keys(saved)).toEqual(["enabled", "threshold"]);
   });
@@ -548,9 +506,7 @@ describe("ConfigManager.save()", () => {
     const mgr = createManager();
     // Save with known key changes; unknown key should survive
     mgr.save({ enabled: false, threshold: 7 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: false, threshold: 7, customFormat: true });
   });
 
@@ -560,9 +516,7 @@ describe("ConfigManager.save()", () => {
     // Save with exact defaults — no known keys to write, but unknown keys survive
     // Unknown keys differ from the (empty) defaults, so they get written.
     mgr.save(DEFAULTS, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({
       enabled: true,
       threshold: 5,
@@ -574,9 +528,7 @@ describe("ConfigManager.save()", () => {
   it("does not add phantom unknown keys when no file existed before save", () => {
     const mgr = createManager();
     mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(Object.keys(saved)).toEqual(["enabled", "threshold"]);
   });
 
@@ -584,9 +536,7 @@ describe("ConfigManager.save()", () => {
     writeProject({ customLabel: "test" });
     const mgr = createManager();
     mgr.save({ enabled: false, threshold: 3 }, "project", tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, ".pi", "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, ".pi", "test-config.json"), "utf-8"));
     expect(saved).toEqual({
       enabled: false,
       threshold: 3,
@@ -599,9 +549,7 @@ describe("ConfigManager.save()", () => {
     const mgr = createManager();
     // Only threshold changed; enabled stayed
     mgr.save({ enabled: true, threshold: 8 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     expect(saved).toEqual({ enabled: true, threshold: 8 });
   });
 
@@ -610,9 +558,7 @@ describe("ConfigManager.save()", () => {
     writeGlobal({ enabled: false, threshold: 3 });
     const mgr = createManager();
     mgr.save({ enabled: true, threshold: 3 }, "global", undefined, tempDir);
-    const saved = JSON.parse(
-      readFileSync(join(tempDir, "test-config.json"), "utf-8"),
-    );
+    const saved = JSON.parse(readFileSync(join(tempDir, "test-config.json"), "utf-8"));
     // threshold: 3 matches the file, so it wasn't in the diff. But the
     // merge ({...existing, ...diff}) preserves it from existing.
     expect(saved).toEqual({ enabled: true, threshold: 3 });
@@ -662,10 +608,7 @@ describe("ConfigManager.openSettings()", () => {
 
     await mgr.openSettings(ctx, tempDir, onUserSave, tempDir);
 
-    expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("Invalid JSON"),
-      "warning",
-    );
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Invalid JSON"), "warning");
     // Still delegated to the flow
     expect(mockOpenConfigFlow).toHaveBeenCalledTimes(1);
   });
@@ -683,10 +626,7 @@ describe("ConfigManager.openSettings()", () => {
 
     await mgr.openSettings(ctx, tempDir, onUserSave, tempDir);
 
-    expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("Invalid JSON"),
-      "warning",
-    );
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Invalid JSON"), "warning");
     expect(mockOpenConfigFlow).toHaveBeenCalledTimes(1);
   });
 
@@ -778,12 +718,7 @@ describe("ConfigManager._ensureSession()", () => {
     // Pending mode: session scope is available, saves go to in-memory store
     expect(mgr.hasSession()).toBe(true);
     // save('session') works in pending mode (in-memory store updated)
-    const result = mgr.save(
-      { enabled: false, threshold: 8 },
-      "session",
-      tempDir,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 8 }, "session", tempDir, tempDir);
     expect(result.changed).toBe(true);
   });
 
@@ -803,12 +738,7 @@ describe("ConfigManager._ensureSession()", () => {
     // leafId-null: file path known but no real leaf yet → pending
     expect(mgr.hasSession()).toBe(true);
     // save('session') stores under PENDING_SENTINEL
-    const result = mgr.save(
-      { enabled: false, threshold: 8 },
-      "session",
-      tempDir,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 8 }, "session", tempDir, tempDir);
     expect(result.changed).toBe(true);
   });
 
@@ -860,12 +790,7 @@ describe("ConfigManager._ensureSession()", () => {
     await mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
 
     expect(mgr.hasSession()).toBe(true);
-    const result = mgr.save(
-      { enabled: false, threshold: 8 },
-      "session",
-      tempDir,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 8 }, "session", tempDir, tempDir);
     expect(result.changed).toBe(true);
   });
 
@@ -910,12 +835,7 @@ describe("ConfigManager._ensureSession()", () => {
       // Pending: session scope is available
       expect(mgr.hasSession()).toBe(true);
       // Save works (in-memory store updated, no JSONL append)
-      const result = mgr.save(
-        { enabled: false, threshold: 8 },
-        "session",
-        tempDir,
-        tempDir,
-      );
+      const result = mgr.save({ enabled: false, threshold: 8 }, "session", tempDir, tempDir);
       expect(result.changed).toBe(true);
       // load() reflects the in-memory pending override
       const loaded = mgr.load(tempDir, tempDir);
@@ -1145,13 +1065,7 @@ describe("ConfigManager._ensureSession()", () => {
       // Pending mode
       await mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
       // Set some pending config so flush has real content to migrate
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "sid-perf",
-        "__pending__",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "sid-perf", "__pending__", { threshold: 3 });
       getEntries.mockClear();
 
       // Materialize file
@@ -1176,15 +1090,9 @@ describe("ConfigManager._ensureSession()", () => {
       await mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
 
       // Set pending session config directly in the store
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "sid-layer",
-        "__pending__",
-        {
-          threshold: 3,
-        },
-      );
+      setSessionConfig("session-config-test", tempDir, "sid-layer", "__pending__", {
+        threshold: 3,
+      });
 
       const result = mgr.layerValues("session", tempDir, tempDir);
       expect(result.threshold).toBe(3);
@@ -1311,8 +1219,7 @@ describe("ConfigManager._ensureSession()", () => {
       const sessionFile = join(tempDir, "recovery.jsonl");
       const appendEntry = vi.fn((type: string, data: unknown) => {
         // Actually append to the JSONL so parseSessionEntries can find it
-        const line =
-          JSON.stringify({ type: "custom", customType: type, data }) + "\n";
+        const line = JSON.stringify({ type: "custom", customType: type, data }) + "\n";
         writeFileSync(sessionFile, readFileSync(sessionFile, "utf-8") + line);
       });
       const ctx = makeCtx({
@@ -1330,8 +1237,7 @@ describe("ConfigManager._ensureSession()", () => {
       // Materialize: write the real session entries (header + message for leaf-1)
       // so getAncestorChain can resolve leaf-1 during recovery.
       const baseEntries = entriesFor("leaf-1");
-      const baseContent =
-        baseEntries.map((e: any) => JSON.stringify(e)).join("\n") + "\n";
+      const baseContent = baseEntries.map((e: any) => JSON.stringify(e)).join("\n") + "\n";
       writeFileSync(sessionFile, baseContent);
       mgr.save({ enabled: true, threshold: 3 }, "session", tempDir, tempDir);
 
@@ -1489,10 +1395,7 @@ describe("ConfigManager.layerValues()", () => {
   it("applies validate at the end for all scopes", () => {
     const validate = vi.fn((raw: Record<string, unknown>) => ({
       enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
-      threshold:
-        typeof raw.threshold === "number"
-          ? Math.min(10, Math.max(1, raw.threshold))
-          : 5,
+      threshold: typeof raw.threshold === "number" ? Math.min(10, Math.max(1, raw.threshold)) : 5,
     }));
     const mgr = createManager({ validate });
     writeGlobal({ threshold: 99 });
@@ -1643,21 +1546,11 @@ describe("ConfigManager.scopeSources()", () => {
 describe("ConfigManager.save() descriptor", () => {
   it("created true on first write, false on second", () => {
     const mgr = createManager();
-    const first = mgr.save(
-      { enabled: false, threshold: 5 },
-      "global",
-      undefined,
-      tempDir,
-    );
+    const first = mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
     expect(first.created).toBe(true);
     expect(first.changed).toBe(true);
 
-    const second = mgr.save(
-      { enabled: false, threshold: 5 },
-      "global",
-      undefined,
-      tempDir,
-    );
+    const second = mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
     expect(second.created).toBe(false);
     expect(second.changed).toBe(false);
   });
@@ -1666,46 +1559,26 @@ describe("ConfigManager.save() descriptor", () => {
     writeGlobal({ enabled: true, threshold: 5 });
     const mgr = createManager();
     mgr.save({ enabled: true, threshold: 5 }, "global", undefined, tempDir);
-    const result = mgr.save(
-      { enabled: true, threshold: 5 },
-      "global",
-      undefined,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: true, threshold: 5 }, "global", undefined, tempDir);
     expect(result.changed).toBe(false);
   });
 
   it("session save shape", () => {
     const mgr = createManager({ sessionConfig: true });
     initSession(mgr);
-    const result = mgr.save(
-      { enabled: false, threshold: 8 },
-      "session",
-      tempDir,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 8 }, "session", tempDir, tempDir);
     expect(result).toEqual({ path: "", created: false, changed: true });
   });
 
   it("returns absolute path for global scope", () => {
     const mgr = createManager();
-    const result = mgr.save(
-      { enabled: false, threshold: 5 },
-      "global",
-      undefined,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: false, threshold: 5 }, "global", undefined, tempDir);
     expect(result.path).toBe(join(tempDir, "test-config.json"));
   });
 
   it("returns absolute path for project scope", () => {
     const mgr = createManager();
-    const result = mgr.save(
-      { enabled: true, threshold: 7 },
-      "project",
-      tempDir,
-      tempDir,
-    );
+    const result = mgr.save({ enabled: true, threshold: 7 }, "project", tempDir, tempDir);
     expect(result.path).toBe(join(tempDir, ".pi", "test-config.json"));
   });
 });
@@ -1776,10 +1649,7 @@ describe("ConfigManager session config", () => {
   });
 
   // Minimal 2-entry JSONL: leaf + root
-  function entriesFor(
-    leafId: string,
-    parentId: string | null = null,
-  ): FileEntry[] {
+  function entriesFor(leafId: string, parentId: string | null = null): FileEntry[] {
     const parentLine = parentId
       ? `{"type":"message","id":"${parentId}","parentId":null,"timestamp":"2024-01-01T00:00:01.000Z","message":{"role":"user","content":"p"}}\n`
       : "";
@@ -1813,13 +1683,7 @@ describe("ConfigManager session config", () => {
         sessionConfig: true,
       });
       initSession(mgr);
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       const result = mgr.load(tempDir, tempDir);
       expect(result.threshold).toBe(3);
       delete process.env.PI_TEST_THRESHOLD;
@@ -1829,13 +1693,7 @@ describe("ConfigManager session config", () => {
       writeProject({ threshold: 7 });
       const mgr = createManager({ sessionConfig: true });
       initSession(mgr);
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       const result = mgr.load(tempDir, tempDir);
       expect(result.threshold).toBe(3);
     });
@@ -1844,13 +1702,7 @@ describe("ConfigManager session config", () => {
       writeGlobal({ threshold: 9 });
       const mgr = createManager({ sessionConfig: true });
       initSession(mgr);
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       const result = mgr.load(tempDir, tempDir);
       expect(result.threshold).toBe(3);
     });
@@ -1858,13 +1710,7 @@ describe("ConfigManager session config", () => {
     it("session overrides defaults", () => {
       const mgr = createManager({ sessionConfig: true });
       initSession(mgr);
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       const result = mgr.load(tempDir, tempDir);
       expect(result.threshold).toBe(3);
     });
@@ -1877,13 +1723,7 @@ describe("ConfigManager session config", () => {
     });
 
     it("does not apply session overrides when initSession not called", () => {
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       const mgr = createManager({ sessionConfig: true });
       const result = mgr.load(tempDir, tempDir);
       expect(result.threshold).toBe(DEFAULTS.threshold);
@@ -1903,9 +1743,7 @@ describe("ConfigManager session config", () => {
 
     it("throws when saving to session scope without initSession", () => {
       const mgr = createManager({ sessionConfig: true });
-      expect(() => mgr.save(DEFAULTS, "session")).toThrow(
-        "session not initialized",
-      );
+      expect(() => mgr.save(DEFAULTS, "session")).toThrow("session not initialized");
     });
   });
 
@@ -1915,13 +1753,7 @@ describe("ConfigManager session config", () => {
     it("clears session config for the leaf", () => {
       const mgr = createManager({ sessionConfig: true });
       initSession(mgr);
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       expect(mgr.load(tempDir, tempDir).threshold).toBe(3);
       mgr.resetScope("session", tempDir, tempDir);
       expect(mgr.load(tempDir, tempDir).threshold).toBe(DEFAULTS.threshold);
@@ -1968,9 +1800,7 @@ describe("ConfigManager session config", () => {
 
     it("throws when resetting session scope without initSession", () => {
       const mgr = createManager({ sessionConfig: true });
-      expect(() => mgr.resetScope("session")).toThrow(
-        "session not initialized",
-      );
+      expect(() => mgr.resetScope("session")).toThrow("session not initialized");
     });
   });
 
@@ -1980,13 +1810,7 @@ describe("ConfigManager session config", () => {
     it("clears session config for the leaf (same as reset)", () => {
       const mgr = createManager({ sessionConfig: true });
       initSession(mgr);
-      setSessionConfig(
-        "session-config-test",
-        tempDir,
-        "test-session",
-        "leaf-1",
-        { threshold: 3 },
-      );
+      setSessionConfig("session-config-test", tempDir, "test-session", "leaf-1", { threshold: 3 });
       expect(mgr.load(tempDir, tempDir).threshold).toBe(3);
       mgr.deleteScope("session", tempDir, tempDir);
       expect(mgr.load(tempDir, tempDir).threshold).toBe(DEFAULTS.threshold);
@@ -2029,9 +1853,7 @@ describe("ConfigManager session config", () => {
 
     it("throws when deleting session scope without initSession", () => {
       const mgr = createManager({ sessionConfig: true });
-      expect(() => mgr.deleteScope("session")).toThrow(
-        "session not initialized",
-      );
+      expect(() => mgr.deleteScope("session")).toThrow("session not initialized");
     });
   });
 

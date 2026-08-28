@@ -22,17 +22,11 @@ function makeEntry(
 }
 
 function hexId(label: string): string {
-  const raw = Array.from(label).reduce(
-    (h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0,
-    0,
-  );
+  const raw = Array.from(label).reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
   return Math.abs(raw).toString(16).padStart(12, "0").slice(0, 12);
 }
 
-function makeObservation(
-  id: string,
-  overrides: Partial<Observation> = {},
-): Observation {
+function makeObservation(id: string, overrides: Partial<Observation> = {}): Observation {
   return {
     id,
     content: `Content ${id}`,
@@ -44,10 +38,7 @@ function makeObservation(
   };
 }
 
-function makeReflection(
-  id: string,
-  overrides: Partial<Reflection> = {},
-): Reflection {
+function makeReflection(id: string, overrides: Partial<Reflection> = {}): Reflection {
   return {
     id,
     content: `Reflection ${id}`,
@@ -57,33 +48,21 @@ function makeReflection(
   };
 }
 
-function recordEntry(
-  id: string,
-  observations: Observation[],
-  coversUpToId: string,
-): Entry {
+function recordEntry(id: string, observations: Observation[], coversUpToId: string): Entry {
   return makeEntry(id, "custom", {
     customType: "om.observations.recorded",
     data: { observations, coversUpToId },
   });
 }
 
-function reflectEntry(
-  id: string,
-  reflections: Reflection[],
-  coversUpToId: string,
-): Entry {
+function reflectEntry(id: string, reflections: Reflection[], coversUpToId: string): Entry {
   return makeEntry(id, "custom", {
     customType: "om.reflections.recorded",
     data: { reflections, coversUpToId },
   });
 }
 
-function compactionEntry(
-  id: string,
-  firstKeptEntryId: string,
-  details?: unknown,
-): Entry {
+function compactionEntry(id: string, firstKeptEntryId: string, details?: unknown): Entry {
   return makeEntry(id, "compaction", { firstKeptEntryId, details });
 }
 
@@ -139,16 +118,14 @@ describe("fullProjection", () => {
 
 describe("visibleProjection", () => {
   it("returns empty when no compaction details", async () => {
-    const { visibleProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { visibleProjection } = await import("../src/om/ledger/projection.js");
     const result = visibleProjection([]);
     expect(result.observations).toEqual([]);
     expect(result.reflections).toEqual([]);
   });
 
   it("returns from latest compaction details", async () => {
-    const { visibleProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { visibleProjection } = await import("../src/om/ledger/projection.js");
     const obs1 = makeObservation(hexId("obs-a"));
     const ref1 = makeReflection(hexId("ref-a"));
     const entries: Entry[] = [
@@ -172,8 +149,7 @@ describe("visibleProjection", () => {
 
 describe("buildCompactionProjection", () => {
   it("builds projection for compaction (coversUpToId at firstKeptEntryId)", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs1 = makeObservation(hexId("obs-a"));
     const obs2 = makeObservation(hexId("obs-b"));
     const ref1 = makeReflection(hexId("ref-a"));
@@ -198,13 +174,9 @@ describe("buildCompactionProjection", () => {
   });
 
   it("triggers full fold when observations pool exceeds threshold", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs = makeObservation(hexId("big-obs"), { tokenCount: 25_000 });
-    const entries: Entry[] = [
-      src("kept-entry"),
-      recordEntry("e1", [obs], "kept-entry"),
-    ];
+    const entries: Entry[] = [src("kept-entry"), recordEntry("e1", [obs], "kept-entry")];
     const result = buildCompactionProjection(entries, "kept-entry", {
       observationsPoolMaxTokens: 20_000,
     });
@@ -212,8 +184,7 @@ describe("buildCompactionProjection", () => {
   });
 
   it("includes details object with fold metadata", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs = makeObservation(hexId("obs-details"));
     const ref = makeReflection(hexId("ref-details"));
     const entries: Entry[] = [
@@ -257,8 +228,7 @@ describe("diffProjection", () => {
 
 describe("latestFullFoldBoundaryId", () => {
   it("returns firstKeptEntryId of latest full-fold compaction", async () => {
-    const { latestFullFoldBoundaryId } =
-      await import("../src/om/ledger/projection.js");
+    const { latestFullFoldBoundaryId } = await import("../src/om/ledger/projection.js");
     const entries: Entry[] = [
       src("src0000000001"),
       compactionEntry("c1", "src0000000001", {
@@ -275,8 +245,7 @@ describe("latestFullFoldBoundaryId", () => {
   });
 
   it("returns undefined when no full-fold compaction", async () => {
-    const { latestFullFoldBoundaryId } =
-      await import("../src/om/ledger/projection.js");
+    const { latestFullFoldBoundaryId } = await import("../src/om/ledger/projection.js");
     const entries: Entry[] = [compactionEntry("c1", "src0000000001")];
     const result = latestFullFoldBoundaryId(entries);
     expect(result).toBeUndefined();
@@ -287,8 +256,7 @@ describe("latestFullFoldBoundaryId", () => {
 
 describe("buildCompactionProjection — fullFoldAlways", () => {
   it("includes reflections when no full-fold exists and fullFoldAlways is true", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs1 = makeObservation(hexId("obs-a"));
     const ref1 = makeReflection(hexId("ref-a"));
     // No prior full-fold compaction in the entries.
@@ -310,8 +278,7 @@ describe("buildCompactionProjection — fullFoldAlways", () => {
   });
 
   it("excludes reflections when no full-fold exists and fullFoldAlways is false", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs1 = makeObservation(hexId("obs-a"));
     const ref1 = makeReflection(hexId("ref-a"));
     const entries: Entry[] = [
@@ -329,8 +296,7 @@ describe("buildCompactionProjection — fullFoldAlways", () => {
   });
 
   it("still uses full-fold boundary when one exists, regardless of fullFoldAlways", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs1 = makeObservation(hexId("obs-a"));
     const ref1 = makeReflection(hexId("ref-a"));
     const entries: Entry[] = [
@@ -357,8 +323,7 @@ describe("buildCompactionProjection — fullFoldAlways", () => {
   });
 
   it("excludes reflections after the full-fold boundary even with fullFoldAlways", async () => {
-    const { buildCompactionProjection } =
-      await import("../src/om/ledger/projection.js");
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const ref1 = makeReflection(hexId("ref-after"));
     const entries: Entry[] = [
       src("full-fold-entry"),

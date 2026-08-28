@@ -28,16 +28,10 @@ import {
   PENDING_SENTINEL,
   getRawSessionConfig,
 } from "./config.js";
-import {
-  openConfigFlow,
-  type ExtraSelectorEntry,
-} from "./settings/config-flow.js";
+import { openConfigFlow, type ExtraSelectorEntry } from "./settings/config-flow.js";
 import { validateFieldValue } from "./settings/validate-field.ts";
 import type { Field } from "./settings/types.ts";
-import type {
-  ExtensionContext,
-  FileEntry,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, FileEntry } from "@earendil-works/pi-coding-agent";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -135,8 +129,7 @@ export class ConfigManager<T extends object> {
   private _getEntries: (() => FileEntry[]) | undefined;
   private _filename: string;
   // Pending-mode session persistence state
-  private _sessionPersist: "persisted" | "pending" | "unavailable" =
-    "unavailable";
+  private _sessionPersist: "persisted" | "pending" | "unavailable" = "unavailable";
   private _sessionManager: SessionManagerFacade | undefined;
   private _pendingCwd: string | undefined;
 
@@ -167,9 +160,7 @@ export class ConfigManager<T extends object> {
 
   /** True when session config scope is available (persisted or pending). */
   hasSession(): boolean {
-    return (
-      this._sessionPersist === "persisted" || this._sessionPersist === "pending"
-    );
+    return this._sessionPersist === "persisted" || this._sessionPersist === "pending";
   }
 
   /**
@@ -198,12 +189,7 @@ export class ConfigManager<T extends object> {
       if (currentSessionId && this._sessionId !== currentSessionId) {
         const oldSessionId = this._sessionId;
         const oldPendingCwd = this._pendingCwd ?? process.cwd();
-        clearSessionConfig(
-          this._getEntryType(),
-          oldPendingCwd,
-          oldSessionId,
-          PENDING_SENTINEL,
-        );
+        clearSessionConfig(this._getEntryType(), oldPendingCwd, oldSessionId, PENDING_SENTINEL);
         this._sessionId = undefined;
         this._leafId = undefined;
         this._entries = undefined;
@@ -244,10 +230,7 @@ export class ConfigManager<T extends object> {
       return false;
     }
 
-    if (
-      this.opts.scopes?.session === false ||
-      this.opts.sessionConfig === false
-    ) {
+    if (this.opts.scopes?.session === false || this.opts.sessionConfig === false) {
       this._sessionPersist = "unavailable";
       return false;
     }
@@ -275,12 +258,8 @@ export class ConfigManager<T extends object> {
       const appendEntryFn = (type: string, data: unknown) => {
         mutable.appendCustomEntry(type, data);
       };
-      this.initSession(
-        sm.getSessionId()!,
-        leafId,
-        sm.getEntries?.() ?? [],
-        appendEntryFn,
-        () => sm.getEntries?.(),
+      this.initSession(sm.getSessionId()!, leafId, sm.getEntries?.() ?? [], appendEntryFn, () =>
+        sm.getEntries?.(),
       );
       this._sessionPersist = "persisted";
       this._sessionManager = mutable; // keep facade for identity guard (F1)
@@ -374,28 +353,13 @@ export class ConfigManager<T extends object> {
 
     const targetCwd = cwd ?? this._pendingCwd ?? process.cwd();
     const pendingConfig =
-      getRawSessionConfig(
-        this._getEntryType(),
-        targetCwd,
-        this._sessionId!,
-        PENDING_SENTINEL,
-      ) ?? {};
+      getRawSessionConfig(this._getEntryType(), targetCwd, this._sessionId!, PENDING_SENTINEL) ??
+      {};
 
     if (Object.keys(pendingConfig).length > 0) {
       // Migrate pending config to the real leafId (in-memory store).
-      setSessionConfig(
-        this._getEntryType(),
-        targetCwd,
-        this._sessionId!,
-        leaf,
-        pendingConfig,
-      );
-      clearSessionConfig(
-        this._getEntryType(),
-        targetCwd,
-        this._sessionId!,
-        PENDING_SENTINEL,
-      );
+      setSessionConfig(this._getEntryType(), targetCwd, this._sessionId!, leaf, pendingConfig);
+      clearSessionConfig(this._getEntryType(), targetCwd, this._sessionId!, PENDING_SENTINEL);
       // Append the migrated config to JSONL — flush appends only real
       // pending content (no empty {} entries).
       appendEntryFn(this._getEntryType(), {
@@ -419,11 +383,7 @@ export class ConfigManager<T extends object> {
     appendEntry?: (type: string, data: unknown) => void,
     getEntries?: () => FileEntry[],
   ): void {
-    if (
-      this.opts.scopes?.session === false ||
-      this.opts.sessionConfig === false
-    )
-      return;
+    if (this.opts.scopes?.session === false || this.opts.sessionConfig === false) return;
     this._sessionId = sessionId;
     this._leafId = leafId;
     this._entries = entries;
@@ -444,16 +404,9 @@ export class ConfigManager<T extends object> {
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i];
       if (entry.type === "custom" && entry.customType === entryType) {
-        const data = entry.data as
-          { leafId: string; config: Record<string, unknown> } | undefined;
+        const data = entry.data as { leafId: string; config: Record<string, unknown> } | undefined;
         if (data && data.leafId === leafId) {
-          setSessionConfig(
-            entryType,
-            process.cwd(),
-            sessionId,
-            leafId,
-            data.config,
-          );
+          setSessionConfig(entryType, process.cwd(), sessionId, leafId, data.config);
           break;
         }
       }
@@ -520,12 +473,9 @@ export class ConfigManager<T extends object> {
       project: true,
       session: true,
     };
-    const sessionEnabled =
-      this.opts.sessionConfig !== false && scopes.session !== false;
+    const sessionEnabled = this.opts.sessionConfig !== false && scopes.session !== false;
     const namespace = this._getEntryType();
-    const final = sessionEnabled
-      ? this.applySessionOverrides(withEnv, cwd, namespace)
-      : withEnv;
+    const final = sessionEnabled ? this.applySessionOverrides(withEnv, cwd, namespace) : withEnv;
 
     // Attempt to flush pending session config if the session file has materialized.
     this._tryFlushSession(cwd);
@@ -543,11 +493,7 @@ export class ConfigManager<T extends object> {
     );
   }
 
-  private applySessionOverrides(
-    config: T,
-    cwd: string | undefined,
-    namespace: string,
-  ): T {
+  private applySessionOverrides(config: T, cwd: string | undefined, namespace: string): T {
     const sessionId = this._sessionId;
     const leafId = this._leafId;
     // Use fresh entries if a refresh function was provided; otherwise
@@ -561,20 +507,9 @@ export class ConfigManager<T extends object> {
     let session: Record<string, unknown>;
     if (leafId === PENDING_SENTINEL) {
       session =
-        getRawSessionConfig(
-          namespace,
-          cwd ?? process.cwd(),
-          sessionId,
-          PENDING_SENTINEL,
-        ) ?? {};
+        getRawSessionConfig(namespace, cwd ?? process.cwd(), sessionId, PENDING_SENTINEL) ?? {};
     } else {
-      session = getSessionConfig(
-        namespace,
-        cwd ?? process.cwd(),
-        sessionId,
-        leafId,
-        entries,
-      );
+      session = getSessionConfig(namespace, cwd ?? process.cwd(), sessionId, leafId, entries);
     }
 
     const merged = deepMerge(
@@ -583,15 +518,11 @@ export class ConfigManager<T extends object> {
     ) as T;
 
     // Re-validate after session merge so invalid session values are clamped
-    return this.opts.validate
-      ? this.opts.validate(merged as Record<string, unknown>)
-      : merged;
+    return this.opts.validate ? this.opts.validate(merged as Record<string, unknown>) : merged;
   }
 
   private _applyValidation(config: T): T {
-    return this.opts.validate
-      ? this.opts.validate(config as Record<string, unknown>)
-      : config;
+    return this.opts.validate ? this.opts.validate(config as Record<string, unknown>) : config;
   }
 
   /**
@@ -613,8 +544,7 @@ export class ConfigManager<T extends object> {
 
     // Base: defaults ← global
     let result: Record<string, unknown> = { ...defaults };
-    const globalData =
-      readConfig<Record<string, unknown>>(this._filename, dir) ?? {};
+    const globalData = readConfig<Record<string, unknown>>(this._filename, dir) ?? {};
     result = deepMerge(result, globalData) as Record<string, unknown>;
 
     if (scope === "global") {
@@ -624,8 +554,7 @@ export class ConfigManager<T extends object> {
     // Layer 2: project
     if (cwd) {
       const projectDir = join(cwd, ".pi");
-      const projectData =
-        readConfig<Record<string, unknown>>(this._filename, projectDir) ?? {};
+      const projectData = readConfig<Record<string, unknown>>(this._filename, projectDir) ?? {};
       result = deepMerge(result, projectData) as Record<string, unknown>;
     }
 
@@ -657,15 +586,10 @@ export class ConfigManager<T extends object> {
       project: true,
       session: true,
     };
-    const sessionEnabled =
-      this.opts.sessionConfig !== false && scopes.session !== false;
+    const sessionEnabled = this.opts.sessionConfig !== false && scopes.session !== false;
     const namespace = this._getEntryType();
     if (sessionEnabled) {
-      const sessionResult = this.applySessionOverrides(
-        result as T,
-        cwd,
-        namespace,
-      );
+      const sessionResult = this.applySessionOverrides(result as T, cwd, namespace);
       result = sessionResult as Record<string, unknown>;
     }
 
@@ -682,15 +606,11 @@ export class ConfigManager<T extends object> {
     const dir = configDir ?? getExtensionsDir();
 
     const defaultsLayer = { ...this.opts.defaults } as Partial<T>;
-    const globalLayer = (readConfig<Record<string, unknown>>(
-      this._filename,
-      dir,
-    ) ?? {}) as Partial<T>;
+    const globalLayer = (readConfig<Record<string, unknown>>(this._filename, dir) ??
+      {}) as Partial<T>;
     const projectLayer = cwd
-      ? ((readConfig<Record<string, unknown>>(
-          this._filename,
-          join(cwd, ".pi"),
-        ) ?? {}) as Partial<T>)
+      ? ((readConfig<Record<string, unknown>>(this._filename, join(cwd, ".pi")) ??
+          {}) as Partial<T>)
       : ({} as Partial<T>);
 
     // Env layer: only keys whose env var is set AND parses.
@@ -705,13 +625,7 @@ export class ConfigManager<T extends object> {
       for (const [key, value] of Object.entries(
         this.opts.env as Record<string, EnvParser | string>,
       )) {
-        if (
-          this._envKeyIsActive(
-            key,
-            value,
-            this.opts.defaults as Record<string, unknown>,
-          )
-        ) {
+        if (this._envKeyIsActive(key, value, this.opts.defaults as Record<string, unknown>)) {
           (envLayer as Record<string, unknown>)[key] = envRecord[key];
         }
       }
@@ -724,19 +638,14 @@ export class ConfigManager<T extends object> {
       project: true,
       session: true,
     };
-    const sessionEnabled =
-      this.opts.sessionConfig !== false && scopes.session !== false;
+    const sessionEnabled = this.opts.sessionConfig !== false && scopes.session !== false;
     const namespace = this._getEntryType();
     if (sessionEnabled && this._sessionId && this._leafId) {
       let sessionConfig: Record<string, unknown>;
       if (this._leafId === PENDING_SENTINEL) {
         sessionConfig =
-          getRawSessionConfig(
-            namespace,
-            cwd ?? process.cwd(),
-            this._sessionId,
-            PENDING_SENTINEL,
-          ) ?? {};
+          getRawSessionConfig(namespace, cwd ?? process.cwd(), this._sessionId, PENDING_SENTINEL) ??
+          {};
       } else {
         sessionConfig = getSessionConfig(
           namespace,
@@ -765,13 +674,7 @@ export class ConfigManager<T extends object> {
     }
 
     const winners: Record<string, ConfigLayer> = {};
-    const precedence: ConfigLayer[] = [
-      "session",
-      "env",
-      "project",
-      "global",
-      "defaults",
-    ];
+    const precedence: ConfigLayer[] = ["session", "env", "project", "global", "defaults"];
     for (const key of allKeys) {
       for (const layer of precedence) {
         if (key in (layers[layer] as Record<string, unknown>)) {
@@ -804,9 +707,7 @@ export class ConfigManager<T extends object> {
         label: "Global",
         path: globalPath,
         exists: globalExists,
-        note: globalExists
-          ? globalPath
-          : "(nonexistent — will be created on save)",
+        note: globalExists ? globalPath : "(nonexistent — will be created on save)",
       });
     }
 
@@ -818,9 +719,7 @@ export class ConfigManager<T extends object> {
         label: "Project Local",
         path: projectPath,
         exists: projectExists,
-        note: projectExists
-          ? projectPath
-          : "(nonexistent — will be created on save)",
+        note: projectExists ? projectPath : "(nonexistent — will be created on save)",
       });
     }
 
@@ -854,9 +753,7 @@ export class ConfigManager<T extends object> {
       if (!raw) return false;
       const defaultValue = defaults[key];
       if (typeof defaultValue === "boolean") {
-        return ["1", "true", "yes", "on", "0", "false", "no", "off"].includes(
-          raw.toLowerCase(),
-        );
+        return ["1", "true", "yes", "on", "0", "false", "no", "off"].includes(raw.toLowerCase());
       }
       if (typeof defaultValue === "number") {
         if (Number.isInteger(defaultValue) && defaultValue > 0) {
@@ -934,11 +831,7 @@ export class ConfigManager<T extends object> {
       // already append. The in-memory store is already updated above.
       // Flush from load/openSettings also appends — side-effect-on-read is
       // intentional: config must not be lost on process exit.
-      if (
-        !flushed &&
-        this._sessionPersist === "persisted" &&
-        this._appendEntry
-      ) {
+      if (!flushed && this._sessionPersist === "persisted" && this._appendEntry) {
         this._appendEntry(this._getEntryType(), {
           leafId: this._leafId!,
           config: config as Record<string, unknown>,
@@ -950,18 +843,14 @@ export class ConfigManager<T extends object> {
       throw new Error("cwd is required for project-scoped config save");
     }
 
-    const dir =
-      scope === "project" && cwd
-        ? join(cwd, ".pi")
-        : (configDir ?? getExtensionsDir());
+    const dir = scope === "project" && cwd ? join(cwd, ".pi") : (configDir ?? getExtensionsDir());
     const targetPath = join(dir, this._filename);
     const created = !existsSync(targetPath);
 
     const knownKeys = new Set(Object.keys(this.opts.defaults));
 
     // Read the existing file. If none exists, start from an empty object.
-    const existing =
-      readConfig<Record<string, unknown>>(this._filename, dir) ?? {};
+    const existing = readConfig<Record<string, unknown>>(this._filename, dir) ?? {};
 
     // Build field map for validation
     const fieldMap = new Map<string, Field>();
@@ -1035,10 +924,7 @@ export class ConfigManager<T extends object> {
    * @param configDir Override the global config dir (for tests)
    */
   private _getEntryType(): string {
-    if (
-      typeof this.opts.sessionConfig === "object" &&
-      this.opts.sessionConfig.entryType
-    ) {
+    if (typeof this.opts.sessionConfig === "object" && this.opts.sessionConfig.entryType) {
       return this.opts.sessionConfig.entryType;
     }
     return `session-config-${this.opts.id}`;
@@ -1097,8 +983,7 @@ export class ConfigManager<T extends object> {
           }
           return fields;
         },
-        layerValues: (s) =>
-          this.layerValues(s, cwd, configDir) as Record<string, unknown>,
+        layerValues: (s) => this.layerValues(s, cwd, configDir) as Record<string, unknown>,
         inspect: () => this.inspect(cwd, configDir),
         scopeSources: () => this.scopeSources(cwd, configDir),
         save: async (values, scope) => {
@@ -1129,42 +1014,23 @@ export class ConfigManager<T extends object> {
    * After this call, the file contains only unknown keys. If no
    * unknown keys exist, the file is deleted entirely.
    */
-  resetScope(
-    scope: "global" | "project" | "session",
-    cwd?: string,
-    configDir?: string,
-  ): void {
+  resetScope(scope: "global" | "project" | "session", cwd?: string, configDir?: string): void {
     if (scope === "session") {
       if (!this._sessionId) {
-        throw new Error(
-          "Cannot reset session config: session not initialized.",
-        );
+        throw new Error("Cannot reset session config: session not initialized.");
       }
       const targetCwd = cwd ?? process.cwd();
       if (this._sessionPersist === "pending") {
-        clearSessionConfig(
-          this._getEntryType(),
-          targetCwd,
-          this._sessionId,
-          PENDING_SENTINEL,
-        );
+        clearSessionConfig(this._getEntryType(), targetCwd, this._sessionId, PENDING_SENTINEL);
       } else {
-        clearSessionConfig(
-          this._getEntryType(),
-          targetCwd,
-          this._sessionId,
-          this._leafId!,
-        );
+        clearSessionConfig(this._getEntryType(), targetCwd, this._sessionId, this._leafId!);
       }
       return;
     }
     if (scope === "project" && !cwd) {
       throw new Error("cwd is required for project-scoped config reset");
     }
-    const dir =
-      scope === "project" && cwd
-        ? join(cwd, ".pi")
-        : (configDir ?? getExtensionsDir());
+    const dir = scope === "project" && cwd ? join(cwd, ".pi") : (configDir ?? getExtensionsDir());
     const knownKeys = new Set(Object.keys(this.opts.defaults));
     const existing = readConfig<Record<string, unknown>>(this._filename, dir);
     const unknownKeys: Record<string, unknown> = {};
@@ -1185,42 +1051,23 @@ export class ConfigManager<T extends object> {
    * this removes unknown keys as well — the file is completely gone.
    * Next load will use nothing but defaults.
    */
-  deleteScope(
-    scope: "global" | "project" | "session",
-    cwd?: string,
-    configDir?: string,
-  ): void {
+  deleteScope(scope: "global" | "project" | "session", cwd?: string, configDir?: string): void {
     if (scope === "session") {
       if (!this._sessionId) {
-        throw new Error(
-          "Cannot delete session config: session not initialized.",
-        );
+        throw new Error("Cannot delete session config: session not initialized.");
       }
       const targetCwd = cwd ?? process.cwd();
       if (this._sessionPersist === "pending") {
-        clearSessionConfig(
-          this._getEntryType(),
-          targetCwd,
-          this._sessionId,
-          PENDING_SENTINEL,
-        );
+        clearSessionConfig(this._getEntryType(), targetCwd, this._sessionId, PENDING_SENTINEL);
       } else {
-        clearSessionConfig(
-          this._getEntryType(),
-          targetCwd,
-          this._sessionId,
-          this._leafId!,
-        );
+        clearSessionConfig(this._getEntryType(), targetCwd, this._sessionId, this._leafId!);
       }
       return;
     }
     if (scope === "project" && !cwd) {
       throw new Error("cwd is required for project-scoped config delete");
     }
-    const dir =
-      scope === "project" && cwd
-        ? join(cwd, ".pi")
-        : (configDir ?? getExtensionsDir());
+    const dir = scope === "project" && cwd ? join(cwd, ".pi") : (configDir ?? getExtensionsDir());
     deleteConfig(this._filename, dir);
   }
 
@@ -1228,11 +1075,7 @@ export class ConfigManager<T extends object> {
    * Check global and project-local config files for malformed JSON.
    * Warns via ctx.ui.notify if any are found.
    */
-  private warnOnMalformedConfig(
-    ctx: ExtensionContext,
-    cwd: string,
-    configDir?: string,
-  ): void {
+  private warnOnMalformedConfig(ctx: ExtensionContext, cwd: string, configDir?: string): void {
     const filename = this._filename;
 
     const globalStatus = checkConfigFile(filename, configDir);

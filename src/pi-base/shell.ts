@@ -81,11 +81,7 @@ export function splitShellBoundary(str: string): [string, string] | null {
 const SHELL_META = /[\s{}()$`!'"\\|&;<>#*?[\]~]/;
 export function shellQuote(value: string): string {
   // Already-quoted single: pass through only if no internal quotes break it
-  if (
-    value.startsWith("'") &&
-    value.endsWith("'") &&
-    !value.slice(1, -1).includes("'")
-  ) {
+  if (value.startsWith("'") && value.endsWith("'") && !value.slice(1, -1).includes("'")) {
     return value;
   }
   // Already-quoted double: pass through only if no internal quotes or expansion chars
@@ -108,8 +104,7 @@ export function shellQuote(value: string): string {
 export function stripQuotes(s: string): string {
   if (
     s.length >= 2 &&
-    ((s.startsWith("'") && s.endsWith("'")) ||
-      (s.startsWith('"') && s.endsWith('"')))
+    ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"')))
   ) {
     return s.slice(1, -1);
   }

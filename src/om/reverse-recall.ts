@@ -35,9 +35,7 @@ export function findObservationsForEntryIds(
 
   const result: RelatedObservation[] = [];
   for (const indexed of observations) {
-    const matched = indexed.observation.sourceEntryIds.filter((id) =>
-      targetSet.has(id),
-    );
+    const matched = indexed.observation.sourceEntryIds.filter((id) => targetSet.has(id));
     if (matched.length > 0) {
       result.push({
         memoryId: indexed.observation.id,
@@ -70,11 +68,7 @@ export function findReflectionsForEntryIds(
   }
   if (matchingObsIds.size === 0) return [];
   return reflections
-    .filter((r) =>
-      r.reflection.supportingObservationIds.some((id) =>
-        matchingObsIds.has(id),
-      ),
-    )
+    .filter((r) => r.reflection.supportingObservationIds.some((id) => matchingObsIds.has(id)))
     .map((r) => ({
       memoryId: r.reflection.id,
       content: r.reflection.content,
@@ -94,9 +88,7 @@ export function formatRelatedObservations(
     for (const obs of observations) {
       const dropped = obs.status === "dropped" ? " [dropped]" : "";
       const entryRefs =
-        obs.matchedEntryIds.length > 0
-          ? ` (${obs.matchedEntryIds.join(", ")})`
-          : "";
+        obs.matchedEntryIds.length > 0 ? ` (${obs.matchedEntryIds.join(", ")})` : "";
       parts.push(
         `  [${obs.memoryId}]${dropped} ${obs.timestamp} [${obs.relevance}] ${obs.content}${entryRefs}`,
       );

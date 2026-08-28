@@ -12,13 +12,7 @@
  * in tests (e.g. a temp dir) to disable the gate.
  */
 
-import {
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getPiAgentDir } from "./paths.js";
 
@@ -123,11 +117,7 @@ export function readConfig<T>(filename: string, configDir?: string): T | null {
       return null;
     }
     const parsed = JSON.parse(trimmed);
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      Array.isArray(parsed)
-    ) {
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       cacheSet(path, { data: null, mtime: stats.mtimeMs, size: stats.size });
       return null;
     }
@@ -158,11 +148,7 @@ export function readConfig<T>(filename: string, configDir?: string): T | null {
  * @param data      Object to serialize as JSON
  * @param configDir Directory to write to. Defaults to getExtensionsDir().
  */
-export function writeConfig<T>(
-  filename: string,
-  data: T,
-  configDir?: string,
-): boolean {
+export function writeConfig<T>(filename: string, data: T, configDir?: string): boolean {
   if (!guardRealDir(filename, configDir, "write")) return false;
   const path = join(resolveConfigDir(configDir), filename);
   _configCache.delete(path);
@@ -205,10 +191,7 @@ export function deleteConfig(filename: string, configDir?: string): void {
  * - Arrays, primitives, and non-plain objects are replaced wholesale.
  * - Does not mutate the base object (returns a new object).
  */
-export function deepMerge<T extends Record<string, unknown>>(
-  base: T,
-  overrides: Partial<T>,
-): T {
+export function deepMerge<T extends Record<string, unknown>>(base: T, overrides: Partial<T>): T {
   if (!overrides || typeof overrides !== "object") {
     return { ...base };
   }
@@ -272,12 +255,7 @@ const _sessionConfigs = new Map<string, Record<string, unknown>>();
  *  Prevents unbounded growth in long-running processes that see many sessions. */
 const MAX_SESSION_CONFIGS = 500;
 
-function sessionKey(
-  namespace: string,
-  cwd: string,
-  sessionId: string,
-  leafId: string,
-): string {
+function sessionKey(namespace: string, cwd: string, sessionId: string, leafId: string): string {
   return `${namespace}${SESSION_KEY_SEP}${cwd}${SESSION_KEY_SEP}${sessionId}${SESSION_KEY_SEP}${leafId}`;
 }
 
@@ -440,10 +418,7 @@ export interface ConfigFileStatus {
  * Use this before `readConfig` to distinguish "file not found" from
  * "file exists but is malformed".
  */
-export function checkConfigFile(
-  filename: string,
-  configDir?: string,
-): ConfigFileStatus {
+export function checkConfigFile(filename: string, configDir?: string): ConfigFileStatus {
   const path = join(resolveConfigDir(configDir), filename);
   try {
     const stats = statSync(path, { throwIfNoEntry: false });
@@ -533,18 +508,12 @@ export function loadConfig<T extends object>(
   let config = defaults;
 
   // Layer 1: global
-  config = mergeFn(
-    config,
-    readConfig<Partial<T>>(filename, dir) ?? ({} as Partial<T>),
-  );
+  config = mergeFn(config, readConfig<Partial<T>>(filename, dir) ?? ({} as Partial<T>));
 
   // Layer 2: project-local
   if (opts.cwd) {
     const projectDir = join(opts.cwd, ".pi");
-    config = mergeFn(
-      config,
-      readConfig<Partial<T>>(filename, projectDir) ?? ({} as Partial<T>),
-    );
+    config = mergeFn(config, readConfig<Partial<T>>(filename, projectDir) ?? ({} as Partial<T>));
   }
 
   return config;

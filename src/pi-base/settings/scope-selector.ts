@@ -1,13 +1,7 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import {
-  divider,
-  formatHintLine,
-  frame,
-  frameContentWidth,
-  type KeyHint,
-} from "./frame.ts";
+import { divider, formatHintLine, frame, frameContentWidth, type KeyHint } from "./frame.ts";
 
 export interface ScopeSelectorEntry {
   id: string;
@@ -16,8 +10,7 @@ export interface ScopeSelectorEntry {
   note?: string;
 }
 
-export type ScopeSelectorResult =
-  { kind: "select"; id: string } | { kind: "cancel" };
+export type ScopeSelectorResult = { kind: "select"; id: string } | { kind: "cancel" };
 
 export interface ScopeSelectorArgs {
   title: string;
@@ -47,8 +40,7 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
       for (let i = 0; i < args.entries.length; i += 1) {
         const entry = args.entries[i]!;
         const availableIndex = availableEntries.indexOf(entry);
-        const isSelected =
-          entry.available && availableIndex === selectedAvailableIndex;
+        const isSelected = entry.available && availableIndex === selectedAvailableIndex;
 
         if (i > 0) bodyLines.push("");
 
@@ -73,9 +65,7 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
         { key: "enter", label: "confirm" },
         { key: "esc", label: "cancel" },
       ];
-      bodyLines.push(
-        args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`),
-      );
+      bodyLines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
 
       return frame(bodyLines, width, args.theme, {
         title: args.title,
@@ -98,8 +88,7 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
     for (let i = 0; i < args.entries.length; i += 1) {
       const entry = args.entries[i]!;
       const availableIndex = availableEntries.indexOf(entry);
-      const isSelected =
-        entry.available && availableIndex === selectedAvailableIndex;
+      const isSelected = entry.available && availableIndex === selectedAvailableIndex;
 
       if (i > 0) lines.push("");
 
@@ -123,9 +112,7 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
       { key: "enter", label: "confirm" },
       { key: "esc", label: "cancel" },
     ];
-    lines.push(
-      args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`),
-    );
+    lines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
     return lines;
   };
 
@@ -140,14 +127,12 @@ export function createScopeSelector(args: ScopeSelectorArgs): Component {
 
     if (matchesKey(data, "up")) {
       selectedAvailableIndex =
-        (selectedAvailableIndex - 1 + availableEntries.length) %
-        availableEntries.length;
+        (selectedAvailableIndex - 1 + availableEntries.length) % availableEntries.length;
       args.tui.requestRender();
       return;
     }
     if (matchesKey(data, "down")) {
-      selectedAvailableIndex =
-        (selectedAvailableIndex + 1) % availableEntries.length;
+      selectedAvailableIndex = (selectedAvailableIndex + 1) % availableEntries.length;
       args.tui.requestRender();
       return;
     }

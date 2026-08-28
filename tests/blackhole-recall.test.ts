@@ -6,10 +6,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const testRoot = join(
-  tmpdir(),
-  `pi-blackhole-recall-test-${process.pid}-${Date.now()}`,
-);
+const testRoot = join(tmpdir(), `pi-blackhole-recall-test-${process.pid}-${Date.now()}`);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => join(testRoot, "agent"),
@@ -19,17 +16,11 @@ import { registerVccRecallCommand } from "../src/commands/vcc-recall.js";
 
 function createMockEnvironment() {
   const sentMessages: Array<{ content: string; customType: string }> = [];
-  const handlerMap = new Map<
-    string,
-    (args: string, ctx: unknown) => Promise<void>
-  >();
+  const handlerMap = new Map<string, (args: string, ctx: unknown) => Promise<void>>();
 
   const pi: any = {
     registerCommand: vi.fn(
-      (
-        name: string,
-        def: { handler: (args: string, ctx: unknown) => Promise<void> },
-      ) => {
+      (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => {
         handlerMap.set(name, def.handler);
       },
     ),
@@ -44,9 +35,7 @@ function createMockEnvironment() {
   };
 
   /** Build a minimal session file with test messages */
-  function createSessionFile(
-    messages: Array<{ role: string; content: string }>,
-  ): string {
+  function createSessionFile(messages: Array<{ role: string; content: string }>): string {
     const dir = join(testRoot, "sessions");
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `session-${Date.now()}.jsonl`);
@@ -77,18 +66,14 @@ describe("/blackhole-recall command", () => {
   it("registers the blackhole-recall command", () => {
     const { pi } = createMockEnvironment();
     registerVccRecallCommand(pi as any);
-    expect(pi.registerCommand).toHaveBeenCalledWith(
-      "blackhole-recall",
-      expect.any(Object),
-    );
+    expect(pi.registerCommand).toHaveBeenCalledWith("blackhole-recall", expect.any(Object));
     const callArgs = pi.registerCommand.mock.calls[0];
     expect(callArgs[0]).toBe("blackhole-recall");
     expect(callArgs[1].description.toLowerCase()).toContain("search");
   });
 
   it("shows recent entries when no query is provided", async () => {
-    const { pi, handlerMap, sentMessages, createSessionFile } =
-      createMockEnvironment();
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
     registerVccRecallCommand(pi as any);
 
     const sessionFile = createSessionFile([
@@ -113,8 +98,7 @@ describe("/blackhole-recall command", () => {
   });
 
   it("searches and returns matches for a query", async () => {
-    const { pi, handlerMap, sentMessages, createSessionFile } =
-      createMockEnvironment();
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
     registerVccRecallCommand(pi as any);
 
     const sessionFile = createSessionFile([
@@ -138,8 +122,7 @@ describe("/blackhole-recall command", () => {
   });
 
   it("returns empty when no matches found", async () => {
-    const { pi, handlerMap, sentMessages, createSessionFile } =
-      createMockEnvironment();
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
     registerVccRecallCommand(pi as any);
 
     const sessionFile = createSessionFile([{ role: "user", content: "Hello" }]);
@@ -182,8 +165,7 @@ describe("/blackhole-recall command", () => {
   });
 
   it("scope:all includes off-lineage results", async () => {
-    const { pi, handlerMap, sentMessages, createSessionFile } =
-      createMockEnvironment();
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
     registerVccRecallCommand(pi as any);
 
     const sessionFile = createSessionFile([
@@ -207,8 +189,7 @@ describe("/blackhole-recall command", () => {
   });
 
   it("pagination via page:N works", async () => {
-    const { pi, handlerMap, sentMessages, createSessionFile } =
-      createMockEnvironment();
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
     registerVccRecallCommand(pi as any);
 
     // Create enough messages to test pagination

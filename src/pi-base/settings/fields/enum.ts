@@ -15,12 +15,7 @@ import {
   type SelectItem,
 } from "@earendil-works/pi-tui";
 import { formatHintLine } from "../frame";
-import type {
-  EnumField,
-  FieldRenderContext,
-  FieldRenderer,
-  SubmenuFactory,
-} from "../types";
+import type { EnumField, FieldRenderContext, FieldRenderer, SubmenuFactory } from "../types";
 
 const DEFAULT_CYCLE_THRESHOLD = 4;
 const MAX_VISIBLE_ROWS = 12;
@@ -74,9 +69,7 @@ function makeEnumSubmenu(
         lines.push("");
         const hints = [
           { key: "↑↓", label: "select" },
-          ...(items.length > 1
-            ? [{ key: `1-${Math.min(9, items.length)}`, label: "choose" }]
-            : []),
+          ...(items.length > 1 ? [{ key: `1-${Math.min(9, items.length)}`, label: "choose" }] : []),
           { key: "enter/space", label: "save" },
           { key: "esc", label: "cancel" },
         ];
@@ -89,12 +82,7 @@ function makeEnumSubmenu(
       },
       handleInput(data: string): void {
         const num = parseInt(data, 10);
-        if (
-          data.length === 1 &&
-          !isNaN(num) &&
-          num >= 1 &&
-          num <= Math.min(9, items.length)
-        ) {
+        if (data.length === 1 && !isNaN(num) && num >= 1 && num <= Math.min(9, items.length)) {
           const item = items[num - 1];
           if (item) {
             done(item.value);
@@ -131,9 +119,7 @@ function makeSearchableEnumSubmenu(
       if (!search.trim()) return allItems;
       const q = search.toLowerCase();
       return allItems.filter(
-        (item) =>
-          item.label.toLowerCase().includes(q) ||
-          item.value.toLowerCase().includes(q),
+        (item) => item.label.toLowerCase().includes(q) || item.value.toLowerCase().includes(q),
       );
     }
 
@@ -142,12 +128,7 @@ function makeSearchableEnumSubmenu(
         const lines: string[] = [];
         const items = filteredItems();
         const searchPrompt = `Search: ${search}${ctx.theme.inverse(" ")}`;
-        lines.push(
-          ctx.theme.bg(
-            "toolPendingBg",
-            truncateToWidth(searchPrompt, width, "…", true),
-          ),
-        );
+        lines.push(ctx.theme.bg("toolPendingBg", truncateToWidth(searchPrompt, width, "…", true)));
         lines.push("");
 
         if (items.length === 0) {
@@ -156,10 +137,7 @@ function makeSearchableEnumSubmenu(
           const maxVisible = MAX_VISIBLE_ROWS;
           const scroll = Math.max(
             0,
-            Math.min(
-              selected - Math.floor(maxVisible / 2),
-              Math.max(0, items.length - maxVisible),
-            ),
+            Math.min(selected - Math.floor(maxVisible / 2), Math.max(0, items.length - maxVisible)),
           );
           const slice = items.slice(scroll, scroll + maxVisible);
           for (let i = 0; i < slice.length; i++) {
@@ -171,10 +149,7 @@ function makeSearchableEnumSubmenu(
             const line = `${prefix}${display}`;
             lines.push(
               isSelected
-                ? ctx.theme.bg(
-                    "selectedBg",
-                    truncateToWidth(line, width, "…", true),
-                  )
+                ? ctx.theme.bg("selectedBg", truncateToWidth(line, width, "…", true))
                 : truncateToWidth(line, width, "…", true),
             );
           }
@@ -261,11 +236,7 @@ export const enumRenderer: FieldRenderer<EnumField, string> = {
     if (row.field.disabled) return {};
     // Searchable enums always open a submenu on Enter/Space
     if (row.field.search) {
-      if (
-        matchesKey(data, "enter") ||
-        matchesKey(data, "return") ||
-        data === " "
-      ) {
+      if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
         return {
           consumed: true,
           submenu: makeEnumSubmenu(row.field, row.value, ctx),
@@ -278,11 +249,7 @@ export const enumRenderer: FieldRenderer<EnumField, string> = {
     const threshold = row.field.cycleThreshold ?? DEFAULT_CYCLE_THRESHOLD;
     const isLongList = row.field.options.length > threshold;
 
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       if (isLongList) {
         return {
           consumed: true,

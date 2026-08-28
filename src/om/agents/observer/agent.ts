@@ -54,8 +54,7 @@ const RelevanceSchema = Type.Union([
   Type.Literal("critical"),
 ]);
 
-export const OBSERVATION_TIMESTAMP_PATTERN =
-  "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$";
+export const OBSERVATION_TIMESTAMP_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$";
 
 const RecordObservationsSchema = Type.Object({
   observations: Type.Array(
@@ -66,8 +65,7 @@ const RecordObservationsSchema = Type.Object({
       }),
       content: Type.String({
         minLength: 1,
-        description:
-          "Single-line plain prose. No markdown, no tags, no embedded timestamp.",
+        description: "Single-line plain prose. No markdown, no tags, no embedded timestamp.",
       }),
       relevance: RelevanceSchema,
       sourceEntryIds: Type.Array(Type.String({ minLength: 1 }), {
@@ -78,8 +76,7 @@ const RecordObservationsSchema = Type.Object({
       }),
     }),
     {
-      description:
-        "Batch of new observations. May be empty only if the tool is not called at all.",
+      description: "Batch of new observations. May be empty only if the tool is not called at all.",
     },
   ),
 });
@@ -111,9 +108,7 @@ export function normalizeSourceEntryIds(
     valid.push(id);
   }
   if (valid.length === 0) return undefined;
-  return valid.sort(
-    (a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0),
-  );
+  return valid.sort((a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0));
 }
 
 /** Result returned by runObserver when no observations are recorded. */
@@ -129,9 +124,7 @@ export interface ObserverResult {
   emptyReason?: ObserverEmptyReason;
 }
 
-export async function runObserver(
-  args: RunObserverArgs,
-): Promise<ObserverResult> {
+export async function runObserver(args: RunObserverArgs): Promise<ObserverResult> {
   const {
     model,
     apiKey,
@@ -167,10 +160,7 @@ export async function runObserver(
       let rejected = 0;
       for (const obs of params.observations) {
         totalProposed++;
-        const sourceEntryIds = normalizeSourceEntryIds(
-          obs.sourceEntryIds,
-          allowedSourceEntryIds,
-        );
+        const sourceEntryIds = normalizeSourceEntryIds(obs.sourceEntryIds, allowedSourceEntryIds);
         if (!sourceEntryIds) {
           rejected++;
           continue;
@@ -243,8 +233,7 @@ ${conversation}`;
 
   const reasoning = (model as { reasoning?: unknown }).reasoning;
   const thinkingLevel = args.thinkingLevel ?? "low";
-  const effectiveMaxTurns =
-    args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
+  const effectiveMaxTurns = args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
   let turnCount = 0;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
   const config: AgentLoopConfig & ProviderFetchOption = {
@@ -255,9 +244,7 @@ ${conversation}`;
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
-    ...(reasoning && thinkingLevel !== "off"
-      ? { reasoning: thinkingLevel }
-      : {}),
+    ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
     ...(effectiveMaxTurns !== undefined
       ? {
           shouldStopAfterTurn: () => {

@@ -52,10 +52,7 @@ describe("session-ledger V3 progress helpers", () => {
   });
 
   it("builds a branch id to index map", () => {
-    const entries = [
-      textCustomMessage("raw-1", "abcd"),
-      textCustomMessage("raw-2", "efgh"),
-    ];
+    const entries = [textCustomMessage("raw-1", "abcd"), textCustomMessage("raw-2", "efgh")];
     expect(entryIndexById(entries).get("raw-1")).toBe(0);
     expect(entryIndexById(entries).get("raw-2")).toBe(1);
   });
@@ -136,9 +133,7 @@ describe("session-ledger V3 progress helpers", () => {
     ];
 
     expect(latestCoverageIndex(entries, V3_OBSERVATIONS_RECORDED)).toBe(1);
-    expect(latestCoverageMarkerId(entries, V3_OBSERVATIONS_RECORDED)).toBe(
-      "raw-2",
-    );
+    expect(latestCoverageMarkerId(entries, V3_OBSERVATIONS_RECORDED)).toBe("raw-2");
     expect(rawTokensSinceObservationCoverage(entries)).toBe(3);
   });
 
@@ -157,18 +152,12 @@ describe("session-ledger V3 progress helpers", () => {
       }),
     ];
 
-    expect(latestCoverageMarkerId(entries, V3_OBSERVATIONS_RECORDED)).toBe(
-      "raw-3",
-    );
-    expect(latestCoverageMarkerId(entries, V3_REFLECTIONS_RECORDED)).toBe(
-      "raw-2",
-    );
+    expect(latestCoverageMarkerId(entries, V3_OBSERVATIONS_RECORDED)).toBe("raw-3");
+    expect(latestCoverageMarkerId(entries, V3_REFLECTIONS_RECORDED)).toBe("raw-2");
     expect(earlierCoverageMarkerId(entries, "raw-3", "raw-2")).toBe("raw-2");
     expect(earlierCoverageMarkerId(entries, "raw-1", undefined)).toBe("raw-1");
     expect(earlierCoverageMarkerId(entries, "missing", "raw-2")).toBe("raw-2");
-    expect(
-      earlierCoverageMarkerId(entries, "missing-a", "missing-b"),
-    ).toBeUndefined();
+    expect(earlierCoverageMarkerId(entries, "missing-a", "missing-b")).toBeUndefined();
   });
 
   it("ignores invalid coverage markers and old V2 markers without throwing", () => {
@@ -200,12 +189,7 @@ describe("session-ledger V3 progress helpers", () => {
 });
 
 describe("usage-aware progress helpers (plan-01 port)", () => {
-  function assistantEntry(
-    id: string,
-    text: string,
-    usageTokens: number,
-    stopReason = "stop",
-  ) {
+  function assistantEntry(id: string, text: string, usageTokens: number, stopReason = "stop") {
     return rawMessage(id, text, {
       message: {
         role: "assistant",
@@ -318,9 +302,7 @@ describe("usage-aware progress helpers (plan-01 port)", () => {
         textCustomMessage("raw-1", "abcd"),
         textCustomMessage("raw-2", "efgh"),
       ];
-      expect(rawTokensSinceLastCompaction(entries)).toBe(
-        rawTokensAfterIndex(entries, 0),
-      );
+      expect(rawTokensSinceLastCompaction(entries)).toBe(rawTokensAfterIndex(entries, 0));
     });
   });
 });

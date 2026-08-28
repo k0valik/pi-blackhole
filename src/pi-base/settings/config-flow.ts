@@ -10,10 +10,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 import { createConfirm } from "./confirm.ts";
-import {
-  createScopeSelector,
-  type ScopeSelectorResult,
-} from "./scope-selector.ts";
+import { createScopeSelector, type ScopeSelectorResult } from "./scope-selector.ts";
 import { createSettingsModalBody } from "./body.ts";
 import type { SettingsModalBodyComponent } from "./types.ts";
 
@@ -29,9 +26,7 @@ export interface ConfigFlowParams {
   defaults: Record<string, unknown>;
   env?: Record<string, string | EnvParser>;
   buildFields: (values: Record<string, unknown>) => Field[];
-  layerValues: (
-    scope: "global" | "project" | "env" | "session",
-  ) => Record<string, unknown>;
+  layerValues: (scope: "global" | "project" | "env" | "session") => Record<string, unknown>;
   inspect: () => ConfigInspection<Record<string, unknown>>;
   scopeSources: () => ScopeSource[];
   save: (
@@ -41,9 +36,7 @@ export interface ConfigFlowParams {
     | { path: string; created: boolean; changed: boolean }
     | Promise<{ path: string; created: boolean; changed: boolean }>;
   resetScope: (scope: "global" | "project" | "session") => void | Promise<void>;
-  deleteScope: (
-    scope: "global" | "project" | "session",
-  ) => void | Promise<void>;
+  deleteScope: (scope: "global" | "project" | "session") => void | Promise<void>;
   onSaved: (values: Record<string, unknown>) => void;
   onChange?: (key: string, value: unknown) => void;
 }
@@ -203,31 +196,13 @@ function openSelector(
 
 interface EditHandlers {
   onChange: (key: string, value: unknown) => void;
-  onSave: (
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ) => Promise<void> | void;
-  onRequestExit: (
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ) => Promise<void> | void;
-  onAction: (
-    id: string,
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ) => void;
+  onSave: (tui: TUI, theme: Theme, done: (result: void) => void) => Promise<void> | void;
+  onRequestExit: (tui: TUI, theme: Theme, done: (result: void) => void) => Promise<void> | void;
+  onAction: (id: string, tui: TUI, theme: Theme, done: (result: void) => void) => void;
 }
 
-async function openEditMode(
-  params: ConfigFlowParams,
-  scope: string,
-): Promise<void> {
-  const values = params.layerValues(
-    scope as "global" | "project" | "env" | "session",
-  );
+async function openEditMode(params: ConfigFlowParams, scope: string): Promise<void> {
+  const values = params.layerValues(scope as "global" | "project" | "env" | "session");
   let inspection = params.inspect();
   const fields = params.buildFields(values);
 
@@ -267,11 +242,7 @@ async function openEditMode(
   // Per-flow body ref so nested async confirm handlers can mount overlays.
   let activeEditBody: SettingsModalBodyComponent | undefined;
 
-  async function saveEdit(
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ): Promise<void> {
+  async function saveEdit(tui: TUI, theme: Theme, done: (result: void) => void): Promise<void> {
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
@@ -305,18 +276,11 @@ async function openEditMode(
       dirtyKeys.clear();
       done(undefined);
     } catch (err) {
-      params.ctx.ui.notify(
-        err instanceof Error ? err.message : String(err),
-        "error",
-      );
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
-  async function discardEdit(
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ): Promise<void> {
+  async function discardEdit(tui: TUI, theme: Theme, done: (result: void) => void): Promise<void> {
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
@@ -359,18 +323,13 @@ async function openEditMode(
 
     try {
       await params.resetScope(scope as "global" | "project" | "session");
-      const fresh = params.layerValues(
-        scope as "global" | "project" | "env" | "session",
-      );
+      const fresh = params.layerValues(scope as "global" | "project" | "env" | "session");
       activeEditBody?.setValues(fresh);
       dirtyKeys.clear();
       inspection = params.inspect();
       activeEditBody?.dismissOverlay();
     } catch (err) {
-      params.ctx.ui.notify(
-        err instanceof Error ? err.message : String(err),
-        "error",
-      );
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -396,18 +355,13 @@ async function openEditMode(
 
     try {
       await params.deleteScope(scope as "global" | "project" | "session");
-      const fresh = params.layerValues(
-        scope as "global" | "project" | "env" | "session",
-      );
+      const fresh = params.layerValues(scope as "global" | "project" | "env" | "session");
       activeEditBody?.setValues(fresh);
       dirtyKeys.clear();
       inspection = params.inspect();
       activeEditBody?.dismissOverlay();
     } catch (err) {
-      params.ctx.ui.notify(
-        err instanceof Error ? err.message : String(err),
-        "error",
-      );
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -427,34 +381,22 @@ async function openEditMode(
       switch (id) {
         case "save":
           void saveEdit(tui, theme, done).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "discard":
           void discardEdit(tui, theme, done).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "reset":
           void resetEdit(tui, theme).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "delete":
           void deleteEdit(tui, theme).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
       }
@@ -537,8 +479,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
       tabPathNotes["session"] = source.path ?? source.note;
     } else {
       // global / project: use the resolved path when it exists, otherwise the note text
-      tabPathNotes[source.scope] =
-        source.exists && source.path ? source.path : source.note;
+      tabPathNotes[source.scope] = source.exists && source.path ? source.path : source.note;
     }
   }
   // Static labels for scopes not covered by scopeSources().
@@ -552,9 +493,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
     if (tab.scope === "defaults") {
       layerVals = { ...params.defaults };
     } else {
-      layerVals = params.layerValues(
-        tab.scope as "global" | "project" | "env" | "session",
-      );
+      layerVals = params.layerValues(tab.scope as "global" | "project" | "env" | "session");
     }
     const raw = params.buildFields(layerVals);
     tabFields[tab.id] = raw.map((f) => ({
@@ -602,10 +541,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
                   (currentTabId === "session" && params.scopes.session);
                 if (isEditableScope) {
                   void openEditMode(params, currentTabId).catch((err) =>
-                    params.ctx.ui.notify(
-                      err instanceof Error ? err.message : String(err),
-                      "error",
-                    ),
+                    params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
                   );
                 } else {
                   void openSelector(params, false)

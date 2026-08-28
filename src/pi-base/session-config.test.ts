@@ -166,12 +166,8 @@ describe("session config store", () => {
     const entries = parse(SESSION_HEADER + BRANCH_ENTRIES.join(""));
     setSessionConfig("test", "/cwd", "sid-1", "a1", { threshold: 10 });
     // c1 has parentId null; c2's parent is c1. No config on c1 or c2.
-    expect(getSessionConfig("test", "/cwd", "sid-1", "c1", entries)).toEqual(
-      {},
-    );
-    expect(getSessionConfig("test", "/cwd", "sid-1", "c2", entries)).toEqual(
-      {},
-    );
+    expect(getSessionConfig("test", "/cwd", "sid-1", "c1", entries)).toEqual({});
+    expect(getSessionConfig("test", "/cwd", "sid-1", "c2", entries)).toEqual({});
   });
 
   it("inherits across branches when ancestor has config", () => {
@@ -220,15 +216,9 @@ describe("session config store", () => {
     setSessionConfig("test", "/cwd", "sid-1", "a2", { threshold: 20 });
     setSessionConfig("test", "/cwd2", "sid-2", "a1", { threshold: 30 });
     clearAllSessionConfigs();
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual(
-      {},
-    );
-    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual(
-      {},
-    );
-    expect(getSessionConfig("test", "/cwd2", "sid-2", "a1", entries)).toEqual(
-      {},
-    );
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a1", entries)).toEqual({});
+    expect(getSessionConfig("test", "/cwd", "sid-1", "a2", entries)).toEqual({});
+    expect(getSessionConfig("test", "/cwd2", "sid-2", "a1", entries)).toEqual({});
   });
 
   // ── NUL separator safety ────────────────────────────────────────────

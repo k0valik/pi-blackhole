@@ -21,9 +21,7 @@ describe("vcc-summarize robust merging and stripping", () => {
 
     it("caps Session Goal at 8 items, preserving first goals at top", () => {
       // 7 prev goals + 1 fresh = 8; slice(0, CAP) keeps original goals first
-      const goals = Array.from({ length: 7 }, (_, i) => `- Goal ${i}`).join(
-        "\n",
-      );
+      const goals = Array.from({ length: 7 }, (_, i) => `- Goal ${i}`).join("\n");
       const previousSummary = `[Session Goal]\n${goals}\n\n---\n\n[user]\ninit`;
       const r = compile({
         messages: [userMsg("Goal: Final Step")],
@@ -40,10 +38,7 @@ describe("vcc-summarize robust merging and stripping", () => {
     });
 
     it("caps Commits at 8 items", () => {
-      const commits = Array.from(
-        { length: 10 },
-        (_, i) => `- abc${i}: commit ${i}`,
-      ).join("\n");
+      const commits = Array.from({ length: 10 }, (_, i) => `- abc${i}: commit ${i}`).join("\n");
       const previousSummary = `[Commits]\n${commits}\n\n---\n\n[user]\ninit`;
       // We need fresh to be non-empty to trigger re-capping logic in mergeHeaderSection
       // But Commits extraction from messages is complex.
@@ -60,21 +55,16 @@ describe("vcc-summarize robust merging and stripping", () => {
     });
 
     it("caps User Preferences at 15 items", () => {
-      const prefs = Array.from({ length: 20 }, (_, i) => `- Pref ${i}`).join(
-        "\n",
-      );
+      const prefs = Array.from({ length: 20 }, (_, i) => `- Pref ${i}`).join("\n");
       const previousSummary = `[User Preferences]\n${prefs}\n\n---\n\n[user]\ninit`;
       const r = compile({ messages: [userMsg("check")], previousSummary });
       const headerPart = r.split("\n\n---\n\n")[0];
-      const lines = headerPart
-        .split("\n")
-        .filter((l) => l.startsWith("- Pref"));
+      const lines = headerPart.split("\n").filter((l) => l.startsWith("- Pref"));
       expect(lines.length).toBe(20); // Uncapped because fresh is empty
     });
 
     it("line-level deduplicates Goals and Preferences", () => {
-      const previousSummary =
-        "[Session Goal]\n- Goal A\n- Goal B\n\n---\n\n[user]\ninit";
+      const previousSummary = "[Session Goal]\n- Goal A\n- Goal B\n\n---\n\n[user]\ninit";
       const r = compile({
         messages: [userMsg("Goal: Goal A")],
         previousSummary,
@@ -93,8 +83,7 @@ describe("vcc-summarize robust merging and stripping", () => {
     });
 
     it("Outstanding Context is volatile and uses only fresh content", () => {
-      const previousSummary =
-        "[Outstanding Context]\n- Old blocker\n\n---\n\n[user]\ninit";
+      const previousSummary = "[Outstanding Context]\n- Old blocker\n\n---\n\n[user]\ninit";
       const r = compile({
         messages: [userMsg("This is still failing and blocked.")],
         previousSummary,
@@ -106,8 +95,7 @@ describe("vcc-summarize robust merging and stripping", () => {
 
   describe("sectionOf boundary edge cases", () => {
     it("extracts section at the very beginning of text", () => {
-      const summary =
-        "[Session Goal]\n- Start here\n\n[Commits]\n- abc: msg\n\n---\n\n[user]\nold";
+      const summary = "[Session Goal]\n- Start here\n\n[Commits]\n- abc: msg\n\n---\n\n[user]\nold";
       const r = compile({
         messages: [userMsg("hi")],
         previousSummary: summary,
@@ -126,8 +114,7 @@ describe("vcc-summarize robust merging and stripping", () => {
     });
 
     it("ignores bracketed text that is not at line start", () => {
-      const summary =
-        "[Session Goal]\n- This [Not A Header] goal\n\n---\n\n[user]\nold";
+      const summary = "[Session Goal]\n- This [Not A Header] goal\n\n---\n\n[user]\nold";
       const r = compile({
         messages: [userMsg("hi")],
         previousSummary: summary,
@@ -200,15 +187,9 @@ describe("vcc-summarize robust merging and stripping", () => {
     it("strips basic recall-guidance footer when no memories present", () => {
       const footer =
         "Use `recall` with an id to retrieve original context, or `#N:path` drill-down to explore file content from referenced entries.";
-      const prev = [
-        "[Session Goal]",
-        "- My goal",
-        "---",
-        "[user]",
-        "hi",
-        "---",
-        footer,
-      ].join("\n\n");
+      const prev = ["[Session Goal]", "- My goal", "---", "[user]", "hi", "---", footer].join(
+        "\n\n",
+      );
       const r = compile({ messages: [userMsg("next")], previousSummary: prev });
       expect(r).not.toContain(footer);
       expect(r).toContain("- My goal");
@@ -267,8 +248,7 @@ describe("vcc-summarize robust merging and stripping", () => {
     it("strips modern RECALL_NOTE with separator", () => {
       const note =
         "Details not captured here — exact code, error messages, file paths — are only recoverable via `recall`.";
-      const prev =
-        "[Session Goal]\n- Goal\n\n---\n\n[user]\nhi\n\n---\n\n" + note;
+      const prev = "[Session Goal]\n- Goal\n\n---\n\n[user]\nhi\n\n---\n\n" + note;
       const r = compile({ messages: [userMsg("next")], previousSummary: prev });
       expect(r).toContain(note);
     });
@@ -306,8 +286,7 @@ describe("vcc-summarize robust merging and stripping", () => {
     });
 
     it("handles multiple separators in previous summary", () => {
-      const prev =
-        "[Goal]\n- G\n\n---\n\n[user]\nmsg 1\n\n---\n\n[user]\nmsg 2";
+      const prev = "[Goal]\n- G\n\n---\n\n[user]\nmsg 1\n\n---\n\n[user]\nmsg 2";
       const r = compile({ messages: [], previousSummary: prev });
       expect(r).toContain("msg 1");
       expect(r).toContain("msg 2");

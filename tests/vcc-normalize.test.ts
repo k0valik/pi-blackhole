@@ -15,23 +15,17 @@ describe("normalize", () => {
 
   it("normalizes user message (string content)", () => {
     const blocks = normalize([userMsg("fix the bug")]);
-    expect(blocks).toEqual([
-      { kind: "user", text: "fix the bug", sourceIndex: 0 },
-    ]);
+    expect(blocks).toEqual([{ kind: "user", text: "fix the bug", sourceIndex: 0 }]);
   });
 
   it("normalizes assistant text message", () => {
     const blocks = normalize([assistantText("done")]);
-    expect(blocks).toEqual([
-      { kind: "assistant", text: "done", sourceIndex: 0 },
-    ]);
+    expect(blocks).toEqual([{ kind: "assistant", text: "done", sourceIndex: 0 }]);
   });
 
   it("normalizes assistant string content", () => {
     const msg = { ...assistantText("done"), content: "plain text" } as any;
-    expect(normalize([msg])).toEqual([
-      { kind: "assistant", text: "plain text", sourceIndex: 0 },
-    ]);
+    expect(normalize([msg])).toEqual([{ kind: "assistant", text: "plain text", sourceIndex: 0 }]);
   });
 
   it("includes thinking blocks (blackhole keeps them, unlike upstream)", () => {
@@ -85,12 +79,7 @@ describe("normalize", () => {
       assistantText("done"),
     ]);
     expect(blocks).toHaveLength(4);
-    expect(blocks.map((b) => b.kind)).toEqual([
-      "user",
-      "tool_call",
-      "tool_result",
-      "assistant",
-    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(["user", "tool_call", "tool_result", "assistant"]);
   });
 
   it("produces image placeholder for user image content", () => {

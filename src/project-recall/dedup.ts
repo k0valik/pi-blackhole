@@ -265,11 +265,7 @@ function levenshteinSimilarity(a: string, b: string): number {
   return 1 - prev[b.length] / Math.max(a.length, b.length);
 }
 
-function bigramJaccard(
-  a: string,
-  b: string,
-  cache: Map<string, Set<string>>,
-): number {
+function bigramJaccard(a: string, b: string, cache: Map<string, Set<string>>): number {
   const bigrams = (s: string): Set<string> => {
     let set = cache.get(s);
     if (!set) {
@@ -292,10 +288,7 @@ function bigramJaccard(
  * content-bearing vocabulary even with different word order.
  */
 export function sorensenDiceTokenSimilarity(a: string, b: string): number {
-  return sorensenDiceSets(
-    new Set(tokenizeContent(a)),
-    new Set(tokenizeContent(b)),
-  );
+  return sorensenDiceSets(new Set(tokenizeContent(a)), new Set(tokenizeContent(b)));
 }
 
 /** Set-based Sørensen-Dice (avoids re-tokenizing inside O(n²) loops). */
@@ -341,9 +334,7 @@ function tsValue(ts: string | null): number {
 }
 
 function pickRep<T extends ClusterableItem>(members: T[]): T {
-  return members.reduce((best, m) =>
-    tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best,
-  );
+  return members.reduce((best, m) => (tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best));
 }
 
 class UnionFind {
@@ -403,8 +394,7 @@ export function clusterObservations(
         const b = allGroups[j].key;
         const la = a.length;
         const lb = b.length;
-        if (Math.abs(la - lb) > (1 - FUZZY_THRESHOLD) * Math.max(la, lb, 1))
-          continue;
+        if (Math.abs(la - lb) > (1 - FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
         if (bigramJaccard(a, b, cache) < FUZZY_THRESHOLD - 0.15) continue;
         if (levenshteinSimilarity(a, b) >= FUZZY_THRESHOLD) uf.union(i, j);
       }
@@ -429,9 +419,7 @@ export function clusterObservations(
   if (opts?.sorensen && allGroups.length > 1) {
     const uf = new UnionFind(allGroups.length);
     // Precompute reps + token sets for O(n²) efficiency
-    const groupReps = allGroups.map((g) =>
-      normalizeContent(pickRep(g.members).content),
-    );
+    const groupReps = allGroups.map((g) => normalizeContent(pickRep(g.members).content));
     const repTokens = groupReps.map((s) => new Set(tokenizeContent(s)));
     for (let i = 0; i < allGroups.length; i++) {
       for (let j = i + 1; j < allGroups.length; j++) {
@@ -439,16 +427,9 @@ export function clusterObservations(
         const b = groupReps[j];
         const la = a.length;
         const lb = b.length;
-        if (
-          Math.abs(la - lb) >
-          (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)
-        )
-          continue;
+        if (Math.abs(la - lb) > (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
         if (levenshteinSimilarity(a, b) < SORENSEN_MIN_LEVENSHTEIN) continue;
-        if (
-          sorensenDiceSets(repTokens[i], repTokens[j]) >=
-          SORENSEN_FUZZY_THRESHOLD
-        )
+        if (sorensenDiceSets(repTokens[i], repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD)
           uf.union(i, j);
       }
     }
@@ -469,20 +450,16 @@ export function clusterObservations(
   for (const group of allGroups) {
     const { members } = group;
     const bestRelevance = members.reduce<Relevance>(
-      (best, m) =>
-        TIER_RANK[m.relevance] > TIER_RANK[best] ? m.relevance : best,
+      (best, m) => (TIER_RANK[m.relevance] > TIER_RANK[best] ? m.relevance : best),
       "low",
     );
     const rep =
       members
         .filter((m) => m.relevance === bestRelevance)
-        .reduce((best, m) =>
-          tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best,
-        ) ?? pickRep(members);
+        .reduce((best, m) => (tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best)) ??
+      pickRep(members);
     const repKey = normalizeContent(rep.content);
-    const extras = members.filter(
-      (m) => m !== rep && normalizeContent(m.content) !== repKey,
-    );
+    const extras = members.filter((m) => m !== rep && normalizeContent(m.content) !== repKey);
     clusters.push({
       rep,
       extras: extras.slice(0, maxVariants),
@@ -495,9 +472,7 @@ export function clusterObservations(
 
   // Consensus rerank signal: max Sørensen-Dice to any other cluster.
   if (clusters.length > 1) {
-    const repTokenSets = clusters.map(
-      (c) => new Set(tokenizeContent(c.rep.content)),
-    );
+    const repTokenSets = clusters.map((c) => new Set(tokenizeContent(c.rep.content)));
     for (let i = 0; i < clusters.length; i++) {
       let maxSim = 0;
       for (let j = 0; j < clusters.length; j++) {

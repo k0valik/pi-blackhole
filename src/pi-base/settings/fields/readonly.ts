@@ -21,9 +21,7 @@ export const readonlyRenderer: FieldRenderer<ReadonlyField, string> = {
     if (row.field.emphasis) {
       return args.ctx.theme.fg("accent", value);
     }
-    return args.selected
-      ? args.ctx.theme.fg("text", value)
-      : args.ctx.theme.fg("muted", value);
+    return args.selected ? args.ctx.theme.fg("text", value) : args.ctx.theme.fg("muted", value);
   },
   hints(row) {
     if (row.field.hint) {

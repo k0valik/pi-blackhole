@@ -13,30 +13,17 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  readFileSync,
-  chmodSync,
-} from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { __setTestConfigDir } from "../src/core/unified-config.js";
 
-const testDir = join(
-  tmpdir(),
-  `pi-blackhole-config-${randomUUID().slice(0, 8)}`,
-);
+const testDir = join(tmpdir(), `pi-blackhole-config-${randomUUID().slice(0, 8)}`);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function writeConfig(
-  data: unknown,
-  filename = "pi-blackhole/pi-blackhole-config.json",
-): string {
+function writeConfig(data: unknown, filename = "pi-blackhole/pi-blackhole-config.json"): string {
   const dir = join(testDir, dirname(filename));
   mkdirSync(dir, { recursive: true });
   const path = join(testDir, filename);
@@ -336,8 +323,7 @@ describe("Env overrides", () => {
 
 describe("saveUnifiedConfig — atomic write", () => {
   it("saves config with atomic temp+rename pattern", async () => {
-    const { saveUnifiedConfig, loadUnifiedConfig } =
-      await import("../src/core/unified-config.js");
+    const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const result = saveUnifiedConfig({
       compaction: "manual",
       tailBehavior: "minimal",
@@ -356,8 +342,7 @@ describe("saveUnifiedConfig — atomic write", () => {
   });
 
   it("preserves existing keys when saving partial config", async () => {
-    const { saveUnifiedConfig, loadUnifiedConfig } =
-      await import("../src/core/unified-config.js");
+    const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compaction: "manual", memory: false });
 
     saveUnifiedConfig({ compaction: "auto" });
@@ -395,8 +380,7 @@ describe("saveUnifiedConfig — atomic write", () => {
 
 describe("scaffoldConfig — NixOS safety", () => {
   it("creates config file with defaults when missing", async () => {
-    const { scaffoldConfig, loadUnifiedConfig } =
-      await import("../src/core/unified-config.js");
+    const { scaffoldConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     expect(existsSync(configPath())).toBe(false);
 
     scaffoldConfig();
@@ -408,8 +392,7 @@ describe("scaffoldConfig — NixOS safety", () => {
   });
 
   it("does not overwrite existing config on scaffold", async () => {
-    const { scaffoldConfig, loadUnifiedConfig } =
-      await import("../src/core/unified-config.js");
+    const { scaffoldConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compaction: "manual" });
 
     scaffoldConfig();

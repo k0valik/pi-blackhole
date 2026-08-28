@@ -50,9 +50,9 @@ export function getOwnPackageRoot(): string {
       let dir = dirname(fileURLToPath(metaUrl));
       while (dir !== dirname(dir)) {
         try {
-          const pkg = JSON.parse(
-            readFileSync(join(dir, "package.json"), "utf-8"),
-          ) as { name?: string };
+          const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as {
+            name?: string;
+          };
           if (pkg.name === "pi-blackhole") return dir;
         } catch {
           /* walk up */
@@ -71,9 +71,9 @@ export function getOwnPackageRoot(): string {
     let dir = process.cwd();
     while (dir !== dirname(dir)) {
       try {
-        const pkg = JSON.parse(
-          readFileSync(join(dir, "package.json"), "utf-8"),
-        ) as { name?: string };
+        const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as {
+          name?: string;
+        };
         if (pkg.name === "pi-blackhole") return dir;
       } catch {
         /* walk up */
@@ -93,9 +93,9 @@ export function getOwnPackageRoot(): string {
       let dir = dirname(entry);
       while (dir !== dirname(dir)) {
         try {
-          const pkg = JSON.parse(
-            readFileSync(join(dir, "package.json"), "utf-8"),
-          ) as { name?: string };
+          const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as {
+            name?: string;
+          };
           if (pkg.name === "pi-blackhole") return dir;
         } catch {
           /* walk up */
@@ -115,11 +115,10 @@ export function getOwnPackageRoot(): string {
 export function getPackageVersion(packageRoot?: string): string | undefined {
   const root = packageRoot ?? getOwnPackageRoot();
   try {
-    const pkg = JSON.parse(
-      readFileSync(join(root, "package.json"), "utf-8"),
-    ) as { version?: string };
-    if (typeof pkg.version === "string" && pkg.version.length > 0)
-      return pkg.version;
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8")) as {
+      version?: string;
+    };
+    if (typeof pkg.version === "string" && pkg.version.length > 0) return pkg.version;
   } catch {
     /* ignore */
   }
@@ -152,10 +151,7 @@ export function stripMarkdownInline(text: string): string {
 export function readChangelogText(packageRoot?: string): string | undefined {
   const explicitRoot = packageRoot !== undefined;
   const root = packageRoot ?? getOwnPackageRoot();
-  const candidates = [
-    join(root, "CHANGELOG.md"),
-    join(root, "docs/CHANGELOG.md"),
-  ];
+  const candidates = [join(root, "CHANGELOG.md"), join(root, "docs/CHANGELOG.md")];
   for (const p of candidates) {
     try {
       if (existsSync(p)) return readFileSync(p, "utf-8");
@@ -178,10 +174,7 @@ export function readChangelogText(packageRoot?: string): string | undefined {
  * Parse a Keep-a-Changelog style markdown file into entries.
  * Each entry starts with `## [version] - date` or `## [version]`.
  */
-export function parseChangelogEntries(
-  text: string,
-  maxEntries?: number,
-): ChangelogEntry[] {
+export function parseChangelogEntries(text: string, maxEntries?: number): ChangelogEntry[] {
   const lines = text.split(/\r?\n/);
   const entries: ChangelogEntry[] = [];
   let current: ChangelogEntry | undefined;
@@ -251,9 +244,7 @@ export function parseChangelogEntries(
 export function entriesToPlainLines(entries: ChangelogEntry[]): string[] {
   const out: string[] = [];
   for (const entry of entries) {
-    const header = entry.date
-      ? `## [${entry.version}] - ${entry.date}`
-      : `## [${entry.version}]`;
+    const header = entry.date ? `## [${entry.version}] - ${entry.date}` : `## [${entry.version}]`;
     out.push(header);
     out.push("");
     if (entry.sections.length === 0) {
@@ -327,18 +318,13 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
   const { tui, theme, done, packageRoot, maxEntries } = args;
 
   const version = getPackageVersion(packageRoot);
-  const title = version
-    ? `pi-blackhole v${version} — Changelog`
-    : "pi-blackhole — Changelog";
+  const title = version ? `pi-blackhole v${version} — Changelog` : "pi-blackhole — Changelog";
 
   const raw = readChangelogText(packageRoot);
   let allLines: string[];
 
   if (!raw) {
-    allLines = [
-      "Changelog not found.",
-      "Expected CHANGELOG.md at package root.",
-    ];
+    allLines = ["Changelog not found.", "Expected CHANGELOG.md at package root."];
   } else {
     const entries = parseChangelogEntries(raw, maxEntries);
     if (entries.length === 0) {
@@ -371,11 +357,7 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
   const PAGE = 5;
 
   const render = (width: number): string[] => {
-    const inner = responsiveInnerRows(
-      tui.terminal.rows ?? 24,
-      PREFERRED_INNER_ROWS,
-      14,
-    );
+    const inner = responsiveInnerRows(tui.terminal.rows ?? 24, PREFERRED_INNER_ROWS, 14);
     const cw = frameContentWidth(width);
     // Wrap static lines to current width
     const wrapped: string[] = [];
@@ -393,9 +375,7 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
     if (scroll > 0) body.push(theme.fg("dim", `  ↑ ${scroll} earlier`));
     body.push(...slice);
     if (scroll + visible < wrapped.length) {
-      body.push(
-        theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`),
-      );
+      body.push(theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`));
     }
 
     const hints = "↑↓ scroll · PgUp/PgDn · Esc close";
@@ -410,11 +390,7 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
   };
 
   const handleInput = (data: string): void => {
-    const inner = responsiveInnerRows(
-      tui.terminal.rows ?? 24,
-      PREFERRED_INNER_ROWS,
-      14,
-    );
+    const inner = responsiveInnerRows(tui.terminal.rows ?? 24, PREFERRED_INNER_ROWS, 14);
     const cw = frameContentWidth(80); // temp; actual wrapped length uses cw=?
     // Recompute wrapped length for bounds
     const wrapped: string[] = [];
@@ -470,11 +446,7 @@ function createLazyChangelogViewer(params: {
   }
 
   const render = (width: number): string[] => {
-    const inner = responsiveInnerRows(
-      tui.terminal.rows ?? 24,
-      PREFERRED_INNER_ROWS,
-      14,
-    );
+    const inner = responsiveInnerRows(tui.terminal.rows ?? 24, PREFERRED_INNER_ROWS, 14);
     const wrapped = getWrapped(width);
     const visible = Math.max(1, inner - 3); // reserve footer + blank
     const maxScroll = Math.max(0, wrapped.length - visible);
@@ -486,9 +458,7 @@ function createLazyChangelogViewer(params: {
     if (scroll > 0) body.push(theme.fg("dim", `  ↑ ${scroll} earlier`));
     body.push(...slice);
     if (scroll + visible < wrapped.length) {
-      body.push(
-        theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`),
-      );
+      body.push(theme.fg("dim", `  ↓ ${wrapped.length - scroll - visible} more`));
     }
     body.push("");
     body.push(theme.fg("dim", "  ↑↓ scroll · PgUp/PgDn · Esc close"));
@@ -496,11 +466,7 @@ function createLazyChangelogViewer(params: {
   };
 
   const handleInput = (data: string): void => {
-    const inner = responsiveInnerRows(
-      tui.terminal.rows ?? 24,
-      PREFERRED_INNER_ROWS,
-      14,
-    );
+    const inner = responsiveInnerRows(tui.terminal.rows ?? 24, PREFERRED_INNER_ROWS, 14);
     const wrapped = getWrapped(lastWidth);
     const visible = Math.max(1, inner - 3);
     const maxScroll = Math.max(0, wrapped.length - visible);
@@ -528,8 +494,7 @@ function createLazyChangelogViewer(params: {
 /** Open the changelog as an overlay via ctx.ui.custom. */
 export async function openChangelogView(ctx: ExtensionContext): Promise<void> {
   await ctx.ui.custom<void>(
-    (tui, theme, _kb, done) =>
-      createChangelogViewer({ tui, theme, done: () => done(undefined) }),
+    (tui, theme, _kb, done) => createChangelogViewer({ tui, theme, done: () => done(undefined) }),
     {
       overlay: true,
       overlayOptions: { anchor: "center", width: "92%", maxHeight: "95%" },

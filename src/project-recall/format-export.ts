@@ -15,11 +15,7 @@
  * adds a small weight, and information density (token count) mildly
  * rewards substantive observations.
  */
-import type {
-  CorpusObservation,
-  CorpusReflection,
-  ProjectCorpus,
-} from "./corpus.js";
+import type { CorpusObservation, CorpusReflection, ProjectCorpus } from "./corpus.js";
 import {
   clusterObservations,
   clusterReflections,
@@ -69,10 +65,7 @@ const MAX_SPLIT_DEPTH = 6;
 /** Minimum clusters in a connected component to form a topic group. */
 const MIN_TOPIC_SIZE = 5;
 
-export function relativeTime(
-  timestamp: string | null,
-  nowMs: number,
-): string | null {
+export function relativeTime(timestamp: string | null, nowMs: number): string | null {
   if (!timestamp) return null;
   const t = Date.parse(timestamp);
   if (Number.isNaN(t)) return null;
@@ -91,18 +84,12 @@ export function relativeTime(
   return `${Math.floor(days / 365)}y ago`;
 }
 
-function recencyDecay(
-  timestamp: string | null,
-  nowMs: number,
-  tier?: Relevance,
-): number {
+function recencyDecay(timestamp: string | null, nowMs: number, tier?: Relevance): number {
   if (!timestamp) return 0.5;
   const t = Date.parse(timestamp);
   if (Number.isNaN(t)) return 0.5;
   const days = Math.max(0, (nowMs - t) / 86400000);
-  const exp = tier
-    ? (TIER_DECAY_EXP[tier] ?? RECENCY_DECAY_EXP)
-    : RECENCY_DECAY_EXP;
+  const exp = tier ? (TIER_DECAY_EXP[tier] ?? RECENCY_DECAY_EXP) : RECENCY_DECAY_EXP;
   return 1 / Math.pow(1 + days, exp);
 }
 
@@ -140,9 +127,7 @@ function clusterScore<T extends Scoreable>(
   );
 }
 
-function buildObsTierMap(
-  observations: CorpusObservation[],
-): Map<string, Relevance> {
+function buildObsTierMap(observations: CorpusObservation[]): Map<string, Relevance> {
   const map = new Map<string, Relevance>();
   for (const o of observations) {
     if (o.id) map.set(o.id, o.relevance);
@@ -220,9 +205,7 @@ export interface ExportStats {
 // ── Coverage index ──────────────────────────────────────────────
 
 /** Map: observation memory id → count of reflections that cite it. */
-function buildCoverageIndex(
-  reflections: CorpusReflection[],
-): Map<string, number> {
+function buildCoverageIndex(reflections: CorpusReflection[]): Map<string, number> {
   const index = new Map<string, number>();
   for (const r of reflections) {
     for (const id of r.supportingObservationIds) {
@@ -256,10 +239,7 @@ function clusterCoverage(
  * Viability gate: keep clusters with recurrence, reflection coverage,
  * or high tier. Low/medium single-session unsupported clusters are noise.
  */
-function passesViability(
-  cluster: MemoryCluster<CorpusObservation>,
-  coverage: number,
-): boolean {
+function passesViability(cluster: MemoryCluster<CorpusObservation>, coverage: number): boolean {
   if (cluster.distinctSessions >= 2) return true;
   if (coverage > 0) return true;
   if (cluster.bestRelevance === "low") return false;
@@ -414,9 +394,7 @@ function connectedComponents(
  * Returns a Map of cluster → topic label (only for assigned clusters).
  * Unassigned clusters (singletons, pairs) render without a badge.
  */
-function assignTopics(
-  clusters: Array<MemoryCluster<CorpusObservation>>,
-): TopicAssignment {
+function assignTopics(clusters: Array<MemoryCluster<CorpusObservation>>): TopicAssignment {
   if (clusters.length < MIN_TOPIC_SIZE) return new Map();
 
   // Cache token sets for all clusters, filtering out compaction-artifact
@@ -481,13 +459,7 @@ function splitComponents(
     if (comp.length <= MAX_COMPONENT_SIZE) {
       if (comp.length >= MIN_TOPIC_SIZE) {
         topics.push({
-          label: computeTopicLabel(
-            comp,
-            tokenSets,
-            orderedTokens,
-            df,
-            totalClusters,
-          ),
+          label: computeTopicLabel(comp, tokenSets, orderedTokens, df, totalClusters),
           indices: comp,
         });
       }
@@ -497,13 +469,7 @@ function splitComponents(
     const nextThreshold = threshold + TOPIC_SPLIT_STEP;
     if (nextThreshold >= 0.9 || depth >= MAX_SPLIT_DEPTH) {
       topics.push({
-        label: computeTopicLabel(
-          comp,
-          tokenSets,
-          orderedTokens,
-          df,
-          totalClusters,
-        ),
+        label: computeTopicLabel(comp, tokenSets, orderedTokens, df, totalClusters),
         indices: comp,
       });
       continue;
@@ -512,13 +478,7 @@ function splitComponents(
     if (sub.length <= 1) {
       // Threshold raise did not fragment — accept as-is
       topics.push({
-        label: computeTopicLabel(
-          comp,
-          tokenSets,
-          orderedTokens,
-          df,
-          totalClusters,
-        ),
+        label: computeTopicLabel(comp, tokenSets, orderedTokens, df, totalClusters),
         indices: comp,
       });
       continue;
@@ -562,9 +522,7 @@ function computeTopicLabel(
     }
   }
   if (bigramCounts.size > 0) {
-    const sortedBigrams = [...bigramCounts.entries()].sort(
-      (a, b) => b[1] - a[1],
-    );
+    const sortedBigrams = [...bigramCounts.entries()].sort((a, b) => b[1] - a[1]);
     const [topBigram, topCount] = sortedBigrams[0];
     const threshold = Math.max(3, Math.ceil(indices.length * 0.3));
     if (topCount >= threshold) {
@@ -577,16 +535,12 @@ function computeTopicLabel(
 
   // Fallback: top-2 TF-IDF tokens
   const tf = new Map<string, number>();
-  for (const idx of indices)
-    for (const t of tokenSets[idx]) tf.set(t, (tf.get(t) ?? 0) + 1);
+  for (const idx of indices) for (const t of tokenSets[idx]) tf.set(t, (tf.get(t) ?? 0) + 1);
 
   const scored = [...tf.entries()]
     .map(([token, count]) => ({
       token,
-      score:
-        count *
-        Math.log(totalClusters / (df.get(token) ?? 1)) *
-        (token.length <= 3 ? 0.6 : 1),
+      score: count * Math.log(totalClusters / (df.get(token) ?? 1)) * (token.length <= 3 ? 0.6 : 1),
     }))
     .sort((a, b) => b.score - a.score);
 
@@ -658,8 +612,7 @@ function assignReflectionTopics(
 
   const assignment = new Map<MemoryCluster<CorpusReflection>, string>();
   for (const topic of topics)
-    for (const idx of topic.indices)
-      assignment.set(reflClusters[idx], topic.label);
+    for (const idx of topic.indices) assignment.set(reflClusters[idx], topic.label);
   return assignment;
 }
 
@@ -684,10 +637,7 @@ function buildObservationTopicMap(
   const obsTier = buildObsTierMap(observations);
 
   // Track best topic per observation cluster, keyed by reflection tier rank
-  const best = new Map<
-    MemoryCluster<CorpusObservation>,
-    { label: string; tierRank: number }
-  >();
+  const best = new Map<MemoryCluster<CorpusObservation>, { label: string; tierRank: number }>();
 
   for (const [reflCluster, topic] of reflTopicAssignments) {
     const reflTier = inferReflectionTier(reflCluster, obsTier);
@@ -723,12 +673,8 @@ function emitBullets(
     const parts: string[] = [];
     const age = relativeTime(cluster.rep.timestamp, nowMs);
     if (age) parts.push(age);
-    if (cluster.distinctSessions > 1)
-      parts.push(`across ${cluster.distinctSessions} sessions`);
-    if (
-      cluster.occurrences > 1 &&
-      cluster.occurrences > cluster.distinctSessions
-    )
+    if (cluster.distinctSessions > 1) parts.push(`across ${cluster.distinctSessions} sessions`);
+    if (cluster.occurrences > 1 && cluster.occurrences > cluster.distinctSessions)
       parts.push(`recorded ${cluster.occurrences}×`);
     const meta = parts.length > 0 ? ` *(${parts.join(" · ")})*` : "";
 
@@ -766,9 +712,7 @@ function renderScoredBullets(
   scored.sort(
     (a, b) =>
       b.score - a.score ||
-      flatten(b.cluster.rep.content).localeCompare(
-        flatten(a.cluster.rep.content),
-      ),
+      flatten(b.cluster.rep.content).localeCompare(flatten(a.cluster.rep.content)),
   );
   return emitBullets(scored, nowMs, topicAssignments);
 }
@@ -785,22 +729,15 @@ export function buildExportMarkdown(
 ): { markdown: string; stats: ExportStats } {
   const now = opts?.now ?? Date.now();
   const title =
-    opts?.title ??
-    corpus.projectRoot.split("/").filter(Boolean).pop() ??
-    corpus.projectRoot;
+    opts?.title ?? corpus.projectRoot.split("/").filter(Boolean).pop() ?? corpus.projectRoot;
 
   // Dropper-pruned ids never render in the body (§17.3: dropped does not boost).
-  const notDropped = (o: CorpusObservation) =>
-    !o.id || !corpus.droppedIds.has(o.id);
+  const notDropped = (o: CorpusObservation) => !o.id || !corpus.droppedIds.has(o.id);
   const branchAndPendingObs = corpus.observations.filter(
     (o) => o.source !== "orphan" && notDropped(o),
   );
-  const orphanObs = corpus.observations.filter(
-    (o) => o.source === "orphan" && notDropped(o),
-  );
-  const branchAndPendingRefl = corpus.reflections.filter(
-    (r) => r.source !== "orphan",
-  );
+  const orphanObs = corpus.observations.filter((o) => o.source === "orphan" && notDropped(o));
+  const branchAndPendingRefl = corpus.reflections.filter((r) => r.source !== "orphan");
   const orphanRefl = corpus.reflections.filter((r) => r.source === "orphan");
 
   const obsClusters = clusterObservations(branchAndPendingObs, {
@@ -813,15 +750,11 @@ export function buildExportMarkdown(
   const coverageIndex = buildCoverageIndex(branchAndPendingRefl);
 
   // Viability gate on branch/observation clusters
-  const viable = obsClusters.filter((c) =>
-    passesViability(c, clusterCoverage(c, coverageIndex)),
-  );
+  const viable = obsClusters.filter((c) => passesViability(c, clusterCoverage(c, coverageIndex)));
   const observationsFiltered = obsClusters.length - viable.length;
 
   // Orphan gate: only clusters seen across ≥2 orphaned sessions
-  const viableOrphans = orphanObsClusters.filter(
-    (c) => c.distinctSessions >= 2,
-  );
+  const viableOrphans = orphanObsClusters.filter((c) => c.distinctSessions >= 2);
 
   // Reflection-first topic assignment: reflections label the topics,
   // observations inherit via supportingObservationIds; unseeded
@@ -877,12 +810,9 @@ export function buildExportMarkdown(
       obsPool: CorpusObservation[],
     ) => {
       const obsTier = buildObsTierMap(obsPool);
-      const tierClusters = clusters.filter(
-        (c) => inferReflectionTier(c, obsTier) === tier,
-      );
+      const tierClusters = clusters.filter((c) => inferReflectionTier(c, obsTier) === tier);
       if (tierClusters.length === 0) return;
-      const label =
-        tier.charAt(0).toUpperCase() + tier.slice(1) + " reflections";
+      const label = tier.charAt(0).toUpperCase() + tier.slice(1) + " reflections";
       const scored = tierClusters
         .map((cluster) => ({
           cluster,
@@ -896,14 +826,11 @@ export function buildExportMarkdown(
       sections.push([`### ${label}`, "", ...lines, ""].join("\n"));
     };
 
-    for (const tier of TIER_ORDER)
-      renderReflectionTier(tier, reflClusters, branchAndPendingObs);
+    for (const tier of TIER_ORDER) renderReflectionTier(tier, reflClusters, branchAndPendingObs);
 
     if (orphanRefl.length > 0) {
       const lines = orphanRefl.map((r) => `- ${flatten(r.content)}`);
-      sections.push(
-        ["### Unattributed reflections", "", ...lines, ""].join("\n"),
-      );
+      sections.push(["### Unattributed reflections", "", ...lines, ""].join("\n"));
     }
   }
 
@@ -916,12 +843,7 @@ export function buildExportMarkdown(
       [
         `## ${label}`,
         "",
-        ...renderScoredBullets(
-          tierClusters,
-          coverageIndex,
-          now,
-          topicAssignments,
-        ),
+        ...renderScoredBullets(tierClusters, coverageIndex, now, topicAssignments),
         "",
       ].join("\n"),
     );
@@ -955,14 +877,7 @@ export function buildExportMarkdown(
         `**${viableOrphans.length} observations** (${orphanObs.length} raw, only cross-session survivors shown):`,
         "",
       );
-      body.push(
-        ...renderScoredBullets(
-          viableOrphans,
-          coverageIndex,
-          now,
-          orphanTopicAssignments,
-        ),
-      );
+      body.push(...renderScoredBullets(viableOrphans, coverageIndex, now, orphanTopicAssignments));
       body.push("");
     }
     if (orphanRefl.length > 0) {

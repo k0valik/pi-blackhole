@@ -42,9 +42,7 @@ describe("session-ledger V3 folding", () => {
     const folded = foldLedger(entries, { upToEntryId: "om-eeeeeeeeeeee" });
 
     expect(folded.observations.map((obs) => obs.id)).toEqual(["aaaaaaaaaaaa"]);
-    expect(folded.activeObservations.map((obs) => obs.id)).toEqual([
-      "aaaaaaaaaaaa",
-    ]);
+    expect(folded.activeObservations.map((obs) => obs.id)).toEqual(["aaaaaaaaaaaa"]);
     expect(folded.reflections.map((ref) => ref.id)).toEqual(["eeeeeeeeeeee"]);
     expect(folded.observationsById.get("bbbbbbbbbbbb")).toBeUndefined();
   });
@@ -66,13 +64,8 @@ describe("session-ledger V3 folding", () => {
 
     const folded = foldLedger(entries);
 
-    expect(folded.observations.map((obs) => obs.id)).toEqual([
-      "aaaaaaaaaaaa",
-      "bbbbbbbbbbbb",
-    ]);
-    expect(folded.activeObservations.map((obs) => obs.id)).toEqual([
-      "bbbbbbbbbbbb",
-    ]);
+    expect(folded.observations.map((obs) => obs.id)).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+    expect(folded.activeObservations.map((obs) => obs.id)).toEqual(["bbbbbbbbbbbb"]);
     expect(folded.droppedObservationIds.has("aaaaaaaaaaaa")).toBe(true);
     expect(folded.observationsById.get("aaaaaaaaaaaa")).toEqual(obs1);
   });
@@ -112,12 +105,8 @@ describe("session-ledger V3 folding", () => {
 
     const folded = foldLedger(entries);
 
-    expect(folded.observationsById.get("aaaaaaaaaaaa")?.content).toBe(
-      "first observation",
-    );
-    expect(folded.reflectionsById.get("eeeeeeeeeeee")?.content).toBe(
-      "first reflection",
-    );
+    expect(folded.observationsById.get("aaaaaaaaaaaa")?.content).toBe("first observation");
+    expect(folded.reflectionsById.get("eeeeeeeeeeee")?.content).toBe("first reflection");
     expect(folded.observations).toHaveLength(1);
     expect(folded.reflections).toHaveLength(1);
   });

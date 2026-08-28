@@ -2,11 +2,7 @@ import type { BodyState } from "./body.ts";
 import type { Field } from "./types.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export function notifyError(
-  _state: BodyState,
-  ctx: ExtensionContext,
-  err: unknown,
-): void {
+export function notifyError(_state: BodyState, ctx: ExtensionContext, err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   try {
     ctx.ui.notify(message, "error");

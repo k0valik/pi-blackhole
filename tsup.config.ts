@@ -22,10 +22,7 @@ function inlineChangelog() {
         let content = "";
         // Prefer docs/CHANGELOG.md (canonical), fall back to root
         try {
-          content = readFileSync(
-            resolve(__dirname, "docs/CHANGELOG.md"),
-            "utf8",
-          );
+          content = readFileSync(resolve(__dirname, "docs/CHANGELOG.md"), "utf8");
         } catch {
           try {
             content = readFileSync(resolve(__dirname, "CHANGELOG.md"), "utf8");

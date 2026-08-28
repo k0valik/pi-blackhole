@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import {
-  frame,
-  frameContentWidth,
-  responsiveInnerRows,
-  DEFAULT_PADDING_Y,
-} from "./frame.ts";
+import { frame, frameContentWidth, responsiveInnerRows, DEFAULT_PADDING_Y } from "./frame.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 function fakeTheme(): Theme {

@@ -51,11 +51,7 @@ export const customRenderer: FieldRenderer<CustomField, unknown> = {
       });
       if (consumed) return { consumed: true };
     }
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       if (row.field.openSubmenu) {
         const factory: SubmenuFactory<unknown> = (done) =>
           row.field.openSubmenu!({

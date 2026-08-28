@@ -25,29 +25,17 @@ export function renderTabBar(state: BodyState, width: number): string {
     if (tab.id === state.activeTabId) {
       const padded = ` ▸ ${label} `;
       cells.push(
-        state.args.theme.fg(
-          "accent",
-          state.args.theme.inverse(state.args.theme.bold(padded)),
-        ),
+        state.args.theme.fg("accent", state.args.theme.inverse(state.args.theme.bold(padded))),
       );
     } else {
       const padded = `   ${label} `;
-      cells.push(
-        state.args.theme.bg(
-          "selectedBg",
-          state.args.theme.fg("accent", padded),
-        ),
-      );
+      cells.push(state.args.theme.bg("selectedBg", state.args.theme.fg("accent", padded)));
     }
   }
   return pad(cells.join(" "), width);
 }
 
-export function renderSearchBar(
-  state: BodyState,
-  width: number,
-  hasMatches = true,
-): string {
+export function renderSearchBar(state: BodyState, width: number, hasMatches = true): string {
   const cursor = state.args.theme.inverse(" ");
   let text: string;
   if (state.search === "") {
@@ -66,10 +54,7 @@ export function renderSearchBar(
 export function renderFooter(
   state: BodyState,
   rendererFor: (field: Field) => {
-    hints: (
-      args: { field: Field; value: unknown },
-      ctx: { isEditing: boolean },
-    ) => FieldKeyHint[];
+    hints: (args: { field: Field; value: unknown }, ctx: { isEditing: boolean }) => FieldKeyHint[];
   },
   _width: number,
 ): string[] {
@@ -103,11 +88,7 @@ export function renderFooter(
   // In readOnly mode with tabs+actions, advertise arrow navigation
   // between the tab bar and the action row so users know ←/→ reach
   // Cancel/Edit without guessing.
-  if (
-    state.options.readOnly &&
-    state.tabs.length > 0 &&
-    (state.options.actions?.length ?? 0) > 0
-  ) {
+  if (state.options.readOnly && state.tabs.length > 0 && (state.options.actions?.length ?? 0) > 0) {
     line1.push({ key: "← →", label: "navigate" });
   }
   if (state.isBuffered) {
@@ -128,11 +109,7 @@ export function renderFooter(
     line2.push({ key: "↑↓", label: "select" });
     line2.push({ key: "enter/space", label: "confirm" });
     line2.push({ key: "esc", label: "cancel" });
-  } else if (
-    state.options.enableSearch &&
-    state.search !== "" &&
-    !row?.isEditing
-  ) {
+  } else if (state.options.enableSearch && state.search !== "" && !row?.isEditing) {
     line2.push({ key: "esc", label: "clear search" });
   } else if (state.isBuffered && isDirty(state)) {
     line2.push({ key: "esc", label: "confirm →" });
@@ -170,8 +147,7 @@ export function renderRow(
     const title = (row.field as { value: string }).value;
     const prefix = isSelected ? state.args.theme.fg("accent", "▌ ") : "  ";
     const composed = `${prefix}${state.args.theme.fg("dim", title)}`;
-    if (isSelected)
-      return state.args.theme.bg("selectedBg", pad(composed, width));
+    if (isSelected) return state.args.theme.bg("selectedBg", pad(composed, width));
     return truncateToWidth(composed, width, "…");
   }
 
@@ -181,21 +157,13 @@ export function renderRow(
   // usable 28-col floor so long names truncate gracefully.
   const labelAlloc = Math.min(55, Math.max(28, Math.floor(width * 0.5)));
   const labelText = truncateToWidth(row.field.label, labelAlloc, "…");
-  const labelPadding = " ".repeat(
-    Math.max(1, labelAlloc - visibleWidth(labelText)),
-  );
+  const labelPadding = " ".repeat(Math.max(1, labelAlloc - visibleWidth(labelText)));
   const valueWidth = Math.max(1, width - labelAlloc - 4);
 
   const dimRaw = row.field.disabled ? true : row.field.dim;
   const dimFlag = typeof dimRaw === "function" ? dimRaw() : dimRaw;
   const labelColor =
-    dimFlag === true
-      ? "muted"
-      : dimFlag === false
-        ? "text"
-        : isSelected
-          ? "text"
-          : "muted";
+    dimFlag === true ? "muted" : dimFlag === false ? "text" : isSelected ? "text" : "muted";
   const label = state.args.theme.fg(labelColor, labelText);
   const renderer = rendererFor(row.field);
   const valueText = renderer.renderValue(
@@ -218,14 +186,12 @@ export function renderRow(
   let note = "";
   const rawValueNote = row.field.valueNote;
   if (rawValueNote) {
-    const resolved =
-      typeof rawValueNote === "function" ? rawValueNote() : rawValueNote;
+    const resolved = typeof rawValueNote === "function" ? rawValueNote() : rawValueNote;
     if (resolved) note += ` ${state.args.theme.fg("dim", resolved)}`;
   }
 
   const composed = `${prefix}${label}${padding}${valueText}${note}`;
-  if (isSelected)
-    return state.args.theme.bg("selectedBg", pad(composed, width));
+  if (isSelected) return state.args.theme.bg("selectedBg", pad(composed, width));
   return truncateToWidth(composed, width, "…");
 }
 
@@ -263,9 +229,7 @@ export function renderBody(
   // Static path/location note between header and field rows
   const pathNote = state.pathNoteRef.current ?? state.pathNote;
   if (pathNote) {
-    lines.push(
-      state.args.theme.fg("dim", truncateToWidth(pathNote, width, "…")),
-    );
+    lines.push(state.args.theme.fg("dim", truncateToWidth(pathNote, width, "…")));
   }
 
   const visibleListRows = Math.max(
@@ -277,15 +241,9 @@ export function renderBody(
   const fieldCount = indices.length;
   const slice = indices.slice(state.scroll, state.scroll + visibleListRows);
   if (slice.length === 0) {
-    lines.push(
-      state.args.theme.fg(
-        "muted",
-        "  No matching settings. (press esc to clear)",
-      ),
-    );
+    lines.push(state.args.theme.fg("muted", "  No matching settings. (press esc to clear)"));
   } else {
-    if (state.scroll > 0)
-      lines.push(state.args.theme.fg("dim", `  ↑ ${state.scroll} earlier`));
+    if (state.scroll > 0) lines.push(state.args.theme.fg("dim", `  ↑ ${state.scroll} earlier`));
     for (const [visIdx, idx] of slice.entries()) {
       const realIdx = state.scroll + visIdx;
       const row = state.rows[idx]!;
@@ -301,8 +259,7 @@ export function renderBody(
       );
     }
     const hidden = Math.max(0, fieldCount - (state.scroll + visibleListRows));
-    if (hidden > 0)
-      lines.push(state.args.theme.fg("dim", `  ↓ ${hidden} more`));
+    if (hidden > 0) lines.push(state.args.theme.fg("dim", `  ↓ ${hidden} more`));
   }
 
   // Description for the focused field
@@ -372,10 +329,7 @@ export function renderFieldDesc(
   }
   if (vdText) {
     lines.push("");
-    for (const line of wrapLine(
-      state.args.theme.fg("accent", vdText),
-      Math.max(1, width - 4),
-    )) {
+    for (const line of wrapLine(state.args.theme.fg("accent", vdText), Math.max(1, width - 4))) {
       lines.push(`  ${line}`);
     }
   }
@@ -401,11 +355,7 @@ export function estimateDescriptionRows(state: BodyState): number {
   if (focused.field.description) estimate = 2;
   const field = focused.field;
   if (field.type === "number") {
-    if (
-      typeof field.min === "number" ||
-      typeof field.max === "number" ||
-      field.integer
-    ) {
+    if (typeof field.min === "number" || typeof field.max === "number" || field.integer) {
       estimate = Math.max(estimate, 2);
     }
   }

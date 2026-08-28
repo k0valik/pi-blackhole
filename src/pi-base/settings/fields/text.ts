@@ -54,10 +54,7 @@ function formatTextPreview(value: string): string {
   return `${truncateToWidth(quoted, 48, "...")}${suffix}`;
 }
 
-function makeTextSubmenu(
-  current: string,
-  ctx: FieldRenderContext,
-): SubmenuFactory<string> {
+function makeTextSubmenu(current: string, ctx: FieldRenderContext): SubmenuFactory<string> {
   return (done) => {
     const editor = new Editor(
       ctx.tui,

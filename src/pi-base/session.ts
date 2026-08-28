@@ -1,10 +1,6 @@
 // Session file tree-walking utilities.
 
-import type {
-  FileEntry,
-  SessionEntry,
-  SessionEntryBase,
-} from "@earendil-works/pi-coding-agent";
+import type { FileEntry, SessionEntry, SessionEntryBase } from "@earendil-works/pi-coding-agent";
 
 /**
  * Resolve the active branch path using PI's append-only tree semantics.
@@ -15,9 +11,7 @@ import type {
  * current leaf of the active branch.
  */
 export function getActiveBranchEntries(entries: FileEntry[]): SessionEntry[] {
-  const sessionEntries = entries.filter(
-    (e): e is SessionEntry => e.type !== "session",
-  );
+  const sessionEntries = entries.filter((e): e is SessionEntry => e.type !== "session");
   const byId = new Map(sessionEntries.map((entry) => [entry.id, entry]));
   const leaf = sessionEntries.at(-1);
   if (!leaf) return [];
@@ -38,9 +32,7 @@ export function getActiveBranchEntries(entries: FileEntry[]): SessionEntry[] {
  * Build a lookup Map from entry id to parent id, filtering out the
  * session header (which has no id/parentId).
  */
-export function buildParentIdMap(
-  entries: FileEntry[],
-): Map<string, string | null> {
+export function buildParentIdMap(entries: FileEntry[]): Map<string, string | null> {
   const map = new Map<string, string | null>();
   for (const entry of entries) {
     if (entry.type === "session") continue;
@@ -60,10 +52,7 @@ export function buildParentIdMap(
  * Accepts `FileEntry[]` — the raw session entries including the header.
  * The header (which lacks id/parentId) is ignored automatically.
  */
-export function getAncestorChain(
-  entries: FileEntry[],
-  leafId: string,
-): string[] {
+export function getAncestorChain(entries: FileEntry[], leafId: string): string[] {
   const byId = new Map<string, { id: string; parentId: string | null }>();
   for (const entry of entries) {
     // Skip session header — it has no id/parentId

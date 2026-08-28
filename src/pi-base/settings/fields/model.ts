@@ -24,18 +24,8 @@
  */
 
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import type {
-  Api,
-  Model,
-  ModelThinkingLevel,
-  ThinkingLevelMap,
-} from "@earendil-works/pi-ai";
-import {
-  matchesKey,
-  SelectList,
-  truncateToWidth,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
+import type { Api, Model, ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai";
+import { matchesKey, SelectList, truncateToWidth, type SelectItem } from "@earendil-works/pi-tui";
 import { formatHintLine, type KeyHint } from "../frame";
 import { handleInlineEditInput, type InlineEditState } from "../inline-edit";
 import type {
@@ -93,10 +83,7 @@ function effortDisplayLabel(
   return LEVEL_FALLBACK_LABELS[level] ?? level;
 }
 
-function listModelOptions(
-  field: ModelField,
-  ctx: FieldRenderContext,
-): ModelOption[] {
+function listModelOptions(field: ModelField, ctx: FieldRenderContext): ModelOption[] {
   if (field.models) return field.models;
   const sessionLabel = field.sessionLabel ?? DEFAULT_SESSION_LABEL;
   const available = ctx.ctx.modelRegistry.getAvailable();
@@ -106,9 +93,7 @@ function listModelOptions(
     label: `${m.name}  [${m.provider}]`,
     model: m,
   }));
-  return field.hideSession
-    ? live
-    : [{ value: "", label: sessionLabel }, ...live];
+  return field.hideSession ? live : [{ value: "", label: sessionLabel }, ...live];
 }
 
 /**
@@ -142,9 +127,7 @@ function resolveModelForValue(
 function supportedEfforts(model: Model<Api> | undefined): ModelThinkingLevel[] {
   if (!model || !model.thinkingLevelMap) return ALL_THINKING_LEVELS;
   const map = model.thinkingLevelMap;
-  return ALL_THINKING_LEVELS.filter(
-    (lvl) => !(lvl in map && map[lvl] === null),
-  );
+  return ALL_THINKING_LEVELS.filter((lvl) => !(lvl in map && map[lvl] === null));
 }
 
 function clampEffort(
@@ -160,11 +143,7 @@ function modelDisplay(field: ModelField, value: ModelValue): string {
   return value.id;
 }
 
-function rowLabel(
-  field: ModelField,
-  value: ModelValue,
-  ctx: FieldRenderContext,
-): string {
+function rowLabel(field: ModelField, value: ModelValue, ctx: FieldRenderContext): string {
   const left = modelDisplay(field, value);
   if (field.hideEffort) return left;
   if (!value.thinking) return left;
@@ -220,9 +199,7 @@ function makeSubmenu(
       const query = filter.buffer.trim().toLowerCase();
       visibleOptions = query
         ? allOptions.filter(
-            (o) =>
-              o.label.toLowerCase().includes(query) ||
-              o.value.toLowerCase().includes(query),
+            (o) => o.label.toLowerCase().includes(query) || o.value.toLowerCase().includes(query),
           )
         : allOptions;
 
@@ -237,9 +214,7 @@ function makeSubmenu(
         getSelectListTheme(),
       );
       const idx =
-        preserveValue !== undefined
-          ? items.findIndex((i) => i.value === preserveValue)
-          : -1;
+        preserveValue !== undefined ? items.findIndex((i) => i.value === preserveValue) : -1;
       list.setSelectedIndex(idx >= 0 ? idx : 0);
 
       list.onSelect = (item) => {
@@ -271,18 +246,10 @@ function makeSubmenu(
       // internal level name.
       const item = list.getSelectedItem();
       const opt = visibleOptions.find((m) => m.value === item?.value);
-      const displayLabel = effortDisplayLabel(
-        currentLevel,
-        opt?.model?.thinkingLevelMap,
-      );
-      const left =
-        effortIndex > 0
-          ? ctx.theme.fg("accent", "‹")
-          : ctx.theme.fg("dim", "‹");
+      const displayLabel = effortDisplayLabel(currentLevel, opt?.model?.thinkingLevelMap);
+      const left = effortIndex > 0 ? ctx.theme.fg("accent", "‹") : ctx.theme.fg("dim", "‹");
       const right =
-        effortIndex < supported.length - 1
-          ? ctx.theme.fg("accent", "›")
-          : ctx.theme.fg("dim", "›");
+        effortIndex < supported.length - 1 ? ctx.theme.fg("accent", "›") : ctx.theme.fg("dim", "›");
       const label = ctx.theme.fg("muted", "  effort: ");
       // Show the canonical level name in dim parentheses next to the
       // override so power-users still know which pi level they're
@@ -292,16 +259,8 @@ function makeSubmenu(
           ? displayLabel
           : `${displayLabel} ${ctx.theme.fg("dim", `(${currentLevel})`)}`;
       const value = ctx.theme.fg("accent", ctx.theme.bold(valueText));
-      const counter = ctx.theme.fg(
-        "dim",
-        `  (${effortIndex + 1}/${supported.length})`,
-      );
-      return truncateToWidth(
-        `${label}${left} ${value} ${right}${counter}`,
-        width,
-        "…",
-        true,
-      );
+      const counter = ctx.theme.fg("dim", `  (${effortIndex + 1}/${supported.length})`);
+      return truncateToWidth(`${label}${left} ${value} ${right}${counter}`, width, "…", true);
     };
 
     const renderFilterRow = (width: number): string => {
@@ -321,21 +280,13 @@ function makeSubmenu(
     const renderHints = (width: number): string => {
       const hints: KeyHint[] = [{ key: "↑↓", label: "model" }];
       if (showEffort) hints.push({ key: "←→", label: "effort" });
-      hints.push(
-        { key: "type", label: "filter" },
-        { key: "enter", label: "save" },
-      );
+      hints.push({ key: "type", label: "filter" }, { key: "enter", label: "save" });
       if (filter.buffer !== "") {
         hints.push({ key: "esc", label: "clear filter" });
       } else {
         hints.push({ key: "esc", label: "cancel" });
       }
-      return truncateToWidth(
-        `  ${formatHintLine(hints, ctx.theme)}`,
-        width,
-        "…",
-        true,
-      );
+      return truncateToWidth(`  ${formatHintLine(hints, ctx.theme)}`, width, "…", true);
     };
 
     return {
@@ -344,9 +295,7 @@ function makeSubmenu(
         lines.push(renderFilterRow(width));
         lines.push("");
         if (visibleOptions.length === 0) {
-          lines.push(
-            ctx.theme.fg("muted", "  No matching models. (press esc to clear)"),
-          );
+          lines.push(ctx.theme.fg("muted", "  No matching models. (press esc to clear)"));
         } else {
           for (const line of list.render(width)) lines.push(line);
         }
@@ -437,11 +386,7 @@ export const modelRenderer: FieldRenderer<ModelField, ModelValue> = {
   },
   handleKey(row, data, { ctx }) {
     if (row.field.disabled) return {};
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       return {
         consumed: true,
         submenu: makeSubmenu(row.field, row.value, ctx),

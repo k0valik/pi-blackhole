@@ -19,10 +19,7 @@ function getErrorMessage(error: unknown): string {
 
 function isStaleExtensionContextError(error: unknown): boolean {
   const message = getErrorMessage(error);
-  return (
-    message.includes("extension ctx is stale") ||
-    message.includes("ctx is stale")
-  );
+  return message.includes("extension ctx is stale") || message.includes("ctx is stale");
 }
 
 function notifySafely(
@@ -46,15 +43,11 @@ function notifySafely(
 function autoCompactionSkipReason(runtime: Runtime): string | null {
   if (runtime.config.compaction === "off") return "compaction_off";
   if (runtime.config.compaction === "manual") return "compaction_manual";
-  if (runtime.config.compactionEngine === "pi-default")
-    return "compactionEngine_pi_default";
+  if (runtime.config.compactionEngine === "pi-default") return "compactionEngine_pi_default";
   // NOTE: memory does not gate compaction — memory:false + compaction:auto = compact without OM
 
   // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
-  if (
-    runtime.config.compaction === undefined &&
-    runtime.config.compactionEngine === undefined
-  ) {
+  if (runtime.config.compaction === undefined && runtime.config.compactionEngine === undefined) {
     if (runtime.config.passive === true) return "passive";
     if (runtime.config.noAutoCompact === true) return "manual";
     // Don't force Pi to compact unless the user explicitly opted into blackhole's pipeline.
@@ -78,10 +71,7 @@ export function resetMidRunRetry(runtime: RetryRuntime): void {
 /** Arm the next retry after `delay` ms (1s, 2s, … capped at 30s). Returns the delay. */
 export function recordMidRunFailure(runtime: RetryRuntime): number {
   const failures = runtime.midRunCompactionRetry.failures + 1;
-  const delay = Math.min(
-    MID_RUN_RETRY_MAX_DELAY_MS,
-    1000 * 2 ** (failures - 1),
-  );
+  const delay = Math.min(MID_RUN_RETRY_MAX_DELAY_MS, 1000 * 2 ** (failures - 1));
   runtime.midRunCompactionRetry = {
     failures,
     retryAfter: Date.now() + delay,
@@ -89,8 +79,7 @@ export function recordMidRunFailure(runtime: RetryRuntime): number {
   return delay;
 }
 
-const retryInSeconds = (delayMs: number) =>
-  `; retrying in ${Math.ceil(delayMs / 1000)}s`;
+const retryInSeconds = (delayMs: number) => `; retrying in ${Math.ceil(delayMs / 1000)}s`;
 
 export function registerCompactionTrigger(
   pi: ExtensionAPI,
@@ -197,10 +186,7 @@ async function handleTurnEnd(
     });
     return;
   }
-  if (
-    mode === "resume" &&
-    runtime.inlineCompactionAdapterStatus?.supported === false
-  ) {
+  if (mode === "resume" && runtime.inlineCompactionAdapterStatus?.supported === false) {
     // The adapter already reported permanent unavailability — don't retry
     // a condition that cannot change mid-session.
     dbg("compaction_trigger.turn_end.skip", {
@@ -332,9 +318,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   dbg("compaction_trigger.agent_end", {
     passive: runtime.config.passive,
     memory: runtime.config.memory,
-    manualMode:
-      runtime.config.compaction === "manual" ||
-      runtime.config.noAutoCompact === true,
+    manualMode: runtime.config.compaction === "manual" || runtime.config.noAutoCompact === true,
     overrideDefaultCompaction: runtime.config.overrideDefaultCompaction,
     compactInFlight: runtime.compactInFlight,
     compactAfterTokens: runtime.config.compactAfterTokens,
@@ -356,10 +340,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   // The next agent_end (after retry succeeds or exhausts attempts) will re-evaluate.
   const lastAssistant = [...event.messages]
     .reverse()
-    .find(
-      (m): m is Extract<typeof m, { role: "assistant" }> =>
-        m.role === "assistant",
-    );
+    .find((m): m is Extract<typeof m, { role: "assistant" }> => m.role === "assistant");
   if (
     lastAssistant &&
     lastAssistant.stopReason === "error" &&
@@ -373,8 +354,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   dbg("compaction_trigger.branch_check", {
     branchLength: entries.length,
     hasLastEntry: entries.length > 0,
-    lastEntryType:
-      entries.length > 0 ? entries[entries.length - 1].type : "none",
+    lastEntryType: entries.length > 0 ? entries[entries.length - 1].type : "none",
   });
 
   const tokens = rawTokensSinceLastCompaction(entries);
@@ -538,11 +518,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         onComplete: (result: any) => {
           runtime.compactInFlight = false;
           dbg("compaction_trigger.onComplete", { result: !!result });
-          runtime.tryEmitInfo(
-            hasUI,
-            ui,
-            "Observational memory: compaction complete",
-          );
+          runtime.tryEmitInfo(hasUI, ui, "Observational memory: compaction complete");
         },
         onError: (error: { message: string }) => {
           runtime.compactInFlight = false;
@@ -553,12 +529,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
             // We already notified the user with the real reason before returning { cancel: true }.
             return;
           }
-          notifySafely(
-            hasUI,
-            ui,
-            `Observational memory: ${error.message}`,
-            "error",
-          );
+          notifySafely(hasUI, ui, `Observational memory: ${error.message}`, "error");
         },
       });
     } catch (error) {
@@ -573,12 +544,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         return;
       }
       dbg("compaction_trigger.microtask.error", { message: msg });
-      notifySafely(
-        hasUI,
-        ui,
-        `Observational memory: compact threw: ${msg}`,
-        "error",
-      );
+      notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
     }
   })();
 }

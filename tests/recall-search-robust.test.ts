@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  searchEntries,
-  getFileIndicators,
-  getTouchedFiles,
-} from "../src/core/search-entries.js";
+import { searchEntries, getFileIndicators, getTouchedFiles } from "../src/core/search-entries.js";
 import type { Message } from "@earendil-works/pi-ai";
 import type { RenderedEntry } from "../src/core/render-entries.js";
 
@@ -15,11 +11,7 @@ const msg = (role: string, content: any): Message =>
     timestamp: ts,
   }) as any;
 
-const rendered = (
-  index: number,
-  role: string,
-  summary: string,
-): RenderedEntry => ({
+const rendered = (index: number, role: string, summary: string): RenderedEntry => ({
   index,
   role,
   summary,
@@ -29,10 +21,7 @@ const rendered = (
 describe("recall-search-robust", () => {
   describe("BM25 scoring and ranking", () => {
     it("ranks rare terms higher (IDF)", () => {
-      const e = [
-        rendered(0, "user", "common"),
-        rendered(1, "user", "rare common"),
-      ];
+      const e = [rendered(0, "user", "common"), rendered(1, "user", "rare common")];
       const m = [msg("user", "common"), msg("user", "rare common")];
       const results = searchEntries(e, m, "rare");
       expect(results).toHaveLength(1);
@@ -43,14 +32,8 @@ describe("recall-search-robust", () => {
     });
 
     it("handles term frequency saturation (BM25 K)", () => {
-      const e = [
-        rendered(0, "user", "common ".repeat(10)),
-        rendered(1, "user", "common common"),
-      ];
-      const m = [
-        msg("user", "common ".repeat(10)),
-        msg("user", "common common"),
-      ];
+      const e = [rendered(0, "user", "common ".repeat(10)), rendered(1, "user", "common common")];
+      const m = [msg("user", "common ".repeat(10)), msg("user", "common common")];
       const results = searchEntries(e, m, "common");
       expect(results[0].index).toBe(0);
     });
@@ -138,9 +121,7 @@ describe("recall-search-robust", () => {
     });
 
     it("defaults to hybrid for invalid modes", () => {
-      expect(
-        searchEntries(e, m, "write", undefined, "invalid" as any),
-      ).toHaveLength(1);
+      expect(searchEntries(e, m, "write", undefined, "invalid" as any)).toHaveLength(1);
     });
   });
 
@@ -172,11 +153,7 @@ describe("recall-search-robust", () => {
           },
         ]),
       ];
-      const r = [
-        rendered(0, "a", "s"),
-        rendered(1, "a", "s"),
-        rendered(2, "a", "s"),
-      ];
+      const r = [rendered(0, "a", "s"), rendered(1, "a", "s"), rendered(2, "a", "s")];
       const touched = getTouchedFiles(m, r);
       expect(touched).toHaveLength(2);
       const a = touched.find((t) => t.path === "a.ts");
@@ -310,10 +287,7 @@ describe("recall-search-robust", () => {
     });
 
     it("scores multiple term matches higher than single term", () => {
-      const e = [
-        rendered(0, "user", "quick brown"),
-        rendered(1, "user", "quick"),
-      ];
+      const e = [rendered(0, "user", "quick brown"), rendered(1, "user", "quick")];
       const m = [msg("user", "quick brown"), msg("user", "quick")];
       const res = searchEntries(e, m, "quick brown");
       expect(res[0].index).toBe(0);
@@ -337,9 +311,7 @@ describe("recall-search-robust", () => {
         output: "file.txt",
       } as any;
       const e = [rendered(0, "assistant", "bash")];
-      expect(searchEntries(e, [mBash], "ls", undefined, "file")).toHaveLength(
-        0,
-      );
+      expect(searchEntries(e, [mBash], "ls", undefined, "file")).toHaveLength(0);
     });
 
     it("handles missing content in messages", () => {

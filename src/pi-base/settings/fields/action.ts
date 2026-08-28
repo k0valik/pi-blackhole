@@ -21,11 +21,7 @@ export const actionRenderer: FieldRenderer<ActionField, void> = {
   },
   handleKey(row, data, { ctx }) {
     if (row.field.disabled) return {};
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       // Fire and forget — actions are deliberately fire-and-go so the
       // modal stays responsive even when `onActivate` is async.
       try {

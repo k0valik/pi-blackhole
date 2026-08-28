@@ -25,10 +25,7 @@ export function getPiAgentDir(): string {
  * @param home Optional home directory override (defaults to `$HOME`)
  */
 export function shortCwd(cwd: string, home?: string): string {
-  const h = (home ?? process.env.HOME ?? process.env.USERPROFILE ?? "").replace(
-    /[\\/]+$/,
-    "",
-  );
+  const h = (home ?? process.env.HOME ?? process.env.USERPROFILE ?? "").replace(/[\\/]+$/, "");
   if (!h) return cwd;
   if (cwd === h) return "~";
   const sep = h.includes("\\") ? "\\" : "/";

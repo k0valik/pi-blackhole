@@ -12,11 +12,7 @@ import { buildOwnCut } from "../src/hooks/before-compact.js";
 // Helpers (mirroring vcc-before-compact.test.ts)
 // ---------------------------------------------------------------------------
 
-const msg = (
-  id: string,
-  role: "user" | "assistant" | "toolResult",
-  content = "x",
-) => ({
+const msg = (id: string, role: "user" | "assistant" | "toolResult", content = "x") => ({
   id,
   type: "message",
   message: { role, content },
@@ -112,11 +108,7 @@ describe("T41: 3 auto-compact cycles with pi-default", () => {
     expect(cycle3.compactAll).toBe(false);
 
     // Cross-check: all 3 cycles compiled disjoint batches
-    const allCompiled = [
-      ...cycle1.messages,
-      ...cycle2.messages,
-      ...cycle3.messages,
-    ];
+    const allCompiled = [...cycle1.messages, ...cycle2.messages, ...cycle3.messages];
     // The important thing: compile doesn't crash, result shapes are correct
     expect(allCompiled).toHaveLength(12); // 4 + 4 + 4
   });
@@ -218,11 +210,7 @@ describe("T42: /blackhole after pi-default auto-compact", () => {
   test("/blackhole after pi-default with orphan recovery still works", () => {
     // Auto-compact with compact-all (no user > idx 0)
     const autoCompact = buildOwnCut(
-      [
-        msg("m1", "user", "go"),
-        msg("m2", "assistant", "x"),
-        msg("m3", "toolResult", "y"),
-      ],
+      [msg("m1", "user", "go"), msg("m2", "assistant", "x"), msg("m3", "toolResult", "y")],
       "m1", // Pi cut at first message
       "pi-default",
     );

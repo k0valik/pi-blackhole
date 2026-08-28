@@ -32,11 +32,7 @@ describe("buildOwnCut", () => {
     });
 
     it("compactAll when only one user message exists at index 0", () => {
-      const entries = [
-        msg("1", "user"),
-        msg("2", "assistant"),
-        msg("3", "assistant"),
-      ];
+      const entries = [msg("1", "user"), msg("2", "assistant"), msg("3", "assistant")];
       const res = buildOwnCut(entries, undefined, "minimal");
       expect(res.ok).toBe(true);
       if (res.ok) {
@@ -47,11 +43,7 @@ describe("buildOwnCut", () => {
     });
 
     it("compactAll when no user message exists", () => {
-      const entries = [
-        msg("1", "assistant"),
-        msg("2", "assistant"),
-        msg("3", "assistant"),
-      ];
+      const entries = [msg("1", "assistant"), msg("2", "assistant"), msg("3", "assistant")];
       const res = buildOwnCut(entries, undefined, "minimal");
       expect(res.ok).toBe(true);
       if (res.ok) {
@@ -194,11 +186,7 @@ describe("buildOwnCut", () => {
 
   describe("robustness and edge cases", () => {
     it("handles branch with no messages", () => {
-      const res = buildOwnCut(
-        [{ id: "1", type: "custom" }],
-        undefined,
-        "minimal",
-      );
+      const res = buildOwnCut([{ id: "1", type: "custom" }], undefined, "minimal");
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.reason).toBe("no_live_messages");
     });
@@ -210,9 +198,7 @@ describe("buildOwnCut", () => {
     });
 
     it("handles very long assistant chain (no user message)", () => {
-      const entries = Array.from({ length: 10 }, (_, i) =>
-        msg(String(i), "assistant"),
-      );
+      const entries = Array.from({ length: 10 }, (_, i) => msg(String(i), "assistant"));
       const res = buildOwnCut(entries, undefined, "minimal");
       expect(res.ok).toBe(true);
       if (res.ok) expect(res.compactAll).toBe(true);
@@ -268,9 +254,7 @@ describe("buildOwnCut", () => {
     it("compactAll when last user is at index 0 and branch is long", () => {
       const entries = [
         msg("0", "user"),
-        ...Array.from({ length: 10 }, (_, i) =>
-          msg(String(i + 1), "assistant"),
-        ),
+        ...Array.from({ length: 10 }, (_, i) => msg(String(i + 1), "assistant")),
       ];
       const res = buildOwnCut(entries, undefined, "minimal");
       expect(res.ok).toBe(true);

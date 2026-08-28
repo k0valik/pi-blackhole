@@ -13,10 +13,7 @@ export const booleanRenderer: FieldRenderer<BooleanField, boolean> = {
     if (row.field.disabled) {
       return ctx.theme.fg("muted", text);
     }
-    return ctx.theme.fg(
-      selected ? "accent" : row.value ? "success" : "muted",
-      text,
-    );
+    return ctx.theme.fg(selected ? "accent" : row.value ? "success" : "muted", text);
   },
   hints(row) {
     if (row.field.disabled) return [];
@@ -27,11 +24,7 @@ export const booleanRenderer: FieldRenderer<BooleanField, boolean> = {
   },
   handleKey(row, data) {
     if (row.field.disabled) return {};
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       return { consumed: true, commit: !row.value };
     }
     if (matchesKey(data, "left")) {

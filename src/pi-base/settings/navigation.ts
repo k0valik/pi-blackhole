@@ -8,11 +8,7 @@ export function totalVisibleItems(state: BodyState): number {
 
 export function updateVisibleIndices(
   state: BodyState,
-  buildCtx: (
-    state: BodyState,
-    field: Field,
-    scope: string,
-  ) => VisibilityContext,
+  buildCtx: (state: BodyState, field: Field, scope: string) => VisibilityContext,
 ): void {
   const query = state.search.trim().toLowerCase();
   const out: number[] = [];
@@ -43,17 +39,11 @@ export function visibleRowIndices(state: BodyState): number[] {
 
 export function clampSelection(state: BodyState, visibleRows: number): void {
   const count = totalVisibleItems(state);
-  state.fieldSelected = Math.max(
-    0,
-    Math.min(state.fieldSelected, Math.max(0, count - 1)),
-  );
+  state.fieldSelected = Math.max(0, Math.min(state.fieldSelected, Math.max(0, count - 1)));
   if (state.fieldSelected < state.scroll) state.scroll = state.fieldSelected;
   else if (state.fieldSelected >= state.scroll + visibleRows)
     state.scroll = state.fieldSelected - visibleRows + 1;
-  state.scroll = Math.max(
-    0,
-    Math.min(state.scroll, Math.max(0, count - visibleRows)),
-  );
+  state.scroll = Math.max(0, Math.min(state.scroll, Math.max(0, count - visibleRows)));
 }
 
 export function focusedIndex(state: BodyState): number | undefined {

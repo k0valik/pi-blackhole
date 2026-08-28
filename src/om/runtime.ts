@@ -9,12 +9,7 @@
  * - recordRetryableError persists cooldown on API errors.
  * - markConsolidationError sets 30s retry gate for failed runs.
  */
-import {
-  type Config,
-  type ConfiguredModel,
-  DEFAULTS,
-  loadConfig,
-} from "./config.js";
+import { type Config, type ConfiguredModel, DEFAULTS, loadConfig } from "./config.js";
 import type { CompactionStats } from "../hooks/before-compact.js";
 import {
   isCooldownActive,
@@ -42,8 +37,7 @@ type NotifyLevel = "warning" | "info" | "error";
 type Notify = (message: string, type?: NotifyLevel) => void;
 export type ConsolidationPhase = "observer" | "reflector" | "dropper";
 
-export type CursorState =
-  "initial" | "recorded" | "empty" | "error" | "skipped" | "not_due";
+export type CursorState = "initial" | "recorded" | "empty" | "error" | "skipped" | "not_due";
 
 export interface PipelineCursor {
   entryId: string;
@@ -91,19 +85,15 @@ async function resolveAuthBaseUrl(
 ): Promise<string | undefined> {
   // Future-proofing: if pi ever adds baseUrl to getApiKeyAndHeaders(),
   // use it directly. No supported version currently does.
-  const directBaseUrl =
-    typeof auth.baseUrl === "string" ? auth.baseUrl.trim() : "";
+  const directBaseUrl = typeof auth.baseUrl === "string" ? auth.baseUrl.trim() : "";
   if (directBaseUrl) return directBaseUrl;
 
   if (typeof modelRegistry.getProviderAuth !== "function") return undefined;
 
   try {
-    const resolved: AuthResult | undefined =
-      await modelRegistry.getProviderAuth(model.provider);
+    const resolved: AuthResult | undefined = await modelRegistry.getProviderAuth(model.provider);
     const baseUrl = resolved?.auth?.baseUrl;
-    return typeof baseUrl === "string" && baseUrl.trim()
-      ? baseUrl.trim()
-      : undefined;
+    return typeof baseUrl === "string" && baseUrl.trim() ? baseUrl.trim() : undefined;
   } catch {
     // Older registries may not expose provider auth resolution.
     return undefined;
@@ -193,11 +183,7 @@ export class Runtime {
    * Emit an info-level notification if none has been emitted this turn/phase yet.
    * Returns true if emitted, false if suppressed (already emitted earlier).
    */
-  tryEmitInfo(
-    hasUI: boolean,
-    ui: { notify: Notify } | undefined,
-    message: string,
-  ): boolean {
+  tryEmitInfo(hasUI: boolean, ui: { notify: Notify } | undefined, message: string): boolean {
     if (!hasUI || !ui || typeof ui.notify !== "function") return false;
     if (this.hasEmittedInfoThisTurn) return false;
     this.hasEmittedInfoThisTurn = true;
@@ -269,10 +255,7 @@ export class Runtime {
    * if all candidates (including session model, if enabled) are exhausted or unavailable.
    */
   async resolveModel(ctx: ResolveCtx): Promise<ResolveResult> {
-    const candidates = this.buildCandidateList(
-      ctx.stageModel,
-      ctx.stageFallbacks,
-    );
+    const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
     const stageName = this.consolidationPhase ?? "unknown";
 
     // Try configured candidates
@@ -300,10 +283,7 @@ export class Runtime {
         continue;
       }
 
-      const configured = ctx.modelRegistry.find(
-        candidate.provider,
-        candidate.id,
-      );
+      const configured = ctx.modelRegistry.find(candidate.provider, candidate.id);
       if (!configured) {
         if (ctx.hasUI && ctx.ui) {
           ctx.ui.notify(
@@ -329,11 +309,7 @@ export class Runtime {
       // NOTE: getProviderAuth is called again inside withResolvedAuthEndpoint
       // to recover the credential-resolved baseUrl (only GitHub Copilot's
       // OAuth emits one; other providers pay the call cost but are unaffected).
-      const resolvedModel = await withResolvedAuthEndpoint(
-        ctx.modelRegistry,
-        configured,
-        auth,
-      );
+      const resolvedModel = await withResolvedAuthEndpoint(ctx.modelRegistry, configured, auth);
 
       return {
         ok: true,
@@ -355,11 +331,9 @@ export class Runtime {
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
-      const hasAuth =
-        ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
+      const hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
       if (!auth.ok || !hasAuth) {
-        const provider =
-          (sessionModel as { provider?: string }).provider ?? "unknown";
+        const provider = (sessionModel as { provider?: string }).provider ?? "unknown";
         return {
           ok: false,
           reason: `no auth for session model provider "${provider}"`,
@@ -369,11 +343,7 @@ export class Runtime {
       // NOTE: getProviderAuth is called again inside withResolvedAuthEndpoint
       // to recover the credential-resolved baseUrl (only GitHub Copilot's
       // OAuth emits one; other providers pay the call cost but are unaffected).
-      const resolvedModel = await withResolvedAuthEndpoint(
-        ctx.modelRegistry,
-        sessionModel,
-        auth,
-      );
+      const resolvedModel = await withResolvedAuthEndpoint(ctx.modelRegistry, sessionModel, auth);
 
       return {
         ok: true,
@@ -404,22 +374,13 @@ export class Runtime {
    * Returns the candidate config if the model was from the candidate list,
    * or undefined if it's the session model.
    */
-  findCandidateConfig(
-    resolvedModel: unknown,
-    ctx: ResolveCtx,
-  ): ConfiguredModel | undefined {
-    const candidates = this.buildCandidateList(
-      ctx.stageModel,
-      ctx.stageFallbacks,
-    );
+  findCandidateConfig(resolvedModel: unknown, ctx: ResolveCtx): ConfiguredModel | undefined {
+    const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
     const model = resolvedModel as { provider?: string; id?: string };
     if (!model.provider || !model.id) return undefined;
     return (
-      candidates.find(
-        (c) => c.provider === model.provider && c.id === model.id,
-      ) ??
-      (this.config.model?.provider === model.provider &&
-      this.config.model?.id === model.id
+      candidates.find((c) => c.provider === model.provider && c.id === model.id) ??
+      (this.config.model?.provider === model.provider && this.config.model?.id === model.id
         ? this.config.model
         : undefined)
     );
@@ -445,8 +406,7 @@ export class Runtime {
       this.failedInCycle.add(modelKey(modelConfig));
       return;
     }
-    const rawReason =
-      error instanceof Error ? error.message : String(error || "unknown error");
+    const rawReason = error instanceof Error ? error.message : String(error || "unknown error");
     // Strip trailing JSON body from API error messages for display cleanliness.
     // To avoid stripping non-JSON braces like "{host}", only strip if the text
     // after the brace pair consists solely of whitespace (i.e. JSON is at end).
@@ -466,10 +426,7 @@ export class Runtime {
   /** Check if the consolidation retry gate is active (too soon after last error). */
   isConsolidationRetryGated(): boolean {
     if (!this.lastConsolidationErrorAt) return false;
-    return (
-      Date.now() - this.lastConsolidationErrorAt <
-      CONSOLIDATION_RETRY_COOLDOWN_MS
-    );
+    return Date.now() - this.lastConsolidationErrorAt < CONSOLIDATION_RETRY_COOLDOWN_MS;
   }
 
   /** Get the current cursor for a pipeline stage. */
@@ -478,11 +435,7 @@ export class Runtime {
   }
 
   /** Advance a stage's cursor to a new entry ID with the given state. */
-  advanceCursor(
-    stage: ConsolidationPhase,
-    entryId: string,
-    state: CursorState,
-  ): void {
+  advanceCursor(stage: ConsolidationPhase, entryId: string, state: CursorState): void {
     this.cursors[stage] = { entryId, state };
   }
 
@@ -536,37 +489,26 @@ export class Runtime {
     });
   }
 
-  launchConsolidationTask(
-    ctx: LaunchCtx,
-    work: () => Promise<void>,
-  ): Promise<void> {
+  launchConsolidationTask(ctx: LaunchCtx, work: () => Promise<void>): Promise<void> {
     this.consolidationInFlight = true;
     this.consolidationPhase = undefined;
     const promise = this.launchTrackedTask(ctx, "consolidation", work, () => {
       this.consolidationInFlight = false;
       this.consolidationPhase = undefined;
-      if (this.consolidationPromise === promise)
-        this.consolidationPromise = null;
+      if (this.consolidationPromise === promise) this.consolidationPromise = null;
     });
     this.consolidationPromise = promise;
     return promise;
   }
 
-  recordConsolidationStageError(
-    ctx: LaunchCtx,
-    phase: ConsolidationPhase,
-    error: unknown,
-  ): string {
+  recordConsolidationStageError(ctx: LaunchCtx, phase: ConsolidationPhase, error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     if (phase === "observer") this.lastObserverError = message;
     if (phase === "reflector") this.lastReflectorError = message;
     if (phase === "dropper") this.lastDropperError = message;
     if (ctx.hasUI && ctx.ui) {
       try {
-        ctx.ui.notify(
-          `Observational memory: ${phase} failed: ${message}`,
-          "warning",
-        );
+        ctx.ui.notify(`Observational memory: ${phase} failed: ${message}`, "warning");
       } catch {
         // Stale extension context — harmless.
       }
@@ -591,10 +533,7 @@ export class Runtime {
         errorMessage = error instanceof Error ? error.message : String(error);
         if (hasUI && ui) {
           try {
-            ui.notify(
-              `Observational memory: ${label} failed: ${errorMessage}`,
-              "warning",
-            );
+            ui.notify(`Observational memory: ${label} failed: ${errorMessage}`, "warning");
           } catch {
             // Stale extension context — harmless.
           }

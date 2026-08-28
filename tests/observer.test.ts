@@ -78,9 +78,7 @@ describe("runObserver", () => {
     expect(systemPrompt).toContain("sourceEntryIds");
     expect(systemPrompt).toContain("zero observations");
     expect(systemPrompt).toContain("The dropper will drop these first");
-    expect(systemPrompt).toContain(
-      "highest-resistance, load-bearing observations",
-    );
+    expect(systemPrompt).toContain("highest-resistance, load-bearing observations");
     expect(systemPrompt).not.toContain("will NEVER be dropped");
     expect(systemPrompt).not.toContain("pruner");
   });
@@ -222,18 +220,17 @@ describe("normalizeSourceEntryIds", () => {
   });
 
   it("dedupes repeated source ids", () => {
-    expect(
-      normalizeSourceEntryIds(["entry-b", "entry-b", "entry-a"], allowed),
-    ).toEqual(["entry-a", "entry-b"]);
+    expect(normalizeSourceEntryIds(["entry-b", "entry-b", "entry-a"], allowed)).toEqual([
+      "entry-a",
+      "entry-b",
+    ]);
   });
 
   it("filters missing, empty, or hallucinated source ids (no longer rejects whole batch)", () => {
     expect(normalizeSourceEntryIds(undefined, allowed)).toBeUndefined();
     expect(normalizeSourceEntryIds([], allowed)).toBeUndefined();
     // Hallucinated IDs are filtered out; valid IDs are kept
-    expect(
-      normalizeSourceEntryIds(["entry-a", "not-in-the-chunk"], allowed),
-    ).toEqual(["entry-a"]);
+    expect(normalizeSourceEntryIds(["entry-a", "not-in-the-chunk"], allowed)).toEqual(["entry-a"]);
     expect(normalizeSourceEntryIds(["entry-a"], [])).toBeUndefined();
   });
 

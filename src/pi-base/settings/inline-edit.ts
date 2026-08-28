@@ -81,10 +81,7 @@ export function clampInlineCursor(editing: InlineEditState): void {
  * the index of the char it is just before. A cursor past the end returns
  * `chars.length`.
  */
-export function codeUnitToCharIndex(
-  chars: InlineEditChar[],
-  cursor: number,
-): number {
+export function codeUnitToCharIndex(chars: InlineEditChar[], cursor: number): number {
   let index = 0;
   while (index < chars.length && chars[index]!.end <= cursor) index += 1;
   return index;
@@ -109,25 +106,17 @@ export function inlineCharKind(ch: string): "space" | "word" | "punct" {
 }
 
 /** Move the cursor by `delta` code-points (negative = left). */
-export function moveInlineCursorByChars(
-  editing: InlineEditState,
-  delta: number,
-): void {
+export function moveInlineCursorByChars(editing: InlineEditState, delta: number): void {
   const chars = inlineEditChars(editing.buffer);
   const index = codeUnitToCharIndex(chars, editing.cursor);
-  editing.cursor = charIndexToCodeUnit(
-    chars,
-    index + delta,
-    editing.buffer.length,
-  );
+  editing.cursor = charIndexToCodeUnit(chars, index + delta, editing.buffer.length);
 }
 
 /** Skip whitespace then a contiguous run of the same char-kind to the left. */
 export function moveInlineCursorWordLeft(editing: InlineEditState): void {
   const chars = inlineEditChars(editing.buffer);
   let index = codeUnitToCharIndex(chars, editing.cursor);
-  while (index > 0 && inlineCharKind(chars[index - 1]!.ch) === "space")
-    index -= 1;
+  while (index > 0 && inlineCharKind(chars[index - 1]!.ch) === "space") index -= 1;
   if (index <= 0) {
     editing.cursor = 0;
     return;
@@ -141,15 +130,13 @@ export function moveInlineCursorWordLeft(editing: InlineEditState): void {
 export function moveInlineCursorWordRight(editing: InlineEditState): void {
   const chars = inlineEditChars(editing.buffer);
   let index = codeUnitToCharIndex(chars, editing.cursor);
-  while (index < chars.length && inlineCharKind(chars[index]!.ch) === "space")
-    index += 1;
+  while (index < chars.length && inlineCharKind(chars[index]!.ch) === "space") index += 1;
   if (index >= chars.length) {
     editing.cursor = editing.buffer.length;
     return;
   }
   const kind = inlineCharKind(chars[index]!.ch);
-  while (index < chars.length && inlineCharKind(chars[index]!.ch) === kind)
-    index += 1;
+  while (index < chars.length && inlineCharKind(chars[index]!.ch) === kind) index += 1;
   editing.cursor = charIndexToCodeUnit(chars, index, editing.buffer.length);
 }
 
@@ -161,11 +148,7 @@ export function insertInlineText(editing: InlineEditState, text: string): void {
 }
 
 /** Delete the half-open `[start, end)` code-unit range; cursor lands at `start`. */
-export function deleteInlineRange(
-  editing: InlineEditState,
-  start: number,
-  end: number,
-): void {
+export function deleteInlineRange(editing: InlineEditState, start: number, end: number): void {
   const safeStart = Math.max(0, Math.min(start, editing.buffer.length));
   const safeEnd = Math.max(safeStart, Math.min(end, editing.buffer.length));
   editing.buffer = `${editing.buffer.slice(0, safeStart)}${editing.buffer.slice(safeEnd)}`;
@@ -185,10 +168,7 @@ export function isPlainSearchInput(data: string): boolean {
  * the input was consumed (caller should re-render); false when it didn't
  * match any inline-edit shortcut (caller may handle it as a hot-key).
  */
-export function handleInlineEditInput(
-  editing: InlineEditState,
-  data: string,
-): boolean {
+export function handleInlineEditInput(editing: InlineEditState, data: string): boolean {
   clampInlineCursor(editing);
   if (matchesKey(data, "left") || matchesKey(data, "ctrl+b")) {
     moveInlineCursorByChars(editing, -1);
@@ -198,11 +178,7 @@ export function handleInlineEditInput(
     moveInlineCursorByChars(editing, 1);
     return true;
   }
-  if (
-    matchesKey(data, "alt+left") ||
-    matchesKey(data, "ctrl+left") ||
-    matchesKey(data, "alt+b")
-  ) {
+  if (matchesKey(data, "alt+left") || matchesKey(data, "ctrl+left") || matchesKey(data, "alt+b")) {
     moveInlineCursorWordLeft(editing);
     return true;
   }

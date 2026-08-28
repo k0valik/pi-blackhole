@@ -63,8 +63,7 @@ describe("changelog — stripMarkdownInline", () => {
   });
 
   it("handles PR links from changelog", () => {
-    const input =
-      "New feature ([#65](https://github.com/k0valik/pi-blackhole/pull/65))";
+    const input = "New feature ([#65](https://github.com/k0valik/pi-blackhole/pull/65))";
     expect(stripMarkdownInline(input)).toBe("New feature (#65)");
   });
 });
@@ -101,9 +100,7 @@ describe("changelog — parseChangelogEntries", () => {
     expect(entries[1]!.date).toBe("2026-08-28");
     expect(entries[1]!.sections.length).toBe(2);
     expect(entries[1]!.sections[0]!.heading).toBe("Added");
-    expect(entries[1]!.sections[0]!.items[0]).toBe(
-      "First item with bold and code",
-    );
+    expect(entries[1]!.sections[0]!.items[0]).toBe("First item with bold and code");
     expect(entries[1]!.sections[0]!.items[1]).toBe("Second item with link");
     expect(entries[1]!.sections[1]!.heading).toBe("Fixed");
   });

@@ -3,13 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import {
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-  existsSync,
-  readFileSync,
-} from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -22,10 +16,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function writeConfig(
-  data: unknown,
-  filename = "pi-blackhole/pi-blackhole-config.json",
-): string {
+function writeConfig(data: unknown, filename = "pi-blackhole/pi-blackhole-config.json"): string {
   const dir = join(testDir, dirname(filename));
   mkdirSync(dir, { recursive: true });
   const path = join(testDir, filename);
@@ -43,11 +34,7 @@ function readCooldownFile(): Record<string, unknown> {
   return JSON.parse(readFileSync(p, "utf-8"));
 }
 
-function makeModel(
-  id: string,
-  provider = "openrouter",
-  overrides: Record<string, unknown> = {},
-) {
+function makeModel(id: string, provider = "openrouter", overrides: Record<string, unknown> = {}) {
   return {
     id,
     name: id,
@@ -68,15 +55,10 @@ type RegistryOptions = {
   providerBaseUrl?: string;
 };
 
-function makeRegistry(
-  models: ReturnType<typeof makeModel>[],
-  options: RegistryOptions = {},
-) {
+function makeRegistry(models: ReturnType<typeof makeModel>[], options: RegistryOptions = {}) {
   return {
     models,
-    find: vi.fn((p: string, id: string) =>
-      models.find((m) => m.provider === p && m.id === id),
-    ),
+    find: vi.fn((p: string, id: string) => models.find((m) => m.provider === p && m.id === id)),
     hasConfiguredAuth: vi.fn(() => true),
     getApiKeyAndHeaders: vi.fn(async () => ({
       ok: true,
@@ -85,9 +67,7 @@ function makeRegistry(
       ...(options.requestBaseUrl ? { baseUrl: options.requestBaseUrl } : {}),
     })),
     getProviderAuth: vi.fn(async () =>
-      options.providerBaseUrl
-        ? { auth: { baseUrl: options.providerBaseUrl } }
-        : undefined,
+      options.providerBaseUrl ? { auth: { baseUrl: options.providerBaseUrl } } : undefined,
     ),
   };
 }
@@ -106,9 +86,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
   it("resolves primary stage model when available", async () => {
     writeConfig({
       observerModel: { provider: "openrouter", id: "primary-model:free" },
-      observerFallbackModels: [
-        { provider: "openrouter", id: "fallback-model:free" },
-      ],
+      observerFallbackModels: [{ provider: "openrouter", id: "fallback-model:free" }],
     });
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
@@ -161,9 +139,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.model.baseUrl).toBe(
-        "https://api.enterprise.githubcopilot.com",
-      );
+      expect(result.model.baseUrl).toBe("https://api.enterprise.githubcopilot.com");
     }
     expect(registry.getProviderAuth).toHaveBeenCalledWith("github-copilot");
   });
@@ -208,9 +184,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.model.baseUrl).toBe(
-        "https://api.enterprise.githubcopilot.com",
-      );
+      expect(result.model.baseUrl).toBe("https://api.enterprise.githubcopilot.com");
     }
     expect(registry.getProviderAuth).toHaveBeenCalledWith("github-copilot");
   });
@@ -277,9 +251,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.model.baseUrl).toBe(
-        "https://api.individual.githubcopilot.com",
-      );
+      expect(result.model.baseUrl).toBe("https://api.individual.githubcopilot.com");
       expect(result.model).toBe(model);
     }
   });
@@ -314,9 +286,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.model.baseUrl).toBe(
-        "https://api.individual.githubcopilot.com",
-      );
+      expect(result.model.baseUrl).toBe("https://api.individual.githubcopilot.com");
       expect(result.model).toBe(model);
     }
   });
@@ -371,23 +341,13 @@ describe("Runtime.resolveModel — fallback chain", () => {
         id: "primary:free",
         cooldownHours: 24,
       },
-      observerFallbackModels: [
-        { provider: "openrouter", id: "fallback:free", cooldownHours: 24 },
-      ],
+      observerFallbackModels: [{ provider: "openrouter", id: "fallback:free", cooldownHours: 24 }],
       model: { provider: "openrouter", id: "base:free", cooldownHours: 1 },
     });
 
     const { recordCooldown } = await import("../src/om/cooldown.js");
-    recordCooldown(
-      { provider: "openrouter", id: "primary:free" },
-      "429",
-      "observer",
-    );
-    recordCooldown(
-      { provider: "openrouter", id: "fallback:free" },
-      "429",
-      "observer",
-    );
+    recordCooldown({ provider: "openrouter", id: "primary:free" }, "429", "observer");
+    recordCooldown({ provider: "openrouter", id: "fallback:free" }, "429", "observer");
 
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
@@ -419,11 +379,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
     });
 
     const { recordCooldown } = await import("../src/om/cooldown.js");
-    recordCooldown(
-      { provider: "openrouter", id: "primary:free" },
-      "429",
-      "observer",
-    );
+    recordCooldown({ provider: "openrouter", id: "primary:free" }, "429", "observer");
 
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
@@ -454,11 +410,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
     });
 
     const { recordCooldown } = await import("../src/om/cooldown.js");
-    recordCooldown(
-      { provider: "openrouter", id: "primary:free" },
-      "429",
-      "observer",
-    );
+    recordCooldown({ provider: "openrouter", id: "primary:free" }, "429", "observer");
 
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
@@ -487,9 +439,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
         id: "primary:free",
         cooldownHours: 0,
       },
-      observerFallbackModels: [
-        { provider: "openrouter", id: "fallback:free", cooldownHours: 6 },
-      ],
+      observerFallbackModels: [{ provider: "openrouter", id: "fallback:free", cooldownHours: 6 }],
     });
 
     const { Runtime } = await import("../src/om/runtime.js");
@@ -513,9 +463,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
       modelRegistry: registry,
       hasUI: false,
       stageModel: { provider: "openrouter", id: "primary:free" },
-      stageFallbacks: [
-        { provider: "openrouter", id: "fallback:free", cooldownHours: 6 },
-      ],
+      stageFallbacks: [{ provider: "openrouter", id: "fallback:free", cooldownHours: 6 }],
     });
 
     expect(result.ok).toBe(true);
@@ -572,9 +520,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
 // ── Phase 9: Consolidation trigger guards ─────────────────────────────────
 
 describe("Consolidation trigger — guards with new config keys", () => {
-  function createConsolidationContext(
-    configOverrides: Record<string, unknown> = {},
-  ) {
+  function createConsolidationContext(configOverrides: Record<string, unknown> = {}) {
     let agentStartHandler: ((event: any, ctx: any) => void) | undefined;
     const pi = {
       on: vi.fn((name: string, cb: any) => {
@@ -650,8 +596,7 @@ describe("Consolidation trigger — guards with new config keys", () => {
     const { pi, runtime, agentStartHandler } = createConsolidationContext({
       memory: false,
     });
-    const { registerConsolidationTrigger } =
-      await import("../src/om/consolidation.js");
+    const { registerConsolidationTrigger } = await import("../src/om/consolidation.js");
     registerConsolidationTrigger(pi as any, runtime as any);
 
     agentStartHandler();
@@ -664,8 +609,7 @@ describe("Consolidation trigger — guards with new config keys", () => {
       memory: true,
       compaction: "off",
     });
-    const { registerConsolidationTrigger } =
-      await import("../src/om/consolidation.js");
+    const { registerConsolidationTrigger } = await import("../src/om/consolidation.js");
     registerConsolidationTrigger(pi as any, runtime as any);
 
     agentStartHandler();
@@ -679,8 +623,7 @@ describe("Consolidation trigger — guards with new config keys", () => {
       compaction: undefined,
       compactionEngine: undefined,
     });
-    const { registerConsolidationTrigger } =
-      await import("../src/om/consolidation.js");
+    const { registerConsolidationTrigger } = await import("../src/om/consolidation.js");
     registerConsolidationTrigger(pi as any, runtime as any);
 
     agentStartHandler();
@@ -705,23 +648,18 @@ describe("Runtime — cooldown persistence", () => {
   });
 
   it("isCooldownActive returns true for active cooldown", async () => {
-    const { recordCooldown, isCooldownActive } =
-      await import("../src/om/cooldown.js");
+    const { recordCooldown, isCooldownActive } = await import("../src/om/cooldown.js");
     recordCooldown(
       { provider: "openrouter", id: "cool-model:free", cooldownHours: 24 },
       "429",
       "observer",
     );
-    expect(
-      isCooldownActive({ provider: "openrouter", id: "cool-model:free" }),
-    ).toBe(true);
+    expect(isCooldownActive({ provider: "openrouter", id: "cool-model:free" })).toBe(true);
   });
 
   it("isCooldownActive returns false when no cooldown entry", async () => {
     const { isCooldownActive } = await import("../src/om/cooldown.js");
-    expect(
-      isCooldownActive({ provider: "openrouter", id: "never-cooled:free" }),
-    ).toBe(false);
+    expect(isCooldownActive({ provider: "openrouter", id: "never-cooled:free" })).toBe(false);
   });
 
   it("expireCooldowns removes expired entries", async () => {
@@ -737,9 +675,7 @@ describe("Runtime — cooldown persistence", () => {
     await new Promise((r) => setTimeout(r, 10));
     expireCooldowns();
     // Should be expired now
-    expect(
-      isCooldownActive({ provider: "openrouter", id: "expiring:free" }),
-    ).toBe(false);
+    expect(isCooldownActive({ provider: "openrouter", id: "expiring:free" })).toBe(false);
   });
 
   it("recordCooldown with cooldownHours: 0 writes nothing to disk", async () => {
@@ -959,10 +895,7 @@ describe("Runtime — sessionFallback notification", () => {
     // The first info notification fires ("failed this cycle"), the
     // second ("sessionFallback disabled") is gated by tryEmitInfo
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0]).toEqual([
-      expect.stringContaining("failed this cycle"),
-      "info",
-    ]);
+    expect(notify.mock.calls[0]).toEqual([expect.stringContaining("failed this cycle"), "info"]);
   });
 });
 
@@ -1004,9 +937,7 @@ describe("Runtime.resolveModel — OAuth/ADC auth", () => {
 
     const registry = {
       models: [makeModel("vertex-model", "vertex", { api: "google-vertex" })],
-      find: vi.fn((p: string, id: string) =>
-        makeModel(id, p, { api: "google-vertex" }),
-      ),
+      find: vi.fn((p: string, id: string) => makeModel(id, p, { api: "google-vertex" })),
       hasConfiguredAuth: vi.fn(() => true),
       getApiKeyAndHeaders: vi.fn(async () => ({
         ok: true,
@@ -1040,11 +971,7 @@ describe("Runtime.resolveModel — OAuth/ADC auth", () => {
 
     // Cool down the primary so we fall through to session model
     const { recordCooldown } = await import("../src/om/cooldown.js");
-    recordCooldown(
-      { provider: "openrouter", id: "primary:free" },
-      "429",
-      "observer",
-    );
+    recordCooldown({ provider: "openrouter", id: "primary:free" }, "429", "observer");
 
     const registry = {
       models: [makeModel("primary:free", "openrouter")],
@@ -1123,11 +1050,7 @@ describe("Runtime.resolveModel — OAuth/ADC auth", () => {
 
     // Cool down the primary so we fall through to session model
     const { recordCooldown } = await import("../src/om/cooldown.js");
-    recordCooldown(
-      { provider: "openrouter", id: "primary:free" },
-      "429",
-      "observer",
-    );
+    recordCooldown({ provider: "openrouter", id: "primary:free" }, "429", "observer");
 
     const registry = {
       models: [makeModel("primary:free", "openrouter")],
@@ -1272,10 +1195,7 @@ it("loads cursors from pending state", async () => {
       reflector: { entryId: "ref-loaded", state: "empty" },
     },
   };
-  writeFileSync(
-    join(pendingDir, "test-session-pending.json"),
-    JSON.stringify(pending),
-  );
+  writeFileSync(join(pendingDir, "test-session-pending.json"), JSON.stringify(pending));
 
   const runtime = new Runtime();
   runtime.loadCursorsFromPending("test-session");
@@ -1297,10 +1217,7 @@ it("saves cursors to pending state", async () => {
 
   // Read back from file
   const raw = JSON.parse(
-    readFileSync(
-      join(testDir, "pi-blackhole", "test-session-pending.json"),
-      "utf-8",
-    ),
+    readFileSync(join(testDir, "pi-blackhole", "test-session-pending.json"), "utf-8"),
   );
   expect(raw.cursors.observer.entryId).toBe("obs-save");
   expect(raw.cursors.observer.state).toBe("recorded");
@@ -1336,10 +1253,7 @@ it("handles corrupt pending file gracefully", async () => {
   const { Runtime } = await import("../src/om/runtime.js");
   const pendingDir = join(testDir, "pi-blackhole");
   mkdirSync(pendingDir, { recursive: true });
-  writeFileSync(
-    join(pendingDir, "test-session-pending.json"),
-    "not valid json",
-  );
+  writeFileSync(join(pendingDir, "test-session-pending.json"), "not valid json");
 
   const runtime = new Runtime();
   // Should not throw
@@ -1350,8 +1264,6 @@ it("handles corrupt pending file gracefully", async () => {
 it("handles missing pending file gracefully", async () => {
   const { Runtime } = await import("../src/om/runtime.js");
   const runtime = new Runtime();
-  expect(() =>
-    runtime.loadCursorsFromPending("nonexistent-session"),
-  ).not.toThrow();
+  expect(() => runtime.loadCursorsFromPending("nonexistent-session")).not.toThrow();
   expect(runtime.getCursor("observer")).toBeUndefined();
 });

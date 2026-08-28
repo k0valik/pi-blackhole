@@ -66,9 +66,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave, onCancel },
@@ -91,9 +89,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave, onCancel },
@@ -117,9 +113,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave, onCancel },
@@ -137,9 +131,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     expect(close).not.toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
     // Confirm dismissed
-    expect(body.render(80).join("\n")).not.toContain(
-      "You have unsaved changes.",
-    );
+    expect(body.render(80).join("\n")).not.toContain("You have unsaved changes.");
   });
 
   // Slice 4: onSave error handling
@@ -147,9 +139,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const ctx = fakeCtx();
     const onSave = vi.fn().mockRejectedValueOnce(new Error("disk full"));
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave },
@@ -204,9 +194,7 @@ describe("createSettingsModalBody — buffered mode", () => {
   it("buffered mode: Ctrl+S when clean saves defaults directly", () => {
     const onSave = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave },
@@ -227,9 +215,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const onSave = vi.fn();
     const onRequestExit = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave, onRequestExit },
@@ -243,18 +229,14 @@ describe("createSettingsModalBody — buffered mode", () => {
     expect(onRequestExit).toHaveBeenCalledTimes(1);
     expect(close).not.toHaveBeenCalled();
     // No built-in confirm mounted
-    expect(body.render(80).join("\n")).not.toContain(
-      "You have unsaved changes.",
-    );
+    expect(body.render(80).join("\n")).not.toContain("You have unsaved changes.");
   });
 
   // Slice 8: Dirty indicator
   it("buffered mode: dirty indicator ● appears in title when dirty", () => {
     const onSave = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "@k0valik/pi-cache", fields, mode: "buffered", onSave },
@@ -274,9 +256,7 @@ describe("createSettingsModalBody — buffered mode", () => {
   it("buffered mode: reverting a value to its initial state clears dirty", () => {
     const onSave = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave },
@@ -302,9 +282,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const onSave = vi.fn();
     const close = vi.fn();
     const ctx = fakeCtx();
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onChange, onSave },
@@ -359,9 +337,7 @@ describe("createSettingsModalBody — buffered mode", () => {
     const onSave = vi.fn();
     const onCancel = vi.fn();
     const close = vi.fn();
-    const fields: Field[] = [
-      { key: "name", type: "string", label: "Name", value: "hello" },
-    ];
+    const fields: Field[] = [{ key: "name", type: "string", label: "Name", value: "hello" }];
 
     const body = createSettingsModalBody<Field>(
       { title: "test", fields, mode: "buffered", onSave, onCancel },
@@ -383,9 +359,7 @@ describe("createSettingsModalBody — buffered mode", () => {
   // Slice 7: Singleton guard
   it("modal.ts: opening a second modal closes the first", () => {
     const ctx = fakeCtx();
-    const fields: Field[] = [
-      { key: "x", type: "boolean", label: "X", value: false },
-    ];
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
 
     const firstDone = vi.fn();
     const secondDone = vi.fn();

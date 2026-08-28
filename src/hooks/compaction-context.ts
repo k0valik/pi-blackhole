@@ -4,10 +4,7 @@ import { debugLog } from "../om/debug-log.js";
 import type { Runtime } from "../om/runtime.js";
 
 /** Project persisted version-2 checkpoints into immutable provider messages. */
-export function registerCompactionContextHook(
-  pi: ExtensionAPI,
-  runtime: Runtime,
-): void {
+export function registerCompactionContextHook(pi: ExtensionAPI, runtime: Runtime): void {
   pi.on("context", (event: any, ctx: any) => {
     runtime.ensureConfig(ctx.cwd ?? process.cwd());
     const dbg = (ev: string, data?: Record<string, unknown>) =>

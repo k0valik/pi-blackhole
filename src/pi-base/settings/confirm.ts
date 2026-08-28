@@ -68,9 +68,7 @@ export function createConfirm(
       { key: "enter", label: "confirm" },
       { key: "esc", label: "cancel" },
     ];
-    lines.push(
-      args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`),
-    );
+    lines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
     return lines;
   };
 
