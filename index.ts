@@ -9,10 +9,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { scaffoldSettings } from "./src/core/settings";
 import { registerBeforeCompactHook } from "./src/hooks/before-compact";
+import { registerCompactFailedHook } from "./src/hooks/compact-failed.js";
 import { registerCompactionContextHook } from "./src/hooks/compaction-context.js";
 import { registerPiVccCommand } from "./src/commands/pi-vcc";
 import { registerMemoryCommand } from "./src/commands/memory";
 import { registerVccRecallCommand } from "./src/commands/vcc-recall";
+import { registerBlackholeExportCommand } from "./src/commands/blackhole-export";
 import { registerConsolidationTrigger } from "./src/om/consolidation.js";
 import { registerCompactionTrigger } from "./src/om/compaction-trigger.js";
 import { registerRecallTool } from "./src/tools/recall";
@@ -53,12 +55,14 @@ export default async (pi: ExtensionAPI) => {
 
   // Pi-vcc: compaction + om injection
   registerBeforeCompactHook(pi, omRuntime); // session_before_compact → pi-vcc + om content
+  registerCompactFailedHook(pi, omRuntime); // session_compact_failed → failure visibility + compactInFlight guard (pi >= 0.84.3)
   registerCompactionContextHook(pi, omRuntime); // context → immutable append segment projection
 
   // Commands
   registerPiVccCommand(pi, omRuntime); // /pi-vcc (needs runtime for noAutoCompact flush)
   registerMemoryCommand(pi, omRuntime); // /blackhole-memory [status|view|full]
   registerVccRecallCommand(pi); // /blackhole-recall <query>
+  registerBlackholeExportCommand(pi); // /blackhole-export [out:<path>]
 
   // Tools
   registerRecallTool(pi); // unified recall (#N + [12char])
