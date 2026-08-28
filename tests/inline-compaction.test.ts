@@ -571,6 +571,86 @@ describe("Blackhole inline compaction adapter", () => {
     ).toEqual([windowsPath]);
   });
 
+  it("patches the bundled CLI AgentSession identity", async () => {
+    const fixtureRoot = await mkdtemp(
+      join(tmpdir(), "blackhole-bundled-host-"),
+    );
+    const packageRoot = join(
+      fixtureRoot,
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+    );
+    const dist = join(packageRoot, "dist");
+    const chunks = join(dist, "bundle", "chunks");
+    const cli = join(dist, "bundle", "cli.js");
+    const runtimeChunk = join(chunks, "runtime.js");
+    const sessionSource = `export class AgentSession {
+  constructor() {
+    this.agent = { state: { messages: [] } };
+    this.sessionManager = {
+      buildSessionContext: () => ({ messages: [] }),
+      appendCompaction: () => {},
+    };
+  }
+  async abort() {}
+  _bindExtensionCore() {}
+  async compact() {
+    await this.abort();
+    this.sessionManager.appendCompaction();
+    this.agent.state.messages = [];
+    return { summary: "summary", firstKeptEntryId: "kept", tokensBefore: 1 };
+  }
+}`;
+
+    try {
+      await mkdir(chunks, { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: "@earendil-works/pi-coding-agent",
+          type: "module",
+        }),
+      );
+      await writeFile(join(dist, "index.js"), sessionSource);
+      await writeFile(
+        runtimeChunk,
+        `${sessionSource}\nexport function main() {}`,
+      );
+      await writeFile(
+        cli,
+        '#!/usr/bin/env node\nimport{main}from"./chunks/runtime.js";main();\n',
+      );
+
+      const bundledModule = (await import(
+        pathToFileURL(runtimeChunk).href
+      )) as {
+        AgentSession: new () => {
+          agent: { state: { messages: unknown[] } };
+          sessionManager: object;
+          _bindExtensionCore(runner: unknown): void;
+        };
+      };
+      const originalBind =
+        bundledModule.AgentSession.prototype._bindExtensionCore;
+
+      await expect(
+        installHostInlineCompactionAdapter({ entrypoint: cli, stack: "" }),
+      ).resolves.toEqual({ supported: true });
+      expect(bundledModule.AgentSession.prototype._bindExtensionCore).not.toBe(
+        originalBind,
+      );
+
+      const session = new bundledModule.AgentSession();
+      session._bindExtensionCore({});
+      await expect(
+        compactInlineAtTurnBoundary(session.sessionManager),
+      ).resolves.toMatchObject({ summary: "summary" });
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("patches every independently loaded host AgentSession identity", async () => {
     const fixtureRoot = await mkdtemp(
       join(tmpdir(), "blackhole-host-identities-"),
