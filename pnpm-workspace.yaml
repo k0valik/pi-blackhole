@@ -3,6 +3,7 @@ allowBuilds:
   esbuild: true
   koffi: true
   protobufjs: true
+  simple-git-hooks: set this to true or false
 
 minimumReleaseAgeExclude:
   - "@earendil-works/pi-agent-core@0.84.0"

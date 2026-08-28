@@ -1,0 +1,6 @@
+{
+  "pre-commit": "node scripts/pre-commit.mjs",
+  "pre-push": "node scripts/pre-push.mjs",
+  "post-merge": "node scripts/post-merge.mjs",
+  "post-checkout": "node scripts/post-merge.mjs"
+}
