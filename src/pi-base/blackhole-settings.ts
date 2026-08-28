@@ -113,6 +113,17 @@ export const config = new ConfigManager<UnifiedConfig>({
       max: 500_000,
       step: 1_000,
     },
+    {
+      key: "retainedToolOutputMaxTokens",
+      type: "number",
+      label: "Retained tool outputs",
+      description:
+        "Token budget for historical tool-output text; newest is retained first and older text remains available via recall",
+      value: cfg.retainedToolOutputMaxTokens,
+      min: 1_000,
+      max: 200_000,
+      step: 1_000,
+    },
 
     // ── Observational Memory ──
     {
@@ -391,6 +402,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       "observeAfterTokens",
       "reflectAfterTokens",
       "compactAfterTokens",
+      "retainedToolOutputMaxTokens",
       "observationsPoolMaxTokens",
       "observationsPoolTargetTokens",
       "reflectorInputMaxTokens",
@@ -402,7 +414,12 @@ export const config = new ConfigManager<UnifiedConfig>({
     for (const k of REQUIRED_NUMERIC_KEYS) {
       const v = (merged as unknown as Record<string, unknown>)[k];
       const minVal = k === "observerPreambleMaxTokens" ? 0 : 1;
-      if (typeof v !== "number" || !Number.isFinite(v) || v < minVal) {
+      if (
+        typeof v !== "number" ||
+        !Number.isFinite(v) ||
+        (k === "retainedToolOutputMaxTokens" && !Number.isInteger(v)) ||
+        v < minVal
+      ) {
         (merged as unknown as Record<string, unknown>)[k] = DEFAULTS[k];
       }
     }

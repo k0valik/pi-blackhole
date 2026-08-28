@@ -30,6 +30,7 @@ vi.mock("../src/pi-base/settings/config-flow.js", () => ({
 }));
 
 import { registerPiVccCommand } from "../src/commands/pi-vcc.js";
+import { openConfigFlow } from "../src/pi-base/settings/config-flow.js";
 
 function createMockEnvironment() {
   const compactCalls: Array<{
@@ -166,6 +167,19 @@ describe("/blackhole command", () => {
       (c) => c.value,
     );
     expect(configMatches).toEqual(["settings"]);
+  });
+
+  it("refreshes runtime config after saving settings", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs } =
+      createMockEnvironment();
+    vi.mocked(openConfigFlow).mockImplementationOnce(async (params: any) => {
+      await params.save({ retainedToolOutputMaxTokens: 9_000 }, "global");
+    });
+    registerPiVccCommand(pi as any, runtime as any);
+
+    await handlerMap.get("blackhole")!("settings", makeHandlerArgs());
+
+    expect(runtime.config.retainedToolOutputMaxTokens).toBe(9_000);
   });
 
   it("calls ctx.compact with PI_VCC_COMPACT_INSTRUCTION", async () => {

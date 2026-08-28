@@ -108,6 +108,10 @@ export interface UnifiedConfig {
    *  ONLY applies when compactionEngine: "blackhole" */
   tailBehavior: "pi-default" | "minimal";
 
+  /** Maximum historical tool-output text tokens retained in provider context.
+   *  Newest consumed outputs are retained first; omitted outputs remain recallable. */
+  retainedToolOutputMaxTokens: number;
+
   /** Token threshold for observer runs. */
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
@@ -198,6 +202,7 @@ export const DEFAULTS: UnifiedConfig = {
 
   skipForProviders: [],
   tailBehavior: "minimal",
+  retainedToolOutputMaxTokens: 20_000,
   midRunCompaction: "off",
 
   observeAfterTokens: 15_000,
@@ -354,6 +359,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "observeAfterTokens",
     "reflectAfterTokens",
     "compactAfterTokens",
+    "retainedToolOutputMaxTokens",
     "observationsPoolMaxTokens",
     "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",

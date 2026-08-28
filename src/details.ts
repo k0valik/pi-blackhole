@@ -4,12 +4,15 @@
  * Version 1 is the existing rewrite format. Version 2 stores one immutable
  * append segment plus the current mutable recall/OM suffix.
  */
+import type { RetainedToolOutputProjection } from "./core/tool-output-budget.js";
+
 export interface PiVccCompactionDetailsV1 {
   compactor: "blackhole";
   version: 1;
   sections: string[];
   sourceMessageCount: number;
   previousSummaryUsed: boolean;
+  retainedToolOutputProjection?: RetainedToolOutputProjection;
 }
 
 export interface PiVccSegmentCoverage {
@@ -49,6 +52,7 @@ export interface PiVccCompactionDetailsV2 {
   sections: string[];
   sourceMessageCount: number;
   previousSummaryUsed: boolean;
+  retainedToolOutputProjection?: RetainedToolOutputProjection;
 }
 
 export type PiVccCompactionDetails =

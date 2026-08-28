@@ -92,4 +92,19 @@ describe("openSettings configDir forwarding (canonical config-flow)", () => {
     expect(typeof params.layerValues).toBe("function");
     expect(typeof params.save).toBe("function");
   });
+
+  it("validates retainedToolOutputMaxTokens through ConfigManager", async () => {
+    const { config, GLOBAL_CONFIG_DIR } =
+      await import("../src/pi-base/blackhole-settings.js");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
+    writeFileSync(
+      join(GLOBAL_CONFIG_DIR, "pi-blackhole-config.json"),
+      JSON.stringify({ retainedToolOutputMaxTokens: 0 }),
+    );
+
+    expect(
+      config.load(testDir, GLOBAL_CONFIG_DIR).retainedToolOutputMaxTokens,
+    ).toBe(20_000);
+  });
 });

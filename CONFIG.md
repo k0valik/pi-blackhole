@@ -25,6 +25,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
   "compactAfterTokens": 81000,    // Token threshold for auto-compaction
+  "retainedToolOutputMaxTokens": 20000, // Full historical tool-output budget
 
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
@@ -185,6 +186,16 @@ Token threshold for auto-compaction. When `compaction: "auto"` and accumulated t
 | number | 81000 |
 
 **The interaction with Pi's threshold:** Pi has its own `keepRecentTokens` default (~20k tokens). Blackhole's threshold is independent — it's the trigger point, not the keep point. When blackhole's trigger fires, `tailBehavior` determines how much is actually kept visible.
+
+### `retainedToolOutputMaxTokens`
+
+Dedicated token budget for historical `toolResult` text and shell output retained by a Blackhole compaction. At the compaction boundary, Blackhole scans the retained tail newest-first, retaining each full text output while it fits. The text crossing the budget and all older text outputs are represented by compact markers that point to `recall #N` when a stable transcript index is available. That representation is persisted with the compaction and stays unchanged during ordinary provider calls until the next Blackhole compaction. Non-text parts such as images are preserved and do not count against this budget.
+
+This only changes the retained context sent to the provider. Session JSONL, compaction summaries' source messages, and recall data remain full fidelity. Trailing results that have not yet been consumed by an assistant response are protected even when they exceed the budget; they can become eligible when a later compaction constructs a new retained representation.
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | 20000 | positive integer |
 
 ## Observational Memory Section
 
@@ -434,6 +445,7 @@ Positive-integer fields (invalid values fall back):
 | Variable | Overrides |
 |----------|-----------|
 | `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` | `compactAfterTokens` |
+| `PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS` | `retainedToolOutputMaxTokens` |
 | `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS` | `observeAfterTokens` |
 | `PI_BLACKHOLE_REFLECT_AFTER_TOKENS` | `reflectAfterTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS` | `observationsPoolMaxTokens` |

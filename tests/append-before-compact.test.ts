@@ -31,6 +31,7 @@ const createHarness = (configOverrides: Record<string, unknown> = {}) => {
     debug: false,
     debugLog: false,
     observationsPoolMaxTokens: 20_000,
+    retainedToolOutputMaxTokens: 20_000,
     fullFoldAlways: true,
     ...configOverrides,
   };
@@ -53,6 +54,7 @@ const createHarness = (configOverrides: Record<string, unknown> = {}) => {
       handler!(event, {
         cwd: process.cwd(),
         model: { provider: "anthropic", api: "messages", id: "test" },
+        sessionManager: { getEntries: () => event.branchEntries },
         ui,
       }),
     ui,
@@ -76,6 +78,136 @@ const event = (
 });
 
 describe("append before-compact integration", () => {
+  it("freezes the newest-first retained tool-output budget in compaction details", () => {
+    const image = { type: "image", data: "encoded", mimeType: "image/png" };
+    const oldOutput = {
+      role: "toolResult",
+      toolCallId: "old-call",
+      toolName: "read",
+      content: [{ type: "text", text: "o".repeat(12) }, image],
+    };
+    const newestOutput = {
+      role: "toolResult",
+      toolCallId: "new-call",
+      toolName: "read",
+      content: "n".repeat(8),
+    };
+    const pendingOutput = {
+      role: "toolResult",
+      toolCallId: "pending-call",
+      toolName: "read",
+      content: "p".repeat(40),
+    };
+    const branchEntries = [
+      msg("m1", "user", "summarize this"),
+      msg("m2", "assistant", "summarized work"),
+      msg("m3", "user", "retained turn"),
+      msg("m4", "assistant", "calling old tool"),
+      { id: "t-old", type: "message", message: oldOutput },
+      msg("m5", "assistant", "used old output"),
+      { id: "t-new", type: "message", message: newestOutput },
+      msg("m6", "assistant", "used newest output"),
+      { id: "t-pending", type: "message", message: pendingOutput },
+    ];
+    const { invoke } = createHarness({
+      compactionSummaryMode: "default",
+      tailBehavior: "pi-default",
+      retainedToolOutputMaxTokens: 2,
+    });
+    const input = event(branchEntries);
+    input.preparation.firstKeptEntryId = "m3";
+
+    const result = invoke(input);
+    const projection = result.compaction.details.retainedToolOutputProjection;
+
+    expect(projection).toMatchObject({
+      version: 1,
+      retainedTokens: 2,
+      omittedTokens: 3,
+      omissions: [
+        {
+          entryId: "t-old",
+          marker: "[Tool output text omitted from active context; recall #4.]",
+        },
+      ],
+    });
+    expect(projection.omissions).not.toContainEqual(
+      expect.objectContaining({ entryId: "t-pending" }),
+    );
+    expect(oldOutput.content).toEqual([
+      { type: "text", text: "o".repeat(12) },
+      image,
+    ]);
+    expect(pendingOutput.content).toBe("p".repeat(40));
+  });
+
+  it("allows the retained representation to change only at the next compaction", () => {
+    const oldOutput = {
+      id: "t-old",
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "old-call",
+        toolName: "read",
+        content: "o".repeat(8),
+      },
+    };
+    const firstBranch = [
+      msg("m1", "user", "summarize first"),
+      msg("m2", "assistant", "first answer"),
+      msg("m3", "user", "retained turn"),
+      msg("m4", "assistant", "calling old tool"),
+      oldOutput,
+      msg("m5", "assistant", "used old output"),
+    ];
+    const { invoke } = createHarness({
+      compactionSummaryMode: "default",
+      tailBehavior: "pi-default",
+      retainedToolOutputMaxTokens: 2,
+    });
+    const firstEvent = event(firstBranch);
+    firstEvent.preparation.firstKeptEntryId = "m3";
+    const first = invoke(firstEvent);
+    expect(
+      first.compaction.details.retainedToolOutputProjection.omissions,
+    ).toEqual([]);
+
+    const c1 = {
+      id: "c1",
+      type: "compaction",
+      ...first.compaction,
+    };
+    const secondBranch = [
+      ...firstBranch,
+      c1,
+      msg("m6", "assistant", "calling new tool"),
+      {
+        id: "t-new",
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "new-call",
+          toolName: "read",
+          content: "n".repeat(8),
+        },
+      },
+      msg("m7", "assistant", "used new output"),
+    ];
+    const secondEvent = event(secondBranch, first.compaction.summary);
+    secondEvent.preparation.firstKeptEntryId = "m4";
+    const second = invoke(secondEvent);
+
+    expect(
+      second.compaction.details.retainedToolOutputProjection.omissions,
+    ).toEqual([
+      {
+        entryId: "t-old",
+        marker: "[Tool output text omitted from active context; recall #4.]",
+      },
+    ]);
+    expect(oldOutput.message.content).toBe("o".repeat(8));
+  });
+
   it("warns once when append mode falls back to the rewrite summary", () => {
     const { invoke, ui } = createHarness();
     const firstBranch = [
