@@ -17,10 +17,22 @@ describe("dedup algorithms", () => {
       expect(stemToken("refactored")).toBe("refactor");
       expect(stemToken("compaction")).toBe("compact");
       expect(stemToken("compacted")).toBe("compact");
-      expect(stemToken("configuring")).toBe("configur");
-      expect(stemToken("configuration")).toBe("configur");
+      expect(stemToken("configuring")).toBe("config");
+      expect(stemToken("configuration")).toBe("config");
       expect(stemToken("pruned")).toBe("prun");
       expect(stemToken("pruning")).toBe("prun");
+    });
+
+    it("stems technical roots and agentive nouns across ecosystems", () => {
+      expect(stemToken("initialize")).toBe("init");
+      expect(stemToken("initialization")).toBe("init");
+      expect(stemToken("authenticate")).toBe("auth");
+      expect(stemToken("authentication")).toBe("auth");
+      expect(stemToken("synchronous")).toBe("sync");
+      expect(stemToken("providers")).toBe("provid");
+      expect(stemToken("serializers")).toBe("serializ");
+      expect(stemToken("handlers")).toBe("handl");
+      expect(stemToken("transpiler")).toBe("transpil");
     });
 
     it("preserves short tokens and irregular words", () => {
@@ -40,24 +52,16 @@ describe("dedup algorithms", () => {
 
   describe("computeSimHash64 and Hamming distance", () => {
     it("returns 0 distance for identical token sets", () => {
-      const tokensA = tokenizeContent(
-        "Session goal was updated in unified-config",
-      );
-      const tokensB = tokenizeContent(
-        "Session goal was updated in unified-config",
-      );
+      const tokensA = tokenizeContent("Session goal was updated in unified-config");
+      const tokensB = tokenizeContent("Session goal was updated in unified-config");
       const hashA = computeSimHash64(tokensA);
       const hashB = computeSimHash64(tokensB);
       expect(simHashHammingDistance(hashA, hashB)).toBe(0);
     });
 
     it("returns small distance for near-duplicate sets and large for disjoint sets", () => {
-      const tokensA = tokenizeContent(
-        "The export command writes a markdown file to disk",
-      );
-      const tokensB = tokenizeContent(
-        "The export command writes a markdown file too disk",
-      );
+      const tokensA = tokenizeContent("The export command writes a markdown file to disk");
+      const tokensB = tokenizeContent("The export command writes a markdown file too disk");
       const tokensC = tokenizeContent(
         "Kitty terminal compatibility issue with ANSI escape sequences",
       );
@@ -88,6 +92,13 @@ describe("dedup algorithms", () => {
       expect(techFactor).toBeGreaterThan(1.15);
       expect(convFactor).toBe(1);
     });
+
+    it("boosts multi-ecosystem technical constructs (Rust, Docker, APIs, SQL, Status codes)", () => {
+      const webRustObservation =
+        "POST /api/v1/auth/login returned 401 Unauthorized; check Result<Token, AuthError> in crates/server/main.rs and Dockerfile";
+      const factor = technicalDensityFactor(webRustObservation);
+      expect(factor).toBeGreaterThan(1.25);
+    });
   });
 
   describe("clusterObservations with drift guard", () => {
@@ -111,8 +122,7 @@ describe("dedup algorithms", () => {
         },
         {
           id: "obs3",
-          content:
-            "Completely unrelated observation regarding kitty terminal freezes",
+          content: "Completely unrelated observation regarding kitty terminal freezes",
           relevance: "medium",
           timestamp: "2026-08-28T02:00:00Z",
           sessionId: "s3",
@@ -125,10 +135,7 @@ describe("dedup algorithms", () => {
         sorensen: true,
       });
       expect(clusters).toHaveLength(2);
-      expect(
-        clusters.find((c) => c.rep.content.includes("export command"))
-          ?.occurrences,
-      ).toBe(2);
+      expect(clusters.find((c) => c.rep.content.includes("export command"))?.occurrences).toBe(2);
     });
   });
 });

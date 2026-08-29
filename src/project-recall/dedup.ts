@@ -156,13 +156,135 @@ export const STOP_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Lightweight rule-based suffix stemmer for English content words.
- * Maps common grammatical variants (e.g. "refactoring"/"refactored" -> "refactor",
- * "compaction"/"compacted" -> "compact", "configuring"/"configured" -> "configur")
+ * Root synonym and base mappings for technical verbs, nouns, and modifiers across
+ * software development workflows and programming ecosystems.
+ */
+const TECHNICAL_ROOTS: Record<string, string> = {
+  initialize: "init",
+  initialization: "init",
+  initialized: "init",
+  initializes: "init",
+  initializer: "init",
+  configure: "config",
+  configuration: "config",
+  configuring: "config",
+  configured: "config",
+  configures: "config",
+  authenticate: "auth",
+  authentication: "auth",
+  authenticated: "auth",
+  authenticates: "auth",
+  synchronous: "sync",
+  synchronized: "sync",
+  synchronization: "sync",
+  synchronize: "sync",
+  synchronizing: "sync",
+  deprecate: "deprec",
+  deprecation: "deprec",
+  deprecated: "deprec",
+  deprecates: "deprec",
+  allocate: "alloc",
+  allocation: "alloc",
+  allocated: "alloc",
+  allocator: "alloc",
+  destructure: "destruct",
+  destructured: "destruct",
+  destructuring: "destruct",
+  destructor: "destruct",
+  destruction: "destruct",
+  validate: "valid",
+  validation: "valid",
+  validator: "valid",
+  validated: "valid",
+  validates: "valid",
+  validating: "valid",
+  sanitize: "sanit",
+  sanitization: "sanit",
+  sanitized: "sanit",
+  sanitizer: "sanit",
+  normalize: "normal",
+  normalization: "normal",
+  normalized: "normal",
+  normalizer: "normal",
+  refactor: "refactor",
+  refactored: "refactor",
+  refactoring: "refactor",
+  refactors: "refactor",
+  rebase: "rebas",
+  rebasing: "rebas",
+  rebased: "rebas",
+  serialize: "serializ",
+  serialization: "serializ",
+  serialized: "serializ",
+  serializer: "serializ",
+  serializers: "serializ",
+  optimize: "optim",
+  optimization: "optim",
+  optimized: "optim",
+  optimizer: "optim",
+  compress: "compress",
+  compression: "compress",
+  compressed: "compress",
+  compressor: "compress",
+  transpile: "transpil",
+  transpilation: "transpil",
+  transpiled: "transpil",
+  transpiler: "transpil",
+  migrate: "migrat",
+  migration: "migrat",
+  migrated: "migrat",
+  migrates: "migrat",
+  migrating: "migrat",
+  subscribe: "subscrib",
+  subscription: "subscrib",
+  subscribed: "subscrib",
+  subscriber: "subscrib",
+  resolve: "resolv",
+  resolution: "resolv",
+  resolved: "resolv",
+  resolver: "resolv",
+  implement: "implement",
+  implementation: "implement",
+  implemented: "implement",
+  implementer: "implement",
+  execute: "execut",
+  execution: "execut",
+  executed: "execut",
+  executor: "execut",
+  executable: "execut",
+  register: "regist",
+  registration: "regist",
+  registered: "regist",
+  registry: "regist",
+  registrar: "regist",
+  compact: "compact",
+  compaction: "compact",
+  compacted: "compact",
+  compactor: "compact",
+  prune: "prun",
+  pruning: "prun",
+  pruned: "prun",
+  pruner: "prun",
+  reflect: "reflect",
+  reflection: "reflect",
+  reflector: "reflect",
+  reflected: "reflect",
+  observe: "observ",
+  observation: "observ",
+  observer: "observ",
+  observed: "observ",
+};
+
+/**
+ * Widened rule-based suffix stemmer for English content and multi-ecosystem technical terms.
+ * Maps common grammatical variants, agentive nouns, action verbs, and derivational suffixes
  * to a shared root form for higher token-set overlap.
  */
 export function stemToken(token: string): string {
   if (token.length <= 3) return token;
+  const directRoot = TECHNICAL_ROOTS[token];
+  if (directRoot) return directRoot;
+
   let word = token;
 
   // Step 1: Plurals and past tense / participles
@@ -191,24 +313,45 @@ export function stemToken(token: string): string {
     if (word.endsWith("i")) word = word.slice(0, -1) + "y";
   }
 
-  // Step 2: Common derivational suffixes (only for substantive words)
+  // Step 2: Agentive and handler nouns (-ers, -ors, -er, -or)
+  if (word.length > 5) {
+    if (word.endsWith("ers") || word.endsWith("ors")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("er") || word.endsWith("or")) {
+      word = word.slice(0, -2);
+    }
+  }
+
+  // Step 3: Derivational and capability suffixes (-ability, -ation, -ment, -ness, etc.)
   if (word.length > 6) {
-    if (word.endsWith("ation") || word.endsWith("ition")) {
+    if (word.endsWith("ability") || word.endsWith("ibility")) {
+      word = word.slice(0, -7);
+    } else if (word.endsWith("ation") || word.endsWith("ition")) {
       word = word.slice(0, -5);
     } else if (word.endsWith("ction") || word.endsWith("stion")) {
       word = word.slice(0, -3); // compaction -> compact, ingestion -> ingest
     } else if (word.endsWith("tion") || word.endsWith("sion")) {
       word = word.slice(0, -2);
-    } else if (word.endsWith("ment")) {
+    } else if (word.endsWith("ment") || word.endsWith("ness")) {
       word = word.slice(0, -4);
     } else if (word.endsWith("able") || word.endsWith("ible")) {
       word = word.slice(0, -4);
-    } else if (word.endsWith("ful")) {
+    } else if (word.endsWith("ance") || word.endsWith("ence")) {
+      word = word.slice(0, -4);
+    } else if (word.endsWith("ity") || word.endsWith("ous")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("ful") || word.endsWith("ive")) {
       word = word.slice(0, -3);
     } else if (word.endsWith("ize") || word.endsWith("ise")) {
       word = word.slice(0, -3);
+    } else if (word.endsWith("ify") || word.endsWith("ied")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("ly") && word.length > 5) {
+      word = word.slice(0, -2);
     }
   }
+
+  if (TECHNICAL_ROOTS[word]) return TECHNICAL_ROOTS[word];
 
   return word.length >= 3 ? word : token;
 }
@@ -532,7 +675,6 @@ export function clusterObservations(
     const tokenLists = groupReps.map((s) => tokenizeContent(s));
     const repTokens = tokenLists.map((tokens) => new Set(tokens));
     const repHashes = tokenLists.map((tokens) => computeSimHash64(tokens));
-
     for (let i = 0; i < allGroups.length; i++) {
       for (let j = i + 1; j < allGroups.length; j++) {
         const rootI = uf.find(i);
