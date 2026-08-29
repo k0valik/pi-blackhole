@@ -920,27 +920,13 @@ export function buildExportMarkdown(
       : "";
 
   const introParagraphs = [
+    `> **⚠️ Best-effort heuristic export — semantic review required.** Ranking, relevance tiers, and topic grouping are heuristic (tier-weighted recency decay, coverage/consensus signals, and c-TF-IDF / Sørensen-Dice similarity) and not ground truth. This artifact is distilled automatically from observational memory and may contain noise, duplicates, or stale observations. The export pushes the most relevant reflections and observations to the top, but agents and humans should verify, distill, and de-duplicate before ingesting into any long-term memory system.`,
+    ``,
     `_This file is a distilled artifact of pi-blackhole's observational memory for this project._`,
     ``,
     `_Observations carry an LLM-assigned **relevance tier** ([critical] > [high] > [medium] > [low]) and are organized by tier into sections below. The **Reflections** section at the top contains curator-verified insights from a second LLM pass — these are the most authoritative entries._${topicNote} _The **viability gate** filters single-session unsupported low/medium observations as likely transient noise (${pctFiltered})._`,
     "",
   ];
-
-  const topicCounts = new Map<string, number>();
-  for (const label of topicAssignments.values()) {
-    topicCounts.set(label, (topicCounts.get(label) ?? 0) + 1);
-  }
-  const sortedTopics = [...topicCounts.entries()].sort((a, b) => b[1] - a[1]);
-  if (sortedTopics.length >= 2) {
-    introParagraphs.push(
-      `### Key Topics`,
-      "",
-      ...sortedTopics
-        .slice(0, 12)
-        .map(([lbl, cnt]) => `- **[${lbl}]** (${cnt} item${cnt > 1 ? "s" : ""})`),
-      "",
-    );
-  }
 
   sections.push(introParagraphs.join("\n"));
 
