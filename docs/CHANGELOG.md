@@ -10,6 +10,10 @@
   - Expanded stemming and technical-artifact detection for common software terminology, major language file types, framework constructs, API routes, DevOps/configuration signals, errors, and semantic versions.
   - Upgraded topic labeling from standard TF-IDF to **c-TF-IDF** (Class-based TF-IDF with sublinear saturation) and added a Key Topics index table in the export preamble.
 
+### Fixed
+
+- **Git-based installs no longer require interactive `pnpm approve-builds`.** `simple-git-hooks` is explicitly trusted through pnpm 11's workspace `allowBuilds` configuration, and the prepare lifecycle now initializes hooks and builds the bundle exactly once.
+
 ---
 
 ## [0.4.9] - 2026-08-28

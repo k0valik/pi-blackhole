@@ -29,6 +29,23 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ---
 
+## ✨ What's new
+
+> **Latest release: [0.4.8](docs/CHANGELOG.md#048---2026-08-23)**
+>
+> - **`/blackhole-export` — distilled project-memory export** — Export for long-term agent memory tools - scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
+> - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
+> - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
+> - **Robust compaction-failure handling** — unified `session_compact_failed` (pi >=0.84.3) with correct attribution, overflow-retry visibility, and noise filtering; plus bundled-CLI `AgentSession` resolution so inline compaction works from `dist/bundle/cli.js` ([#62](https://github.com/k0valik/pi-blackhole/pull/62)).
+
+See [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for the full history.
+
+### ⚠️ Upcoming change
+
+> **Default compaction thresholds will become model-context-window-aware** in an upcoming release. Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values will continue to be respected verbatim. If you're using the defaults, no action is needed; the migration is automatic.
+
+---
+
 ## What it does
 
 Long engineering sessions degrade. Pi's native `/compact` calls an LLM to write a free-form prose summary — then compacts that summary, then compacts the next. After a few cycles, load-bearing details vanish: why a decision was made, which approaches were rejected, what the user clarified early on. The session is still alive; the agent has stopped carrying the real context.
@@ -42,29 +59,13 @@ Both halves share a single hook and a single output. Together they keep the agen
 
 ---
 
-## ✨ What's new
-
-> **Latest release: [0.4.8](docs/CHANGELOG.md#048---2026-08-23)**
->
-> - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
-> - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
-> - **`/blackhole-export` — distilled project-memory export** ([#65](https://github.com/k0valik/pi-blackhole/pull/65)) — scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
-> - **Robust compaction-failure handling** — unified `session_compact_failed` (pi >=0.84.3) with correct attribution, overflow-retry visibility, and noise filtering; plus bundled-CLI `AgentSession` resolution so inline compaction works from `dist/bundle/cli.js` ([#62](https://github.com/k0valik/pi-blackhole/pull/62)).
-
-See [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for the full history.
-
-### ⚠️ Upcoming change
-
-> **Default compaction thresholds will become model-context-window-aware** in an upcoming release. Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values will continue to be respected verbatim. If you're using the defaults, no action is needed; the migration is automatic.
-
----
-
 ## Commands
 
 | Command | Description & Options |
 | --- | --- |
 | `/blackhole` | Manual compact — deterministic structural summary |
 | `/blackhole settings` | Open the configuration overlay *(Alias: `/blackhole configure`)* |
+| `/blackhole changelog` | Open the in-app changelog viewer |
 | `/blackhole cleanup` | Remove orphaned pending files |
 | `/blackhole om-off` | Disable observational memory |
 | `/blackhole om-on` | Enable observational memory |

@@ -53,4 +53,3 @@ pnpm check         # typecheck + lint
 - Runtime clone for local testing: `~/.pi/agent/git/github.com/k0valik/pi-blackhole/` — sync changes there and `/reload` Pi.
 - `debug: true` → pre-compaction snapshot at `/tmp/pi-blackhole-debug.json`; `debugLog: true` → JSONL at `~/.pi/agent/pi-blackhole/debug.ndjson`.
 - Config lives at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`; cooldowns at `pi-blackhole-cooldown.json`. `PI_BLACKHOLE_PASSIVE=true` disables compaction + memory entirely.
-- Must keep compiling against pi 0.81.1 (minimum supported peer version) as well as the current 0.84.0 — CI has a compat job that re-pins all four `@earendil-works/pi-*` deps to 0.81.1 and re-runs typecheck + test. Avoid APIs newer than 0.81.1.
