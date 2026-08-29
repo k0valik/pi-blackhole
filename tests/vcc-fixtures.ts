@@ -22,10 +22,7 @@ export const assistantText = (text: string): Message => ({
   stopReason: "stop",
 });
 
-export const assistantWithThinking = (
-  text: string,
-  thinking: string,
-): Message => ({
+export const assistantWithThinking = (text: string, thinking: string): Message => ({
   role: "assistant",
   content: [
     { type: "thinking", thinking },
@@ -35,10 +32,7 @@ export const assistantWithThinking = (
   stopReason: "stop",
 });
 
-export const assistantWithToolCall = (
-  name: string,
-  args: Record<string, unknown>,
-): Message => ({
+export const assistantWithToolCall = (name: string, args: Record<string, unknown>): Message => ({
   role: "assistant",
   content: [{ type: "toolCall", id: "tc_1", name, arguments: args }],
   ...assistBase,

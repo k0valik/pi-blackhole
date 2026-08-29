@@ -155,8 +155,216 @@ export const STOP_WORDS: ReadonlySet<string> = new Set([
   "etc",
 ]);
 
-/** Normalized, stop-word-stripped token list for a piece of content. */
-export function tokenizeContent(content: string): string[] {
+/**
+ * Root synonym and base mappings for technical verbs, nouns, and modifiers across
+ * software development workflows and programming ecosystems.
+ */
+const TECHNICAL_ROOTS: Record<string, string> = {
+  initialize: "init",
+  initialization: "init",
+  initialized: "init",
+  initializes: "init",
+  initializer: "init",
+  configure: "config",
+  configuration: "config",
+  configuring: "config",
+  configured: "config",
+  configures: "config",
+  authenticate: "auth",
+  authentication: "auth",
+  authenticated: "auth",
+  authenticates: "auth",
+  synchronous: "sync",
+  synchronized: "sync",
+  synchronization: "sync",
+  synchronize: "sync",
+  synchronizing: "sync",
+  deprecate: "deprec",
+  deprecation: "deprec",
+  deprecated: "deprec",
+  deprecates: "deprec",
+  allocate: "alloc",
+  allocation: "alloc",
+  allocated: "alloc",
+  allocator: "alloc",
+  destructure: "destruct",
+  destructured: "destruct",
+  destructuring: "destruct",
+  destructor: "destruct",
+  destruction: "destruct",
+  validate: "valid",
+  validation: "valid",
+  validator: "valid",
+  validated: "valid",
+  validates: "valid",
+  validating: "valid",
+  sanitize: "sanit",
+  sanitization: "sanit",
+  sanitized: "sanit",
+  sanitizer: "sanit",
+  normalize: "normal",
+  normalization: "normal",
+  normalized: "normal",
+  normalizer: "normal",
+  refactor: "refactor",
+  refactored: "refactor",
+  refactoring: "refactor",
+  refactors: "refactor",
+  rebase: "rebas",
+  rebasing: "rebas",
+  rebased: "rebas",
+  serialize: "serializ",
+  serialization: "serializ",
+  serialized: "serializ",
+  serializer: "serializ",
+  serializers: "serializ",
+  optimize: "optim",
+  optimization: "optim",
+  optimized: "optim",
+  optimizer: "optim",
+  compress: "compress",
+  compression: "compress",
+  compressed: "compress",
+  compressor: "compress",
+  transpile: "transpil",
+  transpilation: "transpil",
+  transpiled: "transpil",
+  transpiler: "transpil",
+  migrate: "migrat",
+  migration: "migrat",
+  migrated: "migrat",
+  migrates: "migrat",
+  migrating: "migrat",
+  subscribe: "subscrib",
+  subscription: "subscrib",
+  subscribed: "subscrib",
+  subscriber: "subscrib",
+  resolve: "resolv",
+  resolution: "resolv",
+  resolved: "resolv",
+  resolver: "resolv",
+  implement: "implement",
+  implementation: "implement",
+  implemented: "implement",
+  implementer: "implement",
+  execute: "execut",
+  execution: "execut",
+  executed: "execut",
+  executor: "execut",
+  executable: "execut",
+  register: "regist",
+  registration: "regist",
+  registered: "regist",
+  registry: "regist",
+  registrar: "regist",
+  compact: "compact",
+  compaction: "compact",
+  compacted: "compact",
+  compactor: "compact",
+  prune: "prun",
+  pruning: "prun",
+  pruned: "prun",
+  pruner: "prun",
+  reflect: "reflect",
+  reflection: "reflect",
+  reflector: "reflect",
+  reflected: "reflect",
+  observe: "observ",
+  observation: "observ",
+  observer: "observ",
+  observed: "observ",
+};
+
+/**
+ * Widened rule-based suffix stemmer for English content and multi-ecosystem technical terms.
+ * Maps common grammatical variants, agentive nouns, action verbs, and derivational suffixes
+ * to a shared root form for higher token-set overlap.
+ */
+export function stemToken(token: string): string {
+  if (token.length <= 3) return token;
+  const directRoot = Object.prototype.hasOwnProperty.call(TECHNICAL_ROOTS, token)
+    ? TECHNICAL_ROOTS[token]
+    : undefined;
+  if (directRoot) return directRoot;
+
+  let word = token;
+
+  // Step 1: Plurals and past tense / participles
+  if (word.endsWith("sses")) {
+    word = word.slice(0, -2);
+  } else if (word.endsWith("ies") && word.length > 4) {
+    word = word.slice(0, -3) + "y";
+  } else if (word.endsWith("ss")) {
+    // Keep 'ss' (e.g., 'process', 'pass')
+  } else if (
+    word.endsWith("s") &&
+    word.length > 3 &&
+    !word.endsWith("us") &&
+    !word.endsWith("is")
+  ) {
+    word = word.slice(0, -1);
+  }
+
+  if (word.endsWith("eed") && word.length > 4) {
+    word = word.slice(0, -1);
+  } else if (word.endsWith("ed") && word.length > 4) {
+    word = word.slice(0, -2);
+    if (word.endsWith("i")) word = word.slice(0, -1) + "y";
+  } else if (word.endsWith("ing") && word.length > 5) {
+    word = word.slice(0, -3);
+    if (word.endsWith("i")) word = word.slice(0, -1) + "y";
+  }
+
+  // Step 2: Agentive and handler nouns (-ers, -ors, -er, -or)
+  if (word.length > 5) {
+    if (word.endsWith("ers") || word.endsWith("ors")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("er") || word.endsWith("or")) {
+      word = word.slice(0, -2);
+    }
+  }
+
+  // Step 3: Derivational and capability suffixes (-ability, -ation, -ment, -ness, etc.)
+  if (word.length > 6) {
+    if (word.endsWith("ability") || word.endsWith("ibility")) {
+      word = word.slice(0, -7);
+    } else if (word.endsWith("ation") || word.endsWith("ition")) {
+      word = word.slice(0, -5);
+    } else if (word.endsWith("ction") || word.endsWith("stion")) {
+      word = word.slice(0, -3); // compaction -> compact, ingestion -> ingest
+    } else if (word.endsWith("tion") || word.endsWith("sion")) {
+      word = word.slice(0, -2);
+    } else if (word.endsWith("ment") || word.endsWith("ness")) {
+      word = word.slice(0, -4);
+    } else if (word.endsWith("able") || word.endsWith("ible")) {
+      word = word.slice(0, -4);
+    } else if (word.endsWith("ance") || word.endsWith("ence")) {
+      word = word.slice(0, -4);
+    } else if (word.endsWith("ity") || word.endsWith("ous")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("ful") || word.endsWith("ive")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("ize") || word.endsWith("ise")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("ify") || word.endsWith("ied")) {
+      word = word.slice(0, -3);
+    } else if (word.endsWith("ly") && word.length > 5) {
+      word = word.slice(0, -2);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(TECHNICAL_ROOTS, word)) return TECHNICAL_ROOTS[word];
+
+  return word.length >= 3 ? word : token;
+}
+
+/**
+ * Split content into normalized surface tokens before morphological stemming.
+ *
+ * Topic matching uses the stemmed form, while topic labels need the original
+ * words (for example, "register" rather than the internal stem "regist").
+ */
+export function tokenizeSurfaceContent(content: string): string[] {
   // Expand common contractions so "don't" and "do not" share tokens
   const expanded = content
     .replace(/\bdon't\b/gi, "do not")
@@ -189,7 +397,7 @@ export function tokenizeContent(content: string): string[] {
     .replace(/\bthey're\b/gi, "they are");
   // Split camelCase and PascalCase before stripping non-alpha
   const splitCamel = expanded.replace(/([a-z])([A-Z])/g, "$1 $2");
-  return splitCamel
+  const rawTokens = splitCamel
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
@@ -203,6 +411,56 @@ export function tokenizeContent(content: string): string[] {
         // Filter single letters attached to parens/hyphens
         !/^[a-z]$/.test(t),
     );
+  return rawTokens;
+}
+
+/** Normalized, stop-word-stripped and stemmed token list for a piece of content. */
+export function tokenizeContent(content: string): string[] {
+  return tokenizeSurfaceContent(content).map(stemToken);
+}
+
+/**
+ * 64-bit SimHash locality-sensitive fingerprint.
+ * Fast bitwise signature of a token multiset for O(1) candidate pruning.
+ */
+export function computeSimHash64(tokens: string[]): bigint {
+  if (tokens.length === 0) return 0n;
+  const v = new Int32Array(64);
+  for (const token of tokens) {
+    // Corpus data is parsed from external session JSONL. Keep a malformed
+    // token from aborting the whole export instead of assuming runtime types
+    // always match the compile-time string[] declaration.
+    if (typeof token !== "string") continue;
+    // FNV-1a 64-bit hash
+    let h = 0xcbf29ce484222325n;
+    const prime = 0x100000001b3n;
+    for (let i = 0; i < token.length; i++) {
+      h ^= BigInt(token.charCodeAt(i));
+      h = (h * prime) & 0xffffffffffffffffn;
+    }
+    for (let i = 0; i < 64; i++) {
+      const bit = (h >> BigInt(i)) & 1n;
+      v[i] += bit === 1n ? 1 : -1;
+    }
+  }
+  let fingerprint = 0n;
+  for (let i = 0; i < 64; i++) {
+    if (v[i] > 0) {
+      fingerprint |= 1n << BigInt(i);
+    }
+  }
+  return fingerprint;
+}
+
+/** Hamming distance between two 64-bit BigInt fingerprints. */
+export function simHashHammingDistance(a: bigint, b: bigint): number {
+  let x = a ^ b;
+  let count = 0;
+  while (x > 0n) {
+    count += Number(x & 1n);
+    x >>= 1n;
+  }
+  return count;
 }
 
 export function normalizeContent(content: string): string {
@@ -265,11 +523,7 @@ function levenshteinSimilarity(a: string, b: string): number {
   return 1 - prev[b.length] / Math.max(a.length, b.length);
 }
 
-function bigramJaccard(
-  a: string,
-  b: string,
-  cache: Map<string, Set<string>>,
-): number {
+function bigramJaccard(a: string, b: string, cache: Map<string, Set<string>>): number {
   const bigrams = (s: string): Set<string> => {
     let set = cache.get(s);
     if (!set) {
@@ -292,10 +546,7 @@ function bigramJaccard(
  * content-bearing vocabulary even with different word order.
  */
 export function sorensenDiceTokenSimilarity(a: string, b: string): number {
-  return sorensenDiceSets(
-    new Set(tokenizeContent(a)),
-    new Set(tokenizeContent(b)),
-  );
+  return sorensenDiceSets(new Set(tokenizeContent(a)), new Set(tokenizeContent(b)));
 }
 
 /** Set-based Sørensen-Dice (avoids re-tokenizing inside O(n²) loops). */
@@ -341,9 +592,7 @@ function tsValue(ts: string | null): number {
 }
 
 function pickRep<T extends ClusterableItem>(members: T[]): T {
-  return members.reduce((best, m) =>
-    tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best,
-  );
+  return members.reduce((best, m) => (tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best));
 }
 
 class UnionFind {
@@ -365,10 +614,10 @@ class UnionFind {
 
 /**
  * Cluster observations: exact normalized grouping, then optional fuzzy merge
- * of group representatives (bigram-Jaccard prefilter → Levenshtein@0.92),
+ * of group representatives (bigram-Jaccard prefilter → Levenshtein@0.88 with drift guard),
  * then optional Sørensen-Dice token-set merge over remaining reps
- * (Sørensen-Dice ≥ 0.75 + Levenshtein ≥ 0.60). `maxVariants` bounds how
- * many near-identical members may appear alongside the representative in
+ * (SimHash prefilter → Sørensen-Dice ≥ 0.70 + Levenshtein ≥ 0.45). `maxVariants` bounds
+ * how many near-identical members may appear alongside the representative in
  * rendered output.
  */
 export function clusterObservations(
@@ -397,16 +646,25 @@ export function clusterObservations(
   if (opts?.fuzzy && allGroups.length > 1) {
     const uf = new UnionFind(allGroups.length);
     const cache = new Map<string, Set<string>>();
+    // Sort so most authoritative group representatives are candidate cluster heads
     for (let i = 0; i < allGroups.length; i++) {
       for (let j = i + 1; j < allGroups.length; j++) {
+        const rootI = uf.find(i);
+        const rootJ = uf.find(j);
+        if (rootI === rootJ) continue;
         const a = allGroups[i].key;
         const b = allGroups[j].key;
         const la = a.length;
         const lb = b.length;
-        if (Math.abs(la - lb) > (1 - FUZZY_THRESHOLD) * Math.max(la, lb, 1))
-          continue;
+        if (Math.abs(la - lb) > (1 - FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
         if (bigramJaccard(a, b, cache) < FUZZY_THRESHOLD - 0.15) continue;
-        if (levenshteinSimilarity(a, b) >= FUZZY_THRESHOLD) uf.union(i, j);
+        if (levenshteinSimilarity(a, b) >= FUZZY_THRESHOLD) {
+          // Drift guard: verify similarity with root representative
+          const rootKey = allGroups[rootI].key;
+          if (levenshteinSimilarity(rootKey, b) >= FUZZY_THRESHOLD - 0.08) {
+            uf.union(i, j);
+          }
+        }
       }
     }
     const merged = new Map<number, Group>();
@@ -424,32 +682,41 @@ export function clusterObservations(
 
   // Pass 3: Sørensen-Dice token-set similarity merges tightly related
   // clusters that the Levenshtein pass missed (paraphrases with word-order
-  // changes). Requires a floor on Levenshtein to prevent pure keyword overlap
-  // from merging distinct facts.
+  // changes). Uses SimHash64 for O(1) candidate pruning and a floor on
+  // Levenshtein to prevent pure keyword overlap from merging distinct facts.
   if (opts?.sorensen && allGroups.length > 1) {
     const uf = new UnionFind(allGroups.length);
-    // Precompute reps + token sets for O(n²) efficiency
-    const groupReps = allGroups.map((g) =>
-      normalizeContent(pickRep(g.members).content),
-    );
-    const repTokens = groupReps.map((s) => new Set(tokenizeContent(s)));
+    // Precompute reps, tokens, sets, and SimHash64 for O(n) precomputation
+    const groupReps = allGroups.map((g) => normalizeContent(pickRep(g.members).content));
+    const tokenLists = groupReps.map((s) => tokenizeContent(s));
+    const repTokens = tokenLists.map((tokens) => new Set(tokens));
+    const repHashes = tokenLists.map((tokens) => computeSimHash64(tokens));
     for (let i = 0; i < allGroups.length; i++) {
       for (let j = i + 1; j < allGroups.length; j++) {
+        const rootI = uf.find(i);
+        const rootJ = uf.find(j);
+        if (rootI === rootJ) continue;
         const a = groupReps[i];
         const b = groupReps[j];
         const la = a.length;
         const lb = b.length;
+        if (Math.abs(la - lb) > (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
+        // SimHash candidate filter: dissimilar token sets have Hamming distance > 26
         if (
-          Math.abs(la - lb) >
-          (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)
-        )
+          repTokens[i].size >= 4 &&
+          repTokens[j].size >= 4 &&
+          simHashHammingDistance(repHashes[i], repHashes[j]) > 26
+        ) {
           continue;
+        }
         if (levenshteinSimilarity(a, b) < SORENSEN_MIN_LEVENSHTEIN) continue;
-        if (
-          sorensenDiceSets(repTokens[i], repTokens[j]) >=
-          SORENSEN_FUZZY_THRESHOLD
-        )
-          uf.union(i, j);
+        if (sorensenDiceSets(repTokens[i], repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD) {
+          // Drift guard: check against root token set
+          const rootTokenSet = repTokens[rootI];
+          if (sorensenDiceSets(rootTokenSet, repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD - 0.1) {
+            uf.union(i, j);
+          }
+        }
       }
     }
     const merged = new Map<number, Group>();
@@ -469,20 +736,16 @@ export function clusterObservations(
   for (const group of allGroups) {
     const { members } = group;
     const bestRelevance = members.reduce<Relevance>(
-      (best, m) =>
-        TIER_RANK[m.relevance] > TIER_RANK[best] ? m.relevance : best,
+      (best, m) => (TIER_RANK[m.relevance] > TIER_RANK[best] ? m.relevance : best),
       "low",
     );
     const rep =
       members
         .filter((m) => m.relevance === bestRelevance)
-        .reduce((best, m) =>
-          tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best,
-        ) ?? pickRep(members);
+        .reduce((best, m) => (tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best)) ??
+      pickRep(members);
     const repKey = normalizeContent(rep.content);
-    const extras = members.filter(
-      (m) => m !== rep && normalizeContent(m.content) !== repKey,
-    );
+    const extras = members.filter((m) => m !== rep && normalizeContent(m.content) !== repKey);
     clusters.push({
       rep,
       extras: extras.slice(0, maxVariants),
@@ -495,9 +758,7 @@ export function clusterObservations(
 
   // Consensus rerank signal: max Sørensen-Dice to any other cluster.
   if (clusters.length > 1) {
-    const repTokenSets = clusters.map(
-      (c) => new Set(tokenizeContent(c.rep.content)),
-    );
+    const repTokenSets = clusters.map((c) => new Set(tokenizeContent(c.rep.content)));
     for (let i = 0; i < clusters.length; i++) {
       let maxSim = 0;
       for (let j = 0; j < clusters.length; j++) {

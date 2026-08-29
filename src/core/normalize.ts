@@ -33,9 +33,7 @@ const normalizeOne = (msg: Message, msgIndex: number): NormalizedBlock[] => {
         }
       }
     }
-    return blocks.length > 0
-      ? blocks
-      : [{ kind: "user", text: "", sourceIndex: msgIndex }];
+    return blocks.length > 0 ? blocks : [{ kind: "user", text: "", sourceIndex: msgIndex }];
   }
 
   if ((msg as any).role === "bashExecution") {

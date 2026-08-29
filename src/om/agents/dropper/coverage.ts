@@ -5,28 +5,20 @@ export type ReflectionCoverageTier = (typeof REFLECTION_COVERAGE_TIERS)[number];
 
 type Relevance = Observation["relevance"];
 
-type CoverageBucket = Record<
-  ReflectionCoverageTier,
-  { count: number; tokens: number }
->;
+type CoverageBucket = Record<ReflectionCoverageTier, { count: number; tokens: number }>;
 export type CoverageSummaryByRelevance = Record<Relevance, CoverageBucket>;
 export type CoverageTransitionSummaryByRelevance = Record<
   Relevance,
   Record<string, { count: number; tokens: number }>
 >;
 
-export const REFLECTION_COVERAGE_DROP_RANK: Record<
-  ReflectionCoverageTier,
-  number
-> = {
+export const REFLECTION_COVERAGE_DROP_RANK: Record<ReflectionCoverageTier, number> = {
   strong: 0,
   partial: 1,
   none: 2,
 };
 
-export function reflectionSupportCounts(
-  reflections: readonly Reflection[],
-): Map<string, number> {
+export function reflectionSupportCounts(reflections: readonly Reflection[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const reflection of reflections) {
     const uniqueIds = new Set(reflection.supportingObservationIds);
@@ -35,9 +27,7 @@ export function reflectionSupportCounts(
   return counts;
 }
 
-export function reflectionCoverageTierForCount(
-  count: number,
-): ReflectionCoverageTier {
+export function reflectionCoverageTierForCount(count: number): ReflectionCoverageTier {
   if (count <= 0) return "none";
   if (count === 1) return "partial";
   return "strong";
@@ -92,9 +82,7 @@ export function summarizeCoverageByRelevanceForIds(
   observations: readonly Observation[],
   coverageById: ReadonlyMap<string, ReflectionCoverageTier>,
 ): CoverageSummaryByRelevance {
-  const byId = new Map(
-    observations.map((observation) => [observation.id, observation]),
-  );
+  const byId = new Map(observations.map((observation) => [observation.id, observation]));
   const selected = ids.flatMap((id) => {
     const observation = byId.get(id);
     return observation ? [observation] : [];

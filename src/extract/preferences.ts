@@ -45,10 +45,7 @@ export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
  * Remove preferences that duplicate goals (case-insensitive, trimmed).
  * Called by `buildSections` so that the two sections do not overlap.
  */
-export const dedupPreferencesAgainstGoals = (
-  prefs: string[],
-  goals: string[],
-): string[] => {
+export const dedupPreferencesAgainstGoals = (prefs: string[], goals: string[]): string[] => {
   const norm = (s: string) => s.trim().toLowerCase();
   const goalSet = new Set(goals.map(norm));
   return prefs.filter((p) => !goalSet.has(norm(p)));

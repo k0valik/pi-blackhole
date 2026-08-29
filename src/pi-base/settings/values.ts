@@ -5,16 +5,30 @@ import type { Field, VisibilityContext } from "./types.ts";
 
 export interface BuildVisibilityContextReturn extends VisibilityContext {}
 
+const INITIAL_JSON_CACHE = new WeakMap<object, string>();
+const KEY_TO_ROW_CACHE = new WeakMap<
+  BodyState,
+  { rows: InternalRow[]; map: Map<string, InternalRow> }
+>();
+
 export function buildVisibilityContext(
   _state: BodyState,
   _field: Field,
   scope: string,
 ): BuildVisibilityContextReturn {
+  let cache = KEY_TO_ROW_CACHE.get(_state);
+  if (!cache || cache.rows !== _state.rows || cache.rows.length !== _state.rows.length) {
+    const map = new Map<string, InternalRow>();
+    for (let i = 0; i < _state.rows.length; i += 1) {
+      const r = _state.rows[i]!;
+      map.set(r.field.key, r);
+    }
+    cache = { rows: _state.rows, map };
+    KEY_TO_ROW_CACHE.set(_state, cache);
+  }
+  const rowsMap: Map<string, InternalRow> = cache.map;
   return {
-    get: (key: string) => {
-      const r = _state.rows.find((rr: InternalRow) => rr.field.key === key);
-      return r?.value;
-    },
+    get: (key: string) => rowsMap.get(key)?.value,
     scope,
   };
 }
@@ -24,16 +38,27 @@ export function isDirty(state: BodyState): boolean {
   return state.dirtyKeys.size > 0;
 }
 
-export function syncDirtyState(state: BodyState, key: string): void {
+export function syncDirtyState(state: BodyState, key: string, row?: InternalRow): void {
   if (!state.isBuffered) return;
   const initial = state.initialValues.get(key);
-  const current = state.rows.find(
-    (r: InternalRow) => r.field.key === key,
-  )?.value;
-  const isClean =
-    typeof initial === "object" && initial !== null
-      ? JSON.stringify(current) === JSON.stringify(initial)
-      : current === initial;
+  const targetRow = row ?? state.rows.find((r: InternalRow) => r.field.key === key);
+  const current = targetRow?.value;
+  let isClean: boolean;
+  if (typeof initial === "object" && initial !== null) {
+    let initialJson = INITIAL_JSON_CACHE.get(initial);
+    if (initialJson === undefined) {
+      initialJson = JSON.stringify(initial);
+      INITIAL_JSON_CACHE.set(initial, initialJson);
+    }
+    if (current === undefined) {
+      isClean = initial === undefined;
+    } else {
+      const currentJson = JSON.stringify(current);
+      isClean = currentJson === initialJson;
+    }
+  } else {
+    isClean = current === initial;
+  }
   if (isClean) {
     state.dirtyKeys.delete(key);
   } else {
@@ -41,17 +66,13 @@ export function syncDirtyState(state: BodyState, key: string): void {
   }
 }
 
-export function commitValue(
-  state: BodyState,
-  row: InternalRow,
-  value: unknown,
-): void {
+export function commitValue(state: BodyState, row: InternalRow, value: unknown): void {
   const previous = row.value;
   const key = row.field.key;
 
   row.value = value;
   if (state.isBuffered) {
-    syncDirtyState(state, key);
+    syncDirtyState(state, key, row);
   }
   updateVisibleIndices(state, buildVisibilityContext);
 
@@ -73,7 +94,7 @@ export function commitValue(
             row.value = previous;
           }
           if (state.isBuffered) {
-            syncDirtyState(state, key);
+            syncDirtyState(state, key, row);
           }
           notifyError(state, state.args.ctx, err);
           state.args.tui.requestRender();
@@ -82,7 +103,7 @@ export function commitValue(
   } catch (err) {
     row.value = previous;
     if (state.isBuffered) {
-      syncDirtyState(state, key);
+      syncDirtyState(state, key, row);
     }
     notifyError(state, state.args.ctx, err);
     state.args.tui.requestRender();

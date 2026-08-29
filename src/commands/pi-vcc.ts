@@ -13,22 +13,15 @@ import {
   notifyMigrationReminder,
   formatCompactionStats,
 } from "../hooks/before-compact";
-import {
-  readPendingState,
-  clearPendingState,
-  hasPendingData,
-} from "../om/pending.js";
+import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
 import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
   OM_REFLECTIONS_RECORDED,
 } from "../om/ledger/index.js";
 import { handleCleanup } from "./cleanup.js";
-import {
-  openBlackholeSettings,
-  config,
-  GLOBAL_CONFIG_DIR,
-} from "../pi-base/blackhole-settings.js";
+import { openBlackholeSettings, config, GLOBAL_CONFIG_DIR } from "../pi-base/blackhole-settings.js";
+import { openChangelogView } from "../changelog/changelog.js";
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   const prefixMatch = (value: string, prefix: string): boolean => {
@@ -38,12 +31,16 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   pi.registerCommand("blackhole", {
     description:
       "Manual compact with structural summary. Subcommands: [settings] config overlay, " +
-      "[cleanup] remove orphaned files, [om-off]/[om-on] disable/enable observational memory.",
+      "[changelog] display changelog, [cleanup] remove orphaned files, [om-off]/[om-on] disable/enable observational memory.",
     getArgumentCompletions: (prefix: string) => {
       const subcommands = [
         {
           value: "settings",
           label: "Open configuration overlay [settings]",
+        },
+        {
+          value: "changelog",
+          label: "Display changelog [changelog]",
         },
         {
           value: "cleanup",
@@ -71,6 +68,10 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         await openBlackholeSettings(ctx);
         return;
       }
+      if (trimmed === "changelog") {
+        await openChangelogView(ctx);
+        return;
+      }
       if (trimmed === "cleanup") {
         await handleCleanup(ctx);
         return;
@@ -83,10 +84,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             ctx.cwd,
             GLOBAL_CONFIG_DIR,
           );
-          runtime.config = config.loadWithWarnings(
-            ctx.cwd,
-            GLOBAL_CONFIG_DIR,
-          ).config;
+          runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
           ctx.ui.notify(
             "Observational memory disabled. Use /blackhole om-on to re-enable.",
             "info",
@@ -108,10 +106,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             ctx.cwd,
             GLOBAL_CONFIG_DIR,
           );
-          runtime.config = config.loadWithWarnings(
-            ctx.cwd,
-            GLOBAL_CONFIG_DIR,
-          ).config;
+          runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
           ctx.ui.notify("Observational memory enabled.", "info");
         } catch {
           ctx.ui.notify(
@@ -123,17 +118,10 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         return;
       } // Warn if input starts with a known subcommand but isn't an exact match.
       // Prevents "/blackhole configure foo" from silently becoming a follow-up.
-      const SUBCOMMAND_NAMES = [
-        "configure",
-        "settings",
-        "cleanup",
-        "om-off",
-        "om-on",
-      ];
+      const SUBCOMMAND_NAMES = ["configure", "settings", "changelog", "cleanup", "om-off", "om-on"];
       const nearMiss = SUBCOMMAND_NAMES.find(
         (name) =>
-          trimmed.toLowerCase().startsWith(name.toLowerCase()) &&
-          trimmed.length > name.length,
+          trimmed.toLowerCase().startsWith(name.toLowerCase()) && trimmed.length > name.length,
       );
       if (nearMiss) {
         ctx.ui.notify(
@@ -194,24 +182,17 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           } else {
             ctx.ui.notify("Compacted with blackhole", "info");
           }
-          notifyMigrationReminder(sessionId, (msg, level) =>
-            ctx.ui.notify(msg, level as any),
-          );
+          notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level as any));
 
           // Fire follow-up prompt after compaction completes
           if (followUpPrompt) {
             try {
-              void Promise.resolve(pi.sendUserMessage(followUpPrompt)).catch(
-                () => {},
-              );
+              void Promise.resolve(pi.sendUserMessage(followUpPrompt)).catch(() => {});
             } catch {}
           }
         },
         onError: (err) => {
-          if (
-            err.message === "Compaction cancelled" ||
-            err.message === "Already compacted"
-          ) {
+          if (err.message === "Compaction cancelled" || err.message === "Already compacted") {
             ctx.ui.notify("Nothing to compact", "warning");
           } else {
             ctx.ui.notify(`Compaction failed: ${err.message}`, "error");

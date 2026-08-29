@@ -77,8 +77,7 @@ describe("openSettings configDir forwarding (canonical config-flow)", () => {
   });
 
   it("openBlackholeSettings resolves GLOBAL_CONFIG_DIR under the agent dir", async () => {
-    const { openBlackholeSettings } =
-      await import("../src/pi-base/blackhole-settings.js");
+    const { openBlackholeSettings } = await import("../src/pi-base/blackhole-settings.js");
 
     await openBlackholeSettings({
       cwd: testDir,

@@ -52,9 +52,7 @@ describe("searchEntries", () => {
 
   it("finds keyword beyond clip boundary in full content", () => {
     const longText = "A".repeat(400) + " hidden_keyword here";
-    const longEntries: RenderedEntry[] = [
-      { index: 0, role: "user", summary: "A".repeat(300) },
-    ];
+    const longEntries: RenderedEntry[] = [{ index: 0, role: "user", summary: "A".repeat(300) }];
     const longMsgs: Message[] = [{ role: "user", content: longText } as any];
     const r = searchEntries(longEntries, longMsgs, "hidden_keyword");
     expect(r).toHaveLength(1);
@@ -117,9 +115,7 @@ describe("searchEntries", () => {
   it("natural language ranks by BM25 score", () => {
     const r = searchEntries(entries, messages, "root cause auth");
     // Top result has more terms matched = higher BM25 score
-    expect(r[0].matchCount!).toBeGreaterThanOrEqual(
-      r[r.length - 1].matchCount!,
-    );
+    expect(r[0].matchCount!).toBeGreaterThanOrEqual(r[r.length - 1].matchCount!);
   });
 
   it("filters stopwords from queries", () => {
@@ -165,9 +161,7 @@ describe("searchEntries", () => {
   // ── file content searchability (Phase 1) ──
 
   it("finds text written via tool call content field", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "write path=a.ts" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "write path=a.ts" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -191,9 +185,7 @@ describe("searchEntries", () => {
   });
 
   it("finds text from edit tool call edits array", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "edit path=main.go" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "edit path=main.go" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -244,9 +236,7 @@ describe("searchEntries", () => {
   // ── mode filtering (Phase 4) ──
 
   it("mode:'file' only searches tool call args, not transcript text", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "summary" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "summary" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -278,9 +268,7 @@ describe("searchEntries", () => {
   });
 
   it("mode:'file' populates fileMatches correctly", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "write step" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "write step" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -305,9 +293,7 @@ describe("searchEntries", () => {
   });
 
   it("mode field works with regex queries", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "editing" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "editing" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -331,9 +317,7 @@ describe("searchEntries", () => {
   });
 
   it("mode:'file' does not include bash command output", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "ran bash" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "ran bash" }];
     const m: Message[] = [
       {
         role: "bashExecution" as any,

@@ -8,8 +8,7 @@ const TRUNCATE_ASSISTANT = 200;
 
 // Strip common self-reflective assistant prefixes that carry no semantic info.
 // Conservative list: only removes the leading filler, preserves the actual content.
-const SELF_TALK_PREFIX_RE =
-  /^\s*(?:hmm|wait|actually|oh|okay|ok|well|so)[,.!\s-]+/i;
+const SELF_TALK_PREFIX_RE = /^\s*(?:hmm|wait|actually|oh|okay|ok|well|so)[,.!\s-]+/i;
 
 // ── noise filtering ──
 
@@ -192,8 +191,7 @@ const truncateTokens = (text: string, limit: number): string => {
 const BASH_CAP = 120;
 // Only strip pure-formatting pipe tails (head/tail for truncation, sort/wc/column for display).
 // awk/python3/node/bun are data-processing commands — their output carries semantic meaning.
-const PIPE_TAIL_RE =
-  /\s*\|\s*(?:head|tail|sort|wc|column|tr|cut|uniq)(?:\s[^|]*)?$/;
+const PIPE_TAIL_RE = /\s*\|\s*(?:head|tail|sort|wc|column|tr|cut|uniq)(?:\s[^|]*)?$/;
 
 /** Semantic compression: strip cd prefix, pipe tail formatting, cap length */
 const compressBash = (raw: string): string => {
@@ -360,12 +358,8 @@ export const buildBriefSections = (blocks: NormalizedBlock[]): BriefLine[] => {
       const last = out.length > 0 ? out[out.length - 1] : "";
       const m = last.match(/^(.*) \((#[\d, #]+)\) x(\d+)$/);
       if (m && m[1] === base) {
-        out[out.length - 1] =
-          `${base} (${m[2]}, #${ref}) x${parseInt(m[3]) + 1}`;
-      } else if (
-        last.match(/\(#\d+\)$/) &&
-        last.replace(/\s*\(#\d+\)$/, "") === base
-      ) {
+        out[out.length - 1] = `${base} (${m[2]}, #${ref}) x${parseInt(m[3]) + 1}`;
+      } else if (last.match(/\(#\d+\)$/) && last.replace(/\s*\(#\d+\)$/, "") === base) {
         const prevRef = last.match(/\(#(\d+)\)$/)?.[1];
         out[out.length - 1] = `${base} (#${prevRef}, #${ref}) x2`;
       } else {
@@ -380,9 +374,7 @@ export const buildBriefSections = (blocks: NormalizedBlock[]): BriefLine[] => {
   const TOOL_CALLS_PER_TURN = 8;
   for (const sec of sections) {
     if (sec.header !== "[assistant]") continue;
-    const toolIdxs = sec.lines
-      .map((l, i) => (l.startsWith("* ") ? i : -1))
-      .filter((i) => i >= 0);
+    const toolIdxs = sec.lines.map((l, i) => (l.startsWith("* ") ? i : -1)).filter((i) => i >= 0);
     if (toolIdxs.length <= TOOL_CALLS_PER_TURN) continue;
     const dropCount = toolIdxs.length - TOOL_CALLS_PER_TURN;
     const dropSet = new Set(toolIdxs.slice(0, dropCount));
@@ -448,12 +440,10 @@ export const stringifyBrief = (sections: BriefLine[]): string => {
     if (i > 0) {
       const prev = sections[i - 1];
       const prevIsToolLike =
-        (prev.header === "[assistant]" &&
-          prev.lines.every((l) => l.startsWith("* "))) ||
+        (prev.header === "[assistant]" && prev.lines.every((l) => l.startsWith("* "))) ||
         prev.header.startsWith("[tool_error]");
       const curIsToolLike =
-        (sec.header === "[assistant]" &&
-          sec.lines.every((l) => l.startsWith("* "))) ||
+        (sec.header === "[assistant]" && sec.lines.every((l) => l.startsWith("* "))) ||
         sec.header.startsWith("[tool_error]");
       if (!(prevIsToolLike && curIsToolLike)) {
         out.push("");
@@ -475,9 +465,7 @@ const parseToolLine = (
   // * bash "cmd" (#5)
   // * bash "cmd" (#1, #3) x2
   // * tilth "query" (#7)
-  const m = line.match(
-    /^\* (\S+)\s*(?:"([^"]*)")?\s*(?:\((#[\d, #]+)\))?\s*(?:x(\d+))?$/,
-  );
+  const m = line.match(/^\* (\S+)\s*(?:"([^"]*)")?\s*(?:\((#[\d, #]+)\))?\s*(?:x(\d+))?$/);
   if (!m) return null;
   return {
     tool: m[1],
@@ -496,9 +484,7 @@ const extractRef = (text: string): { clean: string; ref?: string } => {
 /**
  * Convert BriefLine sections to structured TranscriptEntry array for JSON output.
  */
-export const sectionsToTranscript = (
-  sections: BriefLine[],
-): TranscriptEntry[] => {
+export const sectionsToTranscript = (sections: BriefLine[]): TranscriptEntry[] => {
   const entries: TranscriptEntry[] = [];
 
   for (const sec of sections) {
@@ -535,9 +521,7 @@ export const sectionsToTranscript = (
       }
     } else if (sec.header.startsWith("[tool_error]")) {
       // [tool_error] bash (#5)
-      const headerMatch = sec.header.match(
-        /^\[tool_error\]\s+(\S+)\s*(?:\(#(\d+)\))?/,
-      );
+      const headerMatch = sec.header.match(/^\[tool_error\]\s+(\S+)\s*(?:\(#(\d+)\))?/);
       const tool = headerMatch?.[1] ?? "unknown";
       const ref = headerMatch?.[2] ? `#${headerMatch[2]}` : undefined;
       for (const line of sec.lines) {

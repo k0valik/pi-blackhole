@@ -15,21 +15,20 @@ import {
 
 describe("clipboard helper", () => {
   it("uses pbcopy on macOS", () => {
-    expect(getClipboardCommands("darwin")).toEqual([
-      { command: "pbcopy", args: [] },
-    ]);
+    expect(getClipboardCommands("darwin")).toEqual([{ command: "pbcopy", args: [] }]);
   });
 
   it("uses clip on Windows", () => {
-    expect(getClipboardCommands("win32")).toEqual([
-      { command: "clip", args: [] },
-    ]);
+    expect(getClipboardCommands("win32")).toEqual([{ command: "clip", args: [] }]);
   });
 
   it("tries common Linux clipboard commands", () => {
-    expect(
-      getClipboardCommands("linux").map((command) => command.command),
-    ).toEqual(["wl-copy", "xclip", "xsel", "termux-clipboard-set"]);
+    expect(getClipboardCommands("linux").map((command) => command.command)).toEqual([
+      "wl-copy",
+      "xclip",
+      "xsel",
+      "termux-clipboard-set",
+    ]);
   });
 
   it("stops after the first successful clipboard command", async () => {
@@ -38,17 +37,10 @@ describe("clipboard helper", () => {
       { command: "second", args: [] },
       { command: "third", args: [] },
     ];
-    const runner = vi.fn(
-      async (command: ClipboardCommand) => command.command === "second",
-    );
+    const runner = vi.fn(async (command: ClipboardCommand) => command.command === "second");
 
-    await expect(copyTextToClipboard("text", runner, commands)).resolves.toBe(
-      true,
-    );
-    expect(runner.mock.calls.map(([command]) => command.command)).toEqual([
-      "first",
-      "second",
-    ]);
+    await expect(copyTextToClipboard("text", runner, commands)).resolves.toBe(true);
+    expect(runner.mock.calls.map(([command]) => command.command)).toEqual(["first", "second"]);
   });
 
   it("returns false when all clipboard commands fail", async () => {
@@ -58,9 +50,7 @@ describe("clipboard helper", () => {
     ];
     const runner = vi.fn(async () => false);
 
-    await expect(copyTextToClipboard("text", runner, commands)).resolves.toBe(
-      false,
-    );
+    await expect(copyTextToClipboard("text", runner, commands)).resolves.toBe(false);
     expect(runner).toHaveBeenCalledTimes(2);
   });
 });

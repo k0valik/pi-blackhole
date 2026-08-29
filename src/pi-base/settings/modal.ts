@@ -5,18 +5,9 @@
  */
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type {
-  Component,
-  KeybindingsManager,
-  OverlayOptions,
-  TUI,
-} from "@earendil-works/pi-tui";
+import type { Component, KeybindingsManager, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 import { createSettingsModalBody } from "./body";
-import type {
-  Field,
-  SettingsModalFactory,
-  SettingsModalOptions,
-} from "./types";
+import type { Field, SettingsModalFactory, SettingsModalOptions } from "./types";
 
 const DEFAULT_OVERLAY: OverlayOptions = {
   anchor: "center",

@@ -11,10 +11,7 @@ import type { Entry, Observation, Reflection } from "../src/om/ledger/types.js";
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function hexId(label: string): string {
-  const raw = Array.from(label).reduce(
-    (h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0,
-    0,
-  );
+  const raw = Array.from(label).reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
   return Math.abs(raw).toString(16).padStart(12, "0").slice(0, 12);
 }
 
@@ -146,10 +143,7 @@ describe("recallMemorySources", () => {
     const { recallMemorySources } = await import("../src/om/ledger/recall.js");
     const obsId = hexId("dropped-obs");
     const obs = makeObservation(obsId);
-    const entries: Entry[] = [
-      recordEntry("e1", [obs]),
-      dropEntry("e2", [obsId]),
-    ];
+    const entries: Entry[] = [recordEntry("e1", [obs]), dropEntry("e2", [obsId])];
     const result = recallMemorySources(entries, obsId);
     expect(result.status).toBe("found");
     if (result.status === "found") {
@@ -175,10 +169,7 @@ describe("recallMemorySources", () => {
     const sameObsId = hexId("collision");
     const obs1 = makeObservation(sameObsId, ["src0000000001"]);
     const obs2 = makeObservation(sameObsId, ["src0000000002"]); // same id, diff sources
-    const entries: Entry[] = [
-      recordEntry("e1", [obs1]),
-      recordEntry("e2", [obs2]),
-    ];
+    const entries: Entry[] = [recordEntry("e1", [obs1]), recordEntry("e2", [obs2])];
     const result = recallMemorySources(entries, sameObsId);
     expect(result.status).toBe("found");
     if (result.status === "found") {

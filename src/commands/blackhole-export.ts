@@ -7,8 +7,8 @@ import { writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { buildProjectMemoryCorpus } from "../project-recall/corpus.js";
-import { buildExportMarkdown } from "../project-recall/format-export.js";
+import { buildProjectMemoryCorpusAsync } from "../project-recall/corpus.js";
+import { buildExportMarkdownAsync } from "../project-recall/format-export.js";
 import { findGitRoot } from "../project-recall/session-dir.js";
 
 function defaultOutPath(cwd: string, now: Date): string {
@@ -26,6 +26,8 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         "Exporting project memory… this may take a few minutes depending on the number of session files for the project.",
         "info",
       );
+      // Yield so the TUI can paint the warning before the heavy scan blocks.
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
       const outMatch = args.match(/\bout:(\S+)/);
       const now = new Date();
@@ -48,10 +50,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (userOut && !isAbsolute(userOut)) {
         const rel = relative(resolve(ctx.cwd), resolvedOut);
         if (rel.startsWith("..") || isAbsolute(rel)) {
-          ctx.ui.notify(
-            `Export path escapes current directory: ${outPath}`,
-            "error",
-          );
+          ctx.ui.notify(`Export path escapes current directory: ${outPath}`, "error");
           return;
         }
       }
@@ -60,15 +59,41 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (gitWarning) {
         ctx.ui.notify(gitWarning, "warning");
       }
-      const activeSessionFile =
-        ctx.sessionManager.getSessionFile() ?? undefined;
+      const activeSessionFile = ctx.sessionManager.getSessionFile() ?? undefined;
 
-      const corpus = buildProjectMemoryCorpus({
-        cwd: ctx.cwd,
-        gitRoot,
-        activeSessionFile,
-        agentDir: getAgentDir(),
-      });
+      // Throttled progress: Scanning N files… keeps the TUI alive during the
+      // ~35s (98 files) to ~2min (644 files) corpus walk.
+      let lastProgressAt = 0;
+      const onProgress = ({
+        scanned,
+        total,
+      }: {
+        scanned: number;
+        total: number;
+        phase: string;
+      }) => {
+        const t = Date.now();
+        if (t - lastProgressAt < 800 && scanned !== 0 && scanned !== total) return;
+        lastProgressAt = t;
+        if (scanned === 0 && total > 0) {
+          ctx.ui.notify(
+            `Scanning ${total} session files for observational memory markers…`,
+            "info",
+          );
+        } else if (total > 0) {
+          ctx.ui.notify(`Scanning ${scanned}/${total} session files…`, "info");
+        }
+      };
+
+      const corpus = await buildProjectMemoryCorpusAsync(
+        {
+          cwd: ctx.cwd,
+          gitRoot,
+          activeSessionFile,
+          agentDir: getAgentDir(),
+        },
+        onProgress,
+      );
 
       if (
         corpus.observations.length === 0 &&
@@ -82,7 +107,15 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         return;
       }
 
-      const { markdown, stats } = buildExportMarkdown(corpus, {
+      if (corpus.observations.length > 0 || corpus.reflections.length > 0) {
+        ctx.ui.notify(
+          `Ranking ${corpus.observations.length} observations and ${corpus.reflections.length} reflections…`,
+          "info",
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+
+      const { markdown, stats } = await buildExportMarkdownAsync(corpus, {
         now: now.getTime(),
         title: basename(corpus.projectRoot),
       });
@@ -90,10 +123,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       try {
         writeFileSync(outPath, markdown, "utf-8");
       } catch (error) {
-        ctx.ui.notify(
-          `Export failed to write ${outPath}: ${String(error)}`,
-          "error",
-        );
+        ctx.ui.notify(`Export failed to write ${outPath}: ${String(error)}`, "error");
         return;
       }
 
@@ -115,10 +145,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (stats.droppedExcluded > 0) {
         lines.push(`- dropper-pruned ids excluded: ${stats.droppedExcluded}`);
       }
-      lines.push(
-        "",
-        "The file is plain markdown — curate it, then import into any memory system.",
-      );
+      lines.push("", "The file is plain markdown — curate it, then import into any memory system.");
 
       pi.sendMessage({
         customType: "blackhole-export",

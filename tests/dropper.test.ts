@@ -102,15 +102,11 @@ describe("V3 dropper agent", () => {
     expect(systemPrompt).toContain("Active-memory framing");
     expect(systemPrompt).toContain("Age-gradient rule");
     expect(systemPrompt).toContain("critical");
-    expect(systemPrompt).toContain(
-      "highest importance and strongest resistance",
-    );
+    expect(systemPrompt).toContain("highest importance and strongest resistance");
     expect(systemPrompt).toContain(
       "Relevance is importance/resistance, not an absolute keep/drop lock",
     );
-    expect(systemPrompt).toContain(
-      "Coverage is evidence, not an automatic decision",
-    );
+    expect(systemPrompt).toContain("Coverage is evidence, not an automatic decision");
     expect(systemPrompt).toContain("age alone is not enough");
     expect(systemPrompt).not.toContain("NEVER drop");
     expect(systemPrompt).toContain("Preservation floor");
@@ -151,25 +147,14 @@ describe("V3 dropper agent", () => {
   it("normalizes active drop ids, filters invalid ids, dedupes, and accepts critical observations", () => {
     expect(
       normalizeDropObservationIds(
-        [
-          "bbbbbbbbbbbb",
-          "missing",
-          "bbbbbbbbbbbb",
-          "cccccccccccc",
-          "aaaaaaaaaaaa",
-        ],
+        ["bbbbbbbbbbbb", "missing", "bbbbbbbbbbbb", "cccccccccccc", "aaaaaaaaaaaa"],
         [obsA, obsB, critical],
       ),
     ).toEqual(["bbbbbbbbbbbb", "cccccccccccc", "aaaaaaaaaaaa"]);
     expect(
-      normalizeDropObservationIds(
-        ["missing", "cccccccccccc"],
-        [obsA, obsB, critical],
-      ),
+      normalizeDropObservationIds(["missing", "cccccccccccc"], [obsA, obsB, critical]),
     ).toEqual(["cccccccccccc"]);
-    expect(
-      normalizeDropObservationIds(["missing"], [obsA, obsB, critical]),
-    ).toBeUndefined();
+    expect(normalizeDropObservationIds(["missing"], [obsA, obsB, critical])).toBeUndefined();
   });
 
   it("selects final candidates by coverage, lower relevance, age, then stable ordering", () => {
@@ -206,13 +191,9 @@ describe("V3 dropper agent", () => {
       relevance: "high",
       timestamp: "2026-02-01T00:00:00.000Z",
     });
-    expect(
-      selectDropCandidates(
-        ["888888888888", "999999999999"],
-        [oldHigh, newHigh],
-        1,
-      ),
-    ).toEqual(["999999999999"]);
+    expect(selectDropCandidates(["888888888888", "999999999999"], [oldHigh, newHigh], 1)).toEqual([
+      "999999999999",
+    ]);
   });
 
   it("prefers stronger reflection coverage before relevance when over cap", () => {
@@ -259,16 +240,8 @@ describe("V3 dropper agent", () => {
     });
     const observations = [critical, high, low];
     const reflections = [
-      reflection("rrrrrrrrrrr1", [
-        "aaaaaaaaaaaa",
-        "bbbbbbbbbbbb",
-        "cccccccccccc",
-      ]),
-      reflection("rrrrrrrrrrr2", [
-        "aaaaaaaaaaaa",
-        "bbbbbbbbbbbb",
-        "cccccccccccc",
-      ]),
+      reflection("rrrrrrrrrrr1", ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]),
+      reflection("rrrrrrrrrrr2", ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]),
     ];
 
     expect(
@@ -288,9 +261,7 @@ describe("V3 dropper agent", () => {
       });
     });
 
-    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(
-      ["aaaaaaaaaaaa"],
-    );
+    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(["aaaaaaaaaaaa"]);
   });
 
   it("returns critical proposed ids when they are the selected valid candidates", async () => {
@@ -300,9 +271,7 @@ describe("V3 dropper agent", () => {
       });
     });
 
-    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(
-      ["cccccccccccc"],
-    );
+    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(["cccccccccccc"]);
   });
 
   it("returns undefined when only invalid ids are proposed", async () => {
@@ -310,9 +279,7 @@ describe("V3 dropper agent", () => {
       await context.tools[0].execute("tool-1", { ids: ["missing"] });
     });
 
-    await expect(
-      runDropper({ ...baseArgs, agentLoop: loop }),
-    ).resolves.toBeUndefined();
+    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
   });
 
   it("dedupes repeated tool calls and enforces one run-level cap", async () => {
@@ -323,16 +290,12 @@ describe("V3 dropper agent", () => {
       });
     });
 
-    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(
-      ["aaaaaaaaaaaa"],
-    );
+    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toEqual(["aaaaaaaaaaaa"]);
   });
 
   it("returns undefined when no tool call drops observations", async () => {
     const loop = fakeAgentLoop(() => {});
-    await expect(
-      runDropper({ ...baseArgs, agentLoop: loop }),
-    ).resolves.toBeUndefined();
+    await expect(runDropper({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
   });
 
   it("skips the model when pool fullness is below the skip threshold", async () => {
@@ -345,9 +308,7 @@ describe("V3 dropper agent", () => {
     await expect(
       runDropper({
         ...baseArgs,
-        observations: [
-          observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 10 }),
-        ],
+        observations: [observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 10 })],
         budgetTokens: 200,
         agentLoop: loop,
       }),
@@ -365,9 +326,7 @@ describe("V3 dropper agent", () => {
     await expect(
       runDropper({
         ...baseArgs,
-        observations: [
-          observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 10 }),
-        ],
+        observations: [observation("aaaaaaaaaaaa", { relevance: "low", tokenCount: 10 })],
         budgetTokens: 200,
         skipFullness: 0.03,
         agentLoop: loop,

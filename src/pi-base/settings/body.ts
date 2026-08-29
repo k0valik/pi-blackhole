@@ -17,20 +17,33 @@
  */
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  type Component,
+  type TUI,
+  fuzzyMatch,
+} from "@earendil-works/pi-tui";
+import { validateFieldValue } from "./validate-field.ts";
 import type {
   Field,
+  FieldKeyHint,
   FieldRenderContext,
   SettingsModalOptions,
   SettingsModalBodyComponent,
   Tab,
+  VisibilityContext,
 } from "./types";
 import { RENDERERS } from "./fields/index";
 import {
+  divider,
+  formatHintLine,
   frame,
   frameContentWidth,
   pad,
   responsiveInnerRows,
+  wrapLine,
   type FrameOptions,
   DEFAULT_PADDING_X,
 } from "./frame";
@@ -40,16 +53,20 @@ import {
   totalVisibleItems,
   updateVisibleIndices,
   visibleRowIndices,
+  clampSelection,
   focusedIndex,
   focusedRow,
 } from "./navigation.ts";
+import { buildVisibilityContext, isDirty, commitValue, allValues } from "./values.ts";
 import {
-  buildVisibilityContext,
-  isDirty,
-  commitValue,
-  allValues,
-} from "./values.ts";
-import { renderFooter, renderBody } from "./render.ts";
+  renderTabBar,
+  renderSearchBar,
+  renderFooter,
+  renderRow,
+  renderBody,
+  renderFieldDesc,
+  estimateDescriptionRows,
+} from "./render.ts";
 import { createConfirm } from "./confirm.ts";
 
 const PREFERRED_INNER_ROWS = 45;
@@ -118,8 +135,7 @@ export function createSettingsModalBody<F extends Field>(
     field,
     value: extractInitialValue(field),
     isEditing: false,
-    searchIndex:
-      `${field.label}\n${field.description ?? ""}\n${field.key}`.toLowerCase(),
+    searchIndex: `${field.label}\n${field.description ?? ""}\n${field.key}`.toLowerCase(),
   }));
 
   const editStates: Map<string, InlineEditState> = new Map();
@@ -166,9 +182,7 @@ export function createSettingsModalBody<F extends Field>(
     fieldSelected: 0,
     scroll: 0,
     tabActionFocus:
-      readOnly && tabs.length > 0 && (options.actions?.length ?? 0) > 0
-        ? tabs.length
-        : -1,
+      readOnly && tabs.length > 0 && (options.actions?.length ?? 0) > 0 ? tabs.length : -1,
     pathNote: options.pathNote ?? "",
     pathNoteRef: { current: options.pathNote ?? "" },
     overlay,
@@ -254,28 +268,28 @@ export function createSettingsModalBody<F extends Field>(
     if (readOnly) return;
     const row = focusedRow(state);
     if (!row) return;
-    if (row.field.type === "section") return;
     const renderer = rendererFor(row.field);
-    if (!renderer) return;
     try {
-      const result = renderer.handleKey(
-        { field: row.field as never, value: row.value as never },
-        data,
-        {
-          isEditing: row.isEditing,
-          ctx: fieldRenderContext,
-          setEditing: (v) => setEditing(row, v),
-        },
-      );
-      if (result.commit !== undefined) commitValue(state, row, result.commit);
-      if (result.submenu) {
-        mountOverlay(
-          result.submenu((value) => {
-            dismissOverlay();
-            if (value !== undefined) commitValue(state, row, value);
-          }),
-          `${row.field.key} →`,
+      if (renderer) {
+        const result = renderer.handleKey(
+          { field: row.field as never, value: row.value as never },
+          data,
+          {
+            isEditing: row.isEditing,
+            ctx: fieldRenderContext,
+            setEditing: (v) => setEditing(row, v),
+          },
         );
+        if (result.commit !== undefined) commitValue(state, row, result.commit);
+        if (result.submenu) {
+          mountOverlay(
+            result.submenu((value) => {
+              dismissOverlay();
+              if (value !== undefined) commitValue(state, row, value);
+            }),
+            `${row.field.key} →`,
+          );
+        }
       }
     } catch (err) {
       notifyError(state, state.args.ctx, err);
@@ -301,9 +315,7 @@ export function createSettingsModalBody<F extends Field>(
       return true;
     }
 
-    const reorderablePeerIdxs = indices.filter(
-      (i) => state.rows[i]?.field.reorderable,
-    );
+    const reorderablePeerIdxs = indices.filter((i) => state.rows[i]?.field.reorderable);
     const fromPeerPos = reorderablePeerIdxs.indexOf(focusedIdx);
     const toPeerPos = reorderablePeerIdxs.indexOf(targetIdx);
 
@@ -369,10 +381,7 @@ export function createSettingsModalBody<F extends Field>(
       if (row && !row.field.disabled && !row.isEditing) {
         const def = row.field.default;
         if (def !== undefined) {
-          const clonedDef =
-            typeof def === "object" && def !== null
-              ? structuredClone(def)
-              : def;
+          const clonedDef = typeof def === "object" && def !== null ? structuredClone(def) : def;
           commitValue(state, row, clonedDef);
           state.args.tui.requestRender();
           return;
@@ -444,18 +453,14 @@ export function createSettingsModalBody<F extends Field>(
 
     // Tab/Shift+Tab: cycle through tabs + actions
     const actions = state.options.actions ?? [];
-    const stopCount = readOnly
-      ? state.tabs.length
-      : state.tabs.length + actions.length;
+    const stopCount = readOnly ? state.tabs.length : state.tabs.length + actions.length;
     if (matchesKey(data, "tab")) {
       if (stopCount === 0) {
         state.args.tui.requestRender();
         return;
       }
       if (state.tabActionFocus === -1) {
-        const currentTabIdx = state.tabs.findIndex(
-          (t) => t.id === state.activeTabId,
-        );
+        const currentTabIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
         if (currentTabIdx >= 0) {
           state.tabActionFocus = (currentTabIdx + 1) % stopCount;
         } else {
@@ -464,11 +469,19 @@ export function createSettingsModalBody<F extends Field>(
       } else if (state.tabActionFocus < state.tabs.length) {
         state.tabActionFocus = (state.tabActionFocus + 1) % stopCount;
       } else if (readOnly) {
-        const currentTabIdx = state.tabs.findIndex(
-          (t) => t.id === state.activeTabId,
-        );
-        state.tabActionFocus =
-          currentTabIdx >= 0 ? (currentTabIdx + 1) % state.tabs.length : 0;
+        // Stay in action zone, advance the active tab
+        const currentTabIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
+        const nextTabIdx = currentTabIdx >= 0 ? (currentTabIdx + 1) % state.tabs.length : 0;
+        const nextTab = state.tabs[nextTabIdx];
+        if (nextTab && nextTab.id !== state.activeTabId) {
+          state.activeTabId = nextTab.id;
+          state.fieldSelected = 0;
+          state.scroll = 0;
+          updateVisibleIndices(state, buildVisibilityContext);
+          state.options.onActiveTabChange?.(nextTab.id);
+        }
+        state.args.tui.requestRender();
+        return;
       } else {
         state.tabActionFocus = (state.tabActionFocus + 1) % stopCount;
       }
@@ -491,28 +504,33 @@ export function createSettingsModalBody<F extends Field>(
         return;
       }
       if (state.tabActionFocus === -1) {
-        const currentTabIdx = state.tabs.findIndex(
-          (t) => t.id === state.activeTabId,
-        );
+        const currentTabIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
         if (currentTabIdx >= 0) {
           state.tabActionFocus = (currentTabIdx - 1 + stopCount) % stopCount;
         } else {
           state.tabActionFocus = stopCount - 1;
         }
       } else if (state.tabActionFocus < state.tabs.length) {
-        state.tabActionFocus =
-          (state.tabActionFocus - 1 + stopCount) % stopCount;
+        state.tabActionFocus = (state.tabActionFocus - 1 + stopCount) % stopCount;
       } else if (readOnly) {
-        const currentTabIdx = state.tabs.findIndex(
-          (t) => t.id === state.activeTabId,
-        );
-        state.tabActionFocus =
+        // Stay in action zone, go to previous tab
+        const currentTabIdx = state.tabs.findIndex((t) => t.id === state.activeTabId);
+        const prevTabIdx =
           currentTabIdx >= 0
             ? (currentTabIdx - 1 + state.tabs.length) % state.tabs.length
             : state.tabs.length - 1;
+        const prevTab = state.tabs[prevTabIdx];
+        if (prevTab && prevTab.id !== state.activeTabId) {
+          state.activeTabId = prevTab.id;
+          state.fieldSelected = 0;
+          state.scroll = 0;
+          updateVisibleIndices(state, buildVisibilityContext);
+          state.options.onActiveTabChange?.(prevTab.id);
+        }
+        state.args.tui.requestRender();
+        return;
       } else {
-        state.tabActionFocus =
-          (state.tabActionFocus - 1 + stopCount) % stopCount;
+        state.tabActionFocus = (state.tabActionFocus - 1 + stopCount) % stopCount;
       }
       if (state.tabActionFocus < state.tabs.length) {
         const tab = state.tabs[state.tabActionFocus];
@@ -532,10 +550,7 @@ export function createSettingsModalBody<F extends Field>(
     // it from a readOnly field zone.
     const ringActions = state.options.actions ?? [];
     const ringStopCount = state.tabs.length + ringActions.length;
-    if (
-      (matchesKey(data, "left") || matchesKey(data, "right")) &&
-      ringStopCount > 0
-    ) {
+    if ((matchesKey(data, "left") || matchesKey(data, "right")) && ringStopCount > 0) {
       if (state.tabActionFocus >= 0) {
         const forward = matchesKey(data, "right");
         if (readOnly && state.tabs.length > 0 && ringActions.length > 0) {
@@ -622,10 +637,7 @@ export function createSettingsModalBody<F extends Field>(
     // Enter on a tab switches focus to field zone (tab already auto-switched).
     // Then lets Enter fall through to dispatchKey for field toggling/editing.
     // Enter on an action fires onAction if enabled.
-    if (
-      (matchesKey(data, "enter") || matchesKey(data, "return")) &&
-      state.tabActionFocus >= 0
-    ) {
+    if ((matchesKey(data, "enter") || matchesKey(data, "return")) && state.tabActionFocus >= 0) {
       if (state.tabActionFocus < state.tabs.length) {
         state.tabActionFocus = -1;
         // Fall through to dispatchKey below
@@ -634,9 +646,7 @@ export function createSettingsModalBody<F extends Field>(
         const action = actions[actionIdx];
         if (action) {
           const disabled =
-            typeof action.disabled === "function"
-              ? action.disabled()
-              : action.disabled;
+            typeof action.disabled === "function" ? action.disabled() : action.disabled;
           if (!disabled) {
             state.options.onAction?.(action.id);
           }
@@ -731,12 +741,8 @@ export function createSettingsModalBody<F extends Field>(
       );
 
       const dirtyDot =
-        state.isBuffered && isDirty(state)
-          ? ` ${state.args.theme.fg("accent", "● Unsaved")}`
-          : "";
-      const title = state.options.title
-        ? `${state.options.title}${dirtyDot}`
-        : state.options.title;
+        state.isBuffered && isDirty(state) ? ` ${state.args.theme.fg("accent", "● Unsaved")}` : "";
+      const title = state.options.title ? `${state.options.title}${dirtyDot}` : state.options.title;
 
       const frameLines = frame(bodyLines, width, state.args.theme, {
         title,
@@ -745,8 +751,7 @@ export function createSettingsModalBody<F extends Field>(
 
       const bottomBorder = frameLines.pop()!;
       const bottomPadding = frameLines.pop()!;
-      const borderAccent = (s: string) =>
-        state.args.theme.fg("borderAccent", s);
+      const borderAccent = (s: string) => state.args.theme.fg("borderAccent", s);
 
       const paddingX = DEFAULT_PADDING_X;
       const footDiv = `${borderAccent("│")}${" ".repeat(paddingX)}${state.args.theme.fg("dim", "─".repeat(Math.max(1, contentWidth)))}${" ".repeat(paddingX)}${borderAccent("│")}`;
@@ -778,19 +783,9 @@ export function createSettingsModalBody<F extends Field>(
               ),
             );
           } else if (action.danger) {
-            cells.push(
-              state.args.theme.bg(
-                "selectedBg",
-                state.args.theme.fg("warning", padded),
-              ),
-            );
+            cells.push(state.args.theme.bg("selectedBg", state.args.theme.fg("warning", padded)));
           } else {
-            cells.push(
-              state.args.theme.bg(
-                "selectedBg",
-                state.args.theme.fg("accent", padded),
-              ),
-            );
+            cells.push(state.args.theme.bg("selectedBg", state.args.theme.fg("accent", padded)));
           }
         }
         const line = pad(cells.join(" "), contentWidth);

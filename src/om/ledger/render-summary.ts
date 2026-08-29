@@ -25,11 +25,7 @@ export function observationToSummaryLine(observation: Observation): string {
  *  Relevance tier dominates: medium (5+) always outranks low (max 2).
  *  Recency is based on position in the flat-mapped array (0 = oldest, N-1 = newest),
  *  avoiding wall-clock dependency that punishes sessions spanning days or weeks. */
-export function scoreObservation(
-  obs: Observation,
-  index: number,
-  total: number,
-): number {
+export function scoreObservation(obs: Observation, index: number, total: number): number {
   const base =
     obs.relevance === "high" || obs.relevance === "critical"
       ? 10
@@ -54,12 +50,10 @@ export function selectPriorObservations(
   // Track original indices so we can restore chronological order after scoring
   const indexed = observations.map((obs, i) => ({ obs, originalIndex: i }));
   const high = indexed.filter(
-    (item) =>
-      item.obs.relevance === "high" || item.obs.relevance === "critical",
+    (item) => item.obs.relevance === "high" || item.obs.relevance === "critical",
   );
   const rest = indexed.filter(
-    (item) =>
-      item.obs.relevance !== "high" && item.obs.relevance !== "critical",
+    (item) => item.obs.relevance !== "high" && item.obs.relevance !== "critical",
   );
 
   // High always kept — consume budget first
@@ -79,9 +73,7 @@ export function selectPriorObservations(
     }));
     scored.sort((a, b) => b.score - a.score); // highest score first
     for (const { item } of scored) {
-      const lineTokens = Math.ceil(
-        observationToSummaryLine(item.obs).length / 4,
-      );
+      const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
       if (budget - lineTokens < 0) break;
       selected.add(item);
       budget -= lineTokens;
@@ -98,22 +90,15 @@ export function reflectionToSummaryLine(reflection: Reflection): string {
   return `[${reflection.id}] ${reflection.content}`;
 }
 
-export function renderSummary(
-  reflections: Reflection[],
-  observations: Observation[],
-): string {
+export function renderSummary(reflections: Reflection[], observations: Observation[]): string {
   const hasContent = reflections.length > 0 || observations.length > 0;
 
   const parts: string[] = [];
   if (reflections.length > 0) {
-    parts.push(
-      `## Reflections\n${reflections.map(reflectionToSummaryLine).join("\n")}`,
-    );
+    parts.push(`## Reflections\n${reflections.map(reflectionToSummaryLine).join("\n")}`);
   }
   if (observations.length > 0) {
-    parts.push(
-      `## Observations\n${observations.map(observationToSummaryLine).join("\n")}`,
-    );
+    parts.push(`## Observations\n${observations.map(observationToSummaryLine).join("\n")}`);
   }
 
   const footer = hasContent ? OM_FOOTER_FULL : OM_FOOTER_BASIC;

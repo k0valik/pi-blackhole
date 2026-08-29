@@ -21,10 +21,7 @@ afterEach(() => {
   rmSync(testDir, { recursive: true, force: true });
 });
 
-function writeConfig(
-  data: unknown,
-  filename = "pi-blackhole/pi-blackhole-config.json",
-): string {
+function writeConfig(data: unknown, filename = "pi-blackhole/pi-blackhole-config.json"): string {
   const dir = join(testDir, filename).replace(/\/[^/]+$/, "");
   mkdirSync(dir, { recursive: true });
   const path = join(testDir, filename);

@@ -4,11 +4,7 @@
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/serialize.ts)
  * Unmodified.
  */
-import type {
-  Message,
-  TextContent,
-  ToolResultMessage,
-} from "@earendil-works/pi-ai";
+import type { Message, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
@@ -24,9 +20,7 @@ function formatTimestamp(v: number | string | undefined): string {
   return Number.isNaN(d.getTime()) ? "????-??-?? ??:??" : fmtLocal(d);
 }
 
-function formatRecallTimestamp(
-  ...values: Array<number | string | undefined>
-): string {
+function formatRecallTimestamp(...values: Array<number | string | undefined>): string {
   for (const v of values) {
     if (v === undefined) continue;
     const d = new Date(v);
@@ -75,9 +69,7 @@ function textOnly(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .filter(
-      (b): b is TextContent => b?.type === "text" && typeof b.text === "string",
-    )
+    .filter((b): b is TextContent => b?.type === "text" && typeof b.text === "string")
     .map((b) => b.text)
     .join("\n");
 }
@@ -131,10 +123,7 @@ export type RenderableEntry = {
   summary?: unknown;
 };
 
-function renderCustomMessage(
-  entry: RenderableEntry,
-  options: { recallFormat: boolean },
-): string {
+function renderCustomMessage(entry: RenderableEntry, options: { recallFormat: boolean }): string {
   const time = options.recallFormat
     ? formatRecallTimestamp(entry.timestamp)
     : formatTimestamp(entry.timestamp);
@@ -149,9 +138,7 @@ function renderCustomMessage(
             .join("\n")
         : "";
   if (options.recallFormat) {
-    const origin = entry.customType
-      ? `Custom message (${entry.customType})`
-      : "Custom message";
+    const origin = entry.customType ? `Custom message (${entry.customType})` : "Custom message";
     return `[${origin} @ ${time}]: ${text}`;
   }
   const tag = entry.customType ? `Custom (${entry.customType})` : "Custom";
@@ -185,9 +172,7 @@ export type SourceAddressedSerialization = {
 
 function isSourceRenderableEntry(entry: RenderableEntry): boolean {
   return (
-    entry.type === "message" ||
-    entry.type === "custom_message" ||
-    entry.type === "branch_summary"
+    entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary"
   );
 }
 
@@ -229,8 +214,7 @@ function renderRecallMessage(entry: RenderableEntry): string | null {
 
 export function renderRecallSourceEntry(entry: RenderableEntry): string | null {
   if (entry.type === "message") return renderRecallMessage(entry);
-  if (entry.type === "custom_message")
-    return renderCustomMessage(entry, { recallFormat: true });
+  if (entry.type === "custom_message") return renderCustomMessage(entry, { recallFormat: true });
   if (entry.type === "branch_summary" && typeof entry.summary === "string") {
     const time = formatRecallTimestamp(entry.timestamp);
     return `[Branch summary @ ${time}]: ${entry.summary}`;
@@ -241,8 +225,6 @@ export function renderRecallSourceEntry(entry: RenderableEntry): string | null {
 export function renderRecallSourceEntries(entries: RenderableEntry[]): string {
   return entries
     .map(renderRecallSourceEntry)
-    .filter(
-      (block): block is string => block !== null && block.trim().length > 0,
-    )
+    .filter((block): block is string => block !== null && block.trim().length > 0)
     .join("\n\n");
 }

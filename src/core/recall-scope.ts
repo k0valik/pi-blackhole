@@ -7,9 +7,7 @@ const MODE_RE = /\bmode:(hybrid|file|touched)\b/i;
 const VALID_MODES = new Set(["hybrid", "file", "touched"]);
 
 export const normalizeRecallScope = (scope?: unknown): RecallScope =>
-  typeof scope === "string" && scope.toLowerCase() === "all"
-    ? "all"
-    : "lineage";
+  typeof scope === "string" && scope.toLowerCase() === "all" ? "all" : "lineage";
 
 export const normalizeRecallMode = (mode?: unknown): RecallMode =>
   typeof mode === "string" && VALID_MODES.has(mode.toLowerCase())
@@ -24,10 +22,6 @@ export const parseRecallScope = (
   return {
     scope: normalizeRecallScope(scopeMatch?.[1]),
     mode: normalizeRecallMode(modeMatch?.[1]),
-    text: text
-      .replace(SCOPE_RE, "")
-      .replace(MODE_RE, "")
-      .replace(/\s+/g, " ")
-      .trim(),
+    text: text.replace(SCOPE_RE, "").replace(MODE_RE, "").replace(/\s+/g, " ").trim(),
   };
 };

@@ -105,9 +105,7 @@ export const loadAllMessages = (
     }
   }
   if (parseErrors > 0) {
-    console.warn(
-      `blackhole: ${parseErrors} malformed JSONL line(s) in ${sessionFile}`,
-    );
+    console.warn(`blackhole: ${parseErrors} malformed JSONL line(s) in ${sessionFile}`);
   }
   const rendered: RenderedEntry[] = [];
   const rawMessages: Message[] = [];

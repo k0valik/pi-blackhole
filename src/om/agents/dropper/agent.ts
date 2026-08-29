@@ -22,11 +22,7 @@ import { Type } from "typebox";
 import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
-import {
-  reflectionToSummaryLine,
-  type Observation,
-  type Reflection,
-} from "../../ledger/index.js";
+import { reflectionToSummaryLine, type Observation, type Reflection } from "../../ledger/index.js";
 import { DROPPER_SYSTEM } from "./prompts.js";
 import {
   REFLECTION_COVERAGE_DROP_RANK,
@@ -87,10 +83,7 @@ function joinOrEmpty(items: string[]): string {
   return items.length ? items.join("\n") : "(none yet)";
 }
 
-export function observationPoolFullness(
-  observationTokens: number,
-  budgetTokens: number,
-): number {
+export function observationPoolFullness(observationTokens: number, budgetTokens: number): number {
   if (!Number.isFinite(observationTokens) || observationTokens <= 0) return 0;
   if (!Number.isFinite(budgetTokens) || budgetTokens <= 0) return 0;
   return observationTokens / budgetTokens;
@@ -116,10 +109,7 @@ export function maxDropCountForPool(
   const fullness = observationPoolFullness(observationTokens, budgetTokens);
   if (fullness < skipFullness) return 0;
 
-  const cappedFullness = Math.min(
-    DROP_MAX_FULLNESS,
-    Math.max(skipFullness, fullness),
-  );
+  const cappedFullness = Math.min(DROP_MAX_FULLNESS, Math.max(skipFullness, fullness));
   const dropRatio =
     DROP_MIN_RATIO +
     ((cappedFullness - skipFullness) / (DROP_MAX_FULLNESS - skipFullness)) *
@@ -144,9 +134,7 @@ export function normalizeDropObservationIds(
   observations: readonly Observation[],
 ): string[] | undefined {
   if (!ids || ids.length === 0) return undefined;
-  const allowed = new Map(
-    observations.map((observation) => [observation.id, observation]),
-  );
+  const allowed = new Map(observations.map((observation) => [observation.id, observation]));
   const result: string[] = [];
   const seen = new Set<string>();
   for (const id of ids) {
@@ -172,9 +160,7 @@ export function selectDropCandidates(
 ): string[] {
   if (maxDrops <= 0 || ids.length === 0) return [];
 
-  const byId = new Map(
-    observations.map((observation) => [observation.id, observation]),
-  );
+  const byId = new Map(observations.map((observation) => [observation.id, observation]));
   const coverageById = reflectionCoverageMap(observations, reflections);
   const firstProposalIndex = new Map<string, number>();
   for (let i = 0; i < ids.length; i++) {
@@ -185,22 +171,15 @@ export function selectDropCandidates(
   return Array.from(firstProposalIndex.entries())
     .map(([id, index]) => ({ id, index, observation: byId.get(id) }))
     .filter(
-      (
-        candidate,
-      ): candidate is { id: string; index: number; observation: Observation } =>
+      (candidate): candidate is { id: string; index: number; observation: Observation } =>
         candidate.observation !== undefined,
     )
     .sort((a, b) => {
       const coverageDelta =
-        REFLECTION_COVERAGE_DROP_RANK[
-          coverageTierForObservation(a.observation, coverageById)
-        ] -
-        REFLECTION_COVERAGE_DROP_RANK[
-          coverageTierForObservation(b.observation, coverageById)
-        ];
+        REFLECTION_COVERAGE_DROP_RANK[coverageTierForObservation(a.observation, coverageById)] -
+        REFLECTION_COVERAGE_DROP_RANK[coverageTierForObservation(b.observation, coverageById)];
       const relevanceDelta =
-        RELEVANCE_DROP_RANK[a.observation.relevance] -
-        RELEVANCE_DROP_RANK[b.observation.relevance];
+        RELEVANCE_DROP_RANK[a.observation.relevance] - RELEVANCE_DROP_RANK[b.observation.relevance];
       const aAge = timestampRank(a.observation.timestamp);
       const bAge = timestampRank(b.observation.timestamp);
       const ageDelta = aAge === bAge ? 0 : aAge - bAge;
@@ -210,19 +189,9 @@ export function selectDropCandidates(
     .map((candidate) => candidate.id);
 }
 
-export async function runDropper(
-  args: RunDropperArgs,
-): Promise<string[] | undefined> {
-  const {
-    model,
-    apiKey,
-    headers,
-    reflections,
-    observations,
-    budgetTokens,
-    skipFullness,
-    signal,
-  } = args;
+export async function runDropper(args: RunDropperArgs): Promise<string[] | undefined> {
+  const { model, apiKey, headers, reflections, observations, budgetTokens, skipFullness, signal } =
+    args;
   if (observations.length === 0) return undefined;
 
   const observationTokens = observations.reduce(
@@ -238,10 +207,7 @@ export async function runDropper(
     skipFullness,
   );
   const coverageById = reflectionCoverageMap(observations, reflections);
-  const coverageSummaryByRelevance = summarizeCoverageByRelevance(
-    observations,
-    coverageById,
-  );
+  const coverageSummaryByRelevance = summarizeCoverageByRelevance(observations, coverageById);
   debugLog("dropper.agent_start", {
     activeObservationCount: observations.length,
     reflectionCount: reflections.length,
@@ -273,9 +239,7 @@ export async function runDropper(
 
   const proposedDropIds: string[] = [];
   const proposed = new Set<string>();
-  const allowed = new Map(
-    observations.map((observation) => [observation.id, observation]),
-  );
+  const allowed = new Map(observations.map((observation) => [observation.id, observation]));
   let toolCallCount = 0;
   let rawRequestedIdsCount = 0;
   let missingIdsCount = 0;
@@ -286,8 +250,7 @@ export async function runDropper(
   const dropObservations: AgentTool<typeof DropObservationsSchema> = {
     name: "drop_observations",
     label: "Drop observations",
-    description:
-      "Propose active observation ids that are safe to remove from compacted memory.",
+    description: "Propose active observation ids that are safe to remove from compacted memory.",
     parameters: DropObservationsSchema,
     execute: async (_id, params: DropObservationsArgs) => {
       toolCallCount++;
@@ -371,8 +334,7 @@ export async function runDropper(
   };
   const reasoning = (model as { reasoning?: unknown }).reasoning;
   const thinkingLevel = args.thinkingLevel ?? "low";
-  const effectiveMaxTurns =
-    args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
+  const effectiveMaxTurns = args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
   let turnCount = 0;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
   const config: AgentLoopConfig & ProviderFetchOption = {
@@ -383,9 +345,7 @@ export async function runDropper(
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
-    ...(reasoning && thinkingLevel !== "off"
-      ? { reasoning: thinkingLevel }
-      : {}),
+    ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
     ...(effectiveMaxTurns !== undefined
       ? { shouldStopAfterTurn: () => ++turnCount >= effectiveMaxTurns }
       : {}),

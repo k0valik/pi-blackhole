@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  normalizeRecallScope,
-  parseRecallScope,
-} from "../src/core/recall-scope.js";
+import { normalizeRecallScope, parseRecallScope } from "../src/core/recall-scope.js";
 
 describe("normalizeRecallScope", () => {
   it("defaults to active lineage", () => {

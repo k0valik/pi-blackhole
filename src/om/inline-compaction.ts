@@ -1,7 +1,4 @@
-import {
-  AgentSession,
-  type CompactionResult,
-} from "@earendil-works/pi-coding-agent";
+import { AgentSession, type CompactionResult } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -265,9 +262,7 @@ function countMethodCalls(source: string, method: string): number {
   return source.match(pattern)?.length ?? 0;
 }
 
-function detectCompactShape(
-  prototype: PatchableSessionPrototype,
-): CompactShape | string {
+function detectCompactShape(prototype: PatchableSessionPrototype): CompactShape | string {
   if (typeof prototype.compact !== "function") {
     return "AgentSession.compact() is missing";
   }
@@ -278,9 +273,7 @@ function detectCompactShape(
     return "AgentSession._bindExtensionCore() is missing";
   }
 
-  const source = maskNonCodeText(
-    Function.prototype.toString.call(prototype.compact),
-  );
+  const source = maskNonCodeText(Function.prototype.toString.call(prototype.compact));
   const abortCalls = countMethodCalls(source, "abort");
   if (
     abortCalls !== 1 ||
@@ -306,11 +299,7 @@ function detectCompactShape(
   return "unsupported AgentSession disconnect/reconnect shape";
 }
 
-function shadowProperty(
-  target: object,
-  key: string,
-  value: unknown,
-): () => void {
+function shadowProperty(target: object, key: string, value: unknown): () => void {
   const record = target as Record<string, unknown>;
   const ownDescriptor = Object.getOwnPropertyDescriptor(target, key);
   Object.defineProperty(target, key, {
@@ -329,10 +318,7 @@ function shadowProperty(
   };
 }
 
-function installNextTurnRefresh(
-  session: PatchableSession,
-  registry: AdapterRegistry,
-): void {
+function installNextTurnRefresh(session: PatchableSession, registry: AdapterRegistry): void {
   const agent = session.agent;
   if (registry.refreshInstalled.has(agent)) return;
 
@@ -408,8 +394,7 @@ function findPiPackageRoot(startPath: string): string | undefined {
 export function parseHostFramePaths(stack: string): string[] {
   const paths: string[] = [];
   for (const line of stack.split("\n")) {
-    const match =
-      line.match(/\((.+):\d+:\d+\)\s*$/) ?? line.match(/\bat (.+):\d+:\d+\s*$/);
+    const match = line.match(/\((.+):\d+:\d+\)\s*$/) ?? line.match(/\bat (.+):\d+:\d+\s*$/);
     if (!match?.[1]) continue;
     const rawPath = match[1].trim();
     const normalizedPath = rawPath.replaceAll("\\", "/");
@@ -425,9 +410,7 @@ export function parseHostFramePaths(stack: string): string[] {
       continue;
     }
     try {
-      paths.push(
-        rawPath.startsWith("file://") ? fileURLToPath(rawPath) : rawPath,
-      );
+      paths.push(rawPath.startsWith("file://") ? fileURLToPath(rawPath) : rawPath);
     } catch {
       // Ignore malformed stack locations and continue to the CLI entrypoint.
     }
@@ -435,10 +418,7 @@ export function parseHostFramePaths(stack: string): string[] {
   return paths;
 }
 
-function findBundledRuntimeModule(
-  entrypoint: string,
-  packageRoot: string,
-): string | undefined {
+function findBundledRuntimeModule(entrypoint: string, packageRoot: string): string | undefined {
   let resolvedEntrypoint: string;
   let source: string;
   try {
@@ -450,16 +430,12 @@ function findBundledRuntimeModule(
 
   const namedImport = /\bimport\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g;
   for (const match of source.matchAll(namedImport)) {
-    const names = match[1]
-      .split(",")
-      .map((name) => name.trim().split(/\s+as\s+/)[0]);
+    const names = match[1].split(",").map((name) => name.trim().split(/\s+as\s+/)[0]);
     const specifier = match[2];
     if (!names.includes("main") || !specifier.startsWith(".")) continue;
 
     try {
-      const candidate = realpathSync(
-        join(dirname(resolvedEntrypoint), specifier),
-      );
+      const candidate = realpathSync(join(dirname(resolvedEntrypoint), specifier));
       if (findPiPackageRoot(candidate) === packageRoot) return candidate;
     } catch {
       // Keep searching other named imports before falling back to dist/index.js.
@@ -512,8 +488,7 @@ export async function installHostInlineCompactionAdapter(
         sessionClass: hostModule.AgentSession,
       });
       if (status.supported) supportedStatus ??= status;
-      else
-        failureReasons.push(`${modulePath}: ${status.reason ?? "unsupported"}`);
+      else failureReasons.push(`${modulePath}: ${status.reason ?? "unsupported"}`);
     } catch (error) {
       failureReasons.push(
         `${modulePath}: ${error instanceof Error ? error.message : String(error)}`,
@@ -522,8 +497,7 @@ export async function installHostInlineCompactionAdapter(
   }
 
   if (supportedStatus) return supportedStatus;
-  const details =
-    failureReasons.length > 0 ? ` (${failureReasons.join("; ")})` : "";
+  const details = failureReasons.length > 0 ? ` (${failureReasons.join("; ")})` : "";
   return {
     supported: false,
     reason:
@@ -535,8 +509,7 @@ export async function installHostInlineCompactionAdapter(
 export function installInlineCompactionAdapter(
   options: InlineCompactionInstallOptions = {},
 ): InlineCompactionAdapterStatus {
-  const sessionClass =
-    options.sessionClass ?? (AgentSession as unknown as PatchableSessionClass);
+  const sessionClass = options.sessionClass ?? (AgentSession as unknown as PatchableSessionClass);
   const prototype = sessionClass.prototype;
   const registry = getRegistry();
   const existing = registry.installs.get(prototype);
@@ -572,9 +545,7 @@ export function installInlineCompactionAdapter(
 function getToolCallId(block: unknown): string | undefined {
   if (!block || typeof block !== "object") return undefined;
   const value = block as { type?: unknown; id?: unknown };
-  return value.type === "toolCall" && typeof value.id === "string"
-    ? value.id
-    : undefined;
+  return value.type === "toolCall" && typeof value.id === "string" ? value.id : undefined;
 }
 
 function hasTrailingUnpairedToolCall(messages: unknown[]): boolean {
@@ -606,18 +577,11 @@ function hasTrailingUnpairedToolCall(messages: unknown[]): boolean {
     }
     if (pending.size === 0) return false;
 
-    for (
-      let resultIndex = index + 1;
-      resultIndex < messages.length;
-      resultIndex += 1
-    ) {
+    for (let resultIndex = index + 1; resultIndex < messages.length; resultIndex += 1) {
       const result = messages[resultIndex];
       if (!result || typeof result !== "object") continue;
       const resultValue = result as { role?: unknown; toolCallId?: unknown };
-      if (
-        resultValue.role === "toolResult" &&
-        typeof resultValue.toolCallId === "string"
-      ) {
+      if (resultValue.role === "toolResult" && typeof resultValue.toolCallId === "string") {
         pending.delete(resultValue.toolCallId);
       }
     }
@@ -659,9 +623,7 @@ export async function compactInlineAtTurnBoundary(
 
   const activeMessages = session.sessionManager.buildSessionContext().messages;
   if (hasTrailingUnpairedToolCall(activeMessages)) {
-    throw new Error(
-      "Cannot compact inline while a tool call is still in flight",
-    );
+    throw new Error("Cannot compact inline while a tool call is still in flight");
   }
 
   registry.compactionInFlight.add(session);
@@ -720,10 +682,7 @@ export async function compactInlineAtTurnBoundary(
       // shape mutates state but does not invoke the expected hook, the error stays
       // explicit while the still-active loop is prevented from using stale context.
       registry.refreshPending.add(session);
-      if (
-        !abortSuppressed ||
-        (shape.disconnectsAgent && !disconnectSuppressed)
-      ) {
+      if (!abortSuppressed || (shape.disconnectsAgent && !disconnectSuppressed)) {
         throw new InlineCompactionUnavailableError(
           "Blackhole inline compaction invariant failed: Pi quiesce hooks were not invoked as expected",
         );

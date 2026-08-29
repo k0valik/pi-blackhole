@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-misused-promises */
 /**
  * Config flow — pre-selector → edit mode | display-all.
  *
@@ -10,12 +11,10 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 import { createConfirm } from "./confirm.ts";
-import {
-  createScopeSelector,
-  type ScopeSelectorResult,
-} from "./scope-selector.ts";
+import { createScopeSelector, type ScopeSelectorResult } from "./scope-selector.ts";
 import { createSettingsModalBody } from "./body.ts";
 import type { SettingsModalBodyComponent } from "./types.ts";
+import { frame, frameContentWidth, responsiveInnerRows, DEFAULT_PADDING_X } from "./frame.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -29,9 +28,7 @@ export interface ConfigFlowParams {
   defaults: Record<string, unknown>;
   env?: Record<string, string | EnvParser>;
   buildFields: (values: Record<string, unknown>) => Field[];
-  layerValues: (
-    scope: "global" | "project" | "env" | "session",
-  ) => Record<string, unknown>;
+  layerValues: (scope: "global" | "project" | "env" | "session") => Record<string, unknown>;
   inspect: () => ConfigInspection<Record<string, unknown>>;
   scopeSources: () => ScopeSource[];
   save: (
@@ -41,9 +38,7 @@ export interface ConfigFlowParams {
     | { path: string; created: boolean; changed: boolean }
     | Promise<{ path: string; created: boolean; changed: boolean }>;
   resetScope: (scope: "global" | "project" | "session") => void | Promise<void>;
-  deleteScope: (
-    scope: "global" | "project" | "session",
-  ) => void | Promise<void>;
+  deleteScope: (scope: "global" | "project" | "session") => void | Promise<void>;
   onSaved: (values: Record<string, unknown>) => void;
   onChange?: (key: string, value: unknown) => void;
 }
@@ -79,11 +74,21 @@ const SELECTOR_ENTRY_LABELS: Record<string, string> = {
   session: "Configure Session settings",
 };
 
+// ── Extra selector entries (generic extension point for consumers) ─────
+
+export interface ExtraSelectorEntry {
+  id: string;
+  label: string;
+  available: boolean;
+  note?: string;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function buildSelectorEntries(
   params: ConfigFlowParams,
   includeDisplayAll = true,
+  extraEntries: ExtraSelectorEntry[] = [],
 ): Array<{ id: string; label: string; available: boolean; note?: string }> {
   const available: Record<string, boolean> = {
     global: params.scopes.global,
@@ -91,14 +96,15 @@ function buildSelectorEntries(
     session: params.scopes.session && params.sessionInitialized,
   };
 
-  const entries = SCOPE_IDS.map((id) => {
+  const entries: Array<{ id: string; label: string; available: boolean; note?: string }> = [];
+
+  if (includeDisplayAll) {
+    entries.push({ id: "display-all", label: "Display all settings", available: true });
+  }
+
+  for (const id of SCOPE_IDS) {
     const ok = available[id];
-    const entry: {
-      id: string;
-      label: string;
-      available: boolean;
-      note?: string;
-    } = {
+    const entry: { id: string; label: string; available: boolean; note?: string } = {
       id: id as string,
       label: SELECTOR_ENTRY_LABELS[id],
       available: ok,
@@ -110,15 +116,11 @@ function buildSelectorEntries(
           : "(disabled by extension)"
         : undefined,
     };
-    return entry;
-  });
+    entries.push(entry);
+  }
 
-  if (includeDisplayAll) {
-    entries.push({
-      id: "display-all",
-      label: "Display all settings",
-      available: true,
-    });
+  if (extraEntries.length > 0) {
+    entries.push(...extraEntries);
   }
 
   return entries;
@@ -130,12 +132,18 @@ function winnerLabel(winner: string): string {
 
 // ── Entry point ────────────────────────────────────────────────────────
 
-export async function openConfigFlow(params: ConfigFlowParams): Promise<void> {
-  const result = await openSelector(params);
+export async function openConfigFlow(
+  params: ConfigFlowParams,
+  extraEntries: ExtraSelectorEntry[] = [],
+  onExtraSelect?: (id: string) => Promise<void> | void,
+): Promise<void> {
+  const result = await openSelector(params, true, extraEntries);
   if (result.kind === "cancel") return;
 
   if (result.id === "display-all") {
     await openDisplayAll(params);
+  } else if (extraEntries.some((e) => e.id === result.id)) {
+    if (onExtraSelect) await onExtraSelect(result.id);
   } else {
     await openEditMode(params, result.id);
   }
@@ -146,8 +154,9 @@ export async function openConfigFlow(params: ConfigFlowParams): Promise<void> {
 function openSelector(
   params: ConfigFlowParams,
   includeDisplayAll = true,
+  extraEntries: ExtraSelectorEntry[] = [],
 ): Promise<ScopeSelectorResult> {
-  const entries = buildSelectorEntries(params, includeDisplayAll);
+  const entries = buildSelectorEntries(params, includeDisplayAll, extraEntries);
   const { ctx } = params;
 
   return new Promise<ScopeSelectorResult>((resolve) => {
@@ -182,31 +191,13 @@ function openSelector(
 
 interface EditHandlers {
   onChange: (key: string, value: unknown) => void;
-  onSave: (
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ) => Promise<void> | void;
-  onRequestExit: (
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ) => Promise<void> | void;
-  onAction: (
-    id: string,
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ) => void;
+  onSave: (tui: TUI, theme: Theme, done: (result: void) => void) => Promise<void> | void;
+  onRequestExit: (tui: TUI, theme: Theme, done: (result: void) => void) => Promise<void> | void;
+  onAction: (id: string, tui: TUI, theme: Theme, done: (result: void) => void) => void;
 }
 
-async function openEditMode(
-  params: ConfigFlowParams,
-  scope: string,
-): Promise<void> {
-  const values = params.layerValues(
-    scope as "global" | "project" | "env" | "session",
-  );
+async function openEditMode(params: ConfigFlowParams, scope: string): Promise<void> {
+  const values = params.layerValues(scope as "global" | "project" | "env" | "session");
   let inspection = params.inspect();
   const fields = params.buildFields(values);
 
@@ -225,6 +216,7 @@ async function openEditMode(
   const scopeLabel = EDIT_MODE_TITLES[scope] ?? scope;
   const sources = params.scopeSources();
   const sourceEntry = sources.find((s) => s.scope === scope);
+  const subtitle = scope === "session" ? params.sessionNote : (sourceEntry?.note ?? "");
   // Path note for edit mode: static label for env/defaults, resolved
   // path (or pending note) for file-based scopes.
   const editPathNote =
@@ -246,11 +238,7 @@ async function openEditMode(
   // Per-flow body ref so nested async confirm handlers can mount overlays.
   let activeEditBody: SettingsModalBodyComponent | undefined;
 
-  async function saveEdit(
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ): Promise<void> {
+  async function saveEdit(tui: TUI, theme: Theme, done: (result: void) => void): Promise<void> {
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
@@ -284,18 +272,11 @@ async function openEditMode(
       dirtyKeys.clear();
       done(undefined);
     } catch (err) {
-      params.ctx.ui.notify(
-        err instanceof Error ? err.message : String(err),
-        "error",
-      );
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
-  async function discardEdit(
-    tui: TUI,
-    theme: Theme,
-    done: (result: void) => void,
-  ): Promise<void> {
+  async function discardEdit(tui: TUI, theme: Theme, done: (result: void) => void): Promise<void> {
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
@@ -338,18 +319,13 @@ async function openEditMode(
 
     try {
       await params.resetScope(scope as "global" | "project" | "session");
-      const fresh = params.layerValues(
-        scope as "global" | "project" | "env" | "session",
-      );
+      const fresh = params.layerValues(scope as "global" | "project" | "env" | "session");
       activeEditBody?.setValues(fresh);
       dirtyKeys.clear();
       inspection = params.inspect();
       activeEditBody?.dismissOverlay();
     } catch (err) {
-      params.ctx.ui.notify(
-        err instanceof Error ? err.message : String(err),
-        "error",
-      );
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -375,18 +351,13 @@ async function openEditMode(
 
     try {
       await params.deleteScope(scope as "global" | "project" | "session");
-      const fresh = params.layerValues(
-        scope as "global" | "project" | "env" | "session",
-      );
+      const fresh = params.layerValues(scope as "global" | "project" | "env" | "session");
       activeEditBody?.setValues(fresh);
       dirtyKeys.clear();
       inspection = params.inspect();
       activeEditBody?.dismissOverlay();
     } catch (err) {
-      params.ctx.ui.notify(
-        err instanceof Error ? err.message : String(err),
-        "error",
-      );
+      params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
     }
   }
 
@@ -406,34 +377,22 @@ async function openEditMode(
       switch (id) {
         case "save":
           void saveEdit(tui, theme, done).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "discard":
           void discardEdit(tui, theme, done).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "reset":
           void resetEdit(tui, theme).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
         case "delete":
           void deleteEdit(tui, theme).catch((err) =>
-            params.ctx.ui.notify(
-              err instanceof Error ? err.message : String(err),
-              "error",
-            ),
+            params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
           );
           break;
       }
@@ -467,11 +426,8 @@ async function openEditMode(
                 ],
           onSave: () => handlers.onSave(tui, theme, done),
           onChange: handlers.onChange,
-          // eslint-disable-next-line @typescript-eslint/no-misused-promises
           onRequestExit: () => handlers.onRequestExit(tui, theme, done),
-          onAction: (id) => {
-            void handlers.onAction(id, tui, theme, done);
-          },
+          onAction: (id) => handlers.onAction(id, tui, theme, done),
         },
         {
           tui,
@@ -509,6 +465,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
   }
   tabDefs.push({ id: "defaults", scope: "defaults", label: "Defaults" });
 
+  const subtitle = sources.map((s) => `${s.label}: ${s.note}`).join("\n");
+
   // Per-tab path/location notes rendered under the subtitle.
   const tabPathNotes: Record<string, string> = {};
   for (const source of sources) {
@@ -516,8 +474,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
       tabPathNotes["session"] = source.path ?? source.note;
     } else {
       // global / project: use the resolved path when it exists, otherwise the note text
-      tabPathNotes[source.scope] =
-        source.exists && source.path ? source.path : source.note;
+      tabPathNotes[source.scope] = source.exists && source.path ? source.path : source.note;
     }
   }
   // Static labels for scopes not covered by scopeSources().
@@ -531,9 +488,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
     if (tab.scope === "defaults") {
       layerVals = { ...params.defaults };
     } else {
-      layerVals = params.layerValues(
-        tab.scope as "global" | "project" | "env" | "session",
-      );
+      layerVals = params.layerValues(tab.scope as "global" | "project" | "env" | "session");
     }
     const raw = params.buildFields(layerVals);
     tabFields[tab.id] = raw.map((f) => ({
@@ -553,9 +508,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
   await params.ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) => {
       // Mutable path note so onActiveTabChange can update it after mount.
-      const pathNoteRef: { current: string } = {
-        current: tabPathNotes[currentTabId],
-      };
+      const pathNoteRef: { current: string } = { current: tabPathNotes[currentTabId] };
       const body = createSettingsModalBody(
         {
           title: params.label,
@@ -565,8 +518,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
           readOnly: true,
           pathNote: pathNoteRef.current,
           actions: [
-            { id: "cancel", label: "Cancel" },
             { id: "edit", label: "Edit" },
+            { id: "cancel", label: "Cancel" },
           ],
           onAction(id: string) {
             switch (id) {
@@ -581,10 +534,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
                   (currentTabId === "session" && params.scopes.session);
                 if (isEditableScope) {
                   void openEditMode(params, currentTabId).catch((err) =>
-                    params.ctx.ui.notify(
-                      err instanceof Error ? err.message : String(err),
-                      "error",
-                    ),
+                    params.ctx.ui.notify(err instanceof Error ? err.message : String(err), "error"),
                   );
                 } else {
                   void openSelector(params, false)
@@ -606,7 +556,6 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
                 }
                 break;
             }
-            return undefined;
           },
           onActiveTabChange(tabId: string) {
             currentTabId = tabId;

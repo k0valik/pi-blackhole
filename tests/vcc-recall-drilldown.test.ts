@@ -87,10 +87,9 @@ describe("expandEntryFile", () => {
     const dir = mkdtempSync(join(tmpdir(), "drilldown-full-"));
     const file = join(dir, "session.jsonl");
     try {
-      const longContent = Array.from(
-        { length: 50 },
-        (_, i) => `line ${i + 1}: some content`,
-      ).join("\n");
+      const longContent = Array.from({ length: 50 }, (_, i) => `line ${i + 1}: some content`).join(
+        "\n",
+      );
       const lines = [
         JSON.stringify({
           type: "message",
@@ -255,9 +254,7 @@ describe("expandEntryFile", () => {
                 name: "edit",
                 arguments: {
                   path: "main.go",
-                  edits: [
-                    { oldText: "func old() {}", newText: "func new() {}" },
-                  ],
+                  edits: [{ oldText: "func old() {}", newText: "func new() {}" }],
                 },
               },
             ],
@@ -422,9 +419,7 @@ describe("expandEntryFile with offset/limit", () => {
     const dir = mkdtempSync(join(tmpdir(), "drilldown-offset-"));
     const file = join(dir, "session.jsonl");
     try {
-      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join(
-        "\n",
-      );
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
       const session = [
         JSON.stringify({
           type: "message",
@@ -463,9 +458,7 @@ describe("expandEntryFile with offset/limit", () => {
     const dir = mkdtempSync(join(tmpdir(), "drilldown-win-"));
     const file = join(dir, "session.jsonl");
     try {
-      const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join(
-        "\n",
-      );
+      const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join("\n");
       const session = [
         JSON.stringify({
           type: "message",
@@ -506,9 +499,7 @@ describe("expandEntryFile with offset/limit", () => {
     const dir = mkdtempSync(join(tmpdir(), "drilldown-full-over-"));
     const file = join(dir, "session.jsonl");
     try {
-      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join(
-        "\n",
-      );
+      const lines = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
       const session = [
         JSON.stringify({
           type: "message",

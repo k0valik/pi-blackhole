@@ -76,12 +76,10 @@ export function normalizeSupportingObservationIds(
   supportingObservationIds: readonly string[] | undefined,
   allowedObservationIds: readonly string[],
 ): string[] | undefined {
-  if (!supportingObservationIds || supportingObservationIds.length === 0)
-    return undefined;
+  if (!supportingObservationIds || supportingObservationIds.length === 0) return undefined;
   const allowedOrder = new Map<string, number>();
   for (let i = 0; i < allowedObservationIds.length; i++) {
-    if (!allowedOrder.has(allowedObservationIds[i]))
-      allowedOrder.set(allowedObservationIds[i], i);
+    if (!allowedOrder.has(allowedObservationIds[i])) allowedOrder.set(allowedObservationIds[i], i);
   }
 
   const seen = new Set<string>();
@@ -90,9 +88,7 @@ export function normalizeSupportingObservationIds(
     seen.add(id);
   }
   if (seen.size === 0) return undefined;
-  return Array.from(seen).sort(
-    (a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0),
-  );
+  return Array.from(seen).sort((a, b) => (allowedOrder.get(a) ?? 0) - (allowedOrder.get(b) ?? 0));
 }
 
 function normalizeReflectionContent(content: string): string | undefined {
@@ -101,25 +97,18 @@ function normalizeReflectionContent(content: string): string | undefined {
   return normalized;
 }
 
-export async function runReflector(
-  args: RunReflectorArgs,
-): Promise<Reflection[] | undefined> {
+export async function runReflector(args: RunReflectorArgs): Promise<Reflection[] | undefined> {
   const { model, apiKey, headers, reflections, observations, signal } = args;
   if (observations.length === 0) return undefined;
 
-  const allowedObservationIds = observations.map(
-    (observation) => observation.id,
-  );
-  const existingReflectionIds = new Set(
-    reflections.map((reflection) => reflection.id),
-  );
+  const allowedObservationIds = observations.map((observation) => observation.id);
+  const existingReflectionIds = new Set(reflections.map((reflection) => reflection.id));
   const accumulated = new Map<string, Reflection>();
 
   const recordReflections: AgentTool<typeof RecordReflectionsSchema> = {
     name: "record_reflections",
     label: "Record reflections",
-    description:
-      "Record new durable reflections with supporting observation ids.",
+    description: "Record new durable reflections with supporting observation ids.",
     parameters: RecordReflectionsSchema,
     execute: async (_id, params: RecordReflectionsArgs) => {
       let added = 0;
@@ -182,8 +171,7 @@ export async function runReflector(
   };
   const reasoning = (model as { reasoning?: unknown }).reasoning;
   const thinkingLevel = args.thinkingLevel ?? "low";
-  const effectiveMaxTurns =
-    args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
+  const effectiveMaxTurns = args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
   let turnCount = 0;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
   const config: AgentLoopConfig & ProviderFetchOption = {
@@ -194,9 +182,7 @@ export async function runReflector(
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
-    ...(reasoning && thinkingLevel !== "off"
-      ? { reasoning: thinkingLevel }
-      : {}),
+    ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
     ...(effectiveMaxTurns !== undefined
       ? { shouldStopAfterTurn: () => ++turnCount >= effectiveMaxTurns }
       : {}),
@@ -222,8 +208,7 @@ export async function runReflector(
     }
   }
   await stream.result();
-  if (agentError && accumulated.size === 0)
-    throw new Error(`Reflector API error: ${agentError}`);
+  if (agentError && accumulated.size === 0) throw new Error(`Reflector API error: ${agentError}`);
   return accumulated.size > 0 ? Array.from(accumulated.values()) : undefined;
 }
 
@@ -252,9 +237,7 @@ export function summarizeSupportIdCounts(reflections: readonly Reflection[]): {
       histogram: {},
     };
   }
-  const supportIdCounts = reflections.map(
-    (r) => r.supportingObservationIds.length,
-  );
+  const supportIdCounts = reflections.map((r) => r.supportingObservationIds.length);
   const total = supportIdCounts.reduce((sum, c) => sum + c, 0);
   const histogram: Record<string, number> = {};
   for (const count of supportIdCounts) {

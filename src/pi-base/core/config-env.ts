@@ -43,10 +43,7 @@ export function applyEnvOverrides<T extends object>(
 
     if (typeof value === "string") {
       if (typeof defaultValue === "boolean") {
-        result[key] = readBooleanEnv(
-          value,
-          (result[key] as boolean) ?? (defaultValue as boolean),
-        );
+        result[key] = readBooleanEnv(value, (result[key] as boolean) ?? (defaultValue as boolean));
       } else if (typeof defaultValue === "number") {
         if (Number.isInteger(defaultValue) && defaultValue > 0) {
           result[key] = readPositiveIntEnv(

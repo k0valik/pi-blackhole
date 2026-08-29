@@ -155,9 +155,7 @@ describe("toolCallArgsText", () => {
 describe("isContentBearing", () => {
   it("returns true for args with path + content string", async () => {
     const { isContentBearing } = await import("../src/core/content.js");
-    expect(
-      isContentBearing({ path: "auth.ts", content: "function login() {}" }),
-    ).toBe(true);
+    expect(isContentBearing({ path: "auth.ts", content: "function login() {}" })).toBe(true);
   });
 
   it("returns true for args with path + edits array", async () => {
@@ -172,9 +170,7 @@ describe("isContentBearing", () => {
 
   it("returns true for args with path + oldText/newText", async () => {
     const { isContentBearing } = await import("../src/core/content.js");
-    expect(
-      isContentBearing({ path: "config.yaml", oldText: "a", newText: "b" }),
-    ).toBe(true);
+    expect(isContentBearing({ path: "config.yaml", oldText: "a", newText: "b" })).toBe(true);
   });
 
   it("returns false for args without a path", async () => {

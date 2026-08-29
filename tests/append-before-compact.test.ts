@@ -7,11 +7,7 @@ import {
 import { projectAppendOnlyContext } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
 
-const msg = (
-  id: string,
-  role: "user" | "assistant" | "toolResult",
-  content: string,
-) => ({
+const msg = (id: string, role: "user" | "assistant" | "toolResult", content: string) => ({
   id,
   type: "message",
   timestamp: Date.now(),
@@ -59,11 +55,7 @@ const createHarness = (configOverrides: Record<string, unknown> = {}) => {
   };
 };
 
-const event = (
-  branchEntries: any[],
-  previousSummary?: string,
-  customInstructions?: string,
-) => ({
+const event = (branchEntries: any[], previousSummary?: string, customInstructions?: string) => ({
   type: "session_before_compact",
   customInstructions,
   branchEntries,
@@ -161,11 +153,7 @@ describe("append before-compact integration", () => {
       msg("m8", "assistant", "ready"),
     ];
     const rebased = invoke(
-      event(
-        rebaseBranch,
-        second.compaction.summary,
-        PI_VCC_COMPACT_INSTRUCTION,
-      ),
+      event(rebaseBranch, second.compaction.summary, PI_VCC_COMPACT_INSTRUCTION),
     );
     expect(rebased.compaction.details.chainStart).toBe(true);
     expect(rebased.compaction.details.segment.sequence).toBe(1);
@@ -181,8 +169,7 @@ describe("append before-compact integration", () => {
       type: "tools",
       tools: [{ name: "read", description: "Read one file" }],
     };
-    const frame = (value: unknown): Buffer =>
-      Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+    const frame = (value: unknown): Buffer => Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
     const prefix = (messages: unknown[], segmentCount: number): Buffer =>
       Buffer.concat([
         frame(stableSystem),
@@ -241,10 +228,7 @@ describe("append before-compact integration", () => {
       ...second.compaction,
     };
     const secondSegment = second.compaction.details.segment.summary;
-    const secondMessages = providerMessages(second.compaction.summary, [
-      c1,
-      c2,
-    ]);
+    const secondMessages = providerMessages(second.compaction.summary, [c1, c2]);
     const secondPrefixThroughS1 = prefix(secondMessages, 1);
     const prefixThroughS2 = prefix(secondMessages, 2);
 
@@ -267,11 +251,7 @@ describe("append before-compact integration", () => {
       timestamp: 30,
       ...third.compaction,
     };
-    const thirdMessages = providerMessages(third.compaction.summary, [
-      c1,
-      c2,
-      c3,
-    ]);
+    const thirdMessages = providerMessages(third.compaction.summary, [c1, c2, c3]);
     const thirdPrefixThroughS2 = prefix(thirdMessages, 2);
 
     expect(second.compaction.details.segment.sequence).toBe(2);
@@ -459,9 +439,7 @@ describe("append before-compact integration", () => {
     // The immutable segment carries VCC content only.
     expect(segmentSummary).not.toContain("## Observations");
     expect(segmentSummary).not.toContain("TERSE OUTPUT PREFERENCE");
-    expect(segmentSummary).not.toContain(
-      "The conversation before this point has been compacted",
-    );
+    expect(segmentSummary).not.toContain("The conversation before this point has been compacted");
     // The stored fallback stays complete: recall note + OM inside.
     expect(first.compaction.summary).toContain("TERSE OUTPUT PREFERENCE");
     expect(first.compaction.summary).toContain(
@@ -492,9 +470,7 @@ describe("append before-compact integration", () => {
     // Exactly once each in provider-ready context — via the trailing suffix.
     expect(providerJson.split("TERSE OUTPUT PREFERENCE").length - 1).toBe(1);
     expect(
-      providerJson.split(
-        "The conversation before this point has been compacted",
-      ).length - 1,
+      providerJson.split("The conversation before this point has been compacted").length - 1,
     ).toBe(1);
   });
 
@@ -592,13 +568,8 @@ describe("append before-compact integration", () => {
           timestamp: 100,
         },
       ],
-      [
-        c1,
-        { id: "c2", type: "compaction", timestamp: 20, ...second.compaction },
-      ],
+      [c1, { id: "c2", type: "compaction", timestamp: 20, ...second.compaction }],
     ) as any[];
-    expect(
-      projected.filter((m) => m.role === "compactionSummary"),
-    ).toHaveLength(2);
+    expect(projected.filter((m) => m.role === "compactionSummary")).toHaveLength(2);
   });
 });

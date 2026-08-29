@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Changed
+
+- **Upgraded recall & export algorithms (BM25+, SimHash64, c-TF-IDF, and technical density scoring).**
+  - Upgraded session history search to **BM25+** with lower-bound delta ($\delta = 0.5$) preventing length bias against concise observations.
+  - Added lightweight morphological stemming (`stemToken`) to `dedup.ts` for higher token-set overlap across grammatical variants, with expanded software terminology coverage.
+  - Added 64-bit SimHash locality-sensitive fingerprinting (`computeSimHash64`, `simHashHammingDistance`) and cluster drift guards to speed up pairwise candidate filtering and prevent transitive clustering drift.
+  - Added technical entity density scoring (`technicalDensityFactor`) in `format-export.ts` to reward concrete code artifacts across language, framework, API, DevOps, database, and protocol ecosystems over conversational transcripts.
+  - Topic labels now preserve readable surface words while using stems only for internal matching and scoring.
+  - Upgraded topic labeling from standard TF-IDF to **c-TF-IDF** (Class-based TF-IDF with sublinear saturation) and added a Key Topics index table in the export preamble.
+
+### Fixed
+
+- **Git-based installs no longer require interactive `pnpm approve-builds`.** `simple-git-hooks` is explicitly trusted through pnpm 11's workspace `allowBuilds` configuration, and the prepare lifecycle now initializes hooks and builds the bundle exactly once.
+
 ---
 
 ## [0.4.9] - 2026-08-28

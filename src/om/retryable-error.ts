@@ -29,8 +29,5 @@ export function isStaleExtensionContextError(error: unknown): boolean {
   } else {
     message = String(error || "");
   }
-  return (
-    message.includes("extension ctx is stale") ||
-    message.includes("ctx is stale")
-  );
+  return message.includes("extension ctx is stale") || message.includes("ctx is stale");
 }

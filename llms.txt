@@ -1,6 +1,6 @@
 # pi-blackhole: Agent Setup Guide
 
-CONFIG.md is the authoritative source for configuration. Always check it first before relying on summaries from this file.
+docs/CONFIG.md is the authoritative source for configuration. Always check it first before relying on summaries from this file.
 
 pi-blackhole is a Pi extension that replaces Pi's costly LLM-based compaction with a fast, deterministic algorithm — and adds a durable memory layer that survives across compactions. Three background workers (observer, reflector, dropper) run during the session to extract facts, distill stable reflections, and prune old observations — all using cheap/free models, never the expensive session model unless necessary.
 
@@ -38,11 +38,11 @@ Use these terms consistently. The user will encounter them in the config and in 
 
 ## Stage 1: Preparation — read before asking the user
 
-Packages in Pi can be installed in non-standard locations. If you cannot find `CONFIG.md` next to this file, run `pi list`, locate the `pi-blackhole` package, and read its `CONFIG.md` from there.
+Packages in Pi can be installed in non-standard locations. If you cannot find `docs/CONFIG.md` next to this file, run `pi list`, locate the `pi-blackhole` package, and read its `docs/CONFIG.md` from there.
 
 Read these files fully. They contain every default, behavioral nuance, and edge case you need.
 
-- **`CONFIG.md`** — full config reference with every key, type, default, and behavior (same dir as this file)
+- **`docs/CONFIG.md`** — full config reference with every key, type, default, and behavior (in `docs/` next to this file)
 - **`README.md`** — overview, commands, settings table, configuration presets (low/medium/high context), feature comparison
 - **`example-config.json`** — annotated example with model choices, fallback rationale, and thinking levels
 

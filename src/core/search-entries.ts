@@ -48,8 +48,7 @@ export interface SearchHit extends RenderedEntry {
   fileMatches?: FileMatch[];
 }
 
-const escapeRegex = (s: string): string =>
-  s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Try to compile as regex; fall back to escaped literal. */
 const safeRegex = (pattern: string): RegExp => {
@@ -61,8 +60,7 @@ const safeRegex = (pattern: string): RegExp => {
 };
 
 /** Detect if the query looks like a single regex pattern (contains regex metacharacters). */
-const looksLikeRegex = (query: string): boolean =>
-  /[|*+?{}()[\]\\^$.]/.test(query);
+const looksLikeRegex = (query: string): boolean => /[|*+?{}()[\]\\^$.]/.test(query);
 
 /** Build a regex for snippet highlighting — matches first available term. */
 const snippetRegex = (terms: string[]): RegExp => {
@@ -172,9 +170,7 @@ const STOPWORDS = new Set([
 
 /** Remove stopwords, keep meaningful terms. */
 const filterStopwords = (terms: string[]): string[] => {
-  const meaningful = terms.filter(
-    (t) => !STOPWORDS.has(t.toLowerCase()) && t.length > 1,
-  );
+  const meaningful = terms.filter((t) => !STOPWORDS.has(t.toLowerCase()) && t.length > 1);
   // If all terms were stopwords, return original (don't lose everything)
   return meaningful.length > 0 ? meaningful : terms;
 };
@@ -188,9 +184,10 @@ const countMatches = (hay: string, terms: string[]): number => {
   return count;
 };
 
-// ── BM25-lite scoring ──
+// ── BM25+ scoring ──
 const BM25_K = 1.2;
 const BM25_B = 0.75;
+const BM25_DELTA = 0.5; // BM25+ lower-bound floor for matched terms
 
 /** Count occurrences of a regex pattern in text. */
 const termFreq = (text: string, pattern: RegExp): number => {
@@ -222,7 +219,7 @@ const buildBM25Context = (docs: string[], terms: string[]): BM25Context => {
   return { n, avgDl: totalLen / Math.max(n, 1), df };
 };
 
-/** BM25 score for a single doc against query terms. */
+/** BM25+ score for a single doc against query terms. */
 const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
   const dl = doc.split(/\s+/).length;
   let score = 0;
@@ -234,22 +231,17 @@ const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
     const docFreq = ctx.df.get(t) ?? 0;
     // IDF: log((N - df + 0.5) / (df + 0.5) + 1)
     const idf = Math.log((ctx.n - docFreq + 0.5) / (docFreq + 0.5) + 1);
-    // TF saturation with length normalization
+    // TF saturation with length normalization + BM25+ delta floor
     const tfNorm =
-      (tf * (BM25_K + 1)) /
-      (tf + BM25_K * (1 - BM25_B + (BM25_B * dl) / ctx.avgDl));
-    score += idf * tfNorm;
+      (tf * (BM25_K + 1)) / (tf + BM25_K * (1 - BM25_B + (BM25_B * dl) / Math.max(ctx.avgDl, 1)));
+    score += idf * (tfNorm + BM25_DELTA);
   }
 
   return score;
 };
 
 /** Line-based snippet: ±contextLines around first regex match. */
-const lineSnippet = (
-  text: string,
-  regex: RegExp,
-  contextLines = 2,
-): string | undefined => {
+const lineSnippet = (text: string, regex: RegExp, contextLines = 2): string | undefined => {
   const lines = text.split("\n");
   let matchIdx = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -301,10 +293,8 @@ function extractToolCallText(args: Record<string, unknown>): string {
       }
     }
   }
-  if (typeof args.oldText === "string" && !Array.isArray(args.edits))
-    text += args.oldText + "\n";
-  if (typeof args.newText === "string" && !Array.isArray(args.edits))
-    text += args.newText + "\n";
+  if (typeof args.oldText === "string" && !Array.isArray(args.edits)) text += args.oldText + "\n";
+  if (typeof args.newText === "string" && !Array.isArray(args.edits)) text += args.newText + "\n";
   return text;
 }
 
@@ -334,10 +324,7 @@ export function getFileIndicators(msg: Message): FileMatch[] {
   return fileMatches;
 }
 
-function computeFileMatches(
-  msg: Message | undefined,
-  query: string,
-): FileMatch[] {
+function computeFileMatches(msg: Message | undefined, query: string): FileMatch[] {
   if (!msg?.content || typeof msg.content === "string") return [];
   const rawQuery = query.trim();
   const hasQuery = rawQuery.length > 0;
@@ -376,10 +363,7 @@ function computeFileMatches(
 }
 
 /** Aggregate file operations across all entries for mode:touched. */
-export function getTouchedFiles(
-  messages: Message[],
-  rendered: RenderedEntry[],
-): TouchedFile[] {
+export function getTouchedFiles(messages: Message[], rendered: RenderedEntry[]): TouchedFile[] {
   const map = new Map<string, TouchedFile>();
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];

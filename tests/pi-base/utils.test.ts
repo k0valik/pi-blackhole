@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  readBooleanEnv,
-  readPositiveIntEnv,
-} from "../../src/pi-base/config.js";
+import { readBooleanEnv, readPositiveIntEnv } from "../../src/pi-base/config.js";
 import {
   shellQuote,
   splitShellBoundary,
@@ -26,23 +23,13 @@ describe("pi-base utilities", () => {
 
   describe("shell", () => {
     it("should tokenize commands correctly", () => {
-      expect(tokenizeCommand('ls -la "file name"')).toEqual([
-        "ls",
-        "-la",
-        '"file name"',
-      ]);
-      expect(tokenizeCommand("echo 'hello world'")).toEqual([
-        "echo",
-        "'hello world'",
-      ]);
+      expect(tokenizeCommand('ls -la "file name"')).toEqual(["ls", "-la", '"file name"']);
+      expect(tokenizeCommand("echo 'hello world'")).toEqual(["echo", "'hello world'"]);
     });
 
     it("should split shell boundaries", () => {
       expect(splitShellBoundary("ls | grep foo")).toEqual(["ls", "| grep foo"]);
-      expect(splitShellBoundary("cat file > out")).toEqual([
-        "cat file",
-        "> out",
-      ]);
+      expect(splitShellBoundary("cat file > out")).toEqual(["cat file", "> out"]);
       expect(splitShellBoundary("cmd1 && cmd2")).toEqual(["cmd1", "&& cmd2"]);
     });
 

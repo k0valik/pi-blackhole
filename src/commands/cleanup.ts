@@ -52,13 +52,8 @@ function buildTopBorder(
   const titleFitted = title
     ? ` ${title.slice(0, Math.max(1, titleBudget - 2))}${title.length > titleBudget - 2 ? "…" : ""} `
     : "";
-  const fill = Math.max(
-    1,
-    innerW - visibleWidth(titleFitted) - visibleWidth(rightText),
-  );
-  return border(
-    `┏${titleFitted}${"━".repeat(fill)}${right ? dim(rightText) : ""}┓`,
-  );
+  const fill = Math.max(1, innerW - visibleWidth(titleFitted) - visibleWidth(rightText));
+  return border(`┏${titleFitted}${"━".repeat(fill)}${right ? dim(rightText) : ""}┓`);
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -127,18 +122,10 @@ function createCleanupPicker(
         const title = `Delete ${orphaned.length} orphaned file${orphaned.length === 1 ? "" : "s"}?`;
         lines.push(buildTopBorder(w, bdr, dim, "Cleanup Pending Files"));
         lines.push(bdr(`┃${" ".repeat(innerW)}┃`));
-        lines.push(
-          bdr(
-            `┃ ${err(title)}${" ".repeat(Math.max(0, cw - visibleWidth(title)))} ┃`,
-          ),
-        );
+        lines.push(bdr(`┃ ${err(title)}${" ".repeat(Math.max(0, cw - visibleWidth(title)))} ┃`));
         lines.push(bdr(`┃${" ".repeat(innerW)}┃`));
         const hint = "Enter confirm · Esc cancel";
-        lines.push(
-          bdr(
-            `┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`,
-          ),
-        );
+        lines.push(bdr(`┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`));
         lines.push(bdr(`┗${"━".repeat(innerW)}┛`));
         return lines;
       }
@@ -147,16 +134,12 @@ function createCleanupPicker(
       clampScroll();
 
       const sizeLabel = `${orphaned.length} file${orphaned.length === 1 ? "" : "s"}`;
-      lines.push(
-        buildTopBorder(w, bdr, dim, "Orphaned Pending Files", sizeLabel),
-      );
+      lines.push(buildTopBorder(w, bdr, dim, "Orphaned Pending Files", sizeLabel));
       lines.push(bdr(`┃${" ".repeat(innerW)}┃`));
 
       if (orphaned.length === 0) {
         lines.push(
-          bdr(
-            `┃ ${dim("No orphaned pending files found")}${" ".repeat(Math.max(0, cw - 29))} ┃`,
-          ),
+          bdr(`┃ ${dim("No orphaned pending files found")}${" ".repeat(Math.max(0, cw - 29))} ┃`),
         );
       } else {
         const visible = orphaned.slice(scrollOffset, scrollOffset + LIST_ROWS);
@@ -166,9 +149,7 @@ function createCleanupPicker(
           if (!pf) continue;
           const isSel = idx === selectedIndex;
           const row = itemLine(pf, isSel, cw);
-          lines.push(
-            isSel ? theme.bg("selectedBg", bdr(`┃${row}┃`)) : bdr(`┃${row}┃`),
-          );
+          lines.push(isSel ? theme.bg("selectedBg", bdr(`┃${row}┃`)) : bdr(`┃${row}┃`));
         }
       }
 
@@ -185,22 +166,12 @@ function createCleanupPicker(
         const totalStr = `Total: ${kb} KB`;
         const hint = "↑↓ navigate  Enter delete  D delete all  Esc cancel";
         lines.push(
-          bdr(
-            `┃ ${dim(totalStr)}${" ".repeat(Math.max(0, cw - visibleWidth(totalStr)))} ┃`,
-          ),
+          bdr(`┃ ${dim(totalStr)}${" ".repeat(Math.max(0, cw - visibleWidth(totalStr)))} ┃`),
         );
-        lines.push(
-          bdr(
-            `┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`,
-          ),
-        );
+        lines.push(bdr(`┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`));
       } else {
         const hint = "Esc close";
-        lines.push(
-          bdr(
-            `┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`,
-          ),
-        );
+        lines.push(bdr(`┃ ${dim(hint)}${" ".repeat(Math.max(0, cw - visibleWidth(hint)))} ┃`));
       }
       lines.push(bdr(`┗${"━".repeat(innerW)}┛`));
       return lines;
@@ -301,8 +272,7 @@ export async function handleCleanup(ctx: ExtensionContext): Promise<void> {
     return;
   }
 
-  const isRpc =
-    ctx.mode === "rpc" || ctx.mode === "json" || ctx.mode === "print";
+  const isRpc = ctx.mode === "rpc" || ctx.mode === "json" || ctx.mode === "print";
   if (isRpc) {
     // Non-TUI: list only
     const totalSize = orphaned.reduce((s, pf) => s + pf.sizeBytes, 0);

@@ -44,10 +44,18 @@ export default [
 
       // Baseline correctness
       "no-unused-vars": "off", // handled by tsconfig noUnusedLocals
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    },
+  },
+  {
+    // Vendored pi-base: upstream uses oxlint, not eslint -- disable
+    // no-unused-vars here to keep verbatim re-vendor diff minimal.
+    // BH's own code (src/core, src/om, etc.) still has the rule via
+    // the previous block; this just relaxes the vendored tree.
+    files: ["src/pi-base/**/*.ts"],
+    ignores: ["src/pi-base/**/*.test.ts"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": "off",
     },
   },
   {
@@ -64,10 +72,7 @@ export default [
     },
     rules: {
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
   {
@@ -81,10 +86,7 @@ export default [
     },
     rules: {
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": [
-        "error",
-        { argsIgnorePattern: "^_" },
-      ],
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
 ];

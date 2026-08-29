@@ -53,8 +53,7 @@ const FIELDS: FieldDef[] = [
     type: "enum",
     section: "Compaction",
     enumValues: ["blackhole", "pi-default"],
-    helpText:
-      "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
+    helpText: "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
   },
   {
     key: "compactionSummaryMode",
@@ -97,8 +96,7 @@ const FIELDS: FieldDef[] = [
     label: "Observational memory",
     type: "boolean",
     section: "Observational Memory",
-    helpText:
-      "Enable OM workers (observer, reflector, dropper) and content injection",
+    helpText: "Enable OM workers (observer, reflector, dropper) and content injection",
   },
   {
     key: "sessionFallback",
@@ -113,40 +111,35 @@ const FIELDS: FieldDef[] = [
     label: "Observer threshold",
     type: "number",
     section: "Observational Memory",
-    helpText:
-      "Tokens accumulated since last observer run before triggering next observe",
+    helpText: "Tokens accumulated since last observer run before triggering next observe",
   },
   {
     key: "reflectAfterTokens",
     label: "Reflect + dropper threshold",
     type: "number",
     section: "Observational Memory",
-    helpText:
-      "Tokens accumulated since last reflect before triggering reflector and dropper",
+    helpText: "Tokens accumulated since last reflect before triggering reflector and dropper",
   },
   {
     key: "observationsPoolMaxTokens",
     label: "Observation pool max",
     type: "number",
     section: "Observational Memory",
-    helpText:
-      "Max tokens in observation pool before dropper prunes (fold pressure)",
+    helpText: "Max tokens in observation pool before dropper prunes (fold pressure)",
   },
   {
     key: "observationsPoolTargetTokens",
     label: "Observation pool target",
     type: "number",
     section: "Observational Memory",
-    helpText:
-      "Target tokens after dropper prunes (defaults to half of pool max)",
+    helpText: "Target tokens after dropper prunes (defaults to half of pool max)",
   },
   {
     key: "reflectorInputMaxTokens",
     label: "Reflector input max",
     type: "number",
     section: "Observational Memory",
-    helpText:
-      "Max prompt tokens for reflector model input (rolling window cap)",
+    helpText: "Max prompt tokens for reflector model input (rolling window cap)",
   },
   {
     key: "dropperInputMaxTokens",
@@ -167,8 +160,7 @@ const FIELDS: FieldDef[] = [
     label: "Observer preamble max",
     type: "number",
     section: "Observational Memory",
-    helpText:
-      "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
+    helpText: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
   },
   {
     key: "dropperPressureThreshold",
@@ -190,8 +182,7 @@ const FIELDS: FieldDef[] = [
     label: "Preserve OM on first compaction",
     type: "boolean",
     section: "Observational Memory",
-    helpText:
-      "When true, early reflections/drops survive the first compaction in a fresh session",
+    helpText: "When true, early reflections/drops survive the first compaction in a fresh session",
   },
 
   // ── Debug ──
@@ -278,10 +269,7 @@ export function createConfigureOverlay(
   let raw: Record<string, unknown>;
   let fileError: string | undefined;
   try {
-    raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
   } catch (e) {
     if (existsSync(configPath)) {
       fileError = `Config file has invalid JSON: ${(e as Error).message}. Edit the file directly to fix it.`;
@@ -369,8 +357,7 @@ export function createConfigureOverlay(
       }
       if (matchesKey(data, "backspace")) {
         if (cur.cursor > 0) {
-          cur.value =
-            cur.value.slice(0, cur.cursor - 1) + cur.value.slice(cur.cursor);
+          cur.value = cur.value.slice(0, cur.cursor - 1) + cur.value.slice(cur.cursor);
           cur.cursor--;
           invalidate();
         }
@@ -388,8 +375,7 @@ export function createConfigureOverlay(
       }
       const digit = decodeKittyPrintable(data) ?? data;
       if (digit.length === 1 && digit >= "0" && digit <= "9") {
-        cur.value =
-          cur.value.slice(0, cur.cursor) + digit + cur.value.slice(cur.cursor);
+        cur.value = cur.value.slice(0, cur.cursor) + digit + cur.value.slice(cur.cursor);
         cur.cursor++;
         invalidate();
       }
@@ -525,9 +511,7 @@ export function createConfigureOverlay(
 
       // Field label
       const prefix = isSelected ? fg("accent", isEditing ? ">>" : " >") : "  ";
-      const label = isSelected
-        ? fg("accent", `${f.def.label}:`)
-        : fg("text", `${f.def.label}:`);
+      const label = isSelected ? fg("accent", `${f.def.label}:`) : fg("text", `${f.def.label}:`);
       const labelStr = `${prefix} ${label}`;
       const labelVis = visibleWidth(labelStr);
 
@@ -541,8 +525,7 @@ export function createConfigureOverlay(
       } else {
         switch (f.def.type) {
           case "boolean":
-            valueStr =
-              f.value === "on" ? fg("success", "on") : fg("muted", "off");
+            valueStr = f.value === "on" ? fg("success", "on") : fg("muted", "off");
             break;
           default:
             valueStr = f.value ? fg("text", f.value) : fg("dim", "(empty)");
@@ -557,20 +540,13 @@ export function createConfigureOverlay(
           : valueStr;
       const remaining = innerW + 1 - labelVis - visibleWidth(truncated);
 
-      lines.push(
-        fg(
-          "border",
-          `│ ${labelStr}${truncated}${" ".repeat(Math.max(1, remaining))}│`,
-        ),
-      );
+      lines.push(fg("border", `│ ${labelStr}${truncated}${" ".repeat(Math.max(1, remaining))}│`));
 
       // Help text for selected item
       if (isSelected && f.def.helpText && !isEditing) {
         const help = fg("dim", f.def.helpText);
         const helpRemaining = innerW - visibleWidth(help);
-        lines.push(
-          fg("border", `│  ${help}${" ".repeat(Math.max(1, helpRemaining))}│`),
-        );
+        lines.push(fg("border", `│  ${help}${" ".repeat(Math.max(1, helpRemaining))}│`));
       }
     }
 

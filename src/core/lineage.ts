@@ -13,9 +13,7 @@ export const getActiveLineageEntryIds = (
   try {
     const branch = sessionManager.getBranch() ?? [];
     if (branch.length > 0) {
-      return new Set(
-        branch.map((e) => e.id).filter((id): id is string => Boolean(id)),
-      );
+      return new Set(branch.map((e) => e.id).filter((id): id is string => Boolean(id)));
     }
   } catch {
     // fall through to defensive fallback
@@ -23,9 +21,7 @@ export const getActiveLineageEntryIds = (
 
   try {
     const all = sessionManager.getEntries?.() ?? [];
-    return new Set(
-      all.map((e) => e.id).filter((id): id is string => Boolean(id)),
-    );
+    return new Set(all.map((e) => e.id).filter((id): id is string => Boolean(id)));
   } catch {
     return new Set();
   }

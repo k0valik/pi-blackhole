@@ -22,16 +22,14 @@
 
 import {
   matchesKey,
+  truncateToWidth,
   type Component,
   type SelectItem,
 } from "@earendil-works/pi-tui";
 import { SelectList } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import {
-  handleInlineEditInput,
-  renderInlineEditValue,
-  type InlineEditState,
-} from "../inline-edit";
+import { handleInlineEditInput, renderInlineEditValue, type InlineEditState } from "../inline-edit";
+import { formatHintLine } from "../frame";
 import type {
   FieldKeyResult,
   FieldRenderer,
@@ -53,12 +51,8 @@ import type {
  * renderers below pull it out in a single helper to keep the cast
  * isolated.
  */
-function getEditState(
-  args: { ctx: unknown },
-  key: string,
-): InlineEditState | undefined {
-  const registry = (args.ctx as { editStates?: Map<string, InlineEditState> })
-    .editStates;
+function getEditState(args: { ctx: unknown }, key: string): InlineEditState | undefined {
+  const registry = (args.ctx as { editStates?: Map<string, InlineEditState> }).editStates;
   return registry?.get(key);
 }
 
@@ -67,8 +61,7 @@ function setEditState(
   key: string,
   state: InlineEditState | undefined,
 ): void {
-  const registry = (args.ctx as { editStates?: Map<string, InlineEditState> })
-    .editStates;
+  const registry = (args.ctx as { editStates?: Map<string, InlineEditState> }).editStates;
   if (!registry) return;
   if (state === undefined) registry.delete(key);
   else registry.set(key, state);
@@ -109,18 +102,22 @@ export const stringRenderer: FieldRenderer<StringField, string> = {
       }
     }
     const text = placeholderOrEmpty(row.field, row.value, dim);
-    return args.selected
-      ? args.ctx.theme.fg("text", text)
-      : args.ctx.theme.fg("muted", text);
+    return args.selected ? args.ctx.theme.fg("text", text) : args.ctx.theme.fg("muted", text);
   },
   hints(row, { isEditing }) {
     if (row.field.disabled) return [];
     if (isEditing) {
-      return [
+      const hints = [
         { key: "enter", label: "save" },
         { key: "esc", label: "cancel" },
         { key: "←/→", label: "move" },
+        { key: "ctrl+w", label: "delete word" },
+        { key: "ctrl+u", label: "clear" },
       ];
+      if (row.field.default !== undefined) {
+        hints.push({ key: "alt+r", label: "reset" });
+      }
+      return hints;
     }
     return [{ key: "enter", label: "edit" }];
   },
@@ -132,6 +129,7 @@ export const stringRenderer: FieldRenderer<StringField, string> = {
       data,
       args,
       (buf) => buf,
+      row.field.default,
     );
   },
 };
@@ -147,19 +145,14 @@ export const pathRenderer: FieldRenderer<PathField, string> = {
     // share identical render shape today; we cross the variant boundary
     // via an `unknown` cast to satisfy TS's nominal discriminator.
     return (
-      stringRenderer.renderValue as unknown as FieldRenderer<
-        PathField,
-        string
-      >["renderValue"]
+      stringRenderer.renderValue as unknown as FieldRenderer<PathField, string>["renderValue"]
     )(row, args);
   },
   hints(row, args) {
-    return (
-      stringRenderer.hints as unknown as FieldRenderer<
-        PathField,
-        string
-      >["hints"]
-    )(row, args);
+    return (stringRenderer.hints as unknown as FieldRenderer<PathField, string>["hints"])(
+      row,
+      args,
+    );
   },
   handleKey(row, data, args) {
     if (row.field.disabled) return {};
@@ -169,6 +162,7 @@ export const pathRenderer: FieldRenderer<PathField, string> = {
       data,
       args,
       (buf) => buf,
+      row.field.default,
     );
   },
 };
@@ -195,10 +189,7 @@ export const secretRenderer: FieldRenderer<SecretField, string> = {
           buffer: masked,
           cursor: state.cursor,
         };
-        return args.ctx.theme.fg(
-          "accent",
-          renderInlineEditValue(view as InlineEditState),
-        );
+        return args.ctx.theme.fg("accent", renderInlineEditValue(view as InlineEditState));
       }
     }
     const display = maskedSecret(row.value);
@@ -207,12 +198,10 @@ export const secretRenderer: FieldRenderer<SecretField, string> = {
       : args.ctx.theme.fg(row.value ? "success" : "muted", display);
   },
   hints(row, args) {
-    return (
-      stringRenderer.hints as unknown as FieldRenderer<
-        SecretField,
-        string
-      >["hints"]
-    )(row, args);
+    return (stringRenderer.hints as unknown as FieldRenderer<SecretField, string>["hints"])(
+      row,
+      args,
+    );
   },
   handleKey(row, data, args) {
     if (row.field.disabled) return {};
@@ -222,6 +211,7 @@ export const secretRenderer: FieldRenderer<SecretField, string> = {
       data,
       args,
       (buf) => buf,
+      row.field.default,
     );
   },
 };
@@ -242,23 +232,13 @@ function prevValue(values: readonly number[], current: number): number {
   return values[(idx - 1 + values.length) % values.length]!;
 }
 
-function stepUp(
-  value: number,
-  step: number,
-  min?: number,
-  max?: number,
-): number {
+function stepUp(value: number, step: number, min?: number, max?: number): number {
   const next = value + step;
   if (max !== undefined && next > max) return min ?? value;
   return next;
 }
 
-function stepDown(
-  value: number,
-  step: number,
-  min?: number,
-  max?: number,
-): number {
+function stepDown(value: number, step: number, min?: number, max?: number): number {
   const prev = value - step;
   if (min !== undefined && prev < min) return max ?? value;
   return prev;
@@ -269,21 +249,22 @@ function getValueDesc(field: NumberField): string | undefined {
 }
 
 function makeNumberValuesSubmenu(
-  values: readonly number[],
+  field: NumberField,
   current: number,
   _valueDesc: string | undefined,
   ctx: FieldRenderContext,
 ): SubmenuFactory<number> {
+  const values = field.values ?? [];
   return (done) => {
-    const items: SelectItem[] = values.map((v) => ({
-      value: String(v),
-      label: String(v),
-    }));
-    const list = new SelectList(
-      items,
-      Math.min(items.length, 12),
-      getSelectListTheme(),
-    );
+    const items: SelectItem[] = values.map((v, idx) => {
+      const isActive = v === current;
+      const activeSuffix = isActive ? `  ${ctx.theme.fg("success", "✔")}` : "";
+      return {
+        value: String(v),
+        label: `${idx + 1}. ${v}${activeSuffix}`,
+      };
+    });
+    const list = new SelectList(items, Math.min(items.length, 12), getSelectListTheme());
     const idx = items.findIndex((i) => Number(i.value) === current);
     list.setSelectedIndex(idx >= 0 ? idx : 0);
     list.onSelect = (item) => done(Number(item.value));
@@ -293,12 +274,44 @@ function makeNumberValuesSubmenu(
       render(width: number): string[] {
         const lines = [...list.render(width)];
         lines.push("");
+        const hints = [
+          { key: "↑↓", label: "select" },
+          ...(items.length > 1 ? [{ key: `1-${Math.min(9, items.length)}`, label: "choose" }] : []),
+          { key: "enter/space", label: "save" },
+          ...(field.default !== undefined ? [{ key: "alt+r", label: "reset" }] : []),
+          { key: "esc", label: "cancel" },
+        ];
+        const hintText = `  ${formatHintLine(hints, ctx.theme)}`;
+        lines.push(truncateToWidth(hintText, width, "…", true));
         return lines;
       },
       invalidate(): void {
         list.invalidate();
       },
       handleInput(data: string): void {
+        if (matchesKey(data, "alt+r") && field.default !== undefined) {
+          const defaultIdx = values.indexOf(field.default);
+          if (defaultIdx >= 0) {
+            list.setSelectedIndex(defaultIdx);
+            ctx.tui.requestRender();
+          }
+          return;
+        }
+        if (data === " ") {
+          const item = list.getSelectedItem();
+          if (item) {
+            done(Number(item.value));
+            return;
+          }
+        }
+        const num = parseInt(data, 10);
+        if (data.length === 1 && !isNaN(num) && num >= 1 && num <= Math.min(9, items.length)) {
+          const item = items[num - 1];
+          if (item) {
+            done(Number(item.value));
+            return;
+          }
+        }
         list.handleInput(data);
         ctx.tui.requestRender();
       },
@@ -325,15 +338,22 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
       }
     }
     const text = String(row.value);
-    return args.selected
-      ? args.ctx.theme.fg("text", text)
-      : args.ctx.theme.fg("muted", text);
+    return args.selected ? args.ctx.theme.fg("text", text) : args.ctx.theme.fg("muted", text);
   },
   hints(row, args) {
     if (row.field.disabled) return [];
+    if (args.isEditing) {
+      return [
+        { key: "enter", label: "save" },
+        { key: "esc", label: "cancel" },
+        { key: "←/→", label: "move" },
+        { key: "ctrl+w", label: "delete word" },
+        { key: "ctrl+u", label: "clear" },
+        ...(row.field.default !== undefined ? [{ key: "alt+r", label: "reset" }] : []),
+      ];
+    }
     const { values, step } = row.field;
-    if (values && values.length > 4)
-      return [{ key: "enter", label: "open list" }];
+    if (values && values.length > 4) return [{ key: "enter", label: "open list" }];
     if (values && values.length > 0) {
       return [
         { key: "enter/space", label: "cycle" },
@@ -346,12 +366,10 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
         { key: "←/→", label: "step" },
       ];
     }
-    return (
-      stringRenderer.hints as unknown as FieldRenderer<
-        NumberField,
-        number
-      >["hints"]
-    )(row, args);
+    return (stringRenderer.hints as unknown as FieldRenderer<NumberField, number>["hints"])(
+      row,
+      args,
+    );
   },
   handleKey(row, data, args) {
     if (row.field.disabled) return {};
@@ -359,16 +377,12 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
 
     // Discrete values: cycle through (like enum) or open submenu
     if (values && values.length > 0) {
-      if (
-        matchesKey(data, "enter") ||
-        matchesKey(data, "return") ||
-        data === " "
-      ) {
+      if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
         if (values.length > 4) {
           return {
             consumed: true,
             submenu: makeNumberValuesSubmenu(
-              values,
+              row.field,
               row.value,
               getValueDesc(row.field),
               args.ctx,
@@ -414,8 +428,7 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
           const trimmed = buffer.trim();
           if (trimmed === "") throw new Error("Expected a number");
           const parsed = Number(trimmed);
-          if (!Number.isFinite(parsed))
-            throw new Error(`Not a number: '${buffer}'`);
+          if (!Number.isFinite(parsed)) throw new Error(`Not a number: '${buffer}'`);
           if (row.field.integer && !Number.isInteger(parsed))
             throw new Error("Expected an integer");
           if (typeof row.field.min === "number" && parsed < row.field.min)
@@ -424,6 +437,7 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
             throw new Error(`Must be ≤ ${row.field.max}`);
           return parsed;
         },
+        row.field.default,
       );
     }
 
@@ -437,10 +451,8 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
         const trimmed = buffer.trim();
         if (trimmed === "") throw new Error("Expected a number");
         const parsed = Number(trimmed);
-        if (!Number.isFinite(parsed))
-          throw new Error(`Not a number: '${buffer}'`);
-        if (row.field.integer && !Number.isInteger(parsed))
-          throw new Error("Expected an integer");
+        if (!Number.isFinite(parsed)) throw new Error(`Not a number: '${buffer}'`);
+        if (row.field.integer && !Number.isInteger(parsed)) throw new Error("Expected an integer");
         if (typeof row.field.min === "number" && parsed < row.field.min)
           throw new Error(`Must be ≥ ${row.field.min}`);
         if (typeof row.field.max === "number" && parsed > row.field.max)
@@ -449,6 +461,7 @@ export const numberRenderer: FieldRenderer<NumberField, number> = {
           throw new Error(`Must be one of: ${values.join(", ")}`);
         return parsed;
       },
+      row.field.default,
     );
   },
 };
@@ -469,6 +482,7 @@ function handleStringLikeKey<V>(
   data: string,
   args: StringLikeArgs,
   parse: (buffer: string) => V,
+  defaultValue?: unknown,
 ): FieldKeyResult<V> {
   // Defensive coercion: the caller may pass a non-string value (e.g.
   // an array-backed value). We coerce here so cursor/buffer arithmetic
@@ -478,14 +492,17 @@ function handleStringLikeKey<V>(
   if (!args.isEditing) {
     if (matchesKey(data, "enter") || matchesKey(data, "return")) {
       // Begin editing — seed the buffer from the current value.
-      setEditState(args, key, {
-        buffer: initialStr,
-        cursor: initialStr.length,
-      });
+      setEditState(args, key, { buffer: initialStr, cursor: initialStr.length });
       args.setEditing(true);
       return { consumed: true };
     }
     return {};
+  }
+
+  if (matchesKey(data, "alt+r") && defaultValue !== undefined) {
+    const defaultStr = String(defaultValue);
+    setEditState(args, key, { buffer: defaultStr, cursor: defaultStr.length });
+    return { consumed: true };
   }
 
   // Editing mode: Enter commits, Esc cancels.

@@ -1,8 +1,4 @@
-import type {
-  PiVccCompactionDetailsV2,
-  PiVccSegment,
-  PiVccSegmentCoverage,
-} from "../details.js";
+import type { PiVccCompactionDetailsV2, PiVccSegment, PiVccSegmentCoverage } from "../details.js";
 import { isPiVccCompactionDetailsV2 } from "../details.js";
 import { estimateEntryTokens, getUsageTokens } from "../om/tokens.js";
 
@@ -57,19 +53,12 @@ export function estimateChainTokens(
   freshSummary: string,
   trailingSummary: string,
 ): number {
-  const chars = segments.reduce(
-    (total, item) => total + item.segment.summary.length,
-    0,
-  );
+  const chars = segments.reduce((total, item) => total + item.segment.summary.length, 0);
   return Math.ceil((chars + freshSummary.length + trailingSummary.length) / 4);
 }
 
 /** Source entry types counted toward context size (mirrors ledger progress). */
-const SOURCE_ENTRY_TYPES = new Set([
-  "message",
-  "custom_message",
-  "branch_summary",
-]);
+const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
 
 /**
  * Project the next provider-visible chain size for the growth governor.
@@ -86,10 +75,7 @@ export function projectChainTokens(
   freshSummary: string,
   trailingSummary: string,
   branchEntries: SessionEntryLike[],
-  coverage: Pick<
-    PiVccSegmentCoverage,
-    "firstCoveredEntryId" | "lastCoveredEntryId"
-  >,
+  coverage: Pick<PiVccSegmentCoverage, "firstCoveredEntryId" | "lastCoveredEntryId">,
 ): number {
   const fallback = estimateChainTokens(segments, freshSummary, trailingSummary);
   const latestEntry = segments[segments.length - 1]?.entry;
@@ -126,18 +112,13 @@ export function projectChainTokens(
   let coveredTokens = 0;
   for (let index = firstIndex; index <= lastIndex; index += 1) {
     const entry = branchEntries[index];
-    if (
-      !entry ||
-      typeof entry.type !== "string" ||
-      !SOURCE_ENTRY_TYPES.has(entry.type)
-    ) {
+    if (!entry || typeof entry.type !== "string" || !SOURCE_ENTRY_TYPES.has(entry.type)) {
       continue;
     }
     const { type, message, summary } = entry;
     coveredTokens += estimateEntryTokens({ type, message, summary });
   }
-  const projected =
-    usageTokens - coveredTokens + Math.ceil(freshSummary.length / 4);
+  const projected = usageTokens - coveredTokens + Math.ceil(freshSummary.length / 4);
   if (!Number.isFinite(projected) || projected < 0) return fallback;
   return projected;
 }
@@ -157,9 +138,7 @@ export const findLatestCompactionEntry = (
  * Read the active append chain from the current root-first Pi branch.
  * Any version or sequence gap fails closed, so the normal fallback summary stays active.
  */
-export function collectActiveSegments(
-  branchEntries: SessionEntryLike[],
-): ActiveSegmentChain {
+export function collectActiveSegments(branchEntries: SessionEntryLike[]): ActiveSegmentChain {
   let latestIndex = -1;
   for (let index = branchEntries.length - 1; index >= 0; index -= 1) {
     if (branchEntries[index]?.type === "compaction") {
@@ -256,8 +235,7 @@ const mergeRebaseCoverage = (
     .find((id): id is string => typeof id === "string" && id.length > 0);
 
   return {
-    firstCoveredEntryId:
-      firstPrior?.firstCoveredEntryId ?? current.firstCoveredEntryId,
+    firstCoveredEntryId: firstPrior?.firstCoveredEntryId ?? current.firstCoveredEntryId,
     lastCoveredEntryId: current.lastCoveredEntryId,
     firstKeptEntryId: current.firstKeptEntryId,
     sourceMessageCount: priorCount + current.sourceMessageCount,
@@ -277,9 +255,7 @@ export function renderSegmentCoverageMarker(
   const firstKept = coverage.firstKeptEntryId || "<compact-all>";
   const legacy = coverage.includesLegacySummary
     ? `; legacySummary=true${
-        coverage.rebasedFromCompactionId
-          ? `; rebasedFrom=${coverage.rebasedFromCompactionId}`
-          : ""
+        coverage.rebasedFromCompactionId ? `; rebasedFrom=${coverage.rebasedFromCompactionId}` : ""
       }`
     : "";
   return [
@@ -321,9 +297,7 @@ export function buildAppendOnlyDetails(
   // A version-2 entry must always carry a complete fallback summary. A prior
   // compaction without preparation.previousSummary cannot meet that contract.
   if (latestCompaction && !input.previousSummaryUsed) {
-    throw new Error(
-      "append compaction requires the previous complete fallback summary",
-    );
+    throw new Error("append compaction requires the previous complete fallback summary");
   }
 
   const latestDetails = latestCompaction?.details;
@@ -364,21 +338,14 @@ export function buildAppendOnlyDetails(
     // even when no on-branch compaction entry exists to reference by id.
     const inheritedOffChain = !chain.ok && input.previousSummaryUsed;
     const legacyCompactionId =
-      inheritedOffChain && latestCompaction?.id
-        ? latestCompaction.id
-        : undefined;
+      inheritedOffChain && latestCompaction?.id ? latestCompaction.id : undefined;
     const coverage = mergeRebaseCoverage(
       activeSegments,
       input.currentCoverage,
       legacyCompactionId,
       inheritedOffChain,
     );
-    segment = createSegment(
-      1,
-      input.aggregateSummary,
-      coverage,
-      input.tokensBefore,
-    );
+    segment = createSegment(1, input.aggregateSummary, coverage, input.tokensBefore);
     chainStart = true;
   } else {
     const last = chain.segments[chain.segments.length - 1];
@@ -433,10 +400,7 @@ export function projectAppendOnlyContext(
 
   const fallbackIndexes = messages
     .map((message, index) =>
-      message?.role === "compactionSummary" &&
-      message?.summary === latest.summary
-        ? index
-        : -1,
+      message?.role === "compactionSummary" && message?.summary === latest.summary ? index : -1,
     )
     .filter((index) => index >= 0);
   if (fallbackIndexes.length !== 1) return messages;

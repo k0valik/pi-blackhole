@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  invalidExpandIndices,
-  mergeExpandedIntoSearchResults,
-} from "../src/tools/recall.js";
+import { invalidExpandIndices, mergeExpandedIntoSearchResults } from "../src/tools/recall.js";
 import type { SearchHit } from "../src/core/search-entries.js";
 
 // Re-export type alias for consistency
@@ -62,14 +59,8 @@ describe("mergeExpandedIntoSearchResults", () => {
   });
 
   it("merges non-overlapping search and expand entries sorted by index", () => {
-    const search = [
-      makeSearchHit(1, "search result"),
-      makeSearchHit(4, "another result"),
-    ];
-    const expanded = [
-      makeExpanded(2, "full entry 2"),
-      makeExpanded(5, "full entry 5"),
-    ];
+    const search = [makeSearchHit(1, "search result"), makeSearchHit(4, "another result")];
+    const expanded = [makeExpanded(2, "full entry 2"), makeExpanded(5, "full entry 5")];
     const merged = mergeExpandedIntoSearchResults(search, expanded);
     expect(merged).toHaveLength(4);
     expect(merged.map((r) => r.index)).toEqual([1, 2, 4, 5]);
@@ -85,10 +76,7 @@ describe("mergeExpandedIntoSearchResults", () => {
       makeSearchHit(3, "also truncated"),
       makeSearchHit(7, "still truncated"),
     ];
-    const expanded = [
-      makeExpanded(3, "FULL VERSION"),
-      makeExpanded(9, "new full entry"),
-    ];
+    const expanded = [makeExpanded(3, "FULL VERSION"), makeExpanded(9, "new full entry")];
     const merged = mergeExpandedIntoSearchResults(search, expanded);
     expect(merged).toHaveLength(4);
     expect(merged.map((r) => r.index)).toEqual([0, 3, 7, 9]);
