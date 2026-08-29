@@ -356,8 +356,13 @@ export function stemToken(token: string): string {
   return word.length >= 3 ? word : token;
 }
 
-/** Normalized, stop-word-stripped token list for a piece of content. */
-export function tokenizeContent(content: string): string[] {
+/**
+ * Split content into normalized surface tokens before morphological stemming.
+ *
+ * Topic matching uses the stemmed form, while topic labels need the original
+ * words (for example, "register" rather than the internal stem "regist").
+ */
+export function tokenizeSurfaceContent(content: string): string[] {
   // Expand common contractions so "don't" and "do not" share tokens
   const expanded = content
     .replace(/\bdon't\b/gi, "do not")
@@ -404,7 +409,12 @@ export function tokenizeContent(content: string): string[] {
         // Filter single letters attached to parens/hyphens
         !/^[a-z]$/.test(t),
     );
-  return rawTokens.map(stemToken);
+  return rawTokens;
+}
+
+/** Normalized, stop-word-stripped and stemmed token list for a piece of content. */
+export function tokenizeContent(content: string): string[] {
+  return tokenizeSurfaceContent(content).map(stemToken);
 }
 
 /**

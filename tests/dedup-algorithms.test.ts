@@ -2,12 +2,16 @@ import { describe, it, expect } from "vitest";
 import {
   stemToken,
   tokenizeContent,
+  tokenizeSurfaceContent,
   computeSimHash64,
   simHashHammingDistance,
   sorensenDiceTokenSimilarity,
   clusterObservations,
 } from "../src/project-recall/dedup.js";
-import { technicalDensityFactor } from "../src/project-recall/format-export.js";
+import {
+  buildExportMarkdown,
+  technicalDensityFactor,
+} from "../src/project-recall/format-export.js";
 import type { CorpusObservation } from "../src/project-recall/corpus.js";
 
 describe("dedup algorithms", () => {
@@ -33,6 +37,21 @@ describe("dedup algorithms", () => {
       expect(stemToken("serializers")).toBe("serializ");
       expect(stemToken("handlers")).toBe("handl");
       expect(stemToken("transpiler")).toBe("transpil");
+    });
+
+    it("keeps unstemmed surface words available for display labels", () => {
+      expect(tokenizeSurfaceContent("Register Providers and Quality Gates")).toEqual([
+        "register",
+        "providers",
+        "quality",
+        "gates",
+      ]);
+      expect(tokenizeContent("Register Providers and Quality Gates")).toEqual([
+        "regist",
+        "provid",
+        "qual",
+        "gate",
+      ]);
     });
 
     it("preserves short tokens and irregular words", () => {
@@ -98,6 +117,42 @@ describe("dedup algorithms", () => {
         "POST /api/v1/auth/login returned 401 Unauthorized; check Result<Token, AuthError> in crates/server/main.rs and Dockerfile";
       const factor = technicalDensityFactor(webRustObservation);
       expect(factor).toBeGreaterThan(1.25);
+    });
+  });
+
+  describe("topic labels", () => {
+    it("renders surface words instead of internal stems", () => {
+      const corpus = {
+        projectRoot: "/tmp/project",
+        sessionsConsidered: 1,
+        filesWithMarkers: 1,
+        observations: [
+          "Register Provider handles HTTP authentication in src/auth-provider.ts",
+          "Register Provider configures websocket routing in src/ws-provider.ts",
+          "Register Provider validates GraphQL requests in src/graphql-provider.ts",
+          "Register Provider retries database connections in src/db-provider.ts",
+          "Register Provider serializes cache entries in src/cache-provider.ts",
+        ].map((content, i) => ({
+          id: `obs-${i}`,
+          content,
+          relevance: "high" as const,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          sessionId: "session-1",
+          source: "branch" as const,
+        })),
+        reflections: [],
+        droppedIds: new Set<string>(),
+        knownSessionIds: new Set(["session-1"]),
+        orphanedSessions: 0,
+      };
+
+      const { markdown } = buildExportMarkdown(corpus, {
+        now: Date.parse("2026-01-02T00:00:00.000Z"),
+        title: "project",
+      });
+
+      expect(markdown).toContain("**[Register Provider]**");
+      expect(markdown).not.toContain("**[Regist Provid]**");
     });
   });
 

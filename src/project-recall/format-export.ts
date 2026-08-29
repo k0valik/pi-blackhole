@@ -19,7 +19,9 @@ import type { CorpusObservation, CorpusReflection, ProjectCorpus } from "./corpu
 import {
   clusterObservations,
   clusterReflections,
+  stemToken,
   tokenizeContent,
+  tokenizeSurfaceContent,
   sorensenDiceSets,
   type MemoryCluster,
 } from "./dedup.js";
@@ -329,6 +331,21 @@ interface TopicInfo {
   indices: number[];
 }
 
+interface TopicTokenData {
+  /** Stemmed tokens used for similarity and c-TF-IDF scoring. */
+  stemmed: string[];
+  /** Surface tokens used when rendering a human-readable topic label. */
+  surface: string[];
+}
+
+function topicTokenData(content: string): TopicTokenData {
+  const surface = tokenizeSurfaceContent(content);
+  return {
+    surface,
+    stemmed: surface.map(stemToken),
+  };
+}
+
 type TopicAssignment = Map<MemoryCluster<CorpusObservation>, string>;
 
 /**
@@ -453,10 +470,13 @@ function assignTopics(clusters: Array<MemoryCluster<CorpusObservation>>): TopicA
 
   // Cache token sets for all clusters, filtering out compaction-artifact
   // words that would glue unrelated clusters (O(n) precomputation)
-  const orderedTokens = clusters.map((c) => {
-    const tokens = tokenizeContent(flatten(c.rep.content));
-    return tokens.filter((t) => !TOPIC_STOP_WORDS.has(t));
-  });
+  const tokenData = clusters.map((c) => topicTokenData(flatten(c.rep.content)));
+  const orderedTokens = tokenData.map(({ stemmed }) =>
+    stemmed.filter((t) => !TOPIC_STOP_WORDS.has(t)),
+  );
+  const surfaceTokens = tokenData.map(({ stemmed, surface }) =>
+    surface.filter((_, i) => !TOPIC_STOP_WORDS.has(stemmed[i])),
+  );
   const tokenSets = orderedTokens.map((arr) => new Set(arr));
 
   // Global document frequencies for TF-IDF labeling (computed once)
@@ -478,6 +498,7 @@ function assignTopics(clusters: Array<MemoryCluster<CorpusObservation>>): TopicA
     level1,
     tokenSets,
     orderedTokens,
+    surfaceTokens,
     df,
     totalClusters,
     TOPIC_SIMILARITY_THRESHOLD,
@@ -503,6 +524,7 @@ function splitComponents(
   components: number[][],
   tokenSets: Set<string>[],
   orderedTokens: string[][],
+  surfaceTokens: string[][],
   df: Map<string, number>,
   totalClusters: number,
   threshold: number,
@@ -513,7 +535,14 @@ function splitComponents(
     if (comp.length <= MAX_COMPONENT_SIZE) {
       if (comp.length >= MIN_TOPIC_SIZE) {
         topics.push({
-          label: computeTopicLabel(comp, tokenSets, orderedTokens, df, totalClusters),
+          label: computeTopicLabel(
+            comp,
+            tokenSets,
+            orderedTokens,
+            surfaceTokens,
+            df,
+            totalClusters,
+          ),
           indices: comp,
         });
       }
@@ -523,7 +552,7 @@ function splitComponents(
     const nextThreshold = threshold + TOPIC_SPLIT_STEP;
     if (nextThreshold >= 0.9 || depth >= MAX_SPLIT_DEPTH) {
       topics.push({
-        label: computeTopicLabel(comp, tokenSets, orderedTokens, df, totalClusters),
+        label: computeTopicLabel(comp, tokenSets, orderedTokens, surfaceTokens, df, totalClusters),
         indices: comp,
       });
       continue;
@@ -532,7 +561,7 @@ function splitComponents(
     if (sub.length <= 1) {
       // Threshold raise did not fragment — accept as-is
       topics.push({
-        label: computeTopicLabel(comp, tokenSets, orderedTokens, df, totalClusters),
+        label: computeTopicLabel(comp, tokenSets, orderedTokens, surfaceTokens, df, totalClusters),
         indices: comp,
       });
       continue;
@@ -542,6 +571,7 @@ function splitComponents(
         sub,
         tokenSets,
         orderedTokens,
+        surfaceTokens,
         df,
         totalClusters,
         nextThreshold,
@@ -563,25 +593,37 @@ function computeTopicLabel(
   indices: number[],
   tokenSets: Set<string>[],
   orderedTokens: string[][],
+  surfaceTokens: string[][],
   df: Map<string, number>,
   totalClusters: number,
 ): string {
   // Try bigram first: most frequent ordered adjacent pair in topic
-  const bigramCounts = new Map<string, number>();
+  const bigramCounts = new Map<string, { count: number; surface: Map<string, number> }>();
   for (const idx of indices) {
     const arr = orderedTokens[idx];
+    const surface = surfaceTokens[idx];
     for (let i = 0; i < arr.length - 1; i++) {
       const bg = `${arr[i]} ${arr[i + 1]}`;
-      bigramCounts.set(bg, (bigramCounts.get(bg) ?? 0) + 1);
+      const entry = bigramCounts.get(bg) ?? { count: 0, surface: new Map<string, number>() };
+      entry.count++;
+      const surfaceBg = `${surface[i]} ${surface[i + 1]}`;
+      entry.surface.set(surfaceBg, (entry.surface.get(surfaceBg) ?? 0) + 1);
+      bigramCounts.set(bg, entry);
     }
   }
   if (bigramCounts.size > 0) {
-    const sortedBigrams = [...bigramCounts.entries()].sort((a, b) => b[1] - a[1]);
-    const [topBigram, topCount] = sortedBigrams[0];
+    const sortedBigrams = [...bigramCounts.entries()].sort((a, b) => b[1].count - a[1].count);
+    const [topBigram, topStats] = sortedBigrams[0];
     const threshold = Math.max(3, Math.ceil(indices.length * 0.3));
-    if (topCount >= threshold) {
-      const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-      const label = topBigram.split(" ").map(capitalize).join(" ");
+    if (topStats.count >= threshold) {
+      const displayBigram =
+        [...topStats.surface.entries()].sort(
+          (a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]),
+        )[0]?.[0] ?? topBigram;
+      const label = displayBigram
+        .split(" ")
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join(" ");
       if (label.length > 40) return label.slice(0, 40);
       return label;
     }
@@ -624,8 +666,27 @@ function computeTopicLabel(
   }
   const final = picked.length > 0 ? picked : scored.slice(0, 2);
 
-  const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const label = final.map((s) => capitalize(s.token)).join(" ");
+  const displayByStem = new Map<string, Map<string, number>>();
+  for (const idx of indices) {
+    const stems = orderedTokens[idx];
+    const surface = surfaceTokens[idx];
+    for (let i = 0; i < stems.length; i++) {
+      const forms = displayByStem.get(stems[i]) ?? new Map<string, number>();
+      forms.set(surface[i], (forms.get(surface[i]) ?? 0) + 1);
+      displayByStem.set(stems[i], forms);
+    }
+  }
+  const displayToken = (stem: string): string => {
+    const forms = displayByStem.get(stem);
+    if (!forms) return stem;
+    return [...forms.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]),
+    )[0][0];
+  };
+  const label = final
+    .map((s) => displayToken(s.token))
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(" ");
   return label.length > 40 ? label.slice(0, 40) : label;
 }
 
@@ -640,10 +701,13 @@ function assignReflectionTopics(
 ): Map<MemoryCluster<CorpusReflection>, string> {
   if (reflClusters.length < MIN_TOPIC_SIZE) return new Map();
 
-  const orderedTokens = reflClusters.map((c) => {
-    const tokens = tokenizeContent(flatten(c.rep.content));
-    return tokens.filter((t) => !TOPIC_STOP_WORDS.has(t));
-  });
+  const tokenData = reflClusters.map((c) => topicTokenData(flatten(c.rep.content)));
+  const orderedTokens = tokenData.map(({ stemmed }) =>
+    stemmed.filter((t) => !TOPIC_STOP_WORDS.has(t)),
+  );
+  const surfaceTokens = tokenData.map(({ stemmed, surface }) =>
+    surface.filter((_, i) => !TOPIC_STOP_WORDS.has(stemmed[i])),
+  );
   const tokenSets = orderedTokens.map((arr) => new Set(arr));
 
   const df = new Map<string, number>();
@@ -663,6 +727,7 @@ function assignReflectionTopics(
     level1,
     tokenSets,
     orderedTokens,
+    surfaceTokens,
     df,
     total,
     TOPIC_SIMILARITY_THRESHOLD,

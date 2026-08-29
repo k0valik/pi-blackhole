@@ -8,6 +8,7 @@
   - Added 64-bit SimHash locality-sensitive fingerprinting (`computeSimHash64`, `simHashHammingDistance`) and cluster drift guards to speed up pairwise candidate filtering and prevent transitive clustering drift.
   - Added technical entity density scoring (`technicalDensityFactor`) in `format-export.ts` to reward concrete code artifacts (paths, symbols, flags, hashes) over conversational transcripts.
   - Expanded stemming and technical-artifact detection for common software terminology, major language file types, framework constructs, API routes, DevOps/configuration signals, errors, and semantic versions.
+  - Topic labels now preserve readable surface words while using stems only for internal matching and scoring.
   - Upgraded topic labeling from standard TF-IDF to **c-TF-IDF** (Class-based TF-IDF with sublinear saturation) and added a Key Topics index table in the export preamble.
 
 ### Fixed
