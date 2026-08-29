@@ -31,8 +31,9 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.4.8](docs/CHANGELOG.md#048---2026-08-23)**
+> **Latest release: [0.4.10](docs/CHANGELOG.md#0410---2026-08-29)**
 >
+> - **Recall & export ranking upgrade** — BM25+, SimHash64, c-TF-IDF, technical density scoring, and surface-form-preserving topic labels for sharper dedup and more readable exports; export preamble now carries a best-effort heuristic warning.
 > - **`/blackhole-export` — distilled project-memory export** — Export for long-term agent memory tools - scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
 > - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
 > - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.

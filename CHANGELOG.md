@@ -1,18 +1,25 @@
 ## [Unreleased]
 
+---
+
+## [0.4.10] - 2026-08-29
+
 ### Changed
 
 - **Upgraded recall & export algorithms (BM25+, SimHash64, c-TF-IDF, and technical density scoring).**
-  - Upgraded session history search to **BM25+** with lower-bound delta ($\delta = 0.5$) preventing length bias against concise observations.
-  - Added lightweight morphological stemming (`stemToken`) to `dedup.ts` for higher token-set overlap across grammatical variants, with expanded software terminology coverage.
+  - Upgraded session history search to **BM25+** with lower-bound delta term ($\delta = 0.5$) preventing length bias against concise observations.
+  - Added lightweight morphological stemming (`stemToken`) to `dedup.ts` for higher token-set overlap across grammatical variants.
   - Added 64-bit SimHash locality-sensitive fingerprinting (`computeSimHash64`, `simHashHammingDistance`) and cluster drift guards to speed up pairwise candidate filtering and prevent transitive clustering drift.
-  - Added technical entity density scoring (`technicalDensityFactor`) in `format-export.ts` to reward concrete code artifacts across language, framework, API, DevOps, database, and protocol ecosystems over conversational transcripts.
+  - Added technical entity density scoring (`technicalDensityFactor`) in `format-export.ts` to reward concrete code artifacts (paths, symbols, flags, hashes) over conversational transcripts.
+  - Expanded stemming and technical-artifact detection for common software terminology, major language file types, framework constructs, API routes, DevOps/configuration signals, errors, and semantic versions.
   - Topic labels now preserve readable surface words while using stems only for internal matching and scoring.
-  - Upgraded topic labeling from standard TF-IDF to **c-TF-IDF** (Class-based TF-IDF with sublinear saturation) and added a Key Topics index table in the export preamble.
+  - Upgraded topic labeling from standard TF-IDF to **c-TF-IDF** (Class-based TF-IDF with sublinear saturation).
+  - Export preamble now shows a best-effort heuristic warning instead of a Key Topics index.
 
 ### Fixed
 
 - **Git-based installs no longer require interactive `pnpm approve-builds`.** `simple-git-hooks` is explicitly trusted through pnpm 11's workspace `allowBuilds` configuration, and the prepare lifecycle now initializes hooks and builds the bundle exactly once.
+- **Export pipeline hardening for large corpora.** Fixed `token.charCodeAt is not a function` crash caused by `TECHNICAL_ROOTS` prototype pollution on tokens like `constructor`/`toString` (now guarded with `hasOwnProperty`) and added a malformed-token guard in `computeSimHash64`; topic labels now preserve surface forms and the export warning clarifies heuristic ranking.
 
 ---
 
