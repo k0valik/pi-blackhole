@@ -188,9 +188,10 @@ const countMatches = (hay: string, terms: string[]): number => {
   return count;
 };
 
-// ── BM25-lite scoring ──
+// ── BM25+ scoring ──
 const BM25_K = 1.2;
 const BM25_B = 0.75;
+const BM25_DELTA = 0.5; // BM25+ lower-bound floor for matched terms
 
 /** Count occurrences of a regex pattern in text. */
 const termFreq = (text: string, pattern: RegExp): number => {
@@ -222,7 +223,7 @@ const buildBM25Context = (docs: string[], terms: string[]): BM25Context => {
   return { n, avgDl: totalLen / Math.max(n, 1), df };
 };
 
-/** BM25 score for a single doc against query terms. */
+/** BM25+ score for a single doc against query terms. */
 const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
   const dl = doc.split(/\s+/).length;
   let score = 0;
@@ -234,11 +235,11 @@ const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
     const docFreq = ctx.df.get(t) ?? 0;
     // IDF: log((N - df + 0.5) / (df + 0.5) + 1)
     const idf = Math.log((ctx.n - docFreq + 0.5) / (docFreq + 0.5) + 1);
-    // TF saturation with length normalization
+    // TF saturation with length normalization + BM25+ delta floor
     const tfNorm =
       (tf * (BM25_K + 1)) /
-      (tf + BM25_K * (1 - BM25_B + (BM25_B * dl) / ctx.avgDl));
-    score += idf * tfNorm;
+      (tf + BM25_K * (1 - BM25_B + (BM25_B * dl) / Math.max(ctx.avgDl, 1)));
+    score += idf * (tfNorm + BM25_DELTA);
   }
 
   return score;
