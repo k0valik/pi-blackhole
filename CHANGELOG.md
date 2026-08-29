@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Changed
+
+- **Fast prebuilt bundle with git-install fallback (`pi-entry.js`).** Restores `dist/index.js` speed (≈1.6–2× faster, 645KB ESM vs jiti on ~85 files) without breaking `pi install git:` on `npm`/`pnpm`/`bun` with `--omit=dev`. New committed entry `pi-entry.js` loads `dist/index.js` when present, otherwise falls back to `index.ts` via pi's outer `jiti` hook (Node) or native TS (Bun) — zero runtime dependencies, so registry installs stay lean. `prepare` still builds `dist/` when `tsup` is available. Reverses the `c4be93e` trade-off that reverted `pi.extensions` to `["./index.ts"]` for git robustness.
+
 ---
 
 ## [0.4.10] - 2026-08-29

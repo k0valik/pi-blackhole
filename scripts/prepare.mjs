@@ -5,7 +5,13 @@
 //                     that's a dev/CI bug, not a consumer environment issue)
 //   - tsup missing  → skip silently. Registry consumers never run this
 //                     script at all; git consumers without devDependencies
-//                     simply fall back to index.ts at load time.
+//                     fall back to index.ts via pi-entry.js at load time.
+//   - pi-entry.js is the committed entrypoint: it loads dist/index.js when
+//                     present (fast) or falls back to index.ts (slow but robust).
+//                     So `pi.extensions` can safely be a JS entry without
+//                     breaking `git clone` before `prepare` runs. Pi runs
+//                     `npm install --omit=dev` for git deps by default, so
+//                     tsup is often missing — the fallback handles that.
 //   - simple-git-hooks present → (re)install git hooks, best-effort (dev checkouts only)
 //   - Also patches pre-push hook to require SKIP_PRE_PUSH_ALLOWED
 //

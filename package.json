@@ -25,6 +25,7 @@
   },
   "files": [
     "dist/",
+    "pi-entry.js",
     "*.ts",
     "src/**/*.ts",
     "!src/**/*.test.ts",
@@ -92,7 +93,7 @@
   "packageManager": "pnpm@11.2.2",
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./pi-entry.js"
     ]
   }
 }
