@@ -17,10 +17,22 @@ describe("dedup algorithms", () => {
       expect(stemToken("refactored")).toBe("refactor");
       expect(stemToken("compaction")).toBe("compact");
       expect(stemToken("compacted")).toBe("compact");
-      expect(stemToken("configuring")).toBe("configur");
-      expect(stemToken("configuration")).toBe("configur");
+      expect(stemToken("configuring")).toBe("config");
+      expect(stemToken("configuration")).toBe("config");
       expect(stemToken("pruned")).toBe("prun");
       expect(stemToken("pruning")).toBe("prun");
+    });
+
+    it("stems technical roots and agentive nouns across ecosystems", () => {
+      expect(stemToken("initialize")).toBe("init");
+      expect(stemToken("initialization")).toBe("init");
+      expect(stemToken("authenticate")).toBe("auth");
+      expect(stemToken("authentication")).toBe("auth");
+      expect(stemToken("synchronous")).toBe("sync");
+      expect(stemToken("providers")).toBe("provid");
+      expect(stemToken("serializers")).toBe("serializ");
+      expect(stemToken("handlers")).toBe("handl");
+      expect(stemToken("transpiler")).toBe("transpil");
     });
 
     it("preserves short tokens and irregular words", () => {
@@ -87,6 +99,13 @@ describe("dedup algorithms", () => {
       expect(techFactor).toBeGreaterThan(convFactor);
       expect(techFactor).toBeGreaterThan(1.15);
       expect(convFactor).toBe(1);
+    });
+
+    it("boosts multi-ecosystem technical constructs (Rust, Docker, APIs, SQL, Status codes)", () => {
+      const webRustObservation =
+        "POST /api/v1/auth/login returned 401 Unauthorized; check Result<Token, AuthError> in crates/server/main.rs and Dockerfile";
+      const factor = technicalDensityFactor(webRustObservation);
+      expect(factor).toBeGreaterThan(1.25);
     });
   });
 

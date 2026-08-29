@@ -120,33 +120,54 @@ function burstPenalty(cluster: MemoryCluster<Scoreable>): number {
 
 /**
  * Technical entity density factor: rewards observations containing concrete
- * technical artifacts (file paths, symbols, functions, CLI flags, config keys, commit SHAs)
- * over generic conversational transcript prose.
+ * technical artifacts across multi-language, web framework, systems, devops,
+ * database, and protocol ecosystems over generic conversational prose.
  */
 export function technicalDensityFactor(content: string): number {
   let entityCount = 0;
-  // File paths with extensions: src/om/runtime.ts, config.json, etc.
+
+  // 1. File paths, extensions & configuration manifests (all major languages & web/devops formats)
+  const fileExts =
+    "ts|tsx|js|jsx|mjs|cjs|vue|svelte|astro|html|css|scss|sass|less|wasm|" +
+    "rs|go|c|cpp|cc|cxx|h|hpp|zig|nim|java|kt|kts|scala|cs|fs|swift|" +
+    "py|rb|php|lua|pl|sh|bash|zsh|fish|" +
+    "json|json5|jsonc|yaml|yml|toml|xml|ini|env|sql|prisma|graphql|gql|proto|tf|hcl";
   const fileMatches = content.match(
-    /\b[\w.-]+[/\\][\w.-]+(?:\.\w+)?\b|\b\w+\.(?:ts|js|json|md|py|sh|yml|yaml|rs|go|c|cpp|h)\b/g,
+    new RegExp(
+      `\\b[\\w.-]+[\\\\/][\\w.-]+(?:\\.(?:${fileExts}))?\\b|` +
+        `\\b[\\w.-]+\\.(?:${fileExts})\\b|` +
+        `\\b(?:Dockerfile|Containerfile|Makefile|Vagrantfile|Procfile|package\\.json|Cargo\\.toml|go\\.mod|requirements\\.txt|pyproject\\.toml|pom\\.xml|build\\.gradle|\\.gitignore|\\.dockerignore|\\.env(?:\\.[\\w-]+)?)\\b`,
+      "gi",
+    ),
   );
   if (fileMatches) entityCount += fileMatches.length * 1.5;
 
-  // Code symbols / function calls: camelCase, PascalCase, fnName()
+  // 2. Code symbols, function/method calls, types, generics, annotations & scoped identifiers
   const symbolMatches = content.match(
-    /\b[a-zA-Z_]\w*\(\)|\b[a-z]+[A-Z]\w*\b|\b[A-Z][a-z]+[A-Z]\w*\b/g,
+    /\b[a-zA-Z_]\w*\(\)|\b[a-zA-Z_]\w*(?:::|->|\.)[a-zA-Z_]\w*|\b[a-z]+[A-Z]\w*\b|\b[A-Z][a-z]+[A-Z]\w*\b|\b(?:Array|Option|Result|Map|Set|Promise|Vec|List|HashMap)<[\w\s,<>]+>|@\w+(?:\([^)]*\))?|#\[\w+(?:\([^)]*\))?\]/g,
   );
   if (symbolMatches) entityCount += symbolMatches.length;
 
-  // Config keys / env vars / CLI flags: PI_BLACKHOLE_*, --flag
-  const flagMatches = content.match(/\b(?:PI_[A-Z0-9_]+|--[a-z0-9_-]+)\b/g);
-  if (flagMatches) entityCount += flagMatches.length * 1.5;
+  // 3. Web, HTTP methods, REST routes, status codes & API protocols
+  const apiMatches = content.match(
+    /\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/[/\w:.-]*|\b[1-5]\d{2}\s+(?:OK|Created|Accepted|No Content|Bad Request|Unauthorized|Forbidden|Not Found|Conflict|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable)\b|\/(?:api|v[0-9]+|auth|users|healthz|metrics|ws|graphql)[/\w:.-]*/gi,
+  );
+  if (apiMatches) entityCount += apiMatches.length * 1.5;
 
-  // Git SHAs (7+ hex characters)
-  const shaMatches = content.match(/\b[a-f0-9]{7,40}\b/gi);
-  if (shaMatches) entityCount += shaMatches.length;
+  // 4. Config keys, environment variables, CLI commands & flags
+  const configMatches = content.match(
+    /\b(?:REACT_APP_|NEXT_PUBLIC_|VITE_|DATABASE_|NODE_|AWS_|DOCKER_|KUBE_|PI_|PI_BLACKHOLE_)[A-Z0-9_]+\b|\b[A-Z][A-Z0-9_]{3,}\b|\b(?:--[a-z0-9_-]+(?:=[^\s]+)?|-[a-zA-Z]{1,3})\b|\b(?:npm|pnpm|yarn|bun|cargo|go|rustc|docker|kubectl|git|make|pytest|pip|uv)\s+[a-z0-9_-]+/g,
+  );
+  if (configMatches) entityCount += configMatches.length * 1.5;
 
-  // Sublinear scaling: 1.0 (baseline) up to ~1.30 for dense technical observations
-  return 1 + 0.1 * Math.log2(1 + entityCount);
+  // 5. Error classes, exceptions, signals, commit SHAs & SemVer versions
+  const systemMatches = content.match(
+    /\b[A-Z]\w*(?:Exception|Error|Fault|Failure|Panic|SIGSEGV|SIGTERM|ECONNREFUSED|ETIMEDOUT|ENOTFOUND)\b|\b[a-f0-9]{7,40}\b|\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9_.-]+)?\b/gi,
+  );
+  if (systemMatches) entityCount += systemMatches.length;
+
+  // Sublinear scaling: 1.0 (baseline) up to ~1.45 for rich technical observations
+  return 1 + 0.12 * Math.log2(1 + entityCount);
 }
 
 function lengthAndDensityFactor(content: string): number {
