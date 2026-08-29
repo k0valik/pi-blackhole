@@ -227,6 +227,7 @@ const THINKING_LEVELS: readonly string[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ];
 
 // String enums for new config surface

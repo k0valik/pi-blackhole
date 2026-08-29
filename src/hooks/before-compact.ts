@@ -701,7 +701,18 @@ export const registerBeforeCompactHook = (
       omContent = renderSummary([], []);
     }
 
+    // An empty replacement summary would discard the context Pi's native
+    // compactor is designed to preserve. Decline ownership only when neither
+    // Blackhole's VCC summary nor the OM projection produced any content;
+    // non-empty Blackhole summaries retain the existing deterministic path.
     const fallbackSummary = summary + "\n\n" + omContent;
+    if (fallbackSummary.trim().length === 0) {
+      trace("before_compact.native_fallback", {
+        reason: "empty_blackhole_summary",
+      });
+      return;
+    }
+
     const warnAppendFallback = (reason: string) => {
       trace("before_compact.append_fallback", { reason });
       if (omRuntime.appendFallbackNotified) return;

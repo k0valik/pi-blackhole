@@ -141,6 +141,28 @@ export const toolCallArgsText = (
   return parts.join("\n");
 };
 
+/** Extract scalar tool-call arguments for general transcript search. */
+export const extractToolCallArgsText = (
+  args: Record<string, unknown>,
+): string => {
+  if (!args || typeof args !== "object") return "";
+  const parts: string[] = [];
+  for (const value of Object.values(args)) {
+    if (typeof value === "string") parts.push(value);
+    else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === "string") parts.push(item);
+        else if (item && typeof item === "object") {
+          for (const nested of Object.values(item)) {
+            if (typeof nested === "string") parts.push(nested);
+          }
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+};
+
 /** Extract a snippet of ~`radius` chars around the first match of `term` in `text`. */
 export const snippet = (
   text: string,

@@ -321,7 +321,7 @@ What blackhole adds and reworks on top:
 - **Retryable error detection with per-model cooldowns** — models that fail get cooled down, fallbacks tried automatically, 30-second retry gate prevents spam.
 - **Improved observer/reflector/dropper prompts** — each heavily customized with detailed extraction rules, relevance guidance, and error handling.
 - **OM-recall coupling** — when expanding session entries via `recall`, related observations and reflections are automatically shown.
-- **Thinking level support** — per-model `thinking` field for reasoning effort control.
+- **Thinking level support** — per-model `thinking` field for reasoning effort control, including `max` where supported by the provider.
 
 ## License
 

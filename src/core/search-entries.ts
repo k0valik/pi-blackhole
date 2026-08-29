@@ -6,7 +6,13 @@
  */
 import type { Message } from "@earendil-works/pi-ai";
 import type { RenderedEntry } from "./render-entries";
-import { textOf, toolCallArgsText, isContentBearing } from "./content";
+import {
+  textOf,
+  toolCallArgsText,
+  extractToolCallArgsText,
+  isContentBearing,
+  clip,
+} from "./content";
 import type { RecallMode } from "./recall-scope";
 
 // Mirrors @earendil-works/pi-coding-agent's BashExecutionMessage (not re-exported from index)
@@ -272,6 +278,20 @@ const lineSnippet = (
 };
 
 /** Build full searchable text for a message, optionally filtered by mode. */
+const RECALL_TOOL_NAME = "recall";
+const TOOL_ARGS_BUDGET = 2000;
+
+const searchableToolCallArgs = (content: Message["content"]): string => {
+  if (!content || typeof content === "string") return "";
+  const raw = content
+    .filter((part) => part.type === "toolCall")
+    .filter((part) => part.name?.toLowerCase() !== RECALL_TOOL_NAME)
+    .map((part) => extractToolCallArgsText(part.arguments))
+    .filter(Boolean)
+    .join("\n");
+  return clip(raw, TOOL_ARGS_BUDGET);
+};
+
 const fullText = (msg: Message, mode?: RecallMode): string => {
   if ((msg as any).role === "bashExecution") {
     if (mode === "file") return ""; // bash is not file content
@@ -281,9 +301,15 @@ const fullText = (msg: Message, mode?: RecallMode): string => {
   if (mode === "file") {
     return toolCallArgsText(msg.content);
   }
+  if (
+    (msg as any).role === "toolResult" &&
+    (msg as any).toolName?.toLowerCase() === RECALL_TOOL_NAME
+  ) {
+    return "";
+  }
   // hybrid (default): both transcript text + tool call args
   const text = textOf(msg.content);
-  const toolArgs = toolCallArgsText(msg.content);
+  const toolArgs = searchableToolCallArgs(msg.content);
   return toolArgs ? `${text}\n${toolArgs}` : text;
 };
 
@@ -395,14 +421,51 @@ export function getTouchedFiles(
   return Array.from(map.values());
 }
 
-export const searchEntries = (
+export interface SearchResult {
+  hits: SearchHit[];
+  totalBeforeCap: number;
+  truncated: boolean;
+}
+
+export interface SearchTuning {
+  relativeFloor?: number;
+  cap?: number;
+}
+
+const BM25_RELATIVE_FLOOR = 0.2;
+const SEARCH_RESULT_CAP = 50;
+
+const applyRelativeFloor = (
+  scored: Array<{ hit: SearchHit; score: number }>,
+  floor: number,
+): Array<{ hit: SearchHit; score: number }> => {
+  if (scored.length === 0 || scored[0].score <= 0) return scored;
+  const topScore = scored[0].score;
+  return scored.filter(({ score }) => score >= topScore * floor);
+};
+
+const capHits = (hits: SearchHit[], cap: number): SearchResult => {
+  const totalBeforeCap = hits.length;
+  const capped = hits.slice(0, cap);
+  return {
+    hits: capped,
+    totalBeforeCap,
+    truncated: capped.length < totalBeforeCap,
+  };
+};
+
+export const searchEntriesDetailed = (
   entries: RenderedEntry[],
   messages: Message[],
   query?: string,
-  _page?: number,
+  tuning?: SearchTuning,
   mode?: RecallMode,
-): SearchHit[] => {
-  if (!query?.trim()) return entries;
+): SearchResult => {
+  if (!query?.trim())
+    return { hits: entries, totalBeforeCap: entries.length, truncated: false };
+
+  const relativeFloor = tuning?.relativeFloor ?? BM25_RELATIVE_FLOOR;
+  const cap = tuning?.cap ?? SEARCH_RESULT_CAP;
 
   const rawQuery = query.trim();
 
@@ -424,7 +487,7 @@ export const searchEntries = (
         hits.push({ ...e, snippet: snip, matchCount: 1, ...extra });
       }
     }
-    return hits;
+    return capHits(hits, cap);
   }
 
   // Natural language / multi-word query: BM25 scoring
@@ -465,5 +528,23 @@ export const searchEntries = (
 
   // Sort by BM25 score desc
   scored.sort((a, b) => b.score - a.score);
-  return scored.map((s) => s.hit);
+  const effectiveTermCount = new Set(terms.map((term) => term.toLowerCase()))
+    .size;
+  const floored =
+    effectiveTermCount >= 2
+      ? applyRelativeFloor(scored, relativeFloor)
+      : scored;
+  return capHits(
+    floored.map((s) => s.hit),
+    cap,
+  );
 };
+
+export const searchEntries = (
+  entries: RenderedEntry[],
+  messages: Message[],
+  query?: string,
+  _page?: number,
+  mode?: RecallMode,
+): SearchHit[] =>
+  searchEntriesDetailed(entries, messages, query, undefined, mode).hits;

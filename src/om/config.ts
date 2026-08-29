@@ -26,4 +26,5 @@ export const THINKING_LEVEL_VALUES: readonly ModelThinkingLevel[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ] as const;

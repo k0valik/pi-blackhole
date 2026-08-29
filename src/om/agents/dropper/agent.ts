@@ -41,6 +41,7 @@ interface RunDropperArgs {
   model: Model<any>;
   apiKey: string;
   headers?: Record<string, string>;
+  env?: Record<string, string>;
   reflections: Reflection[];
   observations: Observation[];
   /** Compact summary of existing active observations for context. */
@@ -217,6 +218,7 @@ export async function runDropper(
     model,
     apiKey,
     headers,
+    env,
     reflections,
     observations,
     budgetTokens,
@@ -379,6 +381,7 @@ export async function runDropper(
     model,
     apiKey,
     headers,
+    env,
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
