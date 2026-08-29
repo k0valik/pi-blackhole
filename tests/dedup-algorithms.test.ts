@@ -78,6 +78,13 @@ describe("dedup algorithms", () => {
       expect(simHashHammingDistance(hashA, hashB)).toBe(0);
     });
 
+    it("ignores malformed runtime tokens instead of aborting export", () => {
+      expect(() => computeSimHash64(["valid", 42 as unknown as string])).not.toThrow();
+      expect(computeSimHash64(["valid", 42 as unknown as string])).toBe(
+        computeSimHash64(["valid"]),
+      );
+    });
+
     it("returns small distance for near-duplicate sets and large for disjoint sets", () => {
       const tokensA = tokenizeContent("The export command writes a markdown file to disk");
       const tokensB = tokenizeContent("The export command writes a markdown file too disk");

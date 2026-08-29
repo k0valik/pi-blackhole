@@ -425,6 +425,10 @@ export function computeSimHash64(tokens: string[]): bigint {
   if (tokens.length === 0) return 0n;
   const v = new Int32Array(64);
   for (const token of tokens) {
+    // Corpus data is parsed from external session JSONL. Keep a malformed
+    // token from aborting the whole export instead of assuming runtime types
+    // always match the compile-time string[] declaration.
+    if (typeof token !== "string") continue;
     // FNV-1a 64-bit hash
     let h = 0xcbf29ce484222325n;
     const prime = 0x100000001b3n;
