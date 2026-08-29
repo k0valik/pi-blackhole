@@ -282,7 +282,9 @@ const TECHNICAL_ROOTS: Record<string, string> = {
  */
 export function stemToken(token: string): string {
   if (token.length <= 3) return token;
-  const directRoot = TECHNICAL_ROOTS[token];
+  const directRoot = Object.prototype.hasOwnProperty.call(TECHNICAL_ROOTS, token)
+    ? TECHNICAL_ROOTS[token]
+    : undefined;
   if (directRoot) return directRoot;
 
   let word = token;
@@ -351,7 +353,7 @@ export function stemToken(token: string): string {
     }
   }
 
-  if (TECHNICAL_ROOTS[word]) return TECHNICAL_ROOTS[word];
+  if (Object.prototype.hasOwnProperty.call(TECHNICAL_ROOTS, word)) return TECHNICAL_ROOTS[word];
 
   return word.length >= 3 ? word : token;
 }

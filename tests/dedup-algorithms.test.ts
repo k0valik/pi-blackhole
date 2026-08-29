@@ -59,6 +59,9 @@ describe("dedup algorithms", () => {
       expect(stemToken("run")).toBe("run");
       expect(stemToken("bus")).toBe("bus");
       expect(stemToken("is")).toBe("is");
+      expect(stemToken("constructor")).toBe("construct");
+      expect(stemToken("toString")).toBe("toStr");
+      expect(tokenizeContent("constructor toString")).toEqual(["construct", "str"]);
     });
 
     it("improves token similarity across morphological variants", () => {
