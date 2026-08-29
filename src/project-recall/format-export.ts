@@ -105,9 +105,42 @@ function burstPenalty(cluster: MemoryCluster<Scoreable>): number {
   return 1 / (1 + BURST_PENALTY_WEIGHT * Math.log2(ratio));
 }
 
-function lengthFactor(content: string): number {
+/**
+ * Technical entity density factor: rewards observations containing concrete
+ * technical artifacts (file paths, symbols, functions, CLI flags, config keys, commit SHAs)
+ * over generic conversational transcript prose.
+ */
+export function technicalDensityFactor(content: string): number {
+  let entityCount = 0;
+  // File paths with extensions: src/om/runtime.ts, config.json, etc.
+  const fileMatches = content.match(
+    /\b[\w.-]+[/\\][\w.-]+(?:\.\w+)?\b|\b\w+\.(?:ts|js|json|md|py|sh|yml|yaml|rs|go|c|cpp|h)\b/g,
+  );
+  if (fileMatches) entityCount += fileMatches.length * 1.5;
+
+  // Code symbols / function calls: camelCase, PascalCase, fnName()
+  const symbolMatches = content.match(
+    /\b[a-zA-Z_]\w*\(\)|\b[a-z]+[A-Z]\w*\b|\b[A-Z][a-z]+[A-Z]\w*\b/g,
+  );
+  if (symbolMatches) entityCount += symbolMatches.length;
+
+  // Config keys / env vars / CLI flags: PI_BLACKHOLE_*, --flag
+  const flagMatches = content.match(/\b(?:PI_[A-Z0-9_]+|--[a-z0-9_-]+)\b/g);
+  if (flagMatches) entityCount += flagMatches.length * 1.5;
+
+  // Git SHAs (7+ hex characters)
+  const shaMatches = content.match(/\b[a-f0-9]{7,40}\b/gi);
+  if (shaMatches) entityCount += shaMatches.length;
+
+  // Sublinear scaling: 1.0 (baseline) up to ~1.30 for dense technical observations
+  return 1 + 0.1 * Math.log2(1 + entityCount);
+}
+
+function lengthAndDensityFactor(content: string): number {
   const tokens = tokenizeContent(content).length;
-  return 1 + LENGTH_WEIGHT * Math.log2(1 + tokens / 8);
+  const lenFactor = 1 + LENGTH_WEIGHT * Math.log2(1 + tokens / 8);
+  const techFactor = technicalDensityFactor(content);
+  return lenFactor * techFactor;
 }
 
 function clusterScore<T extends Scoreable>(
@@ -123,7 +156,7 @@ function clusterScore<T extends Scoreable>(
     (1 + COVERAGE_WEIGHT * Math.log2(1 + coverage)) *
     (1 + CONSENSUS_WEIGHT * cluster.maxRelatedSimilarity) *
     burstPenalty(cluster as MemoryCluster<Scoreable>) *
-    lengthFactor(cluster.rep.content)
+    lengthAndDensityFactor(cluster.rep.content)
   );
 }
 
@@ -178,7 +211,7 @@ function reflectionScore(
     (1 + Math.log2(1 + cluster.distinctSessions)) *
     (1 + Math.log2(1 + cluster.rep.supportingObservationIds.length)) *
     burstPenalty(cluster as MemoryCluster<Scoreable>) *
-    lengthFactor(cluster.rep.content)
+    lengthAndDensityFactor(cluster.rep.content)
   );
 }
 
@@ -499,10 +532,10 @@ function splitComponents(
 }
 
 /**
- * TF-IDF topic label: prefers the most frequent ordered bigram in the topic
+ * Class-based TF-IDF topic label: prefers the most frequent ordered bigram in the topic
  * when it is dominant (appears in ≥30% of members and ≥3 times), otherwise
- * falls back to top-2 tokens by TF·IDF within the topic.
- * IDF = log(N / df) suppresses project-wide noise words.
+ * falls back to top-2 tokens scored by c-TF-IDF (Class-based TF-IDF with sublinear saturation).
+ * c-IDF = log(1 + totalClusters / df) suppresses project-wide noise words.
  * Short 3-char tokens are penalized and prefix-duplicates are deduped.
  */
 function computeTopicLabel(
@@ -533,15 +566,23 @@ function computeTopicLabel(
     }
   }
 
-  // Fallback: top-2 TF-IDF tokens
+  // Fallback: top-2 c-TF-IDF tokens
   const tf = new Map<string, number>();
-  for (const idx of indices) for (const t of tokenSets[idx]) tf.set(t, (tf.get(t) ?? 0) + 1);
+  for (const idx of indices) {
+    for (const t of tokenSets[idx]) tf.set(t, (tf.get(t) ?? 0) + 1);
+  }
 
   const scored = [...tf.entries()]
-    .map(([token, count]) => ({
-      token,
-      score: count * Math.log(totalClusters / (df.get(token) ?? 1)) * (token.length <= 3 ? 0.6 : 1),
-    }))
+    .map(([token, count]) => {
+      // Sublinear term saturation prevents single observation bursts from dominating
+      const tfSat = Math.log2(1 + count);
+      const idf = Math.log(1 + totalClusters / (df.get(token) ?? 1));
+      const lenWeight = token.length <= 3 ? 0.6 : 1;
+      return {
+        token,
+        score: tfSat * idf * lenWeight,
+      };
+    })
     .sort((a, b) => b.score - a.score);
 
   if (scored.length === 0) return "Observations";
@@ -791,14 +832,31 @@ export function buildExportMarkdown(
     topicGroups > 0
       ? ` **Topic badges** like **[${[...uniqueTopicLabels][0]}]** group related items.`
       : "";
-  sections.push(
-    [
-      `_This file is a distilled artifact of pi-blackhole's observational memory for this project._`,
-      ``,
-      `_Observations carry an LLM-assigned **relevance tier** ([critical] > [high] > [medium] > [low]) and are organized by tier into sections below. The **Reflections** section at the top contains curator-verified insights from a second LLM pass — these are the most authoritative entries._${topicNote} _The **viability gate** filters single-session unsupported low/medium observations as likely transient noise (${pctFiltered})._`,
+
+  const introParagraphs = [
+    `_This file is a distilled artifact of pi-blackhole's observational memory for this project._`,
+    ``,
+    `_Observations carry an LLM-assigned **relevance tier** ([critical] > [high] > [medium] > [low]) and are organized by tier into sections below. The **Reflections** section at the top contains curator-verified insights from a second LLM pass — these are the most authoritative entries._${topicNote} _The **viability gate** filters single-session unsupported low/medium observations as likely transient noise (${pctFiltered})._`,
+    "",
+  ];
+
+  const topicCounts = new Map<string, number>();
+  for (const label of topicAssignments.values()) {
+    topicCounts.set(label, (topicCounts.get(label) ?? 0) + 1);
+  }
+  const sortedTopics = [...topicCounts.entries()].sort((a, b) => b[1] - a[1]);
+  if (sortedTopics.length >= 2) {
+    introParagraphs.push(
+      `### Key Topics`,
       "",
-    ].join("\n"),
-  );
+      ...sortedTopics
+        .slice(0, 12)
+        .map(([lbl, cnt]) => `- **[${lbl}]** (${cnt} item${cnt > 1 ? "s" : ""})`),
+      "",
+    );
+  }
+
+  sections.push(introParagraphs.join("\n"));
 
   // ── 2. Reflections (standalone top section, tier subheaders) ─
   if (reflClusters.length > 0 || orphanRefl.length > 0) {
