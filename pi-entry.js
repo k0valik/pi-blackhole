@@ -34,12 +34,14 @@ const distPath = join(__dirname, "dist", "index.js");
 // Top-level await is supported — pi's loader does `await jiti.import(...)`.
 let factory;
 if (existsSync(distPath)) {
-  // Fast path: prebuilt bundle (645KB, ~1.6-2× faster, no jiti transform)
-  ({ default: factory } = await import("./dist/index.js"));
+  try {
+    ({ default: factory } = await import("./dist/index.js"));
+  } catch {
+    // dist exists but is corrupt/partial build — fall back to source so a bad
+    // artifact doesn't hard-crash the extension. Mirrors pi-utils fix for #821.
+    ({ default: factory } = await import("./index.ts"));
+  }
 } else {
-  // Fallback: raw checkout / git install without devDeps (tsup missing).
-  // On Node this is transpiled by pi's outer jiti hook; on Bun it's handled
-  // natively. No extra dependency needed.
   ({ default: factory } = await import("./index.ts"));
 }
 
