@@ -17,6 +17,21 @@ interface ProviderRegistry {
   registeredProviders?: Map<string, RegisteredProviderConfig>;
 }
 
+/**
+ * Key custom streams by `${provider}\u0000${api}` — NOT by `api` alone.
+ *
+ * Several extensions can register different providers that share one wire API
+ * (e.g. `anthropic` and `databricks` both declare `api: "anthropic-messages"`).
+ * Keying by api alone let the first-registered provider hijack every model that
+ * spoke the same protocol, routing Databricks-hosted Claude through the Anthropic
+ * transport (wrong URL/auth) and vice versa. Mirror pi core's rule: a custom
+ * streamSimple applies only to models of *that* provider whose `model.api`
+ * equals the provider's declared `api`.
+ */
+export function providerStreamKey(provider: string, api: string): string {
+  return `${provider}\u0000${api}`;
+}
+
 export function captureRegisteredProviderStreams(
   registry: ProviderRegistry,
   providerStreams: Map<string, Function>,
@@ -24,16 +39,17 @@ export function captureRegisteredProviderStreams(
   if (registry.getRegisteredProviderIds && registry.getRegisteredProviderConfig) {
     for (const providerId of registry.getRegisteredProviderIds()) {
       const config = registry.getRegisteredProviderConfig(providerId);
-      if (config?.streamSimple && config.api && !providerStreams.has(config.api)) {
-        providerStreams.set(config.api, config.streamSimple);
+      if (config?.streamSimple && config.api) {
+        // Always overwrite: providers may re-register (e.g. after async model refresh).
+        providerStreams.set(providerStreamKey(providerId, config.api), config.streamSimple);
       }
     }
     return;
   }
 
-  registry.registeredProviders?.forEach((config) => {
-    if (config.streamSimple && config.api && !providerStreams.has(config.api)) {
-      providerStreams.set(config.api, config.streamSimple);
+  registry.registeredProviders?.forEach((config, providerId) => {
+    if (config.streamSimple && config.api && typeof providerId === "string") {
+      providerStreams.set(providerStreamKey(providerId, config.api), config.streamSimple);
     }
   });
 }
@@ -114,7 +130,10 @@ export function createBridgeStreamFn(streamSimple: any) {
       PROVIDER_STREAMS_KEY
     ];
     if (!providerStreams) return streamSimple(model, ctx, opts);
-    const customFn = model?.api ? providerStreams.get(model.api) : undefined;
+    const customFn =
+      model?.provider && model?.api
+        ? providerStreams.get(providerStreamKey(model.provider, model.api))
+        : undefined;
     return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
   };
 }
