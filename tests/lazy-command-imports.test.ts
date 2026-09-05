@@ -24,7 +24,14 @@ beforeEach(() => {
   cleanup = vi.fn(async () => {});
   vi.doMock("../src/pi-base/blackhole-settings.js", () => {
     imports.push("settings");
-    return { openBlackholeSettings: openSettings };
+    return {
+      openBlackholeSettings: openSettings,
+      // The settings handler refreshes runtime.config after the overlay closes
+      // (merged from dev); it loads from this same module, so the lazy-load
+      // contract — only this module — still holds.
+      config: { loadWithWarnings: () => ({ config: {} }) },
+      GLOBAL_CONFIG_DIR: "/test-global-config",
+    };
   });
   vi.doMock("../src/changelog/changelog.js", () => {
     imports.push("changelog");
