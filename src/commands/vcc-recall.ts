@@ -6,7 +6,10 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages.js";
-import { searchEntries, getTouchedFiles } from "../core/search-entries.js";
+import {
+  searchEntriesDetailed,
+  getTouchedFiles,
+} from "../core/search-entries.js";
 import {
   formatRecallOutput,
   formatTouchedOutput,
@@ -126,22 +129,23 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
         false,
         lineageEntryIds,
       );
-      const allResults = searchEntries(
-        rendered,
-        rawMessages,
-        query,
-        undefined,
-        mode,
-      );
+      const {
+        hits: allResults,
+        totalBeforeCap,
+        truncated,
+      } = searchEntriesDetailed(rendered, rawMessages, query, undefined, mode);
 
       const start = (page - 1) * PAGE_SIZE;
       const pageResults = allResults.slice(start, start + PAGE_SIZE);
       const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
       const scopeSuffix = parsed.scope === "all" ? " (scope: all)" : "";
+      const capNote = truncated
+        ? ` — capped at ${allResults.length}, refine the query for more`
+        : "";
       const header =
         totalPages > 1
-          ? `Page ${page}/${totalPages} (${allResults.length} total matches${scopeSuffix})`
-          : `${allResults.length} matches${scopeSuffix}`;
+          ? `Page ${page}/${totalPages} (${totalBeforeCap} total matches${capNote}${scopeSuffix})`
+          : `${totalBeforeCap} matches${capNote}${scopeSuffix}`;
       const footer =
         page < totalPages
           ? `\n--- /blackhole-recall ${query}${parsed.scope === "all" ? " scope:all" : ""} page:${page + 1} ---`
