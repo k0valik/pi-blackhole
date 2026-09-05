@@ -43,7 +43,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ### Auto-compaction threshold & model context window
 
-> **Auto-compaction can now be context-window-aware** (opt-in, issue #60): set `compactAfterRatio` (e.g. `0.65`) or `compactReserveTokens` and the trigger threshold derives from the active model's context window instead of the fixed 81k — re-derived on every check, so mid-session `/model` switches apply automatically. Explicit `compactAfterTokens` (a non-default value) still wins over both. The fixed 81k default is unchanged unless you opt in. See `docs/CONFIG.md` → `compactAfterRatio` / `compactReserveTokens`.
+> **Auto-compaction can now be context-window-aware** (opt-in, issue #60): set `compactAfterRatio` (e.g. `0.65`) or `compactReserveTokens` and the trigger threshold derives from the active model's context window instead of the fixed 81k — re-derived on every check, so mid-session `/model` switches apply automatically. Both knobs are editable under **Compaction** in `/blackhole settings` (0 = not set), or via `docs/CONFIG.md` → `compactAfterRatio` / `compactReserveTokens`. Explicit `compactAfterTokens` (a non-default value) still wins over both. The fixed 81k default is unchanged unless you opt in.
 
 ---
 

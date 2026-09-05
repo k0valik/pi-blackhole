@@ -20,7 +20,6 @@ import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import { DEFAULTS, type UnifiedConfig } from "../core/unified-config.js";
 import { openChangelogView } from "../changelog/changelog.js";
-import type { Field } from "./settings/types.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
 
@@ -30,46 +29,6 @@ export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
 // interface field is optional only because derived mode (ratio/reserve) deletes
 // it from the merged config.
 const DEFAULT_COMPACT_AFTER_TOKENS = DEFAULTS.compactAfterTokens as number;
-
-/**
- * Context-window-derived threshold fields (issue #60). Returned as a separate
- * list so they only appear in the modal once configured — they have no fixed
- * default, and an unset numeric field would otherwise render as "undefined".
- * Configure them via the config file or PI_BLACKHOLE_* env vars.
- */
-function derivedThresholdFields(cfg: {
-  compactAfterRatio?: number;
-  compactReserveTokens?: number;
-}): Field[] {
-  const fields: Field[] = [];
-  if (cfg.compactAfterRatio !== undefined) {
-    fields.push({
-      key: "compactAfterRatio",
-      type: "number",
-      label: "Auto-compact ratio (of context window)",
-      description:
-        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). Overrides the fixed threshold; explicit tokens win over it.",
-      value: cfg.compactAfterRatio,
-      min: 0.05,
-      max: 1,
-      step: 0.05,
-    });
-  }
-  if (cfg.compactReserveTokens !== undefined) {
-    fields.push({
-      key: "compactReserveTokens",
-      type: "number",
-      label: "Auto-compact headroom reserve",
-      description:
-        "Alternative derivation: compact when only this many tokens of headroom remain (threshold = window − reserve). Explicit tokens win over it; ratio wins when both are set.",
-      value: cfg.compactReserveTokens,
-      min: 1_000,
-      max: 2_000_000,
-      step: 1_000,
-    });
-  }
-  return fields;
-}
 
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
@@ -172,10 +131,32 @@ export const config = new ConfigManager<UnifiedConfig>({
       max: 200_000,
       step: 1_000,
     },
-    // Context-window-derived knobs only show once configured (no fixed
-    // default; unset would render "undefined"). Add them in the config file
-    // or via PI_BLACKHOLE_* env vars — see docs/CONFIG.md.
-    ...derivedThresholdFields(cfg),
+    // Context-window-derived knobs (issue #60). Always visible: 0 means
+    // "not set" (the loader treats 0 as unset, so the fixed token threshold
+    // governs). Type a value to engage window-derived mode; set it back to 0
+    // to turn it off again. The tokens field above wins whenever it holds an
+    // explicit non-default value; ratio wins over reserve when both are set.
+    {
+      key: "compactAfterRatio",
+      type: "number",
+      label: "Auto-compact ratio (of context window)",
+      description:
+        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob.",
+      value: cfg.compactAfterRatio ?? 0,
+      min: 0,
+      max: 1,
+    },
+    {
+      key: "compactReserveTokens",
+      type: "number",
+      label: "Auto-compact headroom reserve",
+      description:
+        "Alternative window-derived knob: compact when only this many tokens of headroom remain (threshold = window − reserve). 0 = not set. An explicit token threshold wins; ratio wins when both are set.",
+      value: cfg.compactReserveTokens ?? 0,
+      integer: true,
+      min: 0,
+      max: 2_000_000,
+    },
 
     // ── Observational Memory ──
     {

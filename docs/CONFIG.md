@@ -231,6 +231,8 @@ Alternative derivation that keeps constant headroom: blackhole compacts when onl
 
 **Precedence & enabling:** when several knobs are set, `compactAfterTokens` (explicit, i.e. a non-default value) > `compactAfterRatio` > `compactReserveTokens`. When a derived knob is configured and `compactAfterTokens` is unset **or still at its 81000 default** (config scaffold and the settings modal write the default into the file), the fixed default is dropped so the derived knob governs. Remove the derived key to fall back to the fixed default.
 
+**Settings modal:** both knobs appear under **Compaction** in `/blackhole settings` and are always visible — they use `0` to mean *not set*. Type a real value (e.g. `0.65`, `32768`) to engage the knob; set it back to `0` to disable. The loader treats a file value of `0` exactly like an absent key.
+
 **Example:**
 
 ```jsonc

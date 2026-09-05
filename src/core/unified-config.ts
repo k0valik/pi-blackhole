@@ -231,6 +231,12 @@ export const DEFAULTS: UnifiedConfig = {
   observeAfterTokens: 15_000,
   reflectAfterTokens: 25_000,
   compactAfterTokens: 81_000,
+  // Window-derived knobs (issue #60). Present here (as undefined) so
+  // ConfigManager.save()'s diff-over-defaults can persist them and the
+  // settings modal can expose them — absence from DEFAULTS would silently
+  // drop any field edit. 0 is treated as unset by parseConfig.
+  compactAfterRatio: undefined,
+  compactReserveTokens: undefined,
   observationsPoolMaxTokens: 20_000,
   fullFoldAlways: true,
   observationsPoolTargetTokens: 10_000,
