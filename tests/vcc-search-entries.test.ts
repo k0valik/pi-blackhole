@@ -3,7 +3,7 @@
  * Changes: bun:test → vitest, added .js import extensions
  */
 import { describe, it, expect } from "vitest";
-import { searchEntries } from "../src/core/search-entries.js";
+import { searchEntries, searchEntriesDetailed } from "../src/core/search-entries.js";
 import type { RenderedEntry } from "../src/core/render-entries.js";
 import type { Message } from "@earendil-works/pi-ai";
 
@@ -331,5 +331,77 @@ describe("searchEntries", () => {
     // In hybrid mode, bash output should still be searchable (existing behavior)
     const hybrid = searchEntries(e, m, "secret_api_key");
     expect(hybrid).toHaveLength(1);
+  });
+
+  it("indexes generic tool-call arguments but excludes recall self-search", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "called a tool" },
+      { index: 1, role: "assistant", summary: "searched history" },
+      { index: 2, role: "tool_result", summary: "1 matches for secret-marker" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc-generic",
+            name: "custom_tool",
+            arguments: { query: "secret-marker" },
+          },
+        ],
+      } as any,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc-recall",
+            name: "recall",
+            arguments: { query: "secret-marker" },
+          },
+        ],
+      } as any,
+      {
+        role: "toolResult",
+        toolName: "recall",
+        content: "secret-marker",
+      } as any,
+    ];
+
+    expect(searchEntries(e, m, "secret-marker").map((hit) => hit.index)).toEqual([0]);
+  });
+
+  it("caps broad results and reports the uncapped count", () => {
+    const e = Array.from({ length: 60 }, (_, index) => ({
+      index,
+      role: "user" as const,
+      summary: `common-marker entry ${index}`,
+    }));
+    const m = e.map((entry) => ({ role: "user", content: entry.summary }) as any);
+    const result = searchEntriesDetailed(e, m, "common-marker", {
+      relativeFloor: 0,
+    });
+    expect(result.hits).toHaveLength(50);
+    expect(result.totalBeforeCap).toBe(60);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("filters the low-score tail only for distinct multi-term queries", () => {
+    const texts = [
+      "alpha beta gamma delta ".repeat(3),
+      "alpha mentioned once in an unrelated paragraph",
+    ];
+    const e = texts.map((summary, index) => ({
+      index,
+      role: "user" as const,
+      summary,
+    }));
+    const m = texts.map((content) => ({ role: "user", content }) as any);
+
+    expect(searchEntriesDetailed(e, m, "alpha beta gamma delta").hits.map((h) => h.index)).toEqual([
+      0,
+    ]);
+    expect(searchEntriesDetailed(e, m, "alpha alpha", { relativeFloor: 0.9 }).hits).toHaveLength(2);
   });
 });

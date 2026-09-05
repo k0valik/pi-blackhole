@@ -21,12 +21,12 @@ A third-party fork commit ([tavasti@360f24a](https://github.com/tavasti/pi-black
 
 ## Background: the counters and code paths
 
-| Counter | Function (src/om/ledger/progress.ts) | Used by |
-|---|---|---|
-| Since last compaction | `rawTokensSinceLastCompaction` (L151) | `src/om/compaction-trigger.ts`, `/blackhole-memory` |
-| Since last observation run | `rawTokensSinceObservationCoverage` (L132) | `consolidation.ts` `observerDue`, status |
-| Since last reflection run | `rawTokensSinceReflectionCoverage` (L136) | `consolidation.ts` `reflectorDue`, status |
-| Since last drop | `rawTokensSinceDropCoverage` (L140) | `consolidation.ts` `dropperDue`, `runDropperStage`, status |
+| Counter                    | Function (src/om/ledger/progress.ts)       | Used by                                                    |
+| -------------------------- | ------------------------------------------ | ---------------------------------------------------------- |
+| Since last compaction      | `rawTokensSinceLastCompaction` (L151)      | `src/om/compaction-trigger.ts`, `/blackhole-memory`        |
+| Since last observation run | `rawTokensSinceObservationCoverage` (L132) | `consolidation.ts` `observerDue`, status                   |
+| Since last reflection run  | `rawTokensSinceReflectionCoverage` (L136)  | `consolidation.ts` `reflectorDue`, status                  |
+| Since last drop            | `rawTokensSinceDropCoverage` (L140)        | `consolidation.ts` `dropperDue`, `runDropperStage`, status |
 
 All delegate to `rawTokensSinceCoverage(entries, customType)` (L125) → `rawTokensAfterIndex(entries, latestCoverageIndex(...))`, which sums `estimateEntryTokens` (src/om/tokens.ts) over source entries (`message`, `custom_message`, `branch_summary`). `estimateEntryTokens` uses pi's `estimateTokens(message)` (chars/4-based) and `chars/4` for strings.
 
@@ -82,12 +82,12 @@ The reflector counter reads 75k (under 80k → not due) while actual is ~102k �
 
 **Primary basis — the author's actual config** (observe 25k / reflect+drop 80k / compact 185k; stable for weeks, defaults never used — config has no `dropAfterTokens`, so dropper inherits `reflectAfterTokens`):
 
-| stage | n marker-windows | est/usage median | est fires | usage fires | churn× | LATE | EARLY | same-fire-count T' |
-|---|---|---|---|---|---|---|---|---|
-| observer | 243 | 0.80 | 297 | 377 | **1.3** | 98 | 18 | ~36.3k |
-| reflector | 176 | 0.82 | 98 | 165 | **1.7** | 77 | 11 | ~99.3k |
-| dropper | 5 | 0.61 | 191 | 286 | **1.5** | 109 | 15 | ~103.2k |
-| compaction | 339 | 0.61 | 3 | 22 | **7.3** | 20 | 1 | ~262k |
+| stage      | n marker-windows | est/usage median | est fires | usage fires | churn×  | LATE | EARLY | same-fire-count T' |
+| ---------- | ---------------- | ---------------- | --------- | ----------- | ------- | ---- | ----- | ------------------ |
+| observer   | 243              | 0.80             | 297       | 377         | **1.3** | 98   | 18    | ~36.3k             |
+| reflector  | 176              | 0.82             | 98        | 165         | **1.7** | 77   | 11    | ~99.3k             |
+| dropper    | 5                | 0.61             | 191       | 286         | **1.5** | 109  | 15    | ~103.2k            |
+| compaction | 339              | 0.61             | 3         | 22          | **7.3** | 20   | 1     | ~262k              |
 
 Actual usage at trigger-decision points: observer p50 31.8k / p90 110.8k / p95 130k / max 238k; reflector p50 40.9k / p90 114.4k / p95 131.4k; dropper p50 66.9k / p90 141.8k / p95 163.7k; compaction p50 67k / p90 143.5k / p95 167.6k.
 
@@ -99,17 +99,17 @@ Read: est underreports ~20% (observer/reflector) to ~39% (dropper/compaction) on
 
 **Context windows have grown materially in the last year.** The minimum coding-agent context sits around **256k**; most frontier models run **1M**; only local coder models top out at **~128k**. The shipped presets predate this:
 
-| preset | README target | observe | reflect/drop | compact |
-|---|---|---|---|---|
-| low | ~32–64k | 5k | 10k | 30k |
-| medium (default) | ~128k | 15k | 25k | 81k |
-| high | ~200k+ | 20k | 40k | 180k |
+| preset           | README target | observe | reflect/drop | compact |
+| ---------------- | ------------- | ------- | ------------ | ------- |
+| low              | ~32–64k       | 5k      | 10k          | 30k     |
+| medium (default) | ~128k         | 15k     | 25k          | 81k     |
+| high             | ~200k+        | 20k     | 40k          | 180k    |
 
-**Cost framing.** The extension is used by **hundreds to thousands of users** — and the majority are **not** on free models: they use **real, expensive API keys** and rely on **auto-compaction heavily** (the author's own config, with `compaction: off` and free-tier fallback chains, is the *cheap* outlier, not the norm). For that majority:
+**Cost framing.** The extension is used by **hundreds to thousands of users** — and the majority are **not** on free models: they use **real, expensive API keys** and rely on **auto-compaction heavily** (the author's own config, with `compaction: off` and free-tier fallback chains, is the _cheap_ outlier, not the norm). For that majority:
 
 - Truthful counting with unchanged thresholds means 1.3–1.7× more observer/reflector/dropper calls — a silent **30–70% increase in paid token spend per session**. At thousands of users this is a real, ongoing cost change shipped without consent.
-- **Auto-compaction is a core, frequently-hit feature for them** — and it is exactly the stage with the worst underreporting (median est/usage 0.61) and the most dramatic churn (7.3× at 185k; at the default 81k the est counter already fires 172× and truthful counting raises it further). A compaction fix that fires meaningfully earlier than before is a *cost increase on every long session* for these users — but it also protects them from hitting hard context limits, which is the point of the feature.
-- This is why the fork's surface is deliberately *smaller*: it only fixes **compaction** (rare-ish, high-value context-safety) rather than the **chatty coverage workers** (observer/reflector/dropper fire on a large fraction of sessions). The usage-delta change for coverage stages is the part that needs cost-mitigation design — for paid users it is the dominant cost lever.
+- **Auto-compaction is a core, frequently-hit feature for them** — and it is exactly the stage with the worst underreporting (median est/usage 0.61) and the most dramatic churn (7.3× at 185k; at the default 81k the est counter already fires 172× and truthful counting raises it further). A compaction fix that fires meaningfully earlier than before is a _cost increase on every long session_ for these users — but it also protects them from hitting hard context limits, which is the point of the feature.
+- This is why the fork's surface is deliberately _smaller_: it only fixes **compaction** (rare-ish, high-value context-safety) rather than the **chatty coverage workers** (observer/reflector/dropper fire on a large fraction of sessions). The usage-delta change for coverage stages is the part that needs cost-mitigation design — for paid users it is the dominant cost lever.
 
 For the author specifically the cost is not dollars — every worker model in the fallback chains is free-tier (OpenRouter/Cerebras/stepfun/z.ai) — but **free-tier rate limits and fallback churn**: more fires → more 429s → more cooldown cycling.
 
@@ -119,21 +119,23 @@ For the author specifically the cost is not dollars — every worker model in th
 
 Replaces the earlier hand-estimated draft with the script's **tier calibration** (per achieved-context tier: max `usage.totalTokens` per session — a measured lower bound on the model window, computable on any user's machine). Compact anchor = 65% of the tier's p90 achieved context (README 60–70% rule); worker thresholds read off the tier's usage distribution at explicit **fire-rate targets** (fire-40% = only 40% of that tier's windows exceed the threshold).
 
-| tier | n | p90 ctx | compact (65%) | observe fire-40% | reflect fire-40% | drop fire-40% |
-|---|---|---|---|---|---|---|
-| low (<100k) | 358 | 91.9k | 59.7k | 36.4k | 48.3k | 51.7k |
-| medium (100–200k) | 246 | 187.3k | 121.8k | 67.9k | 82.4k | 120.5k |
-| high (200k+) | 71 | 273.5k | 177.7k | 89.9k | 85.5k | 128.6k |
+| tier              | n   | p90 ctx | compact (65%) | observe fire-40% | reflect fire-40% | drop fire-40% |
+| ----------------- | --- | ------- | ------------- | ---------------- | ---------------- | ------------- |
+| low (<100k)       | 358 | 91.9k   | 59.7k         | 36.4k            | 48.3k            | 51.7k         |
+| medium (100–200k) | 246 | 187.3k  | 121.8k        | 67.9k            | 82.4k            | 120.5k        |
+| high (200k+)      | 71  | 273.5k  | 177.7k        | 89.9k            | 85.5k            | 128.6k        |
 
 Key observations:
+
 - **Worker thresholds grow with tier** (bigger windows → more content accumulates between runs): observe fire-40% 36.4k → 67.9k → 89.9k. A single default set cannot serve all tiers well — this is the argument for tiered presets, not just one bump.
 - The calibrated medium-tier observe (~68k) sits far above the current default (15k) and the author's 25k — medium-context sessions genuinely accumulate ~68k between observer runs (under truthful counting).
-- Compact anchors are bounded by what this archive *achieved* (max 348k — no 1M-window sessions here). For 1M-window users the script on their machine yields larger numbers; the shipped default should be set for the target population.
+- Compact anchors are bounded by what this archive _achieved_ (max 348k — no 1M-window sessions here). For 1M-window users the script on their machine yields larger numbers; the shipped default should be set for the target population.
 - The **fire-rate target is the explicit, documented product choice** — pick e.g. 40% (workers run in under half of windows), read thresholds from the table, then validate against the trim savings. Re-run `scripts/analyze-token-estimation.mjs --summary` on any user's machine to recalibrate.
 
 Interactions to check before finalizing:
+
 - `observeAfterTokens` vs `observerChunkMaxTokens` (default 40k) — observe can't meaningfully exceed chunk size.
-- Compaction vs pi's per-model hard limit: keep ~60–70% of the *model's* window, not the preset's label.
+- Compaction vs pi's per-model hard limit: keep ~60–70% of the _model's_ window, not the preset's label.
 - Whether the bump ships **atomically with the counting change** (recommended: cost-neutral adoption) or in a later release (existing users first see the 1.3–1.7× fire increase with their custom thresholds).
 
 ### Worker input sizing vs session-context triggers (the upper-bound invariant)
@@ -143,19 +145,21 @@ The tier calibration sizes **trigger** thresholds to the SESSION model's context
 The caps (`observerChunkMaxTokens` 60k, `reflectorInputMaxTokens` 95k, `dropperInputMaxTokens` 80k) already ensure individual chunks don't overflow the worker. `effectiveContextWindow()` (model-budget.ts) already resolves the worker's window from config-override → pi registry → 128k fallback, and the pre-checks already detect overflow. The missing piece is the **trigger timing**: the worker fires only when `rawTokensSince*Coverage >= configureThreshold` — if the threshold (e.g. 80k) exceeds what the worker can ingest in one run, it will **never fire successfully** because the backlog is already too large by the time the trigger trips.
 
 **Fix — advance trigger on worker window:**
+
 - The trigger should fire when EITHER the configured threshold is met **OR** the accumulated backlog approaches the worker's effective context window (minus reserve). I.e. `rawTokensSince*Coverage >= min(configureThreshold, effectiveCtx − AGENT_LOOP_RESERVE − chunkOverhead)`.
 - This means the worker runs **earlier** — before overflowing — while the backlog is still ingestible. The `coversUpToId` marker advances per run, so the backlog drains across multiple runs naturally (the observer loop already supports partial coverage via `record_observations`).
 - No new config knob needed: the worker window is already resolved from the model (via `effectiveContextWindow`); the caps and pre-checks already exist; only the trigger condition changes — add the worker-window upper bound to the `observerDue`/`reflectorDue`/`dropperDue` checks in consolidation.ts.
 - Models released monthly? Doesn't matter — `effectiveContextWindow` reads the registry at runtime; the upper bound auto-tracks.
 
 **Conceptual separation preserved:**
+
 - Trigger thresholds (`observeAfterTokens`/`reflectAfterTokens`/`compactAfterTokens`) = **session-context** numbers: "when has enough accumulated to make a run worthwhile" — sourced from the tier calibration.
 - The worker's own window = **hard upper bound** on the trigger: "fire before this worker would overflow, regardless of the configured threshold."
 - Never overload one number to mean both — that is exactly how "what is actually the trigger" gets lost.
 
 ## Key architectural insight: why the fork's function can't be reused verbatim for coverage
 
-- **Compaction**: pi *rebuilds* the context after compacting (summary + new messages). The last assistant message's usage after the compaction point therefore **is** "tokens since compaction". The fork's logic is correct as-is.
+- **Compaction**: pi _rebuilds_ the context after compacting (summary + new messages). The last assistant message's usage after the compaction point therefore **is** "tokens since compaction". The fork's logic is correct as-is.
 - **Coverage markers** (`om.observations.recorded`, `om.reflections.recorded`, `om.observations.dropped`) are written **mid-context** — the context is not reset. The last usage after a marker would report the **whole context** (e.g. ~224k in the live session), not "since the marker". Applied naively, the counters would be permanently ≥ threshold → observer/reflector/dropper would run on **every** `agent_start` (runaway).
 
 **Fix: usage-delta for coverage counters.**
@@ -204,7 +208,7 @@ The exact algorithms are already implemented and battle-tested in `scripts/analy
 ### B. One-time breaking-change warning at session start
 
 - **The problem:** the install base is fire-and-forget — users install, never read changelogs (GitHub or otherwise), and would absorb the usage-counting + threshold change as a silent behavior/cost shift. Provenance of the change is required.
-- **Proposal:** once per session, at `agent_start`, show a small yellow line in the status overlay / transient `ctx.ui` note, e.g. *"pi-blackhole: token counting now uses real model usage; thresholds changed — check /blackhole configure"*, with auto-dismiss (a few seconds) or an explicit dismiss.
+- **Proposal:** once per session, at `agent_start`, show a small yellow line in the status overlay / transient `ctx.ui` note, e.g. _"pi-blackhole: token counting now uses real model usage; thresholds changed — check /blackhole configure"_, with auto-dismiss (a few seconds) or an explicit dismiss.
 - **Hook point:** the existing `pi.on("agent_start", …)` handlers (`src/om/consolidation.ts` L461, `src/om/compaction-trigger.ts` L76) — or a dedicated handler — compare the persisted last-seen version against a `BREAKING_SINCE` constant, show the note once, then persist.
 - **Provenance / deprecation (must not linger forever):**
   1. Persist a `lastSeenVersion` field in a small state file in `~/.pi/agent/pi-blackhole/` — same pattern as `pi-blackhole-cooldown.json` (`src/om/cooldown.ts` L28/L53/L64).
@@ -222,15 +226,15 @@ The exact algorithms are already implemented and battle-tested in `scripts/analy
 
 ## Measurement critique (2026-08-23)
 
-Re-analysis during PR #58 review, while porting the usage-based compaction counter. The headline claim — *"underreports by 20–40% because chars/4"* — over-attributes to tokenizer density what is largely a **numerator-scope defect**, and the two mechanisms should not share one multiplier in migration guidance.
+Re-analysis during PR #58 review, while porting the usage-based compaction counter. The headline claim — _"underreports by 20–40% because chars/4"_ — over-attributes to tokenizer density what is largely a **numerator-scope defect**, and the two mechanisms should not share one multiplier in migration guidance.
 
 ### Corrected framing
 
-`est` (the production counters) sums chars/4 over **source entries only** since the anchor (`message` / `custom_message` / `branch_summary`). `usage.totalTokens` covers **everything the provider saw**: system prompt, tool schemas, and injected summary text. Those consume real window budget whether est sees them or not — est wasn't measuring context imperfectly; it measured a *smaller thing* and the trigger treated it as context. That is precisely why the never-fires regime existed.
+`est` (the production counters) sums chars/4 over **source entries only** since the anchor (`message` / `custom_message` / `branch_summary`). `usage.totalTokens` covers **everything the provider saw**: system prompt, tool schemas, and injected summary text. Those consume real window budget whether est sees them or not — est wasn't measuring context imperfectly; it measured a _smaller thing_ and the trigger treated it as context. That is precisely why the never-fires regime existed.
 
 Decomposition of the observed ratios:
 
-1. **Structural blindness** — est misses system + tools + summary. Dominant for **compaction**, whose counter compares a window slice against *absolute* context; worst right after a rebuild (context = overhead + summary + small tail). Cancels out of the coverage stages' delta method.
+1. **Structural blindness** — est misses system + tools + summary. Dominant for **compaction**, whose counter compares a window slice against _absolute_ context; worst right after a rebuild (context = overhead + summary + small tail). Cancels out of the coverage stages' delta method.
 2. **Tokenizer density drift (~10–25%, content-dependent)** — what remains in the coverage-stage ratios; code/JSON tokenizes denser than 4 chars/token, prose slightly looser.
 3. **Degenerate anchors** — the min 0.00 / max 23.6× outliers (marker immediately before compaction etc.).
 
@@ -239,16 +243,16 @@ Decomposition of the observed ratios:
 - **Live young session, no compaction, whole branch:** est over all source entries = 47,927 vs last valid usage = 47,583 → **ratio 1.01**. Chars/4 is nearly exact absent overhead/anchor asymmetry (slight prose overcount offsetting uncounted overhead). Matches the naive expectation "81k reported ≈ 84k real".
 - **8 archived compacted sessions**, script semantics (est since `firstKeptEntryId` vs absolute last usage):
 
-| session | usage | est | ratio | summary |
-|---|---|---|---|---|
-| 2026-05-15T17-15-27 | 185,720 | 130,061 | 0.70 | ~4.3k tok |
-| 2026-06-21T17-05-05 | 141,066 | 99,697 | 0.71 | ~5.4k tok |
-| 2026-05-16T01-29-07 | 62,139 | 48,031 | 0.77 | ~4.5k tok |
-| 2026-05-21T20-39-05 | 165,993 | 131,051 | 0.79 | ~1.6k tok |
-| 2026-06-02T23-46-54 | 109,518 | 106,618 | 0.97 | ~3.1k tok |
-| 2026-06-12T16-59-09 | 77,651 | 25,278 | 0.33 | outlier anchor |
-| 2026-06-12T19-28-37 | 126,929 | 97,468 | 0.77 | ~3.6k tok |
-| 2026-06-13T11-47-10 | 150,234 | 109,635 | 0.73 | ~3.5k tok |
+| session             | usage   | est     | ratio | summary        |
+| ------------------- | ------- | ------- | ----- | -------------- |
+| 2026-05-15T17-15-27 | 185,720 | 130,061 | 0.70  | ~4.3k tok      |
+| 2026-06-21T17-05-05 | 141,066 | 99,697  | 0.71  | ~5.4k tok      |
+| 2026-05-16T01-29-07 | 62,139  | 48,031  | 0.77  | ~4.5k tok      |
+| 2026-05-21T20-39-05 | 165,993 | 131,051 | 0.79  | ~1.6k tok      |
+| 2026-06-02T23-46-54 | 109,518 | 106,618 | 0.97  | ~3.1k tok      |
+| 2026-06-12T16-59-09 | 77,651  | 25,278  | 0.33  | outlier anchor |
+| 2026-06-12T19-28-37 | 126,929 | 97,468  | 0.77  | ~3.6k tok      |
+| 2026-06-13T11-47-10 | 150,234 | 109,635 | 0.73  | ~3.5k tok      |
 
 Typical 0.70–0.79. Summary text alone (~1.2–5.4k tokens) cannot close gaps of 14–55k — most of the gap is system+tools+summary overhead plus density drift on code-heavy content. The coverage stages' medians (~0.80) ≈ true density drift, consistent with their deltas cancelling the fixed overhead on both baselines.
 

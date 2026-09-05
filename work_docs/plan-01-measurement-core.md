@@ -38,11 +38,15 @@ export function getUsageTokens(msg: unknown): number | undefined;
 /** Rendered-footprint token count of one observation line:
  *  `[id] timestamp [relevance] content` (estimate basis). */
 export function observationLineTokenCount(observation: {
-  id: string; timestamp: string; relevance: string; content: string;
+  id: string;
+  timestamp: string;
+  relevance: string;
+  content: string;
 }): number;
 ```
 
 Implementation notes:
+
 - `getUsageTokens` checks `role === "assistant"`, `stopReason !== "error" && stopReason !== "aborted"`, then `calculateContextTokens(usage)` with a `> 0 && Number.isFinite` guard, wrapped so a malformed `usage` object yields `undefined`, never a throw.
 - Attribute the approach in a comment: tavasti@360f24a (fork) + upstream PR #40 (`contextTokensFromUsage`/`validAssistantContextTokens`).
 - `calculateContextTokens` is runtime-verified public on pi 0.83.0 (peer floor 0.81.1 has it too).
@@ -92,8 +96,9 @@ export function measureSinceAnchor(
 ```
 
 Semantics details (encode these as tests, §5):
+
 - `realContextTokens` = `usage(lastValidUsageIndex(entries, len-1, strictly after lastCompaction))` + `rawTokensAfterIndex(entries, thatIndex)`; `undefined` if no such index. When there is **no compaction** in the branch, the scan is over the whole branch.
-- "Strictly after the compaction entry": index must be `> findLastCompactionIndex(entries)`. Note our `rawTokensSinceLastCompaction` anchors at `firstKeptEntryId − 1` for the *estimate*; the usage scan instead keys off the compaction entry index — the two coexist (estimate fallback keeps its semantics).
+- "Strictly after the compaction entry": index must be `> findLastCompactionIndex(entries)`. Note our `rawTokensSinceLastCompaction` anchors at `firstKeptEntryId − 1` for the _estimate_; the usage scan instead keys off the compaction entry index — the two coexist (estimate fallback keeps its semantics).
 - `realTokensSinceAnchor(entries, anchorIndex)`:
   - `compactionIdx = findLastCompactionIndex(entries)`; if `compactionIdx > anchorIndex` → baseline = usage at `firstValidUsageIndex(entries, compactionIdx + 1)` (undefined → `undefined`).
   - else if `anchorIndex >= 0` → baseline = `realTokensAtAnchor(entries, anchorIndex)` (undefined → `undefined`).
@@ -135,10 +140,12 @@ Re-export the new progress functions (follow existing re-export pattern).
 ## 5. Test plan
 
 **`tests/tokens-usage.test.ts` (new):**
+
 - `hasUsageData`/`getUsageTokens`: assistant with `totalTokens` → value; components-only (`input+output+cacheRead+cacheWrite`) → sum; zero/NaN/missing usage → undefined; `stopReason: "error"|"aborted"` → undefined; user/toolResult roles → undefined (even if a `usage` field is present on the toolResult).
 - `observationLineTokenCount`: matches `estimateStringTokens(`[id] ts [rel] content`)` exactly.
 
 **`tests/session-ledger-progress.test.ts` (extend — follow existing fixture patterns in `tests/fixtures/session.ts`):**
+
 - `realContextTokens`: no compaction → last usage + trailing est; compaction then new assistant → post-compaction usage + trailing; compaction with **no** post-compaction assistant → `undefined` (not stale pre-compaction usage!); error-storm (only error/aborted assistants after compaction) → `undefined`; entries with usage on kept pre-compaction assistants only → `undefined`.
 - `realTokensAtAnchor`: usage before anchor → nearest-at/before value; none → `undefined`; usage exactly at anchor index → used.
 - `realTokensSinceAnchor`: coverage anchor after compaction → delta vs at-anchor baseline; anchor before compaction → baseline = first usage after compaction; negative delta (baseline > current — simulate model switch by shrinking totals) → `undefined`; anchor `-1` with no compaction → current real; `realContextTokens` undefined → `undefined`.
@@ -146,6 +153,7 @@ Re-export the new progress functions (follow existing re-export pattern).
 - Regression: existing raw-counter tests unchanged and green.
 
 **`tests/model-budget.test.ts` (extend):**
+
 - `resolveSessionContextWindow`: thunk value wins → model value next → 128k floor; throwing thunk → falls through; non-positive/NaN values → falls through.
 
 ## 6. Edge cases checklist (from the semantic diff, §7.2 anchor taxonomy)

@@ -22,6 +22,7 @@ import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthResult } from "@earendil-works/pi-ai";
+import { debugLog } from "./debug-log.js";
 
 export type ResolveResult =
   | {
@@ -29,6 +30,7 @@ export type ResolveResult =
       model: any;
       apiKey: string;
       headers?: Record<string, string>;
+      env?: Record<string, string>;
       cooldownApplied?: boolean;
     }
   | { ok: false; reason: string };
@@ -116,6 +118,16 @@ export interface LaunchCtx {
 
 /** Default cooldown interval between failed consolidation runs (ms). */
 const CONSOLIDATION_RETRY_COOLDOWN_MS = 30_000;
+const AVAILABILITY_RECHECK_TIMEOUT_MS = 5_000;
+const AVAILABILITY_RECHECK_REARM_MS = 60_000;
+
+function hasUsableAuth(auth: { apiKey?: unknown; headers?: unknown }): boolean {
+  if (typeof auth.apiKey === "string" && auth.apiKey.length > 0) return true;
+  if (!auth.headers || typeof auth.headers !== "object") return false;
+  return Object.values(auth.headers as Record<string, unknown>).some(
+    (value) => typeof value === "string" && value.length > 0,
+  );
+}
 
 export class Runtime {
   config: Config = { ...DEFAULTS };
@@ -155,6 +167,8 @@ export class Runtime {
   lastObserverError: string | undefined;
   lastReflectorError: string | undefined;
   lastDropperError: string | undefined;
+  /** Provider -> epoch ms of the last stale availability re-check. */
+  availabilityRecheckedAt = new Map<string, number>();
   /** Epoch ms of the last failed consolidation run (any stage). */
   lastConsolidationErrorAt: number | undefined;
   /** Stats from the most recent compaction run (session-scoped via handler closure). */
@@ -295,7 +309,13 @@ export class Runtime {
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(configured);
-      const hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(configured) ?? true;
+      let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(configured) ?? true;
+      const authProvider = candidate.provider;
+      const isOAuth = ctx.modelRegistry.isUsingOAuth?.(configured) === true;
+      const emptyApiKey = typeof auth.apiKey === "string" && auth.apiKey.length === 0;
+      if (auth.ok && !hasUsableAuth(auth) && !isOAuth && !emptyApiKey && !hasAuth) {
+        hasAuth = await this.recheckProviderCredential(ctx.modelRegistry, configured, authProvider);
+      }
       if (!auth.ok || !hasAuth) {
         if (ctx.hasUI && ctx.ui) {
           ctx.ui.notify(
@@ -316,6 +336,7 @@ export class Runtime {
         model: resolvedModel,
         apiKey: (auth.apiKey as string) ?? "",
         headers: auth.headers as Record<string, string> | undefined,
+        env: (auth as any).env as Record<string, string> | undefined,
         cooldownApplied: false,
       };
     }
@@ -331,12 +352,21 @@ export class Runtime {
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
-      const hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
+      let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
+      const sessionProvider = (sessionModel as { provider?: string }).provider ?? "unknown";
+      const isOAuth = ctx.modelRegistry.isUsingOAuth?.(sessionModel) === true;
+      const emptyApiKey = typeof auth.apiKey === "string" && auth.apiKey.length === 0;
+      if (auth.ok && !hasUsableAuth(auth) && !isOAuth && !emptyApiKey && !hasAuth) {
+        hasAuth = await this.recheckProviderCredential(
+          ctx.modelRegistry,
+          sessionModel,
+          sessionProvider,
+        );
+      }
       if (!auth.ok || !hasAuth) {
-        const provider = (sessionModel as { provider?: string }).provider ?? "unknown";
         return {
           ok: false,
-          reason: `no auth for session model provider "${provider}"`,
+          reason: `no auth for session model provider "${sessionProvider}"`,
         };
       }
 
@@ -350,6 +380,7 @@ export class Runtime {
         model: resolvedModel,
         apiKey: (auth.apiKey as string) ?? "",
         headers: auth.headers as Record<string, string> | undefined,
+        env: (auth as any).env as Record<string, string> | undefined,
         cooldownApplied: false,
       };
     }
@@ -367,6 +398,60 @@ export class Runtime {
       ok: false,
       reason: `no model available for ${stageName} (all candidates exhausted, sessionFallback disabled)`,
     };
+  }
+
+  /**
+   * Refresh one provider's availability snapshot when an otherwise ambient
+   * request-time credential looks stale. This mirrors Pi's own two-part auth
+   * gate while remaining bounded and harmless on older registries.
+   */
+  private async recheckProviderCredential(
+    registry: any,
+    model: any,
+    provider: string,
+  ): Promise<boolean> {
+    const now = Date.now();
+    const last = this.availabilityRecheckedAt.get(provider);
+    if (last !== undefined && now - last < AVAILABILITY_RECHECK_REARM_MS) return false;
+    this.availabilityRecheckedAt.set(provider, now);
+
+    const refresh = registry?.refresh;
+    if (typeof refresh !== "function") return false;
+
+    const controller = new AbortController();
+    let timedOut = false;
+    let refreshError: string | undefined;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, AVAILABILITY_RECHECK_TIMEOUT_MS);
+    try {
+      await Promise.race([
+        refresh.call(registry, {
+          allowNetwork: false,
+          providers: [provider],
+          signal: controller.signal,
+        }),
+        new Promise<void>((resolve) =>
+          controller.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        ),
+      ]);
+    } catch (error) {
+      refreshError = error instanceof Error ? error.message : String(error);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const recovered = registry.hasConfiguredAuth?.(model) === true && !timedOut;
+    debugLog("resolve.availability_recheck", {
+      provider,
+      recovered,
+      timedOut,
+      ...(refreshError ? { refreshError } : {}),
+    });
+    return recovered;
   }
 
   /**

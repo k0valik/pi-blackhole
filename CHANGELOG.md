@@ -2,6 +2,26 @@
 
 ---
 
+## [0.5.0] - 2026-09-06
+
+### Added
+
+- **Newest-first retained tool-output budgeting.** At each Blackhole compaction boundary, retained historical tool and shell output text is projected through a dedicated budget (default 20000 tokens) and the resulting omission decisions are persisted with that compaction. Set `retainedToolOutputMaxTokens` to `0` to disable. When enabled, the provider-visible representation remains fixed until the next compaction, while raw session history and compaction inputs remain full fidelity. Pending results and non-text content remain visible, and omitted text points to `recall #N` when a stable transcript index is available. ([#66](https://github.com/k0valik/pi-blackhole/pull/66))
+- **`max` thinking level support.** Configured memory models now accept and forward Pi's highest reasoning level where supported by the provider ([upstream OM `e6c0fd9`](https://github.com/elpapi42/pi-observational-memory/commit/e6c0fd9d8e43ffb5d3c1a271bf1ec4a4640bde02)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
+
+### Changed
+
+- **Lazy loading of optional command modules and memory workers.** The settings overlay, changelog viewer, cleanup handler, export pipeline, and OM worker imports now load on demand instead of at extension startup, cutting per-session startup cost. ([#71](https://github.com/k0valik/pi-blackhole/pull/71))
+- **Recall search now indexes bounded generic tool arguments, filters multi-term BM25 noise, caps results at 50, and reports pagination/truncation accurately — including in `/blackhole-recall`** ([upstream VCC `f7b80bb`, `4bb7115`](https://github.com/sting8k/pi-vcc/commit/f7b80bbbe22315acf9f7925c0c3be2d4ae9feee5)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
+
+### Fixed
+
+- **Custom provider streams are now keyed by provider + API, not API alone.** Several extensions can register different providers sharing one wire API (e.g. `anthropic` and a Databricks-hosted Claude both speak `anthropic-messages`); keying by API alone let the first-registered provider hijack every model speaking that protocol, routing requests through the wrong transport/URL/auth. Streams also overwrite on re-registration instead of first-wins. ([#70](https://github.com/k0valik/pi-blackhole/pull/70))
+- **OM workers now receive provider environment substitutions, and stale ambient-credential availability snapshots are rechecked before rejecting request-time-signed providers** ([upstream OM `ce9fc98`, `699ccc7`](https://github.com/elpapi42/pi-observational-memory/commit/ce9fc982b3a219a7839f07c9f4a3e054e81a2b21)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
+- **Empty Blackhole compaction output now delegates to Pi's native summarizer instead of replacing context with an empty summary** ([upstream OM PR #39](https://github.com/elpapi42/pi-observational-memory/pull/39)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
+
+---
+
 ## [0.4.10] - 2026-08-29
 
 ### Changed
@@ -322,6 +342,7 @@ Audit surfaced 7 correctness/performance edge cases in the cursor pipeline.
 Four were fixed; three were deferred as harmless or cosmetic.
 
 **Fixed:**
+
 - **Session fork cursor bleed (#2).** `cursorsLoaded` was a one-shot boolean
   — on session fork, stale cursors bled into the new branch because
   `validateCursors` was never re-invoked. Now keyed by `cursorsLoadedSessionId`
@@ -342,6 +363,7 @@ Four were fixed; three were deferred as harmless or cosmetic.
   last source entry (`findLast(isSourceEntry)`).
 
 **Deferred:**
+
 - **"unknown" magic entry ID (#4).** Functional but cosmetic — the sentinel
   triggers fallback on next load. 9 call sites; zero behavioral change.
 - **Observer re-checks tokens (#5).** Harmless — only reached when pipeline
@@ -355,8 +377,6 @@ Four were fixed; three were deferred as harmless or cosmetic.
 - 17 new tests for cursor gating, persistence, stale recovery, and debug log events
 - 3 new tests for manual-mode pending awareness (reflector, dropper, post-first-run)
 - `dropperPressureThreshold` added to config validation tests
-
-
 
 # Changelog
 
@@ -406,7 +426,7 @@ Four were fixed; three were deferred as harmless or cosmetic.
 - **Section headers in summaries use line-boundary regex.** `sectionOf` and `stripOMContent` now match `## Reflections` / `## Observations` at the start of a line instead of using bare `indexOf`. Prevents false positives when those phrases appear inside file paths or conversation text. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **Read+same-path-Modified dedup in file summaries.** `mergeFileLines` now removes a path from `Read` if it also appears in `Modified` — a file that was read then edited shouldn't show twice. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **`reverse-recall` outputs related reflections.** The `_reflections` dead parameter is now used — related reflections are shown alongside observations when expanding session entries. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
-- **Cooldown reason in UI notification.** The `getCooldownEntry` function now returns the actual entry (with reason), so the status notification shows *why* a model was cooled down, not just "cooldown active". ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Cooldown reason in UI notification.** The `getCooldownEntry` function now returns the actual entry (with reason), so the status notification shows _why_ a model was cooled down, not just "cooldown active". ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **Env override validation.** Invalid `PI_BLACKHOLE_COMPACTION` / `PI_BLACKHOLE_COMPACTION_ENGINE` values now print a warning instead of being silently ignored. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **`observerPreambleMaxTokens` accepts 0.** Now uses `nonNegativeInt` validator instead of `positiveInt` — 0 means "auto-compute", which was the intended semantics. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 

@@ -9,9 +9,6 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesSkippedProvider } from "../core/provider-skip.js";
-import { runDropper } from "./agents/dropper/agent.js";
-import { runObserver } from "./agents/observer/agent.js";
-import { runReflector } from "./agents/reflector/agent.js";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConfiguredModel } from "./config.js";
 import { debugLog, withDebugLogContext } from "./debug-log.js";
@@ -763,10 +760,12 @@ async function runObserverStage(
     }
 
     try {
+      const { runObserver } = await import("./agents/observer/agent.js");
       const result = await runObserver({
         model: resolved.model as any,
         apiKey: resolved.apiKey,
         headers: resolved.headers,
+        env: resolved.env,
         priorReflections,
         priorObservations,
         chunk,
@@ -1046,10 +1045,12 @@ async function runReflectorStage(
         Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
       );
 
+      const { runReflector } = await import("./agents/reflector/agent.js");
       const reflections = await runReflector({
         model: resolved.model as any,
         apiKey: resolved.apiKey,
         headers: resolved.headers,
+        env: resolved.env,
         reflections: newReflections,
         observations: newObservations,
         existingReflectionsSummary: existingReflectionsSummary || undefined,
@@ -1285,10 +1286,12 @@ async function runDropperStage(
         continue;
       }
 
+      const { runDropper } = await import("./agents/dropper/agent.js");
       const droppedIds = await runDropper({
         model: resolved.model as any,
         apiKey: resolved.apiKey,
         headers: resolved.headers,
+        env: resolved.env,
         reflections: reflectionsForDropper,
         observations: newObservations,
         existingObservationsSummary: existingObservationsSummary || undefined,

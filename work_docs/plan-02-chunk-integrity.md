@@ -18,11 +18,11 @@ Fix the two halves of upstream issue #32 in our tree:
 
 They are one failure story (#32): the livelock existed because the chunk could outgrow the window **and** the failure was invisible. Upstream shipped their halves as separate PRs (#34 merged, #33 merged); we land them as one coherent phase — plus the trimming layer that turns "the worker can ingest the backlog" from an assumption into a tested guarantee.
 
-**Correction surfaced while planning:** chunk-content trimming does **not** exist in our tree today. `truncateRecordContent` (`serialize.ts` L117, 10k chars, head-only) only truncates what agents *write* (their own observation/reflection records). The observer's *input* — source tool results and thinking blocks — is serialized untrimmed; pi's own tool-output truncation happens at capture time and still lets giants through (the 1.7M-char case). The author believed trimming already protected small workers; it does not. This phase adds it (§4.5).
+**Correction surfaced while planning:** chunk-content trimming does **not** exist in our tree today. `truncateRecordContent` (`serialize.ts` L117, 10k chars, head-only) only truncates what agents _write_ (their own observation/reflection records). The observer's _input_ — source tool results and thinking blocks — is serialized untrimmed; pi's own tool-output truncation happens at capture time and still lets giants through (the 1.7M-char case). The author believed trimming already protected small workers; it does not. This phase adds it (§4.5).
 
 ## 3. Current-state bugs being fixed (evidence)
 
-- `capSourceEntriesToTokens` (`src/om/consolidation.ts` L102) walks **newest-to-oldest**: when the backlog exceeds the cap, the *oldest* uncovered entries are dropped and `coversUpToId` jumps past them → that conversation is **permanently never observed**. The function carries an unresolved internal debate comment ("Remove the `kept.length > 0` guard? No — …").
+- `capSourceEntriesToTokens` (`src/om/consolidation.ts` L102) walks **newest-to-oldest**: when the backlog exceeds the cap, the _oldest_ uncovered entries are dropped and `coversUpToId` jumps past them → that conversation is **permanently never observed**. The function carries an unresolved internal debate comment ("Remove the `kept.length > 0` guard? No — …").
 - A single oversized entry is included **whole** ("include it anyway to avoid data loss") — upstream shipped exactly this in PR #34 v1 and immediately hit the real **1.7M-char tool result** that still blew the window; their merged fix is the marked head/tail excerpt.
 - The cap budget counts message-content chars (+ JSON for custom OM entries) — **not** the actual sent text: no `[Source entry id: …]` labels, no separators, no `branch_summary` rendering. Actual sent text can exceed the cap.
 - Agent drain loops (`observer/agent.ts` L273, `reflector/agent.ts` L204, `dropper/agent.ts` L393) ignore every event — a `stopReason: "error"` final message is indistinguishable from "no observations".
@@ -37,7 +37,7 @@ Extend `SourceAddressedSerialization` and `serializeSourceAddressedBranchEntries
 export type SourceAddressedSerialization = {
   text: string;
   sourceEntryIds: string[];
-  estimatedTokens: number;          // NEW — estimateStringTokens(text), the honest sent size
+  estimatedTokens: number; // NEW — estimateStringTokens(text), the honest sent size
   truncatedSourceEntryIds: string[]; // NEW — ids sent as head/tail excerpts
 };
 
@@ -47,6 +47,7 @@ export type SourceAddressedSerializationOptions = {
 ```
 
 Rules (upstream invariants, verbatim intent):
+
 - Walk entries **oldest-first**; render each via existing `serializeBranchEntries([entry])`; block = `[Source entry id: <id>]\n<rendered>`; separator `\n\n`; budget counts `estimateStringTokens(separator + block)` — labels and separators included.
 - Adding a block that would exceed `maxTokens` with blocks already present → **break** (remaining entries stay eligible next run).
 - First (oldest) entry alone exceeding the budget → **head/tail excerpt**: fixed parts = label + `SOURCE_OMISSION_MARKER`; if fixed parts alone exceed the budget → return **no chunk at all** (empty result; coverage cannot advance without a complete source label — the min-budget guard). Else split remaining char budget evenly head/tail:
@@ -60,15 +61,22 @@ Rules (upstream invariants, verbatim intent):
 ### 4.2 `src/om/consolidation.ts` — `runObserverStage` rewire
 
 - **Delete `capSourceEntriesToTokens`** (and its internal debate comment) — no other caller exists (verify with `rg`).
-- **Move `resolveModel("observer")` before chunk construction** (the derived cap needs the resolved worker window — same move upstream made; a resolution failure now aborts before the "observer running" notification). Note: our resolution lives inside the `MAX_STAGE_ATTEMPTS` loop today because it participates in the fallback chain; restructure so the *first* resolution happens up front for budgeting, and the retry loop re-resolves on failure as today. If this proves awkward, alternative: compute the cap from the best synchronously-known worker window (stage config model → session model → 128k) and keep the loop as-is. Decide at implementation; document the choice.
+- **Move `resolveModel("observer")` before chunk construction** (the derived cap needs the resolved worker window — same move upstream made; a resolution failure now aborts before the "observer running" notification). Note: our resolution lives inside the `MAX_STAGE_ATTEMPTS` loop today because it participates in the fallback chain; restructure so the _first_ resolution happens up front for budgeting, and the retry loop re-resolves on failure as today. If this proves awkward, alternative: compute the cap from the best synchronously-known worker window (stage config model → session model → 128k) and keep the loop as-is. Decide at implementation; document the choice.
 - Chunk construction:
   ```ts
-  const workerWindow = effectiveContextWindow(resolved.model, stageModelConfig(runtime, "observer"));
+  const workerWindow = effectiveContextWindow(
+    resolved.model,
+    stageModelConfig(runtime, "observer"),
+  );
   const maxChunkTokens = resolveObserverChunkMaxTokens(runtime.config, workerWindow); // §4.4
   const backlog = sourceEntriesAfter(entries, effectiveStart);
-  const { text: chunk, sourceEntryIds, estimatedTokens: chunkTokens, truncatedSourceEntryIds } =
-    serializeSourceAddressedBranchEntries(backlog, { maxTokens: maxChunkTokens });
-  const coversUpToId = sourceEntryIds.at(-1);  // LAST ID THE SERIALIZER RETURNED — not backlog tail
+  const {
+    text: chunk,
+    sourceEntryIds,
+    estimatedTokens: chunkTokens,
+    truncatedSourceEntryIds,
+  } = serializeSourceAddressedBranchEntries(backlog, { maxTokens: maxChunkTokens });
+  const coversUpToId = sourceEntryIds.at(-1); // LAST ID THE SERIALIZER RETURNED — not backlog tail
   ```
 - `observer.chunk_capped` debug event when `sourceEntryIds.length < backlog.length || truncatedSourceEntryIds.length > 0` with `{ maxChunkTokens, backlogEntries, backlogTokens: tokens, chunkEntries, chunkTokens, truncatedSourceEntryIds }`.
 - Notification: keep our richer form but make both numbers honest: `observer running on ~<chunkTokens>-token chunk (of <tokens> accumulated)`.
@@ -100,11 +108,12 @@ export function logAgentStreamError(
 ```
 
 - Wire one line into each drain loop (`observer/agent.ts` L273, `reflector/agent.ts` L204, `dropper/agent.ts` L393) — our loops already iterate `event`, so it's import + call.
-- **Surfacing:** in `consolidation.ts`, the agents return empty/undefined on swallowed errors — additionally record `runtime.lastObserverError` / `lastReflectorError` / `lastDropperError` (fields exist, `runtime.ts` L100/L467) when a stage ends empty *and* a stream error was seen. Cleanest: have `logAgentStreamError` also return/record the error so the stage can capture it (e.g. a small per-run collector the agent exposes, or the stage passes a callback). Keep it simple: the helper takes an optional `onError?: (msg: string) => void` the agent forwards from its args; the stage passes a setter. Status overlay shows the fields already.
+- **Surfacing:** in `consolidation.ts`, the agents return empty/undefined on swallowed errors — additionally record `runtime.lastObserverError` / `lastReflectorError` / `lastDropperError` (fields exist, `runtime.ts` L100/L467) when a stage ends empty _and_ a stream error was seen. Cleanest: have `logAgentStreamError` also return/record the error so the stage can capture it (e.g. a small per-run collector the agent exposes, or the stage passes a callback). Keep it simple: the helper takes an optional `onError?: (msg: string) => void` the agent forwards from its args; the stage passes a setter. Status overlay shows the fields already.
 
 ### 4.4 `src/om/serialize.ts` — content trimming (Worker Safety Invariant, layer a)
 
 **Policy (validated on the 674-window archive simulation):**
+
 - Tool-result text blocks > 4096 chars → first **1000** + last **1000** chars, joined by a marked omission note. (1000/1000 chosen over 500/500: median 31% vs 34% total savings — not worth the extra loss.)
 - Thinking blocks > 4096 chars → first **20%** + last **20%**, marked. (Rationale validated on 620 real blocks: head restates the task, tail concludes, middle is least valuable. Median thinking save only 1%, but p90 48% / max 60% — this is a long-session tail guard.)
 - **Open implementation decision (record at execution):** extreme blocks (largest observed: 90,516 chars) — pure 20% still keeps ~18k chars of head; consider an absolute head/tail cap (~2–4k chars each): `head = min(20%, 4000)`. Default: implement the cap; the simulation numbers barely move and worst cases become bounded.
@@ -126,7 +135,10 @@ export const OBSERVER_CHUNK_FALLBACK_WINDOW = 128_000;
 /** 0/undefined/invalid config → floor(window × 0.2) clamped ≥ 256.
  *  Explicit >0 → clamped ≥ 256. Window comes from effectiveContextWindow
  *  (config override → model metadata → 128k). */
-export function resolveObserverChunkMaxTokens(configValue: number | undefined, workerWindow: number): number;
+export function resolveObserverChunkMaxTokens(
+  configValue: number | undefined,
+  workerWindow: number,
+): number;
 ```
 
 - Config plumbing: `observerChunkMaxTokens` gains `0 = auto` semantics — normalize with `nonNegativeInt` (same pattern as `observerPreambleMaxTokens`); **default changes 40000 → 0** in `unified-config.ts`. (This is the one Phase-2 config change; it is backward compatible since 0 previously meant "absent → default".)
@@ -147,15 +159,18 @@ export function resolveObserverChunkMaxTokens(configValue: number | undefined, w
 ## 6. Test plan
 
 **`tests/source-serialization-budget.test.ts` (new, adapted from upstream):**
+
 - All blocks kept when fitting; later entries stay for next run when budget full (oldest-first order preserved); **no chunk** under unusably-small budget (label guard); single huge tool result → marked head/tail excerpt with `truncatedSourceEntryIds`, `estimatedTokens ≤ budget`, `HEAD:`/`:TAIL` retained, next entry excluded; `renderRecallSourceEntry` still returns the full original; no-`maxTokens` call → all blocks + correct new fields.
 - **Trim cases:** tool result > 4096 chars → head 1000 + tail 1000 + marker; ≤ 4096 untouched; thinking block > 4096 → 20%/20% + marker (and absolute cap if implemented); recall rendering untrimmed (`trim` option off); trim composes with budget (trimmed entry fits without excerpt).
 
 **`tests/stream-errors.test.ts` (new, adapted from upstream):**
+
 - error/aborted logged with stage prefix; stop/user/other events ignored; end-to-end `runObserver` with failing fake loop → `undefined` + one `observer.stream_error`; `onError` callback fires.
 
 **`tests/model-budget.test.ts` (extend):** cap resolution — explicit > derived; derived from window (1280 → 256; 1M → 200000); min clamp; invalid window (0/NaN) → fallback.
 
 **`tests/consolidation.test.ts` (update + extend):**
+
 - Oversized backlog capped and drained incrementally across runs: first call `allowedSourceEntryIds: ["raw-1"]`, `coversUpToId: "raw-1"`; next run continues from `"raw-2"` (adapt upstream test to our cursor/pending harness).
 - Single oversized tool result → excerpt, provenance preserved, next run proceeds.
 - Derived cap from resolved model `contextWindow` (mock `resolveModel` with 1280 → cap 256).

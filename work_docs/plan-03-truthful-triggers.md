@@ -17,7 +17,7 @@ Make every trigger truthful and every threshold self-sizing:
 
 ## 2. Non-goals
 
-- Ratio-mode *config fields* (upstream's `compactAfterTokensMode`/`compactAfterTokensRatio`) — rejected (D5/D11); auto-derivation replaces them.
+- Ratio-mode _config fields_ (upstream's `compactAfterTokensMode`/`compactAfterTokensRatio`) — rejected (D5/D11); auto-derivation replaces them.
 - Changing raw estimate counters (they remain as the fallback path).
 - Trimming (Phase 5), pool accounting (Phase 4).
 
@@ -28,19 +28,20 @@ New home: `src/om/consolidation.ts` (or extract `src/om/due.ts` if consolidation
 ```ts
 export type StageMeasurement = {
   due: boolean;
-  progress: number;        // tokens measured on `basis`
-  threshold: number;       // resolved (auto-derived or absolute override)
-  basis: CountBasis;       // "usage" | "estimate" — for display honesty
-  anchorIndex: number;     // resolved anchor actually used (-1 = none)
+  progress: number; // tokens measured on `basis`
+  threshold: number; // resolved (auto-derived or absolute override)
+  basis: CountBasis; // "usage" | "estimate" — for display honesty
+  anchorIndex: number; // resolved anchor actually used (-1 = none)
   upperBoundApplied: boolean; // true when worker-window bound drove `due`
 };
 
 export function measureObserverDue(entries, runtime, pending?): StageMeasurement;
 export function measureReflectorDue(entries, runtime, pending?): StageMeasurement;
-export function measureDropperDue(entries, runtime, pending?): StageMeasurement;   // token leg only; pool/new-data legs unchanged
+export function measureDropperDue(entries, runtime, pending?): StageMeasurement; // token leg only; pool/new-data legs unchanged
 ```
 
 **Anchor resolution per stage (preserves current semantics exactly):**
+
 - observer: cursor `entryId` → index; else `latestCoverageIndex(OM_OBSERVATIONS_RECORDED)`; else `findLastCompactionIndex` (cold start); else −1.
 - reflector: cursor → coverage (reflections) → manual-mode pending batch mapping; plus the existing **new-data leg** (observation batches after the cursor / pending) — unchanged, only the token leg changes.
 - dropper token leg: cursor → `latestCoverageIndex(OM_OBSERVATIONS_DROPPED)` → pending. Pool-fullness/pressure/new-data legs stay estimate-based internal accounting (Phase 4 only changes their line-counting basis).
@@ -51,10 +52,13 @@ export function measureDropperDue(entries, runtime, pending?): StageMeasurement;
 
 ```ts
 // src/om/model-budget.ts or due.ts
-export function resolveTriggerThresholds(config, sessionWindow): {
-  observeAfterTokens: number;   // config >0 ? config : floor(sessionWindow × 0.25 × scale)
-  reflectAfterTokens: number;   // config >0 ? config : floor(sessionWindow × 0.40 × scale)
-  compactAfterTokens: number;   // config >0 ? config : floor(sessionWindow × 0.65 × scale)
+export function resolveTriggerThresholds(
+  config,
+  sessionWindow,
+): {
+  observeAfterTokens: number; // config >0 ? config : floor(sessionWindow × 0.25 × scale)
+  reflectAfterTokens: number; // config >0 ? config : floor(sessionWindow × 0.40 × scale)
+  compactAfterTokens: number; // config >0 ? config : floor(sessionWindow × 0.65 × scale)
 };
 // scale = config.thresholdScale (default 1.0) — applies ONLY to auto-derived values (D14);
 // explicit absolute thresholds are returned verbatim (clean break, D5).
@@ -70,13 +74,14 @@ export function resolveCompactThreshold(config, sessionWindow): number; // used 
 due = progress >= Math.min(resolvedThreshold, workerWindowSync − AGENT_LOOP_RESERVE − STAGE_OVERHEAD)
 ```
 
-- `workerWindowSync` = best **synchronously** available worker window: stage's configured model metadata `contextWindow` (sync registry lookup if available; else session window; else 128k). The in-stage `context_window_exceeded` pre-check remains the authoritative guard — the bound exists to fire *earlier*, never later. `STAGE_OVERHEAD` ≈ preamble/system estimate per stage (constant, e.g. 4000; observer preamble is separately capped already).
+- `workerWindowSync` = best **synchronously** available worker window: stage's configured model metadata `contextWindow` (sync registry lookup if available; else session window; else 128k). The in-stage `context_window_exceeded` pre-check remains the authoritative guard — the bound exists to fire _earlier_, never later. `STAGE_OVERHEAD` ≈ preamble/system estimate per stage (constant, e.g. 4000; observer preamble is separately capped already).
 - When the bound drives `due`, set `upperBoundApplied: true` and debug-log it (`observer.upper_bound`, etc.).
 
 **Consumers:**
+
 - `anyStageDue` → calls the three measure functions (replaces L219–333's inline legs; cursor/pending logic moves into the measure functions).
 - `runObserverStage`/`runReflectorStage`/`runDropperStage` → call the same measure function for their re-check; **delete** the duplicated `rawTokensSince*Coverage >= config.*` lines (L219–241, L327–333, L1051–1057, L1352–1358).
-- **Fallback-safety rule (semantic diff §10.8):** when `basis === "estimate"` because the baseline was *unmeasurable* (not merely "no usage provider"), the `not_due` cursor advance in `runObserverStage` must NOT fire — advance cursors only on a trustworthy measurement. (Simplest: skip the not_due advance whenever `basis === "estimate"`.)
+- **Fallback-safety rule (semantic diff §10.8):** when `basis === "estimate"` because the baseline was _unmeasurable_ (not merely "no usage provider"), the `not_due` cursor advance in `runObserverStage` must NOT fire — advance cursors only on a trustworthy measurement. (Simplest: skip the not_due advance whenever `basis === "estimate"`.)
 - `/blackhole-memory` (`memory.ts`) → same functions for the progress lines (Phase 4 styles the output).
 
 ## 4. Compaction trigger (`src/om/compaction-trigger.ts`)
@@ -86,30 +91,35 @@ All three call sites (L135 `handleTurnEnd`, L289 `handleAgentEnd`, L411 deferred
 ```ts
 const entries = ctx.sessionManager.getBranch() as Entry[];
 const real = realContextTokens(entries);
-const tokens = real ?? rawTokensSinceLastCompaction(entries);   // D4 fallback
+const tokens = real ?? rawTokensSinceLastCompaction(entries); // D4 fallback
 const basis = real !== undefined ? "usage" : "estimate";
-const threshold = resolveCompactThreshold(runtime.config, resolveSessionContextWindow(ctx.model, () => guardedGetContextUsage(ctx)));
-if (tokens < threshold) { /* pressure-relieved path (midRunCompactionSuspended lift) — unchanged */ }
+const threshold = resolveCompactThreshold(
+  runtime.config,
+  resolveSessionContextWindow(ctx.model, () => guardedGetContextUsage(ctx)),
+);
+if (tokens < threshold) {
+  /* pressure-relieved path (midRunCompactionSuspended lift) — unchanged */
+}
 ```
 
 - Entries-only numerator → no stale-ctx hazard in the deferred re-check (D1). `resolveSessionContextWindow`'s thunk is guarded (try/catch) for the deferred path.
 - `handleTurnEnd`'s suspension-lift logic (`midRunCompactionSuspended`) keys off the same truthful `tokens < threshold` — unchanged structurally.
 - Debug events (`compaction_trigger.*`) gain `{ basis, threshold }`.
-- Note on semantics: `realContextTokens` *is* "real context now" = "since last compaction" when a compaction happened (post-compaction baseline). The raw fallback keeps its `firstKeptEntryId`-based estimate semantics.
+- Note on semantics: `realContextTokens` _is_ "real context now" = "since last compaction" when a compaction happened (post-compaction baseline). The raw fallback keeps its `firstKeptEntryId`-based estimate semantics.
 
 ## 5. Config changes (`src/core/unified-config.ts`, `src/core/config-env.ts`)
 
-| Field | Change |
-|---|---|
-| `compactAfterTokens` | move to `nonNegativeInt` normalization; default `81000 → 0` |
-| `observeAfterTokens` | same; default `15000 → 0` |
-| `reflectAfterTokens` | same; default `25000 → 0` |
-| `reflectorInputMaxTokens` | same; default `80000 → 0` (auto = 0.60 × worker window, resolved at stage time) |
-| `dropperInputMaxTokens` | same; default `80000 → 0` (auto = 0.60 × worker window) |
-| `observationsPoolMaxTokens` | same; default `20000 → 0` (auto = 0.15 × session window) |
-| `observationsPoolTargetTokens` | default `10000 → 0` (auto = pool max / 2; existing "half of max" logic absorbs this) |
-| `observerChunkMaxTokens` | (Phase 2) default `40000 → 0` |
-| **`thresholdScale`** | **NEW field — the only one (D14).** Default `1.0`; finite > 0, clamped [0.1, 10]; multiplies auto-derived observe/reflect/compact thresholds; ignored for explicit values. Env: `PI_BLACKHOLE_THRESHOLD_SCALE`. |
+| Field                          | Change                                                                                                                                                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compactAfterTokens`           | move to `nonNegativeInt` normalization; default `81000 → 0`                                                                                                                                                     |
+| `observeAfterTokens`           | same; default `15000 → 0`                                                                                                                                                                                       |
+| `reflectAfterTokens`           | same; default `25000 → 0`                                                                                                                                                                                       |
+| `reflectorInputMaxTokens`      | same; default `80000 → 0` (auto = 0.60 × worker window, resolved at stage time)                                                                                                                                 |
+| `dropperInputMaxTokens`        | same; default `80000 → 0` (auto = 0.60 × worker window)                                                                                                                                                         |
+| `observationsPoolMaxTokens`    | same; default `20000 → 0` (auto = 0.15 × session window)                                                                                                                                                        |
+| `observationsPoolTargetTokens` | default `10000 → 0` (auto = pool max / 2; existing "half of max" logic absorbs this)                                                                                                                            |
+| `observerChunkMaxTokens`       | (Phase 2) default `40000 → 0`                                                                                                                                                                                   |
+| **`thresholdScale`**           | **NEW field — the only one (D14).** Default `1.0`; finite > 0, clamped [0.1, 10]; multiplies auto-derived observe/reflect/compact thresholds; ignored for explicit values. Env: `PI_BLACKHOLE_THRESHOLD_SCALE`. |
 
 - Budget resolvers live next to `resolveObserverChunkMaxTokens` in `model-budget.ts`: `resolveReflectorInputMaxTokens(config, workerWindow)`, `resolveDropperInputMaxTokens(config, workerWindow)`, `resolveObservationsPoolMaxTokens(config, sessionWindow)`. All clamp to sane minimums (≥ 1000).
 - Env vars (`PI_BLACKHOLE_*`) unchanged — `0` now means auto; documented.

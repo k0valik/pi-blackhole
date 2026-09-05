@@ -12,7 +12,7 @@
 
 **Origin:** issue #32 comment (IgorGanapolsky): "treat API errors as terminal for that observer slice, and advance (or shrink) the watermark on failure — never only on success."
 
-**Why deferred:** we already have `MAX_STAGE_ATTEMPTS` + `recordRetryableError` + fallback chains + the upper-bound pre-check; the marginal value is the *halt* semantics and the shrink-on-failure policy, both of which need design (what resets the streak? per-session or persistent?). Phase 2's stream-error logging is the prerequisite and ships first.
+**Why deferred:** we already have `MAX_STAGE_ATTEMPTS` + `recordRetryableError` + fallback chains + the upper-bound pre-check; the marginal value is the _halt_ semantics and the shrink-on-failure policy, both of which need design (what resets the streak? per-session or persistent?). Phase 2's stream-error logging is the prerequisite and ships first.
 
 ## D-2 Upstream PR #40 merge watch
 
@@ -49,5 +49,5 @@
 
 - **Upstream ratio-mode config fields** (`compactAfterTokensMode`, `compactAfterTokensRatio`) — rejected: D5's `0 = auto` sentinel on existing fields delivers the same outcome without new knobs (the author's constraint; the single granted exception is `thresholdScale`, D14).
 - **Per-stage opt-in for usage counting** (issue doc open question 2) — rejected: shared measurement core; per-stage divergence is the drift class we're killing.
-- **Staged rollout (compaction-only first, coverage later)** (issue doc open question 1) — considered; rejected in favor of phased landing (Phase 1 → 2 → 3) with the atomic *release* carrying counting + auto-derivation together (D10), since the phases are separately revertable anyway.
+- **Staged rollout (compaction-only first, coverage later)** (issue doc open question 1) — considered; rejected in favor of phased landing (Phase 1 → 2 → 3) with the atomic _release_ carrying counting + auto-derivation together (D10), since the phases are separately revertable anyway.
 - **`getContextUsage().tokens` as the compaction numerator** (upstream PR #40's approach) — rejected in favor of entries-only (D1): same data source, no stale-ctx hazard, testable purity.
