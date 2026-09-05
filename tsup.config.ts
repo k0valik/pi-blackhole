@@ -49,7 +49,8 @@ export default defineConfig({
   dts: false,
   clean: true,
   treeshake: true,
-  sourcemap: true,
+  sourcemap: false,
+  minify: true,
   target: "es2022",
   esbuildPlugins: [inlineChangelog()],
   external: [

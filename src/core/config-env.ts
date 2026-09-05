@@ -86,6 +86,7 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
   // Positive integers
   compactAfterTokens: "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
+  retainedToolOutputMaxTokens: "PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS",
   observeAfterTokens: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
   reflectAfterTokens: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
   observationsPoolMaxTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS",

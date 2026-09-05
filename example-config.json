@@ -96,6 +96,7 @@
   "observeAfterTokens": 15000,
   "reflectAfterTokens": 25000,
   "compactAfterTokens": 81000,
+  "retainedToolOutputMaxTokens": 20000,
   "observationsPoolMaxTokens": 20000,
   "observationsPoolTargetTokens": 10000,
   "reflectorInputMaxTokens": 80000,
@@ -118,6 +119,7 @@
     "  compactionSummaryMode (default|append) — replace one summary or freeze auto-compaction segments",
     "  tailBehavior (pi-default|minimal) — how much stays visible",
     "  midRunCompaction (resume|pause|off) — threshold check during tool loops",
+    "  retainedToolOutputMaxTokens — newest-first historical tool-output text budget; older text remains available through recall",
     "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
     "  dropperPressureThreshold (0-1, default 0.70) — pressure relief valve: fraction of reflectorInputMaxTokens where dropper fires even without new data",
     "  providerIdleTimeoutMs (ms, 0=disabled, unset=inherit pi default) — body-idle timeout for background provider streams",
@@ -129,6 +131,7 @@
     "  PI_BLACKHOLE_PASSIVE=1  → compaction:off + memory:false",
     "  PI_BLACKHOLE_COMPACTION  → override compaction setting",
     "  PI_BLACKHOLE_COMPACTION_ENGINE → override compactionEngine setting",
-    "  PI_BLACKHOLE_COMPACTION_SUMMARY_MODE → override compactionSummaryMode setting"
+    "  PI_BLACKHOLE_COMPACTION_SUMMARY_MODE → override compactionSummaryMode setting",
+    "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget"
   ]
 }

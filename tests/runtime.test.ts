@@ -53,6 +53,7 @@ function makeModel(id: string, provider = "openrouter", overrides: Record<string
 type RegistryOptions = {
   requestBaseUrl?: string;
   providerBaseUrl?: string;
+  env?: Record<string, string>;
 };
 
 function makeRegistry(models: ReturnType<typeof makeModel>[], options: RegistryOptions = {}) {
@@ -64,6 +65,7 @@ function makeRegistry(models: ReturnType<typeof makeModel>[], options: RegistryO
       ok: true,
       apiKey: "sk-test",
       headers: undefined,
+      ...(options.env ? { env: options.env } : {}),
       ...(options.requestBaseUrl ? { baseUrl: options.requestBaseUrl } : {}),
     })),
     getProviderAuth: vi.fn(async () =>
@@ -83,6 +85,65 @@ afterEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("Runtime.resolveModel — fallback chain", () => {
+  it("forwards environment substitutions from model auth", async () => {
+    writeConfig({
+      observerModel: { provider: "cloudflare-workers-ai", id: "model" },
+    });
+    const model = makeModel("model", "cloudflare-workers-ai");
+    const registry = makeRegistry([model], {
+      env: { CLOUDFLARE_ACCOUNT_ID: "account-123" },
+    });
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    const result = await runtime.resolveModel({
+      model: undefined,
+      modelRegistry: registry,
+      hasUI: false,
+      stageModel: { provider: "cloudflare-workers-ai", id: "model" },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      env: { CLOUDFLARE_ACCOUNT_ID: "account-123" },
+    });
+  });
+
+  it("refreshes a stale ambient credential snapshot once", async () => {
+    writeConfig({
+      observerModel: { provider: "amazon-bedrock", id: "model" },
+    });
+    const model = makeModel("model", "amazon-bedrock");
+    let configured = false;
+    const registry = {
+      ...makeRegistry([model]),
+      hasConfiguredAuth: vi.fn(() => configured),
+      getApiKeyAndHeaders: vi.fn(async () => ({ ok: true })),
+      refresh: vi.fn(async () => {
+        configured = true;
+      }),
+      isUsingOAuth: vi.fn(() => false),
+    };
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    const result = await runtime.resolveModel({
+      model: undefined,
+      modelRegistry: registry,
+      hasUI: false,
+      stageModel: { provider: "amazon-bedrock", id: "model" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(registry.refresh).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowNetwork: false,
+        providers: ["amazon-bedrock"],
+      }),
+    );
+  });
   it("resolves primary stage model when available", async () => {
     writeConfig({
       observerModel: { provider: "openrouter", id: "primary-model:free" },

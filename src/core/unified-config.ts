@@ -107,6 +107,11 @@ export interface UnifiedConfig {
    *  ONLY applies when compactionEngine: "blackhole" */
   tailBehavior: "pi-default" | "minimal";
 
+  /** Maximum historical tool-output text tokens retained in provider context.
+   *  Newest consumed outputs are retained first; omitted outputs remain recallable.
+   *  0 = disabled (opt-out). */
+  retainedToolOutputMaxTokens: number;
+
   /** Token threshold for observer runs. */
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
@@ -197,6 +202,7 @@ export const DEFAULTS: UnifiedConfig = {
 
   skipForProviders: [],
   tailBehavior: "minimal",
+  retainedToolOutputMaxTokens: 20_000,
   midRunCompaction: "off",
 
   observeAfterTokens: 15_000,
@@ -219,7 +225,15 @@ export const DEFAULTS: UnifiedConfig = {
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
 
-const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_LEVELS: readonly string[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 // String enums for new config surface
 const COMPACTION_VALUES = ["auto", "manual", "off"] as const;
@@ -319,11 +333,13 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (typeof raw.fullFoldAlways === "boolean") c.fullFoldAlways = raw.fullFoldAlways;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
-  // Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
+  // Numeric fields — use nonNegativeInt for keys where 0 is meaningful
+  // (observerPreambleMaxTokens 0 = auto, retainedToolOutputMaxTokens 0 = disabled)
   const numKeys = [
     "observeAfterTokens",
     "reflectAfterTokens",
     "compactAfterTokens",
+    "retainedToolOutputMaxTokens",
     "observationsPoolMaxTokens",
     "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
@@ -356,7 +372,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
     // everything else must be > 0.
     const validator =
-      k === "observerPreambleMaxTokens" || k === "providerIdleTimeoutMs"
+      k === "observerPreambleMaxTokens" ||
+      k === "providerIdleTimeoutMs" ||
+      k === "retainedToolOutputMaxTokens" // 0 = disabled (opt-in)
         ? nonNegativeInt
         : positiveInt;
     const v = validator(raw[k]);
