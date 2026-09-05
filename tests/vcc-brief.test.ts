@@ -109,9 +109,7 @@ describe("compileBrief", () => {
   });
 
   it("truncates long user text", () => {
-    const longText = Array.from({ length: 300 }, (_, i) => `word${i}`).join(
-      " ",
-    );
+    const longText = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
     const blocks: NormalizedBlock[] = [{ kind: "user", text: longText }];
     const r = compileBrief(blocks);
     expect(r).toContain("(truncated)");
@@ -119,9 +117,7 @@ describe("compileBrief", () => {
   });
 
   it("truncates long assistant text", () => {
-    const longText = Array.from({ length: 300 }, (_, i) => `word${i}`).join(
-      " ",
-    );
+    const longText = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
     const blocks: NormalizedBlock[] = [{ kind: "assistant", text: longText }];
     const r = compileBrief(blocks);
     expect(r).toContain("(truncated)");

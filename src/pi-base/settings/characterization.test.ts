@@ -88,9 +88,7 @@ const FILENAME = "test-scope-config.json";
 
 describe("§2.1 Tab / action-row cycling", () => {
   it("C1: shift+tab reverses the cycle and wraps", () => {
-    const fields: Field[] = [
-      { key: "enabled", type: "boolean", label: "Enabled", value: false },
-    ];
+    const fields: Field[] = [{ key: "enabled", type: "boolean", label: "Enabled", value: false }];
     const tabs = [
       { id: "global", label: "Global" },
       { id: "project", label: "Project Local" },
@@ -115,25 +113,19 @@ describe("§2.1 Tab / action-row cycling", () => {
     expect(body.render(80).join("\n")).toContain("▸ Global");
     // Shift+Tab → Session tab
     body.handleInput?.("\x1b[Z");
-    expect(body.render(80).join("\n")).toContain("▸ Session");
+    expect(body.render(80).join("\n")).toContain("▶ Session");
     // Shift+Tab → Project Local tab
     body.handleInput?.("\x1b[Z");
-    expect(body.render(80).join("\n")).toContain("▸ Project Local");
+    expect(body.render(80).join("\n")).toContain("▶ Project Local");
     // Shift+Tab → Global tab (wrap)
     body.handleInput?.("\x1b[Z");
-    expect(body.render(80).join("\n")).toContain("▸ Global");
+    expect(body.render(80).join("\n")).toContain("▶ Global");
   });
 
   it("C2: Enter on a focused tab returns focus to field zone and toggles the field", () => {
     const onChange = vi.fn();
     const fields: Field[] = [
-      {
-        key: "enabled",
-        type: "boolean",
-        label: "Enabled",
-        value: false,
-        tab: "tab2",
-      },
+      { key: "enabled", type: "boolean", label: "Enabled", value: false, tab: "tab2" },
     ];
     const tabs = [
       { id: "tab1", label: "Tab 1" },
@@ -146,7 +138,7 @@ describe("§2.1 Tab / action-row cycling", () => {
     body.render(80);
     // Tab once: focus lands on Tab 2
     body.handleInput?.("\t");
-    expect(body.render(80).join("\n")).toContain("▸ Tab 2");
+    expect(body.render(80).join("\n")).toContain("▶ Tab 2");
     // Press Enter — returns focus to field zone, does NOT toggle yet
     body.handleInput?.("\r");
     // Focus returned to field zone — active tab is still Tab 2
@@ -164,13 +156,7 @@ describe("§2.1 Tab / action-row cycling", () => {
     const close = vi.fn();
     const onChange = vi.fn();
     const fields: Field[] = [
-      {
-        key: "enabled",
-        type: "boolean",
-        label: "Enabled",
-        value: false,
-        tab: "tab2",
-      },
+      { key: "enabled", type: "boolean", label: "Enabled", value: false, tab: "tab2" },
     ];
     const tabs = [
       { id: "tab1", label: "Tab 1" },
@@ -256,16 +242,12 @@ describe("§2.4 Misc gaps", () => {
     body.render(80);
     // Initial selection at row 0
     const initial = body.render(80).join("\n");
-    const initialSelected = initial
-      .split("\n")
-      .findIndex((l) => l.includes("▌"));
+    const initialSelected = initial.split("\n").findIndex((l) => l.includes("▌"));
     expect(initialSelected).toBeGreaterThanOrEqual(0);
     // PageDown
     body.handleInput?.("\x1b[6~");
     const afterDown = body.render(80).join("\n");
-    const downSelected = afterDown
-      .split("\n")
-      .findIndex((l) => l.includes("▌"));
+    const downSelected = afterDown.split("\n").findIndex((l) => l.includes("▌"));
     expect(downSelected).toBe(initialSelected + 5);
     // PageUp
     body.handleInput?.("\x1b[5~");
@@ -276,9 +258,7 @@ describe("§2.4 Misc gaps", () => {
 
   it("C18: ctrl+r on a field with default resets value and calls onChange", () => {
     const onChange = vi.fn();
-    const fields: Field[] = [
-      { key: "num", type: "number", label: "Num", value: 10, default: 5 },
-    ];
+    const fields: Field[] = [{ key: "num", type: "number", label: "Num", value: 10, default: 5 }];
     const body = createSettingsModalBody<Field>(
       { fields, onChange },
       { tui: fakeTui(), theme: fakeTheme(), ctx: fakeCtx(), close: vi.fn() },
@@ -287,10 +267,6 @@ describe("§2.4 Misc gaps", () => {
     // ctrl+r
     body.handleInput?.("\x12");
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(
-      "num",
-      5,
-      expect.objectContaining({ key: "num" }),
-    );
+    expect(onChange).toHaveBeenCalledWith("num", 5, expect.objectContaining({ key: "num" }));
   });
 });

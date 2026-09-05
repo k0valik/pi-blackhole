@@ -178,9 +178,7 @@ describe("append rebase surgery", () => {
     // The folded segment carries the merged VCC material from all three cycles.
     expect(r1).toContain("parser timeout");
     // Old segments stay byte-identical in storage; collection just stops at R1.
-    expect(branchEntries[0].details.segment.summary).toContain(
-      "[Blackhole Append Segment 1]",
-    );
+    expect(branchEntries[0].details.segment.summary).toContain("[Blackhole Append Segment 1]");
     expect(s3.segment.summary).toContain("[Blackhole Append Segment 3]");
   });
 });

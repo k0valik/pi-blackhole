@@ -102,9 +102,7 @@ function defaultState(): PendingOMState {
 }
 
 function isEmptyState(s: PendingOMState): boolean {
-  const hasCursors =
-    s.cursors &&
-    (s.cursors.observer || s.cursors.reflector || s.cursors.dropper);
+  const hasCursors = s.cursors && (s.cursors.observer || s.cursors.reflector || s.cursors.dropper);
   if (hasCursors) return false;
   return (
     !s.observation &&
@@ -256,10 +254,7 @@ function sanitizePendingState(raw: PendingOMState): PendingOMState {
  * Each new run covers all entries since last branch append, so the latest
  * result fully subsumes any previous one.
  */
-export function savePendingObservation(
-  sessionId: string,
-  entry: PendingObservation,
-): void {
+export function savePendingObservation(sessionId: string, entry: PendingObservation): void {
   const state = readSessionState(sessionId);
   state.observation = entry;
   // Append to accumulated batches for LLM context and /blackhole flush.
@@ -272,10 +267,7 @@ export function savePendingObservation(
 /**
  * Save (replace) the latest reflection result for a session.
  */
-export function savePendingReflection(
-  sessionId: string,
-  entry: PendingReflection,
-): void {
+export function savePendingReflection(sessionId: string, entry: PendingReflection): void {
   const state = readSessionState(sessionId);
   state.reflection = entry;
   // Append to accumulated batches for LLM context and /blackhole flush.
@@ -288,10 +280,7 @@ export function savePendingReflection(
  * append to droppedBatches so no drops are lost across cycles
  * before /blackhole flush.
  */
-export function savePendingDropped(
-  sessionId: string,
-  entry: PendingDropped,
-): void {
+export function savePendingDropped(sessionId: string, entry: PendingDropped): void {
   const state = readSessionState(sessionId);
   state.dropped = entry;
   state.droppedBatches = [...(state.droppedBatches ?? []), entry];
@@ -302,10 +291,7 @@ export function savePendingDropped(
  * Check whether a coversUpToId matches the already-pending observation
  * for the given session. Returns true if the chunk was already processed.
  */
-export function isObservationChunkPending(
-  sessionId: string,
-  coversUpToId: string,
-): boolean {
+export function isObservationChunkPending(sessionId: string, coversUpToId: string): boolean {
   const s = readSessionState(sessionId);
   return s.observation?.coversUpToId === coversUpToId;
 }
@@ -314,10 +300,7 @@ export function isObservationChunkPending(
  * Check whether a coversUpToId matches the already-pending reflection
  * for the given session.
  */
-export function isReflectionChunkPending(
-  sessionId: string,
-  coversUpToId: string,
-): boolean {
+export function isReflectionChunkPending(sessionId: string, coversUpToId: string): boolean {
   const s = readSessionState(sessionId);
   return s.reflection?.coversUpToId === coversUpToId;
 }
@@ -338,19 +321,14 @@ export function hasPendingData(sessionId: string): boolean {
 }
 
 /** Read cursors from pending state for a session. */
-export function readPendingCursors(
-  sessionId: string,
-): PendingOMState["cursors"] {
+export function readPendingCursors(sessionId: string): PendingOMState["cursors"] {
   const state = readSessionState(sessionId);
   return state.cursors;
 }
 
 /** Write cursors to pending state for a session (replaces existing cursors).
  *  Uses assignment (not merge) so deletions from validateCursors persist. */
-export function writePendingCursors(
-  sessionId: string,
-  cursors: PendingOMState["cursors"],
-): void {
+export function writePendingCursors(sessionId: string, cursors: PendingOMState["cursors"]): void {
   const state = readSessionState(sessionId);
   state.cursors = { ...cursors };
   writeSessionState(sessionId, state);

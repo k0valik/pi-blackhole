@@ -1,9 +1,7 @@
 /**
  * Common theme overlays for TUI components.
  */
-export function overlaySelectListTheme(theme: {
-  fg: (color: string, text: string) => string;
-}) {
+export function overlaySelectListTheme(theme: { fg: (color: string, text: string) => string }) {
   return {
     selectedPrefix: (text: string) => theme.fg("accent", text),
     selectedText: (text: string) => theme.fg("accent", text),

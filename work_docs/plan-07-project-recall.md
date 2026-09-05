@@ -409,6 +409,65 @@ Chrollo's `parseLine` keeps only user/assistant message lines — `om.*` custom 
 
 ---
 
+## §19 — Machine recon receipts (2026-08-25, branch `feat/project-recall`)
+
+Empirical validation of §17/Appendix A assumptions against the real corpus (`~/.pi/agent/sessions`, 1202 files / 1100MB / 1 corrupt line; `~/.pi/agent/pi-blackhole`, 420 pending/stale files). Throwaway scripts under `/tmp/opencode/recon/`; findings below are measured, not estimated.
+
+### 19.1 Corpus inventory
+
+| Signal | Value |
+|---|---|
+| Sessions carrying om markers | 305 of 1202 (571MB), range 2026-05-11 → 2026-08-14 |
+| `om.observations.recorded` | 297 entries → **17,646 observations, 100% shape-valid** against current validators |
+| Relevance spread | high 9919 / medium 4829 / critical 1789 / low 1109 |
+| Observation content mass | ~759k est tokens (3.0M chars) |
+| `om.reflections.recorded` | 221 entries → 2396 reflections; `supportingObservationIds` resolve vs same-file obs ids at **99.9%** |
+| `om.observations.dropped` | only 12 entries / 1200 ids — dropper status signal is thin |
+| Legacy `om.observation` | 8 entries, different shape (`data.records`, `YYYY-MM-DD HH:MM` timestamps, no tokenCount/coversUpToId) → tiny export shim needed |
+| `om.folded` | **zero occurrences in the wild** → MemoryDetails handling can be deferred |
+| Internal linkage | `sourceEntryIds` resolve in-file 99.97%, `coversUpToId` 99.87% |
+| Pending files | 2204 obs + 531 refl + 42 drops across 86 batch-bearing files (+330 cursor-only shells from the known June 19–24 manual-mode recording gap — ignore that window); **249 orphaned** (no matching session file) still holding real data → export must include orphans and prefer main over `.stale` |
+
+### 19.2 Compaction is a view boundary, not deletion (docs corrected)
+
+Claim found in session-forensics skill + `scripts/om-session-parser.mjs` header was wrong. Measured: pre-compaction-boundary `coversUpToId` resolves 200/200, pre-boundary `sourceEntryIds` 956/956 across sampled compacted sessions; parser reads all lines (0 mismatches). pi appends a `compaction` entry with `firstKeptEntryId`; `buildSessionContext` slices the view only. Fixed: skill SKILL.md (4 spots), parser comments (on `feat/token-rework`, where the script lives). Consequence for this plan: whole-file scanning sees full history; D7 race safety only needs to exclude the *active* file.
+
+### 19.3 Two id spaces (wiring note for §17.4)
+
+Observation/reflection `id`s are 12-hex **memory ids**; observations' `sourceEntryIds` are **entry ids**; reflections' `supportingObservationIds` point at observation memory ids. The project ledger index must key both spaces.
+
+### 19.4 Duplication analysis (recon nr.2 — author's slicing guidance applied)
+
+Author guidance: relevance tiers feed RRF criticality, timestamps feed recency/scoring, memory ids carry no rendered value → output slices to content only. Measured duplication:
+
+| Metric | Value |
+|---|---|
+| Exact-normalized duplicate copies | **47.9% of all obs** (8554 redundant); tokens 767k → 371k by hash dedup alone |
+| Fuzzy lev@0.92 adds | only ~4% further savings (387k vs 371k); insensitive across 0.90–0.95 |
+| Cluster profile @0.92 | 9740 clusters, 74.2% singletons; dup clusters: 1805 span >1 file, 705 same-file bursts |
+| Mega-clusters (50–84×) | all trace to **one logical session copied into 3 scope dirs × within-file repeat bursts** (member timestamps span ~2 minutes) |
+| Cross-scope session copies | 51 session ids present in >1 scope dir (50× three-way, all project-move artifacts) |
+| Low/med boilerplate repeats (author's hypothesis) | real but small: 759 groups of 2–3; every large group traces back to copy inflation |
+
+Design consequences:
+1. **Exact-normalized dedup FIRST** (cheap content hash) — halves the corpus, kills fork/move inflation and record bursts. Levenshtein clustering is a refinement (paraphrase merge + display cap ≤3 per A.1), not the main lever.
+2. **Session-id dedup**: same header `session.id` in multiple scope dirs = one logical session (keep newest mtime). This also mitigates the project-identity fragmentation (this repo's history spans `projects/pi-blackhole-dev`, `~/pi-blackhole-dev`, `.pi/agent/extensions/pi-blackhole`).
+3. **Cluster-size boost must be damped** (`log(1+distinctLogicalSessions)`): raw repetition counts pipeline artifacts and single-episode bursts, not long-horizon recurrence. Linear boosting would be badly wrong.
+4. Relevance tiers survive as rank inputs even among duplicates; low-value boilerplate repeats exist but rarely exceed 2–3×.
+5. Export sizing: global rep-only ≈ 371k est tokens (~1.5MB raw) → A.1's "50–100kb distilled" needs relevance+recency filtering and/or per-project scoping on top of dedup.
+
+### 19.5 Latency receipt
+
+Pure-Node whole-corpus scan (parse every line of all 1202 files): 9.4s. rg over one project's marker-bearing subset will be far below that; D2's bounded single-pass discipline is comfortable at this corpus size.
+
+### 19.6 Project scoping + reflection elevation (author notes, 2026-08-25)
+
+- **One scope folder = one project.** Corpus walks only the cwd-encoded scope dir (`--home-kovalik-projects-pi-blackhole-dev--`), plus the git-root-encoded dir as secondary candidate when it differs. Other projects' session files are never opened — speed + true "current project" scoping.
+- **Reflections outrank all raw observations.** Pipeline semantics: the reflector is a second LLM pass that reviewed, dropped, and promoted observations before distilling them, so a reflection carries verified value from the project's perspective. `/blackhole-export` renders the Reflections section above every observation tier and scores reflections with high-tier weight × an evidence-mass multiplier `1+log2(1+supportingObservationIds.length)` (damped, per §19.4).
+- Cheap prefilter discipline: attributed session files are skipped before JSON parsing when a buffered read shows no `om.` substring at all.
+
+---
+
 ## Appendix A — `/blackhole export` — distilled project memory dump (author concept, 2026-08-20)
 
 Closely tied to the project-recall plan: same treatment, reuses the same primitives (chrollo search/normalize, tf-idf/RRF/recency ranking, levenshtein dedup, unified observation corpus from §17) and builds on it.
@@ -432,3 +491,25 @@ Instead, the export command turns the observation pipeline's accumulated output 
 ### A.3 Tests
 
 - Fixture project sessions + pending.json batch: export output strips prefixes, caps near-identical observations at 2–3, boosts recurring insights, and is valid markdown.
+
+### A.4 Implementation decisions (2026-08-26, branch `feat/project-recall`)
+
+The first export commit (a123e12) was a deterministic, deduplicated dump: 83 sessions → 3053 observations → 1421 unique bullets + 568 reflections, tiered but flat. The improvements below move it **from a deduplicated dump toward a distilled, topic-organized brief** (the direction agreed with the author: anyone in possession of the `.md` can import it into their own memory system). Commit is `A4-shipped` (see CHANGELOG/commit message); rationale for each decision:
+
+| # | Decision | Rationale |
+|---|---|---|
+| **A4-D1** | Command output is delivered via `pi.sendMessage({customType:"blackhole-export", content, display:true})` with **no `triggerTurn`**; a `ctx.ui.notify("Exporting project memory…", "info")` shows the working indicator | `triggerTurn:true` made the agent start reading the export as a new turn — the export is a **user artifact**, not agent context. `display:true` (the pi-context/pi-cache pattern) renders the notification in the TUI; the agent stays on task. The file on disk is the artifact. |
+| **A4-D2** | `CorpusReflection` preserves `supportingObservationIds: string[]` instead of collapsing to `supportingCount: number` | Coverage-weighted ranking needs the actual id set: an observation's export score must reflect **how many reflections validated it**. Damping (log-scale) happens at scoring time, not parse time. |
+| **A4-D3** | Three-pass dedup: exact normalized → Levenshtein@0.92 (bigram-Jaccard prefilters) → **Sørensen-Dice token-set similarity** over remaining reps | Levenshtein edits catch near-identical wording but miss paraphrases that reorder/swap vocabulary. Sørensen-Dice is order-independent: `2·|A∩B|/(|A|+|B|)` over stop-word-stripped token sets. Merges require **Sørensen-Dice ≥ 0.75 AND Levenshtein ≥ 0.60** — the Levenshtein floor prevents pure keyword overlap from merging distinct facts. |
+| **A4-D4** | Stop-word stripping before tokenization, explicitly including `user`/`agent` | Those two words appear in a vast majority of observations (observer prompt patterns); they would dominate token-set overlap and inflate similarity for unrelated items. The stop list covers English function words + discourse markers (exported as `STOP_WORDS`). |
+| **A4-D5** | Coverage-weighted ranking: score × `(1 + 0.3·log2(1 + coverage))`, where coverage = count of reflections citing any member id | A reflection is a second LLM pass that reviewed and validated the observation; covered observations are verified durable facts and outrank equal-tier unsupported ones. Log-scaled so 10 citations don't dominate the tier term. |
+| **A4-D6** | Consensus rerank: score × `(1 + 0.2 · maxRelatedSimilarity)`, where maxRelatedSimilarity = max Sørensen-Dice to any sibling cluster | Clusters sharing vocabulary with a sibling represent recurring themes; the small weight breaks ties without letting keyword overlap masquerade as importance. |
+| **A4-D7** | Viability gate: low-tier clusters with <2 distinct sessions and zero reflection coverage are dropped; medium similarly but kept when ≥50 chars | Cuts the noise floor (single-session transient notes, setup scaffolding) with zero LLM involvement. Measured corpus: removes the majority of the ~1421 unique observations while keeping all high/critical and every recurrence. |
+| **A4-D8** | Orphan (unattributed pending) observations render only when their cluster spans ≥2 orphaned sessions | The measured corpus had 858 orphan observations from 34 lost sessions — almost entirely single-occurrence crash noise. Cross-session orphans are the only ones likely to carry durable signal. |
+| **A4-D9** | Topic grouping replaces the flat tier dump: observation clusters group by shared content keywords (top-2 TF per cluster), connected via union-find; sections labeled by top-2 shared keywords; reflections matching a topic render beneath it; unmatched reflections stay in the top Reflections section (with a note when distribution happened) | Wiki-importability is the stated goal (§A.1): a flat 600+ bullet list is a database dump, not a document. Keyword-derived topics are deterministic, dependency-free, and stable across runs. Fallback to tier sections when <2 topics form (corpus too diverse). |
+| **A4-D10** | Generic-keyword guard: keywords shared by >30% of clusters are excluded from topic edges (`GENERIC_KEYWORD_RATIO = 0.3`) | Words like `config`/`code`/`file` appear everywhere; connecting on them would merge the whole corpus into one topic. |
+| **A4-D11** | Bullets surface provenance inline: `(across N sessions)`, `(recorded N×)`; fuzzy extras render as indented sub-bullets; wording `seen across` → `across` | Frequency signal was previously hidden in the stats footer only; surfacing it inline makes recurrence visible to a reader (human or importing agent) without parsing headers. |
+| **A4-D12** | Stats extended: `observationsClustered`, `observationsRendered`, `observationsFiltered`, `topicGroups`; header shows rendered count after the viability gate | The old "1421 unique" overstated what the reader actually receives; the new header says how many survive dedup **and** the gate, plus how many clusters the gate removed. |
+| **A4-D13** | Multi-pass clustering runs statelessly on every export (no caching layer) | Deterministic output is the author requirement (same corpus → same file); the corpus walk is already bounded to the project scope folders + pending dir (§19.5). |
+
+**Tests** — `tests/blackhole-export.test.ts` gained an `orphan456-pending.json` fixture (a cross-session orphan survivor, needed because A4-D8 requires ≥2 orphaned sessions to render) and asserts the new `across 2 sessions` meta. All 1421 tests green; typecheck, lint, and format all clean.

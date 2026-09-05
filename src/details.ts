@@ -55,8 +55,7 @@ export interface PiVccCompactionDetailsV2 {
   retainedToolOutputProjection?: RetainedToolOutputProjection;
 }
 
-export type PiVccCompactionDetails =
-  PiVccCompactionDetailsV1 | PiVccCompactionDetailsV2;
+export type PiVccCompactionDetails = PiVccCompactionDetailsV1 | PiVccCompactionDetailsV2;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -65,9 +64,7 @@ const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === "string");
 
 /** Fail-closed validator for persisted append details. */
-export function isPiVccCompactionDetailsV2(
-  value: unknown,
-): value is PiVccCompactionDetailsV2 {
+export function isPiVccCompactionDetailsV2(value: unknown): value is PiVccCompactionDetailsV2 {
   if (!isRecord(value)) return false;
   if (
     value.compactor !== "blackhole" ||
@@ -98,10 +95,7 @@ export function isPiVccCompactionDetailsV2(
   }
 
   const sequence = segment.sequence as number;
-  if (
-    (value.chainStart && sequence !== 1) ||
-    (!value.chainStart && sequence === 1)
-  ) {
+  if ((value.chainStart && sequence !== 1) || (!value.chainStart && sequence === 1)) {
     return false;
   }
 

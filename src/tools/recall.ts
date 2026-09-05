@@ -8,19 +8,12 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
-import {
-  searchEntries,
-  getFileIndicators,
-  getTouchedFiles,
-} from "../core/search-entries";
+import { searchEntriesDetailed, getFileIndicators, getTouchedFiles } from "../core/search-entries";
 import type { RenderedEntry } from "../core/render-entries";
 import type { SearchHit } from "../core/search-entries";
 import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall";
 import { getActiveLineageEntryIds } from "../core/lineage";
-import {
-  normalizeRecallScope,
-  normalizeRecallMode,
-} from "../core/recall-scope";
+import { normalizeRecallScope, normalizeRecallMode } from "../core/recall-scope";
 import { parseDrillDown, expandEntryFile } from "../core/drill-down.js";
 import { recallMemorySources, type Entry } from "../om/ledger/recall.js";
 import { renderRecallSourceEntries } from "../om/serialize.js";
@@ -37,10 +30,7 @@ import {
 const DEFAULT_RECENT = 25;
 const PAGE_SIZE = 5;
 
-export const invalidExpandIndices = (
-  requested: number[],
-  available: Set<number>,
-): number[] =>
+export const invalidExpandIndices = (requested: number[], available: Set<number>): number[] =>
   requested.filter((i) => !Number.isInteger(i) || !available.has(i));
 
 /**
@@ -94,17 +84,11 @@ async function vccRecall(
   const scope = normalizeRecallScope(params.scope);
   const mode = normalizeRecallMode(params.mode);
   const lineageEntryIds =
-    scope === "lineage"
-      ? getActiveLineageEntryIds(ctx.sessionManager)
-      : undefined;
+    scope === "lineage" ? getActiveLineageEntryIds(ctx.sessionManager) : undefined;
 
   // ── "touched" mode: aggregate file operations ──
   if (mode === "touched") {
-    const { rendered, rawMessages } = loadAllMessages(
-      sessionFile,
-      false,
-      lineageEntryIds,
-    );
+    const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
     const touched = getTouchedFiles(rawMessages, rendered);
     const text = formatTouchedOutput(touched, params.page);
     return { content: [{ type: "text" as const, text }], details: undefined };
@@ -116,11 +100,7 @@ async function vccRecall(
   // ── Pre-load full messages if expand is requested ──
   let expandedFullEntries: RenderedEntry[] | undefined;
   if (hasExpand) {
-    const { rendered: fullMsgs } = loadAllMessages(
-      sessionFile,
-      true,
-      lineageEntryIds,
-    );
+    const { rendered: fullMsgs } = loadAllMessages(sessionFile, true, lineageEntryIds);
     const requested = [...expandSet];
     const byIndex = new Map(fullMsgs.map((m) => [m.index, m]));
     const invalid = invalidExpandIndices(requested, new Set(byIndex.keys()));
@@ -142,8 +122,7 @@ async function vccRecall(
     // Expand-only path (no query): return expanded entries immediately
     if (!params.query) {
       let output =
-        (scope === "all" ? "Scope: all\n\n" : "") +
-        formatRecallOutput(expandedFullEntries);
+        (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(expandedFullEntries);
 
       // Coupling: look up related OM observations
       const expandedIds = expandedFullEntries.map((e) => e.id).filter(Boolean);
@@ -168,13 +147,12 @@ async function vccRecall(
     // With query: fall through to search, then merge expanded entries into results
   }
 
-  const { rendered: msgs, rawMessages } = loadAllMessages(
-    sessionFile,
-    false,
-    lineageEntryIds,
-  );
-  let allResults: SearchHit[] = params.query?.trim()
-    ? searchEntries(msgs, rawMessages, params.query, undefined, mode)
+  const { rendered: msgs, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
+  const searchResult = params.query?.trim()
+    ? searchEntriesDetailed(msgs, rawMessages, params.query, undefined, mode)
+    : undefined;
+  let allResults: SearchHit[] = searchResult
+    ? searchResult.hits
     : msgs.slice(-DEFAULT_RECENT).map((entry, i) => {
         const msgIndex = Math.max(0, msgs.length - DEFAULT_RECENT) + i;
         const msg = rawMessages[msgIndex];
@@ -193,26 +171,35 @@ async function vccRecall(
   if (expandedFullEntries) {
     // Track expand-only entries that don't match the query so the header can distinguish them
     const existingIndices = new Set(allResults.map((r) => r.index));
-    appendedExpandCount = expandedFullEntries.filter(
-      (fe) => !existingIndices.has(fe.index),
-    ).length;
-    allResults = mergeExpandedIntoSearchResults(
-      allResults,
-      expandedFullEntries,
-    );
+    appendedExpandCount = expandedFullEntries.filter((fe) => !existingIndices.has(fe.index)).length;
+    allResults = mergeExpandedIntoSearchResults(allResults, expandedFullEntries);
   }
 
   if (params.query?.trim()) {
     const page = Math.max(1, params.page ?? 1);
+    const truncationNote = searchResult?.truncated
+      ? ` — showing ${searchResult.hits.length} of ${searchResult.totalBeforeCap} matches, refine your query for more precise results`
+      : "";
+    const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
+    if (allResults.length > 0 && page > totalPages) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Page ${page} is outside the available range 1-${totalPages} (${allResults.length} matches${scope === "all" ? " (scope: all)" : ""}${truncationNote}). Use a page between 1 and ${totalPages}.`,
+          },
+        ],
+        details: undefined,
+      };
+    }
     const start = (page - 1) * PAGE_SIZE;
     const pageResults: SearchHit[] = allResults.slice(start, start + PAGE_SIZE);
-    const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
     const scopeSuffix = scope === "all" ? " (scope: all)" : "";
     const matchCount = allResults.length - appendedExpandCount;
     const header =
       totalPages > 1
-        ? `Page ${page}/${totalPages} (${matchCount} matches${appendedExpandCount > 0 ? ` + ${appendedExpandCount} expanded` : ""}${scopeSuffix})`
-        : `${matchCount} matches${appendedExpandCount > 0 ? ` (+ ${appendedExpandCount} expanded)` : ""}${scopeSuffix}`;
+        ? `Page ${page}/${totalPages} (${matchCount} matches${appendedExpandCount > 0 ? ` + ${appendedExpandCount} expanded` : ""}${scopeSuffix}${truncationNote})`
+        : `${matchCount} matches${appendedExpandCount > 0 ? ` (+ ${appendedExpandCount} expanded)` : ""}${scopeSuffix}${truncationNote}`;
     const footer =
       page < totalPages
         ? `\n--- Use page:${page + 1}${scope === "all" ? " with scope:'all'" : ""} for more results ---`
@@ -243,8 +230,7 @@ async function vccRecall(
 
   // No query: show recent entries (expand already merged above)
   const output =
-    (scope === "all" ? "Scope: all\n\n" : "") +
-    formatRecallOutput(allResults, params.query);
+    (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(allResults, params.query);
   return {
     content: [{ type: "text" as const, text: output }],
     details: undefined,
@@ -282,8 +268,7 @@ async function omRecall(memoryId: string, ctx: any) {
     };
   }
   const lines: string[] = [];
-  if (result.collision)
-    lines.push(`ID ${result.memoryId} matched multiple items.`);
+  if (result.collision) lines.push(`ID ${result.memoryId} matched multiple items.`);
   for (const ref of result.reflections) {
     lines.push(`[${ref.reflection.id}] ${ref.reflection.content}`);
   }
@@ -300,9 +285,7 @@ async function omRecall(memoryId: string, ctx: any) {
     try {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (sessionFile) {
-        const { rendered } = await Promise.resolve(
-          loadAllMessages(sessionFile, false),
-        );
+        const { rendered } = await Promise.resolve(loadAllMessages(sessionFile, false));
         const idToIndex = buildIndexMap(rendered);
         const indexAnnotation = formatEntryIndexAnnotation(
           result.observations.flatMap((o) => o.sourceEntryIds),
@@ -315,8 +298,7 @@ async function omRecall(memoryId: string, ctx: any) {
     }
     lines.push(renderRecallSourceEntries(result.sourceEntries));
   }
-  const text =
-    lines.join("\n") || `Memory ${memoryId} found, but no evidence rendered.`;
+  const text = lines.join("\n") || `Memory ${memoryId} found, but no evidence rendered.`;
   return { content: [{ type: "text" as const, text }], details: undefined };
 }
 
@@ -350,14 +332,12 @@ export function registerRecallTool(pi: ExtensionAPI): void {
       ),
       page: Type.Optional(
         Type.Number({
-          description:
-            "Page number (1-based) for paginated results. Default: 1.",
+          description: "Page number (1-based) for paginated results. Default: 1.",
         }),
       ),
       scope: Type.Optional(
         StringEnum(["lineage", "all"] as const, {
-          description:
-            "Search scope. lineage = active lineage (default), all = entire session.",
+          description: "Search scope. lineage = active lineage (default), all = entire session.",
         }),
       ),
       mode: Type.Optional(
@@ -371,18 +351,14 @@ export function registerRecallTool(pi: ExtensionAPI): void {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         return {
-          content: [
-            { type: "text" as const, text: "No session file available." },
-          ],
+          content: [{ type: "text" as const, text: "No session file available." }],
           details: undefined,
         };
       }
 
       const scope = normalizeRecallScope(params.scope);
       const lineageEntryIds =
-        scope === "lineage"
-          ? getActiveLineageEntryIds(ctx.sessionManager)
-          : undefined;
+        scope === "lineage" ? getActiveLineageEntryIds(ctx.sessionManager) : undefined;
 
       // Drill-down: #N:path resolves to file-scoped tool content. Anchored so
       // inline mentions like "see #42:auth.ts" are never treated as drill-down.
@@ -394,11 +370,7 @@ export function registerRecallTool(pi: ExtensionAPI): void {
       if (q && parseDrillDown(q)) {
         const parsed = parseDrillDown(q)!;
         if (lineageEntryIds) {
-          const { rendered } = loadAllMessages(
-            sessionFile,
-            false,
-            lineageEntryIds,
-          );
+          const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
           if (!rendered.some((m) => m.index === parsed.index)) {
             return {
               content: [

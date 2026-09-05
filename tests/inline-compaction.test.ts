@@ -4,11 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import {
-  fauxAssistantMessage,
-  fauxToolCall,
-  type Context,
-} from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 
@@ -161,9 +157,7 @@ function createSessionClass(options: {
   };
 }
 
-async function refreshNextTurn(
-  session: InstanceType<ReturnType<typeof createSessionClass>>,
-) {
+async function refreshNextTurn(session: InstanceType<ReturnType<typeof createSessionClass>>) {
   return await session.agent.prepareNextTurnWithContext(
     {
       context: {
@@ -180,31 +174,28 @@ describe("Blackhole inline compaction adapter", () => {
   it.each([
     ["Pi 0.81 legacy disconnect shape", true],
     ["Pi 0.84 connected-listener shape", false],
-  ])(
-    "compacts without aborting the active run on %s",
-    async (_label, legacyDisconnect) => {
-      const SessionClass = createSessionClass({ legacyDisconnect });
-      const status = installInlineCompactionAdapter({
-        sessionClass: SessionClass as never,
-      });
-      const session = new SessionClass();
+  ])("compacts without aborting the active run on %s", async (_label, legacyDisconnect) => {
+    const SessionClass = createSessionClass({ legacyDisconnect });
+    const status = installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+    });
+    const session = new SessionClass();
 
-      session._bindExtensionCore({});
-      const result = await compactInlineAtTurnBoundary(
-        session.sessionManager,
-        "preserve active work",
-      );
+    session._bindExtensionCore({});
+    const result = await compactInlineAtTurnBoundary(
+      session.sessionManager,
+      "preserve active work",
+    );
 
-      expect(status).toEqual({ supported: true });
-      expect(result.summary).toBe("summary");
-      expect(session.customInstructions).toBe("preserve active work");
-      expect(session.compactCalls).toBe(1);
-      expect(session.originalAbortCalls).toBe(0);
-      expect(session.disconnectCalls).toBe(0);
-      expect(session.reconnectCalls).toBe(legacyDisconnect ? 1 : 0);
-      expect(session.bindCalls).toBe(1);
-    },
-  );
+    expect(status).toEqual({ supported: true });
+    expect(result.summary).toBe("summary");
+    expect(session.customInstructions).toBe("preserve active work");
+    expect(session.compactCalls).toBe(1);
+    expect(session.originalAbortCalls).toBe(0);
+    expect(session.disconnectCalls).toBe(0);
+    expect(session.reconnectCalls).toBe(legacyDisconnect ? 1 : 0);
+    expect(session.bindCalls).toBe(1);
+  });
 
   it("replaces the low-level loop snapshot with compacted agent messages on the next turn", async () => {
     const SessionClass = createSessionClass({ legacyDisconnect: false });
@@ -227,9 +218,7 @@ describe("Blackhole inline compaction adapter", () => {
       activeMessages: [
         {
           role: "assistant",
-          content: [
-            { type: "toolCall", id: "tool-1", name: "read", arguments: {} },
-          ],
+          content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: {} }],
         },
       ],
     });
@@ -237,9 +226,9 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new SessionClass();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).rejects.toThrow("tool call is still in flight");
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).rejects.toThrow(
+      "tool call is still in flight",
+    );
     expect(session.compactCalls).toBe(0);
     expect(session.originalAbortCalls).toBe(0);
   });
@@ -277,9 +266,9 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new SessionClass();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).resolves.toMatchObject({ summary: "summary" });
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
+      summary: "summary",
+    });
     expect(session.compactCalls).toBe(1);
   });
 
@@ -301,9 +290,9 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new SessionClass();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).rejects.toThrow("tool call is still in flight");
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).rejects.toThrow(
+      "tool call is still in flight",
+    );
     expect(session.compactCalls).toBe(0);
   });
 
@@ -330,9 +319,9 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new SessionClass();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).resolves.toMatchObject({ summary: "summary" });
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
+      summary: "summary",
+    });
     expect(session.compactCalls).toBe(1);
   });
 
@@ -360,9 +349,9 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new SessionClass();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).resolves.toMatchObject({ summary: "summary" });
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
+      summary: "summary",
+    });
     expect(session.compactCalls).toBe(1);
   });
 
@@ -374,10 +363,7 @@ describe("Blackhole inline compaction adapter", () => {
           stopReason: "aborted",
         }),
         fauxAssistantMessage(
-          [
-            fauxToolCall("read", {}, { id: "read-2" }),
-            fauxToolCall("read", {}, { id: "read-3" }),
-          ],
+          [fauxToolCall("read", {}, { id: "read-2" }), fauxToolCall("read", {}, { id: "read-3" })],
           { stopReason: "toolUse" },
         ),
       ],
@@ -386,9 +372,9 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new SessionClass();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).rejects.toThrow("tool call is still in flight");
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).rejects.toThrow(
+      "tool call is still in flight",
+    );
     expect(session.compactCalls).toBe(0);
   });
 
@@ -441,9 +427,7 @@ describe("Blackhole inline compaction adapter", () => {
       override async compact() {
         if (this.invokeExpectedAbort) await this.abort();
         this.sessionManager.appendCompaction();
-        this.agent.state.messages = [
-          { role: "user", content: "mutated-summary" },
-        ];
+        this.agent.state.messages = [{ role: "user", content: "mutated-summary" }];
         return {
           summary: "mutated-summary",
           firstKeptEntryId: "kept-1",
@@ -460,22 +444,19 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new PostMutationDriftSession();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).rejects.toThrow("quiesce hooks were not invoked");
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).rejects.toThrow(
+      "quiesce hooks were not invoked",
+    );
     const next = await refreshNextTurn(session);
 
-    expect(next.context.messages).toEqual([
-      { role: "user", content: "mutated-summary" },
-    ]);
+    expect(next.context.messages).toEqual([{ role: "user", content: "mutated-summary" }]);
   });
 
   it("ignores method-like text in literals when detecting compact shape", () => {
     const SessionClass = createSessionClass({ legacyDisconnect: false });
     class TextBearingSession extends SessionClass {
       override async compact(customInstructions?: string) {
-        const diagnostic =
-          "this.abort() this._disconnectFromAgent() this._reconnectToAgent()";
+        const diagnostic = "this.abort() this._disconnectFromAgent() this._reconnectToAgent()";
         void diagnostic;
         const nestedDiagnostic = `outer ${`this.abort()`} tail`;
         void nestedDiagnostic;
@@ -534,9 +515,7 @@ describe("Blackhole inline compaction adapter", () => {
     const session = new CleanupFailureSession();
     session._bindExtensionCore({});
 
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).rejects.toThrow("restore");
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).rejects.toThrow("restore");
     expect(Object.hasOwn(session, "_disconnectFromAgent")).toBe(false);
   });
 
@@ -558,29 +537,20 @@ describe("Blackhole inline compaction adapter", () => {
 
     expect(status.supported).toBe(false);
     expect(status.reason).toContain("unsupported AgentSession.compact() shape");
-    await expect(
-      compactInlineAtTurnBoundary(session.sessionManager),
-    ).rejects.toBeInstanceOf(InlineCompactionUnavailableError);
+    await expect(compactInlineAtTurnBoundary(session.sessionManager)).rejects.toBeInstanceOf(
+      InlineCompactionUnavailableError,
+    );
   });
 
   it("parses Windows native host stack paths", () => {
     const windowsPath = String.raw`C:\Users\maple\node_modules\@earendil-works\pi-coding-agent\dist\runner.js`;
 
-    expect(
-      parseHostFramePaths(`Error\n    at run (${windowsPath}:12:34)`),
-    ).toEqual([windowsPath]);
+    expect(parseHostFramePaths(`Error\n    at run (${windowsPath}:12:34)`)).toEqual([windowsPath]);
   });
 
   it("patches the bundled CLI AgentSession identity", async () => {
-    const fixtureRoot = await mkdtemp(
-      join(tmpdir(), "blackhole-bundled-host-"),
-    );
-    const packageRoot = join(
-      fixtureRoot,
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-    );
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "blackhole-bundled-host-"));
+    const packageRoot = join(fixtureRoot, "node_modules", "@earendil-works", "pi-coding-agent");
     const dist = join(packageRoot, "dist");
     const chunks = join(dist, "bundle", "chunks");
     const cli = join(dist, "bundle", "cli.js");
@@ -613,48 +583,35 @@ describe("Blackhole inline compaction adapter", () => {
         }),
       );
       await writeFile(join(dist, "index.js"), sessionSource);
-      await writeFile(
-        runtimeChunk,
-        `${sessionSource}\nexport function main() {}`,
-      );
-      await writeFile(
-        cli,
-        '#!/usr/bin/env node\nimport{main}from"./chunks/runtime.js";main();\n',
-      );
+      await writeFile(runtimeChunk, `${sessionSource}\nexport function main() {}`);
+      await writeFile(cli, '#!/usr/bin/env node\nimport{main}from"./chunks/runtime.js";main();\n');
 
-      const bundledModule = (await import(
-        pathToFileURL(runtimeChunk).href
-      )) as {
+      const bundledModule = (await import(pathToFileURL(runtimeChunk).href)) as {
         AgentSession: new () => {
           agent: { state: { messages: unknown[] } };
           sessionManager: object;
           _bindExtensionCore(runner: unknown): void;
         };
       };
-      const originalBind =
-        bundledModule.AgentSession.prototype._bindExtensionCore;
+      const originalBind = bundledModule.AgentSession.prototype._bindExtensionCore;
 
       await expect(
         installHostInlineCompactionAdapter({ entrypoint: cli, stack: "" }),
       ).resolves.toEqual({ supported: true });
-      expect(bundledModule.AgentSession.prototype._bindExtensionCore).not.toBe(
-        originalBind,
-      );
+      expect(bundledModule.AgentSession.prototype._bindExtensionCore).not.toBe(originalBind);
 
       const session = new bundledModule.AgentSession();
       session._bindExtensionCore({});
-      await expect(
-        compactInlineAtTurnBoundary(session.sessionManager),
-      ).resolves.toMatchObject({ summary: "summary" });
+      await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
+        summary: "summary",
+      });
     } finally {
       await rm(fixtureRoot, { recursive: true, force: true });
     }
   });
 
   it("patches every independently loaded host AgentSession identity", async () => {
-    const fixtureRoot = await mkdtemp(
-      join(tmpdir(), "blackhole-host-identities-"),
-    );
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "blackhole-host-identities-"));
     const makeHostPackage = async (name: string) => {
       const packageRoot = join(
         fixtureRoot,
@@ -699,16 +656,13 @@ describe("Blackhole inline compaction adapter", () => {
       const modules = await Promise.all(
         [first, second].map(
           async ({ packageRoot }) =>
-            (await import(
-              pathToFileURL(join(packageRoot, "dist", "index.js")).href
-            )) as {
+            (await import(pathToFileURL(join(packageRoot, "dist", "index.js")).href)) as {
               AgentSession: { prototype: { _bindExtensionCore: unknown } };
             },
         ),
       );
       const originalBinds = modules.map(
-        ({ AgentSession: SessionClass }) =>
-          SessionClass.prototype._bindExtensionCore,
+        ({ AgentSession: SessionClass }) => SessionClass.prototype._bindExtensionCore,
       );
 
       await expect(
@@ -719,9 +673,7 @@ describe("Blackhole inline compaction adapter", () => {
       ).resolves.toEqual({ supported: true });
 
       for (const [index, { AgentSession: SessionClass }] of modules.entries()) {
-        expect(SessionClass.prototype._bindExtensionCore).not.toBe(
-          originalBinds[index],
-        );
+        expect(SessionClass.prototype._bindExtensionCore).not.toBe(originalBinds[index]);
       }
     } finally {
       await rm(fixtureRoot, { recursive: true, force: true });
@@ -780,8 +732,7 @@ describe("Blackhole inline compaction adapter", () => {
       harness.sessionManager.appendMessage(
         fauxAssistantMessage("old-assistant-2", { timestamp: 4 }),
       );
-      harness.agent.state.messages =
-        harness.sessionManager.buildSessionContext().messages;
+      harness.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
 
       let nextRequestMessages: Context["messages"] | undefined;
       harness.setResponses([
@@ -818,11 +769,9 @@ describe("Blackhole inline compaction adapter", () => {
       });
 
       let promptSettled = false;
-      promptPromise = harness.session
-        .prompt("use the echo tool and then finish")
-        .finally(() => {
-          promptSettled = true;
-        });
+      promptPromise = harness.session.prompt("use the echo tool and then finish").finally(() => {
+        promptSettled = true;
+      });
 
       await Promise.race([
         summaryStarted.promise,
@@ -846,12 +795,9 @@ describe("Blackhole inline compaction adapter", () => {
       expect(promptSettled).toBe(false);
       expect(activeRunSignal?.aborted).toBe(false);
 
-      const compactedMessages =
-        harness.sessionManager.buildSessionContext().messages;
+      const compactedMessages = harness.sessionManager.buildSessionContext().messages;
       expect(nextRequestMessages).toEqual(convertToLlm(compactedMessages));
-      expect(JSON.stringify(nextRequestMessages)).toContain(
-        "COMPACTED-SUMMARY",
-      );
+      expect(JSON.stringify(nextRequestMessages)).toContain("COMPACTED-SUMMARY");
       expect(JSON.stringify(nextRequestMessages)).not.toContain("old-user-1");
 
       releaseFinalResponse.release();
@@ -873,15 +819,15 @@ describe("Blackhole inline compaction adapter", () => {
     const SessionClass = createSessionClass({ legacyDisconnect: false });
     const originalBind = SessionClass.prototype._bindExtensionCore;
 
-    expect(
-      installInlineCompactionAdapter({ sessionClass: SessionClass as never }),
-    ).toEqual({ supported: true });
+    expect(installInlineCompactionAdapter({ sessionClass: SessionClass as never })).toEqual({
+      supported: true,
+    });
     const patchedBind = SessionClass.prototype._bindExtensionCore;
     expect(patchedBind).not.toBe(originalBind);
 
-    expect(
-      installInlineCompactionAdapter({ sessionClass: SessionClass as never }),
-    ).toEqual({ supported: true });
+    expect(installInlineCompactionAdapter({ sessionClass: SessionClass as never })).toEqual({
+      supported: true,
+    });
     expect(SessionClass.prototype._bindExtensionCore).toBe(patchedBind);
   });
 });

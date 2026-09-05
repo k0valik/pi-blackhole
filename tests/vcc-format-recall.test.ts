@@ -3,11 +3,7 @@
  * Changes: bun:test → vitest, added .js import extensions
  */
 import { describe, it, expect } from "vitest";
-import {
-  formatRecallOutput,
-  formatTouchedOutput,
-  shortPath,
-} from "../src/core/format-recall.js";
+import { formatRecallOutput, formatTouchedOutput, shortPath } from "../src/core/format-recall.js";
 import type { SearchHit, TouchedFile } from "../src/core/search-entries.js";
 
 describe("formatRecallOutput", () => {
@@ -21,17 +17,13 @@ describe("formatRecallOutput", () => {
   });
 
   it("formats entries with index and role", () => {
-    const entries: SearchHit[] = [
-      { index: 0, role: "user", summary: "hello", id: "1" },
-    ];
+    const entries: SearchHit[] = [{ index: 0, role: "user", summary: "hello", id: "1" }];
     const r = formatRecallOutput(entries);
     expect(r).toContain("#0 [user] hello");
   });
 
   it("shows match count with query", () => {
-    const entries: SearchHit[] = [
-      { index: 2, role: "assistant", summary: "done", id: "1" },
-    ];
+    const entries: SearchHit[] = [{ index: 2, role: "assistant", summary: "done", id: "1" }];
     const r = formatRecallOutput(entries, "done");
     expect(r).toContain('Found 1 matches for "done"');
   });
@@ -95,9 +87,7 @@ describe("formatRecallOutput", () => {
   });
 
   it("still shows basic format when no fileMatches", () => {
-    const entries: SearchHit[] = [
-      { index: 0, role: "user", summary: "hello", id: "1" },
-    ];
+    const entries: SearchHit[] = [{ index: 0, role: "user", summary: "hello", id: "1" }];
     const r = formatRecallOutput(entries);
     expect(r).toContain("#0 [user] hello");
   });

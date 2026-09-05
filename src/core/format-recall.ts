@@ -27,11 +27,7 @@ export function shortPath(fullPath: string): string {
 // ── File indicator formatting ─────────────────────────────────────────────
 
 /** Render one file indicator line with shortened path. */
-function formatFileMatch(
-  fm: FileMatch,
-  index: number,
-  isQuery: boolean,
-): string {
+function formatFileMatch(fm: FileMatch, index: number, isQuery: boolean): string {
   const label = isQuery
     ? fm.lineCount === 1
       ? "match"
@@ -76,9 +72,7 @@ export function formatTouchedOutput(
 
   const lines = pageFiles.map((tf) => {
     const displayPath = shortPath(tf.path);
-    const indices = tf.entries
-      .map((e) => `#${e.index} (${e.toolName})`)
-      .join(", ");
+    const indices = tf.entries.map((e) => `#${e.index} (${e.toolName})`).join(", ");
     return `  ${displayPath}    ${indices}`;
   });
 

@@ -6,11 +6,8 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages.js";
-import { searchEntries, getTouchedFiles } from "../core/search-entries.js";
-import {
-  formatRecallOutput,
-  formatTouchedOutput,
-} from "../core/format-recall.js";
+import { searchEntriesDetailed, getTouchedFiles } from "../core/search-entries.js";
+import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall.js";
 import { getActiveLineageEntryIds } from "../core/lineage.js";
 import { parseRecallScope } from "../core/recall-scope.js";
 import {
@@ -57,19 +54,13 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
       const raw = args.trim();
       const parsed = parseRecallScope(raw);
       const lineageEntryIds =
-        parsed.scope === "lineage"
-          ? getActiveLineageEntryIds(ctx.sessionManager)
-          : undefined;
+        parsed.scope === "lineage" ? getActiveLineageEntryIds(ctx.sessionManager) : undefined;
       const mode = parsed.mode;
 
       if (mode === "touched") {
         const pageMatch = raw.match(/\bpage:(\d+)\b/i);
         const page = pageMatch ? Math.max(1, parseInt(pageMatch[1], 10)) : 1;
-        const { rendered, rawMessages } = loadAllMessages(
-          sessionFile,
-          false,
-          lineageEntryIds,
-        );
+        const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
         const touched = getTouchedFiles(rawMessages, rendered);
         const text = formatTouchedOutput(touched, page);
         pi.sendMessage(
@@ -81,15 +72,9 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
 
       if (!parsed.text) {
         // No query: show recent entries
-        const { rendered } = loadAllMessages(
-          sessionFile,
-          false,
-          lineageEntryIds,
-        );
+        const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
         const recent = rendered.slice(-DEFAULT_RECENT);
-        const base =
-          (parsed.scope === "all" ? "Scope: all\n\n" : "") +
-          formatRecallOutput(recent);
+        const base = (parsed.scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(recent);
         const output = await augmentWithObservations(base, recent, ctx);
         pi.sendMessage(
           { customType: "blackhole-recall", content: output, display: true },
@@ -104,15 +89,9 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
       const query = parsed.text.replace(/\bpage:\d+\b/i, "").trim();
 
       if (!query) {
-        const { rendered } = loadAllMessages(
-          sessionFile,
-          false,
-          lineageEntryIds,
-        );
+        const { rendered } = loadAllMessages(sessionFile, false, lineageEntryIds);
         const recent = rendered.slice(-DEFAULT_RECENT);
-        const base =
-          (parsed.scope === "all" ? "Scope: all\n\n" : "") +
-          formatRecallOutput(recent);
+        const base = (parsed.scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(recent);
         const output = await augmentWithObservations(base, recent, ctx);
         pi.sendMessage(
           { customType: "blackhole-recall", content: output, display: true },
@@ -121,27 +100,24 @@ export const registerVccRecallCommand = (pi: ExtensionAPI) => {
         return;
       }
 
-      const { rendered, rawMessages } = loadAllMessages(
-        sessionFile,
-        false,
-        lineageEntryIds,
-      );
-      const allResults = searchEntries(
-        rendered,
-        rawMessages,
-        query,
-        undefined,
-        mode,
-      );
+      const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
+      const {
+        hits: allResults,
+        totalBeforeCap,
+        truncated,
+      } = searchEntriesDetailed(rendered, rawMessages, query, undefined, mode);
 
       const start = (page - 1) * PAGE_SIZE;
       const pageResults = allResults.slice(start, start + PAGE_SIZE);
       const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
       const scopeSuffix = parsed.scope === "all" ? " (scope: all)" : "";
+      const capNote = truncated
+        ? ` — capped at ${allResults.length}, refine the query for more`
+        : "";
       const header =
         totalPages > 1
-          ? `Page ${page}/${totalPages} (${allResults.length} total matches${scopeSuffix})`
-          : `${allResults.length} matches${scopeSuffix}`;
+          ? `Page ${page}/${totalPages} (${totalBeforeCap} total matches${capNote}${scopeSuffix})`
+          : `${totalBeforeCap} matches${capNote}${scopeSuffix}`;
       const footer =
         page < totalPages
           ? `\n--- /blackhole-recall ${query}${parsed.scope === "all" ? " scope:all" : ""} page:${page + 1} ---`

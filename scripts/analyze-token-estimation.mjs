@@ -61,10 +61,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import {
-  calculateContextTokens,
-  estimateTokens,
-} from "@earendil-works/pi-coding-agent";
+import { calculateContextTokens, estimateTokens } from "@earendil-works/pi-coding-agent";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
 const args = process.argv.slice(2);
@@ -165,8 +162,7 @@ function estimateEntryTokens(entry) {
     if (Array.isArray(content)) {
       let total = 0;
       for (const block of content) {
-        if (block.type === "text" && block.text)
-          total += estimateStringTokens(block.text);
+        if (block.type === "text" && block.text) total += estimateStringTokens(block.text);
       }
       return total;
     }
@@ -283,9 +279,7 @@ function usageSinceLastCompaction(entries) {
     startIndex = -1;
   } else {
     const firstKept = entries[compactionIndex].firstKeptEntryId;
-    const firstKeptIndex = firstKept
-      ? entries.findIndex((e) => e.id === firstKept)
-      : -1;
+    const firstKeptIndex = firstKept ? entries.findIndex((e) => e.id === firstKept) : -1;
     startIndex = firstKeptIndex === -1 ? compactionIndex : firstKeptIndex - 1;
   }
 
@@ -313,10 +307,7 @@ function usageSinceLastCompaction(entries) {
 // ── statistics helpers (algorithmic calibration surface) ──────────────────
 function percentile(sorted, p) {
   if (sorted.length === 0) return undefined;
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil(p * sorted.length) - 1),
-  );
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1));
   return sorted[idx];
 }
 
@@ -376,8 +367,7 @@ function observerChunkEntries(entries, maxChunkTokens) {
       const msg = entry.message;
       if (typeof msg.content === "string") chars = msg.content.length;
       else if (Array.isArray(msg.content)) {
-        for (const block of msg.content)
-          if (block?.text) chars += block.text.length;
+        for (const block of msg.content) if (block?.text) chars += block.text.length;
       }
     } else if (entry.type === "custom") {
       chars = String(JSON.stringify(entry.data ?? {})).length;
@@ -430,10 +420,7 @@ function classifyChunk(chunk) {
           for (const block of content) {
             if (block?.type === "text" && typeof block.text === "string")
               b.assistantText += est(block.text);
-            else if (
-              block?.type === "thinking" &&
-              typeof block.thinking === "string"
-            ) {
+            else if (block?.type === "thinking" && typeof block.thinking === "string") {
               const t = block.thinking;
               b.thinking += est(t);
               b.thinkingChars += t.length;
@@ -449,9 +436,7 @@ function classifyChunk(chunk) {
                 b.thinkingTrimmedChars += t.length;
               }
             } else if (block?.type === "toolCall")
-              b.toolCall += est(
-                (block.name ?? "") + JSON.stringify(block.arguments ?? {}),
-              );
+              b.toolCall += est((block.name ?? "") + JSON.stringify(block.arguments ?? {}));
           }
         }
         continue;
@@ -465,9 +450,7 @@ function classifyChunk(chunk) {
         const tail = text.slice(-TRIM.tailChars);
         const dropped = text.length - head.length - tail.length;
         b.toolResultTrimmedChars +=
-          head.length +
-          tail.length +
-          `\n… [truncated ${dropped} chars] …\n`.length;
+          head.length + tail.length + `\n… [truncated ${dropped} chars] …\n`.length;
       } else {
         b.toolResultTrimmedChars += text.length;
       }
@@ -545,9 +528,7 @@ function analyzeOnce(useDefaults, limit) {
     path.dirname(new URL(import.meta.url).pathname),
     "..",
     "tmp",
-    useDefaults
-      ? "token-estimation-report-defaults.md"
-      : "token-estimation-report.md",
+    useDefaults ? "token-estimation-report-defaults.md" : "token-estimation-report.md",
   );
   const sessions = findSessions(limit);
 
@@ -588,13 +569,10 @@ function analyzeOnce(useDefaults, limit) {
       `Thresholds: observe=${th.observe} reflect=${th.reflect} drop=${th.drop} compact=${th.compact}\n` +
       `(est = current chars/4 estimate over the branch window; usage = proposed usage-based count; marker = index of last coverage marker / compaction, -1 = none)`,
   );
-  console.log(
-    "stage      est       usage     ratio  marker  est>=thr  usage>=thr  session",
-  );
+  console.log("stage      est       usage     ratio  marker  est>=thr  usage>=thr  session");
 
   for (const [si, s] of sessions.entries()) {
-    if ((si + 1) % 100 === 0)
-      console.log(`… processed ${si + 1}/${sessions.length} sessions`);
+    if ((si + 1) % 100 === 0) console.log(`… processed ${si + 1}/${sessions.length} sessions`);
     const entries = parseEntries(s.path);
     const name = path
       .basename(s.path)
@@ -656,13 +634,7 @@ function analyzeOnce(useDefaults, limit) {
     if (obsChunk.length > 0) {
       const b = classifyChunk(obsChunk);
       const chunkTokens =
-        b.user +
-        b.assistantText +
-        b.thinking +
-        b.toolCall +
-        b.toolResult +
-        b.custom +
-        b.summary;
+        b.user + b.assistantText + b.thinking + b.toolCall + b.toolResult + b.custom + b.summary;
       const trimmedTokens =
         chunkTokens -
         b.toolResult -
@@ -684,30 +656,22 @@ function analyzeOnce(useDefaults, limit) {
   }
 
   // ── console aggregate ─────────────────────────────────────────────────────
-  console.log(
-    "\n── Aggregate (ratios over marker-present, usage>0 windows) ──",
-  );
+  console.log("\n── Aggregate (ratios over marker-present, usage>0 windows) ──");
   for (const stage of stages) {
     const a = agg[stage.name];
     const ratios = [...a.ratios].sort((x, y) => x - y);
-    const med = ratios.length
-      ? ratios[Math.floor(ratios.length / 2)].toFixed(2)
-      : "n/a";
+    const med = ratios.length ? ratios[Math.floor(ratios.length / 2)].toFixed(2) : "n/a";
     const min = ratios.length ? ratios[0].toFixed(2) : "n/a";
     const max = ratios.length ? ratios[ratios.length - 1].toFixed(2) : "n/a";
     const trigger =
-      a.late || a.early
-        ? `| fires LATE:${a.late} EARLY:${a.early}`
-        : "| triggers agree";
+      a.late || a.early ? `| fires LATE:${a.late} EARLY:${a.early}` : "| triggers agree";
     console.log(
       `${stage.name.padEnd(10)} n=${String(ratios.length).padStart(3)}  est/usage median=${med} min=${min} max=${max}  | est>=thr:${a.estOver} usage>=thr:${a.usageOver} (windows: ${a.withMarker} marker / ${a.noMarker} no-marker)${a.noUsage ? ` no-usage:${a.noUsage}` : ""} ${trigger}`,
     );
   }
 
   // ── calibration (planning input for default threshold bumps) ──────────────
-  console.log(
-    "\n── Calibration (usage-accurate counting with unchanged thresholds) ──",
-  );
+  console.log("\n── Calibration (usage-accurate counting with unchanged thresholds) ──");
   console.log(
     "stage      estOver usageOver  churn×   calibrated(median)  same-fire-count T'  usage p50    p90    p95    max",
   );
@@ -721,11 +685,8 @@ function analyzeOnce(useDefaults, limit) {
       .map((r) => (r > 0 ? 1 / r : undefined))
       .filter((v) => v !== undefined);
     invRatios.sort((x, y) => x - y);
-    const medInv = invRatios.length
-      ? invRatios[Math.floor(invRatios.length / 2)]
-      : undefined;
-    const calibrated =
-      medInv !== undefined ? Math.round(stage.threshold * medInv) : undefined;
+    const medInv = invRatios.length ? invRatios[Math.floor(invRatios.length / 2)] : undefined;
+    const calibrated = medInv !== undefined ? Math.round(stage.threshold * medInv) : undefined;
     const sameCount = sameFireCountThreshold(a.usageValues, a.estOver);
     const sameCountAchieved = countAtOrAbove(a.usageValues, sameCount);
     cal.push({
@@ -750,26 +711,15 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
 
   // ── observer input simulation (console) ───────────────────────────────────
   if (obsSim.length > 0) {
-    const med = (arr) =>
-      arr.length ? arr[Math.floor(arr.length / 2)] : undefined;
+    const med = (arr) => (arr.length ? arr[Math.floor(arr.length / 2)] : undefined);
     const pct = (arr, p) =>
-      arr.length
-        ? arr[Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1)]
-        : undefined;
+      arr.length ? arr[Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1)] : undefined;
     const chunks = obsSim.map((r) => r.chunkTokens).sort((a, b) => a - b);
-    const trShares = obsSim
-      .map((r) => r.toolResultTokens / r.chunkTokens)
-      .sort((a, b) => a - b);
-    const thShares = obsSim
-      .map((r) => r.thinkingTokens / r.chunkTokens)
-      .sort((a, b) => a - b);
-    const saves = obsSim
-      .map((r) => 1 - r.trimmedTokens / r.chunkTokens)
-      .sort((a, b) => a - b);
+    const trShares = obsSim.map((r) => r.toolResultTokens / r.chunkTokens).sort((a, b) => a - b);
+    const thShares = obsSim.map((r) => r.thinkingTokens / r.chunkTokens).sort((a, b) => a - b);
+    const saves = obsSim.map((r) => 1 - r.trimmedTokens / r.chunkTokens).sort((a, b) => a - b);
     const medChunk = med(chunks);
-    const medTrimmed = med(
-      obsSim.map((r) => r.trimmedTokens).sort((a, b) => a - b),
-    );
+    const medTrimmed = med(obsSim.map((r) => r.trimmedTokens).sort((a, b) => a - b));
     const fmtP = (v) => (v === undefined ? "n/a" : (100 * v).toFixed(0) + "%");
     const toolSaves = obsSim
       .map((r) => 1 - r.toolResultTrimmedTokens / r.toolResultTokens)
@@ -868,9 +818,7 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
   md.push("");
   md.push("## Per-window rows");
   md.push("");
-  md.push(
-    "| stage | est | usage | ratio | marker | est>=thr | usage>=thr | session |",
-  );
+  md.push("| stage | est | usage | ratio | marker | est>=thr | usage>=thr | session |");
   md.push("|---|---|---|---|---|---|---|---|");
   for (const r of rows) {
     md.push(
@@ -887,9 +835,7 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
   for (const stage of stages) {
     const a = agg[stage.name];
     const ratios = [...a.ratios].sort((x, y) => x - y);
-    const med = ratios.length
-      ? ratios[Math.floor(ratios.length / 2)].toFixed(2)
-      : "n/a";
+    const med = ratios.length ? ratios[Math.floor(ratios.length / 2)].toFixed(2) : "n/a";
     const min = ratios.length ? ratios[0].toFixed(2) : "n/a";
     const max = ratios.length ? ratios[ratios.length - 1].toFixed(2) : "n/a";
     md.push(
@@ -960,22 +906,13 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
 
   // ── observer input simulation (report section) ────────────────────────────
   if (obsSim.length > 0) {
-    const med = (arr) =>
-      arr.length ? arr[Math.floor(arr.length / 2)] : undefined;
+    const med = (arr) => (arr.length ? arr[Math.floor(arr.length / 2)] : undefined);
     const pct = (arr, p) =>
-      arr.length
-        ? arr[Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1)]
-        : undefined;
+      arr.length ? arr[Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1)] : undefined;
     const chunks = obsSim.map((r) => r.chunkTokens).sort((a, b) => a - b);
-    const trShares = obsSim
-      .map((r) => r.toolResultTokens / r.chunkTokens)
-      .sort((a, b) => a - b);
-    const thShares = obsSim
-      .map((r) => r.thinkingTokens / r.chunkTokens)
-      .sort((a, b) => a - b);
-    const saves = obsSim
-      .map((r) => 1 - r.trimmedTokens / r.chunkTokens)
-      .sort((a, b) => a - b);
+    const trShares = obsSim.map((r) => r.toolResultTokens / r.chunkTokens).sort((a, b) => a - b);
+    const thShares = obsSim.map((r) => r.thinkingTokens / r.chunkTokens).sort((a, b) => a - b);
+    const saves = obsSim.map((r) => 1 - r.trimmedTokens / r.chunkTokens).sort((a, b) => a - b);
     const fmtP = (v) => (v === undefined ? "n/a" : (100 * v).toFixed(0) + "%");
     const toolSaves = obsSim
       .map((r) => 1 - r.toolResultTrimmedTokens / r.toolResultTokens)
@@ -986,17 +923,13 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
       .filter((v) => Number.isFinite(v))
       .sort((a, b) => a - b);
     md.push("");
-    md.push(
-      "## Observer input simulation (what the observer would send upstream)",
-    );
+    md.push("## Observer input simulation (what the observer would send upstream)");
     md.push("");
     md.push(
       `Chunk = source entries since the last observation marker, capped at \`observerChunkMaxTokens=${th.observerChunk}\` (mirrors capSourceEntriesToTokens). Role shares are chars/4 estimates of the serialized text (mirrors serialize.ts). Trim policy: tool results > ${TRIM.thresholdChars} chars → head+tail ${TRIM.headChars}/${TRIM.tailChars} chars; thinking blocks > ${THINK.thresholdChars} chars → head+tail ${Math.round(THINK.headPct * 100)}%/${Math.round(THINK.tailPct * 100)}% (fractional). **Provider usage (session context) is unaffected — trimming only reduces the observer's own input volume.**`,
     );
     md.push("");
-    md.push(
-      "| session | chunk tokens | tool_result % | thinking % | trimmed tokens | save % |",
-    );
+    md.push("| session | chunk tokens | tool_result % | thinking % | trimmed tokens | save % |");
     md.push("|---|---|---|---|---|---|");
     for (const r of obsSim) {
       md.push(
@@ -1031,12 +964,9 @@ same-fire-count T' = k-th largest actual usage with k = today's est fire count �
 // Runs BOTH config surfaces (author config + code defaults) and writes only
 // the math (aggregate, calibration, observer simulation) — no per-window rows.
 function writeSummary(primary, secondary, outPath) {
-  const med = (arr) =>
-    arr.length ? arr[Math.floor(arr.length / 2)] : undefined;
+  const med = (arr) => (arr.length ? arr[Math.floor(arr.length / 2)] : undefined);
   const pct = (arr, p) =>
-    arr.length
-      ? arr[Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1)]
-      : undefined;
+    arr.length ? arr[Math.min(arr.length - 1, Math.ceil(p * arr.length) - 1)] : undefined;
   const fmtP = (v) => (v === undefined ? "n/a" : (100 * v).toFixed(0) + "%");
   const fmtN = (v) => (v === undefined ? "n/a" : v.toLocaleString());
 
@@ -1054,9 +984,7 @@ function writeSummary(primary, secondary, outPath) {
     for (const s of stages) {
       const a = agg[s.name];
       const ratios = [...a.ratios].sort((x, y) => x - y);
-      const medR = ratios.length
-        ? ratios[Math.floor(ratios.length / 2)].toFixed(2)
-        : "n/a";
+      const medR = ratios.length ? ratios[Math.floor(ratios.length / 2)].toFixed(2) : "n/a";
       const minR = ratios.length ? ratios[0].toFixed(2) : "n/a";
       const maxR = ratios.length ? ratios[ratios.length - 1].toFixed(2) : "n/a";
       lines.push(
@@ -1064,9 +992,7 @@ function writeSummary(primary, secondary, outPath) {
       );
     }
     lines.push("");
-    lines.push(
-      "### Calibration (usage threshold that reproduces today's fire frequency)",
-    );
+    lines.push("### Calibration (usage threshold that reproduces today's fire frequency)");
     lines.push("");
     lines.push(
       "| stage | threshold | same-fire-count T' | achieved | usage p50 | p90 | p95 | max |",
@@ -1080,15 +1006,9 @@ function writeSummary(primary, secondary, outPath) {
     lines.push("");
     if (obsSim.length > 0) {
       const chunks = obsSim.map((r) => r.chunkTokens).sort((a, b) => a - b);
-      const trShares = obsSim
-        .map((r) => r.toolResultTokens / r.chunkTokens)
-        .sort((a, b) => a - b);
-      const thShares = obsSim
-        .map((r) => r.thinkingTokens / r.chunkTokens)
-        .sort((a, b) => a - b);
-      const saves = obsSim
-        .map((r) => 1 - r.trimmedTokens / r.chunkTokens)
-        .sort((a, b) => a - b);
+      const trShares = obsSim.map((r) => r.toolResultTokens / r.chunkTokens).sort((a, b) => a - b);
+      const thShares = obsSim.map((r) => r.thinkingTokens / r.chunkTokens).sort((a, b) => a - b);
+      const saves = obsSim.map((r) => 1 - r.trimmedTokens / r.chunkTokens).sort((a, b) => a - b);
       const toolSaves = obsSim
         .map((r) => 1 - r.toolResultTrimmedTokens / r.toolResultTokens)
         .filter((v) => Number.isFinite(v))
@@ -1097,9 +1017,7 @@ function writeSummary(primary, secondary, outPath) {
         .map((r) => 1 - r.thinkingTrimmedTokens / r.thinkingTokens)
         .filter((v) => Number.isFinite(v))
         .sort((a, b) => a - b);
-      lines.push(
-        "### Observer input simulation (tool-result + thinking trimming)",
-      );
+      lines.push("### Observer input simulation (tool-result + thinking trimming)");
       lines.push("");
       lines.push(`- windows with content: ${obsSim.length}`);
       lines.push(
@@ -1123,9 +1041,7 @@ function writeSummary(primary, secondary, outPath) {
   md.push(
     `- Sessions: ${primary.sessions.length} unique (realpath-deduped) under \`~/.pi/agent/sessions\``,
   );
-  md.push(
-    `- Command: \`node scripts/analyze-token-estimation.mjs --summary ${outPath}\``,
-  );
+  md.push(`- Command: \`node scripts/analyze-token-estimation.mjs --summary ${outPath}\``);
   md.push("- Full plan: \`work_docs/issue-usage-based-token-counting.md\`");
   md.push(
     "- Raw per-window reports (gitignored, regenerate with the script): \`tmp/token-estimation-report.md\` (author config), \`tmp/token-estimation-report-defaults.md\` (code defaults)",

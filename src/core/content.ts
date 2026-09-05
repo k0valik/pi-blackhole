@@ -38,19 +38,15 @@ export const nonEmptyLines = (text: string): string[] =>
     .map((line) => line.trim())
     .filter(Boolean);
 
-export const firstLine = (text: string, max = 200): string =>
-  clip(text.split("\n")[0] ?? "", max);
+export const firstLine = (text: string, max = 200): string => clip(text.split("\n")[0] ?? "", max);
 
 export const textParts = (content: Message["content"]): string[] => {
   if (!content) return [];
   if (typeof content === "string") return [content];
-  return content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text);
+  return content.filter((part) => part.type === "text").map((part) => part.text);
 };
 
-export const textOf = (content: Message["content"]): string =>
-  textParts(content).join("\n");
+export const textOf = (content: Message["content"]): string => textParts(content).join("\n");
 
 /**
  * Check if tool call arguments contain content-bearing data.
@@ -74,17 +70,9 @@ export const isContentBearing = (args: Record<string, unknown>): boolean => {
   )
     return true;
   // oldText/newText without edits are content-bearing
-  if (
-    typeof args.oldText === "string" &&
-    args.oldText.length > 0 &&
-    args.edits === undefined
-  )
+  if (typeof args.oldText === "string" && args.oldText.length > 0 && args.edits === undefined)
     return true;
-  if (
-    typeof args.newText === "string" &&
-    args.newText.length > 0 &&
-    args.edits === undefined
-  )
+  if (typeof args.newText === "string" && args.newText.length > 0 && args.edits === undefined)
     return true;
   return false;
 };
@@ -96,10 +84,7 @@ export const isContentBearing = (args: Record<string, unknown>): boolean => {
  * at least one large string/array field like `content`, `edits`, `oldText`, `newText`).
  * Each call is capped at `maxBytesPerCall` to avoid inflating the search index.
  */
-export const toolCallArgsText = (
-  content: Message["content"],
-  maxBytesPerCall = 10_240,
-): string => {
+export const toolCallArgsText = (content: Message["content"], maxBytesPerCall = 10_240): string => {
   if (!content || typeof content === "string") return "";
   const parts: string[] = [];
   for (const part of content) {
@@ -116,13 +101,11 @@ export const toolCallArgsText = (
         if (extracted.length >= maxBytesPerCall) break;
         if (edit && typeof edit === "object") {
           if (typeof edit.oldText === "string") {
-            extracted +=
-              edit.oldText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+            extracted += edit.oldText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
           }
           if (extracted.length >= maxBytesPerCall) break;
           if (typeof edit.newText === "string") {
-            extracted +=
-              edit.newText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
+            extracted += edit.newText.slice(0, Math.floor(maxBytesPerCall / 2)) + "\n";
           }
         }
       }
@@ -141,12 +124,28 @@ export const toolCallArgsText = (
   return parts.join("\n");
 };
 
+/** Extract scalar tool-call arguments for general transcript search. */
+export const extractToolCallArgsText = (args: Record<string, unknown>): string => {
+  if (!args || typeof args !== "object") return "";
+  const parts: string[] = [];
+  for (const value of Object.values(args)) {
+    if (typeof value === "string") parts.push(value);
+    else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === "string") parts.push(item);
+        else if (item && typeof item === "object") {
+          for (const nested of Object.values(item)) {
+            if (typeof nested === "string") parts.push(nested);
+          }
+        }
+      }
+    }
+  }
+  return parts.join("\n");
+};
+
 /** Extract a snippet of ~`radius` chars around the first match of `term` in `text`. */
-export const snippet = (
-  text: string,
-  term: string,
-  radius = 60,
-): string | null => {
+export const snippet = (text: string, term: string, radius = 60): string | null => {
   const idx = text.toLowerCase().indexOf(term.toLowerCase());
   if (idx === -1) return null;
   const start = Math.max(0, idx - radius);

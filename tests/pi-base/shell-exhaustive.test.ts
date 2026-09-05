@@ -90,10 +90,7 @@ describe("shell utilities exhaustive", () => {
     it("should handle all operator variants", () => {
       const ops = ["&&", "||", "|", ">", ">>", "2>", "1>&2", "<", ";"];
       for (const op of ops) {
-        expect(splitShellBoundary(`cmd1 ${op} cmd2`)).toEqual([
-          "cmd1",
-          `${op} cmd2`,
-        ]);
+        expect(splitShellBoundary(`cmd1 ${op} cmd2`)).toEqual(["cmd1", `${op} cmd2`]);
       }
     });
 
@@ -108,10 +105,7 @@ describe("shell utilities exhaustive", () => {
     });
 
     it("should handle unicode", () => {
-      expect(splitShellBoundary("echo 🚀 | grep 🚀")).toEqual([
-        "echo 🚀",
-        "| grep 🚀",
-      ]);
+      expect(splitShellBoundary("echo 🚀 | grep 🚀")).toEqual(["echo 🚀", "| grep 🚀"]);
     });
 
     it("should return null for empty string", () => {
@@ -121,24 +115,20 @@ describe("shell utilities exhaustive", () => {
 
   describe("tokenizeCommand", () => {
     it("should handle mixed quoting", () => {
-      expect(
-        tokenizeCommand("ls -la \"dir with spaces\" 'file with spaces'"),
-      ).toEqual(["ls", "-la", '"dir with spaces"', "'file with spaces'"]);
+      expect(tokenizeCommand("ls -la \"dir with spaces\" 'file with spaces'")).toEqual([
+        "ls",
+        "-la",
+        '"dir with spaces"',
+        "'file with spaces'",
+      ]);
     });
 
     it("should handle escaped characters in double quotes", () => {
-      expect(tokenizeCommand('echo "quote \\" is here"')).toEqual([
-        "echo",
-        '"quote \\" is here"',
-      ]);
+      expect(tokenizeCommand('echo "quote \\" is here"')).toEqual(["echo", '"quote \\" is here"']);
     });
 
     it("should handle unicode", () => {
-      expect(tokenizeCommand("echo 🚀 'rocket 🚀'")).toEqual([
-        "echo",
-        "🚀",
-        "'rocket 🚀'",
-      ]);
+      expect(tokenizeCommand("echo 🚀 'rocket 🚀'")).toEqual(["echo", "🚀", "'rocket 🚀'"]);
     });
 
     it("should handle empty or whitespace string", () => {

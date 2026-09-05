@@ -25,17 +25,11 @@ import {
 /** Build a minimal mock pi + runtime for testing commands */
 function createMockEnvironment() {
   const notifyCalls: Array<{ msg: string; level: string }> = [];
-  const handlerMap = new Map<
-    string,
-    (event: unknown, ctx: unknown) => unknown
-  >();
+  const handlerMap = new Map<string, (event: unknown, ctx: unknown) => unknown>();
 
   const pi = {
     registerCommand: vi.fn(
-      (
-        name: string,
-        def: { handler: (args: unknown, ctx: unknown) => Promise<void> },
-      ) => {
+      (name: string, def: { handler: (args: unknown, ctx: unknown) => Promise<void> }) => {
         handlerMap.set(name, def.handler as any);
       },
     ),
@@ -102,9 +96,7 @@ function createMockEnvironment() {
     }
     if (reflections > 0) {
       const refList = Array.from({ length: reflections }, (_, i) =>
-        reflection(`${"e".repeat(12 - String(i).length)}${i}`, [
-          "aaaaaaaaaaaa",
-        ]),
+        reflection(`${"e".repeat(12 - String(i).length)}${i}`, ["aaaaaaaaaaaa"]),
       );
       entries.push(
         reflectionsRecordedEntry("om-ref", {
@@ -216,9 +208,7 @@ describe("/blackhole-memory command", () => {
 
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("Passive:");
-    expect(msg).toContain(
-      "automatic memory workers and auto-compaction disabled",
-    );
+    expect(msg).toContain("automatic memory workers and auto-compaction disabled");
   });
 
   it("shows in-flight indicators when consolidation is running", async () => {

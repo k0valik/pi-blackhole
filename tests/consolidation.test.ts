@@ -1,13 +1,8 @@
 import { describe, test, expect } from "vitest";
 import { Runtime } from "../src/om/runtime.js";
-import {
-  makeModelResolver,
-  type ConsolidationCtx,
-} from "../src/om/consolidation.js";
+import { makeModelResolver, type ConsolidationCtx } from "../src/om/consolidation.js";
 
-function mockCtx(
-  notifyCalls: Array<{ message: string; level?: string }>,
-): ConsolidationCtx {
+function mockCtx(notifyCalls: Array<{ message: string; level?: string }>): ConsolidationCtx {
   return {
     cwd: "/tmp",
     hasUI: true,
@@ -139,9 +134,7 @@ describe("anyStageDue with cursors", () => {
         id: "obs-1",
         customType: "om.observations.recorded",
         data: {
-          observations: [
-            { id: "o1", content: "a".repeat(100), tokenCount: 25 },
-          ],
+          observations: [{ id: "o1", content: "a".repeat(100), tokenCount: 25 }],
         },
       },
     ];
@@ -356,9 +349,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
     ];
     runtime.advanceCursor("reflector", "msg-1", "recorded");
     const pending: any = {
-      observationBatches: [
-        { coversUpToId: "msg-2", data: { observations: [] } },
-      ],
+      observationBatches: [{ coversUpToId: "msg-2", data: { observations: [] } }],
     };
     expect(anyStageDue(entries, runtime, pending)).toBe(true);
   });
@@ -388,9 +379,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
         {
           coversUpToId: "msg-1",
           data: {
-            observations: [
-              { id: "o1", content: "x".repeat(500), tokenCount: 125 },
-            ],
+            observations: [{ id: "o1", content: "x".repeat(500), tokenCount: 125 }],
           },
         },
       ],
@@ -423,9 +412,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
         id: "msg-2",
         message: {
           role: "user",
-          content: [
-            { type: "text", text: "new message after reflector cursor" },
-          ],
+          content: [{ type: "text", text: "new message after reflector cursor" }],
         },
       },
     ];

@@ -77,8 +77,7 @@ function formatToolCallContent(
   } else if (tc.edits) {
     body = tc.edits
       .map(
-        (e, i) =>
-          `--- edit ${i + 1} ---\n${e.oldText ?? ""}\n--- becomes ---\n${e.newText ?? ""}`,
+        (e, i) => `--- edit ${i + 1} ---\n${e.oldText ?? ""}\n--- becomes ---\n${e.newText ?? ""}`,
       )
       .join("\n\n");
   } else if (tc.oldText && tc.newText) {
@@ -269,9 +268,7 @@ export function expandEntryFile(
       });
     }
     // Multiple content-bearing calls — list them
-    const items = calls.map(
-      (tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`,
-    );
+    const items = calls.map((tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`);
     return `Entry #${entryIndex} has ${calls.length} file operations:\n${items.join("\n")}\n\nUse #${entryIndex}:path to drill into a specific file.`;
   }
 
@@ -283,9 +280,7 @@ export function expandEntryFile(
 
   if (matched.length > 1) {
     // Ambiguous match — list options instead of silently picking the first
-    const items = matched.map(
-      (tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`,
-    );
+    const items = matched.map((tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`);
     return `Entry #${entryIndex} has ${matched.length} file operations matching "${pathPattern}":
 ${items.join("\n")}
 

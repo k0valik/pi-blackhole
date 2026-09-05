@@ -51,12 +51,8 @@ describe("V3 reflector agent", () => {
     expect(systemPrompt).toContain("User assertions are authoritative");
     expect(systemPrompt).toContain("supportingObservationIds");
     expect(systemPrompt).toContain("coverage/provenance set");
-    expect(systemPrompt).toContain(
-      "Do not lightly reword existing reflections",
-    );
-    expect(systemPrompt).toContain(
-      "Reflections are scarce, expensive durable orientation anchors",
-    );
+    expect(systemPrompt).toContain("Do not lightly reword existing reflections");
+    expect(systemPrompt).toContain("Reflections are scarce, expensive durable orientation anchors");
     expect(systemPrompt).toContain("not a second observation layer");
     expect(systemPrompt).toContain("Over-reflection is also memory distortion");
     expect(systemPrompt).toContain("makes transient details look durable");
@@ -75,21 +71,15 @@ describe("V3 reflector agent", () => {
     expect(systemPrompt).toContain(
       "High and critical observations deserve careful review, not automatic reflection",
     );
-    expect(systemPrompt).toContain(
-      "Do not turn each observation into a reflection",
-    );
+    expect(systemPrompt).toContain("Do not turn each observation into a reflection");
     expect(systemPrompt).toContain(
       "Observations are evidence; reflections are compressed durable conclusions",
     );
-    expect(systemPrompt).toContain(
-      "Single-observation reflections are allowed",
-    );
+    expect(systemPrompt).toContain("Single-observation reflections are allowed");
     expect(systemPrompt).toContain(
       "durable user preference, constraint, correction, decision, invariant, completed outcome, or long-lived blocker",
     );
-    expect(systemPrompt).toContain(
-      "Do not copy or lightly paraphrase observation lines",
-    );
+    expect(systemPrompt).toContain("Do not copy or lightly paraphrase observation lines");
     expect(systemPrompt).toContain("Prefer fewer, higher-value reflections");
     expect(systemPrompt).toContain(
       "zero reflections than to create one reflection per observation",
@@ -110,21 +100,15 @@ describe("V3 reflector agent", () => {
     expect(systemPrompt).toContain(
       "include all current observation ids whose durable meaning is preserved",
     );
-    expect(systemPrompt).toContain(
-      "supportingObservationIds are not a checklist",
-    );
-    expect(systemPrompt).toContain(
-      "Do not add ids merely to improve coverage counts",
-    );
+    expect(systemPrompt).toContain("supportingObservationIds are not a checklist");
+    expect(systemPrompt).toContain("Do not add ids merely to improve coverage counts");
     expect(systemPrompt).toContain(
       "False or inflated support ids can cause unsafe downstream dropper pruning",
     );
     expect(systemPrompt).toContain(
       "emit zero reflections even when observations have coverage: none",
     );
-    expect(systemPrompt).toContain(
-      "BAD: completed: edited src/hooks/reflect-drop-trigger.ts",
-    );
+    expect(systemPrompt).toContain("BAD: completed: edited src/hooks/reflect-drop-trigger.ts");
     expect(systemPrompt).toContain(
       "GOOD: completed: V3 reflect/drop coverage now uses raw progress watermarks",
     );
@@ -136,19 +120,11 @@ describe("V3 reflector agent", () => {
       "ZERO REFLECTIONS: The only new observations are files inspected, commands run, failed attempts, partial implementation, transient debugging, or current working state with no durable conclusion yet",
     );
     expect(systemPrompt).toContain("Focus on:");
-    expect(systemPrompt).toContain(
-      "User identity, role, preferences, constraints",
-    );
-    expect(systemPrompt).toContain(
-      "Project goals, architecture, technical decisions",
-    );
+    expect(systemPrompt).toContain("User identity, role, preferences, constraints");
+    expect(systemPrompt).toContain("Project goals, architecture, technical decisions");
     expect(systemPrompt).toContain("Recurring user behavior or preferences");
-    expect(systemPrompt).toContain(
-      "Completed outcomes future runs must not redo",
-    );
-    expect(systemPrompt).toContain(
-      "Durable blockers, invariants, and open decisions",
-    );
+    expect(systemPrompt).toContain("Completed outcomes future runs must not redo");
+    expect(systemPrompt).toContain("Durable blockers, invariants, and open decisions");
     expect(systemPrompt).toContain("Reflection content rules");
     expect(systemPrompt).toContain("Lead with the fact or pattern");
     expect(systemPrompt).not.toContain("legacy/no-provenance");
@@ -220,11 +196,7 @@ describe("V3 reflector agent", () => {
     expect(
       summarizeSupportIdCounts([
         reflection("rrrrrrrrrrr1", ["aaaaaaaaaaaa"]),
-        reflection("rrrrrrrrrrr2", [
-          "aaaaaaaaaaaa",
-          "bbbbbbbbbbbb",
-          "cccccccccccc",
-        ]),
+        reflection("rrrrrrrrrrr2", ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]),
       ]),
     ).toEqual({
       reflectionCount: 2,
@@ -244,14 +216,9 @@ describe("V3 reflector agent", () => {
       ),
     ).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
     expect(
-      normalizeSupportingObservationIds(
-        ["aaaaaaaaaaaa", "missing"],
-        ["aaaaaaaaaaaa"],
-      ),
+      normalizeSupportingObservationIds(["aaaaaaaaaaaa", "missing"], ["aaaaaaaaaaaa"]),
     ).toBeUndefined();
-    expect(
-      normalizeSupportingObservationIds([], ["aaaaaaaaaaaa"]),
-    ).toBeUndefined();
+    expect(normalizeSupportingObservationIds([], ["aaaaaaaaaaaa"])).toBeUndefined();
   });
 
   it("records one-line V3 reflections with code-computed ids and token counts", async () => {
@@ -289,9 +256,7 @@ describe("V3 reflector agent", () => {
       });
     });
 
-    await expect(
-      runReflector({ ...baseArgs, agentLoop: loop }),
-    ).resolves.toBeUndefined();
+    await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
   });
 
   it("dedupes proposals and skips existing reflection ids", async () => {
@@ -324,8 +289,6 @@ describe("V3 reflector agent", () => {
 
   it("returns undefined when no tool call records reflections", async () => {
     const loop = fakeAgentLoop(() => {});
-    await expect(
-      runReflector({ ...baseArgs, agentLoop: loop }),
-    ).resolves.toBeUndefined();
+    await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
   });
 });

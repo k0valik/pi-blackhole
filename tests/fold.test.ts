@@ -21,10 +21,7 @@ function makeEntry(
 }
 
 /** Observation IDs must be exactly 12 hex chars [a-f0-9]{12}. */
-function makeObservation(
-  id: string,
-  overrides: Partial<Observation> = {},
-): Observation {
+function makeObservation(id: string, overrides: Partial<Observation> = {}): Observation {
   return {
     id,
     content: `Observation ${id}`,
@@ -36,10 +33,7 @@ function makeObservation(
   };
 }
 
-function makeReflection(
-  id: string,
-  overrides: Partial<Reflection> = {},
-): Reflection {
+function makeReflection(id: string, overrides: Partial<Reflection> = {}): Reflection {
   return {
     id,
     content: `Reflection ${id}`,
@@ -84,10 +78,7 @@ function dropEntry(
 
 /** Generate a unique 12-hex-char ID from a label. */
 function hexId(label: string): string {
-  const raw = Array.from(label).reduce(
-    (h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0,
-    0,
-  );
+  const raw = Array.from(label).reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
   return Math.abs(raw).toString(16).padStart(12, "0").slice(0, 12);
 }
 
@@ -122,10 +113,7 @@ describe("foldLedger", () => {
     const sameId = hexId("dedup");
     const obs1 = makeObservation(sameId);
     const obs2 = makeObservation(sameId, { content: "Different content" });
-    const entries: Entry[] = [
-      recordEntry("entry-one", [obs1]),
-      recordEntry("entry-two", [obs2]),
-    ];
+    const entries: Entry[] = [recordEntry("entry-one", [obs1]), recordEntry("entry-two", [obs2])];
     const result = foldLedger(entries);
     expect(result.observations).toHaveLength(1);
     expect(result.observations[0].content).toBe(`Observation ${sameId}`); // first wins

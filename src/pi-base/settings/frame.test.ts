@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import {
-  frame,
-  frameContentWidth,
-  responsiveInnerRows,
-  DEFAULT_PADDING_Y,
-} from "./frame.ts";
+import { frame, frameContentWidth, responsiveInnerRows, DEFAULT_PADDING_Y } from "./frame.ts";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 function fakeTheme(): Theme {
@@ -67,9 +62,7 @@ describe("frame() — subtitle", () => {
 
   it("renders multi-line subtitles (split on \\n)", () => {
     const theme = fakeTheme();
-    const lines = frame(["hello"], width, theme, {
-      subtitle: "line one\nline two",
-    });
+    const lines = frame(["hello"], width, theme, { subtitle: "line one\nline two" });
     // First line after top border
     const line1 = lines[1]!;
     expect(line1).toContain("line one");
@@ -91,10 +84,7 @@ describe("frame() — subtitle", () => {
   it("fixedInnerRows still reserves space for subtitle", () => {
     const theme = fakeTheme();
     const manyLines = Array.from({ length: 20 }, (_, i) => `row ${i}`);
-    const lines = frame(manyLines, width, theme, {
-      subtitle: "sub",
-      fixedInnerRows: 5,
-    });
+    const lines = frame(manyLines, width, theme, { subtitle: "sub", fixedInnerRows: 5 });
     // The frame should still cap body rows at fixedInnerRows
     const bodyRows = lines.filter((l) => l.includes("row"));
     expect(bodyRows.length).toBeLessThanOrEqual(5);

@@ -191,10 +191,7 @@ function notFound(memoryId: string): RecallResult {
   };
 }
 
-export function recallMemorySources(
-  entries: Entry[],
-  memoryId: string,
-): RecallResult {
+export function recallMemorySources(entries: Entry[], memoryId: string): RecallResult {
   const {
     observations: indexedObservations,
     reflections: indexedReflections,
@@ -222,23 +219,15 @@ export function recallMemorySources(
   function addObservation(indexed: IndexedObservation): void {
     const key = `${indexed.entryId}:${indexed.recordIndex}`;
     if (recalledByKey.has(key)) return;
-    const recalled = resolveObservationSources(
-      entries,
-      indexed.observation,
-      indexed,
-    );
-    recalled.status = droppedIds.has(indexed.observation.id)
-      ? "dropped"
-      : "active";
+    const recalled = resolveObservationSources(entries, indexed.observation, indexed);
+    recalled.status = droppedIds.has(indexed.observation.id) ? "dropped" : "active";
     recalledByKey.set(key, recalled);
   }
 
   for (const match of directObservationMatches) addObservation(match);
 
   for (const { reflection } of reflectionMatches) {
-    for (const observationId of uniqueStrings(
-      reflection.supportingObservationIds,
-    )) {
+    for (const observationId of uniqueStrings(reflection.supportingObservationIds)) {
       const indexed = observationsById.get(observationId);
       if (!indexed) {
         rawMissingSupportingObservationIds.push(observationId);
@@ -256,18 +245,14 @@ export function recallMemorySources(
       reflectionRecordIndex: recordIndex,
     }),
   );
-  const sourceEntries = uniqueById(
-    recalledObservations.flatMap((match) => match.sourceEntries),
-  );
+  const sourceEntries = uniqueById(recalledObservations.flatMap((match) => match.sourceEntries));
   const missingSourceEntryIds = uniqueStrings(
     recalledObservations.flatMap((match) => match.missingSourceEntryIds),
   );
   const nonSourceEntryIds = uniqueStrings(
     recalledObservations.flatMap((match) => match.nonSourceEntryIds),
   );
-  const uniqueMissingSupportingObservationIds = uniqueStrings(
-    rawMissingSupportingObservationIds,
-  );
+  const uniqueMissingSupportingObservationIds = uniqueStrings(rawMissingSupportingObservationIds);
   const matchCount = directObservationMatches.length + reflectionMatches.length;
 
   return {

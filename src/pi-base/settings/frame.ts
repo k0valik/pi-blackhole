@@ -28,11 +28,7 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import {
-  truncateToWidth,
-  visibleWidth,
-  wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 /** Default horizontal padding inside the frame, in columns. */
 export const DEFAULT_PADDING_X = 1;
@@ -64,10 +60,7 @@ export interface FrameOptions {
 }
 
 /** Width available to body content, given a frame's outer `width`. */
-export function frameContentWidth(
-  width: number,
-  paddingX: number = DEFAULT_PADDING_X,
-): number {
+export function frameContentWidth(width: number, paddingX: number = DEFAULT_PADDING_X): number {
   return Math.max(1, width - 2 - paddingX * 2);
 }
 
@@ -84,8 +77,13 @@ export function pad(text: string, width: number): string {
  */
 export function wrapLine(line: string, width: number): string[] {
   const safeWidth = Math.max(1, width);
-  const normalized = String(line ?? "").replace(/\t/g, "  ");
-  const wrapped = normalized.split(/\r?\n/).flatMap((part) => {
+  const rawStr = String(line ?? "");
+  const normalized = rawStr.includes("\t") ? rawStr.replace(/\t/g, "  ") : rawStr;
+  const parts =
+    normalized.includes("\n") || normalized.includes("\r")
+      ? normalized.split(/\r?\n/)
+      : [normalized];
+  const wrapped = parts.flatMap((part) => {
     const rows = wrapTextWithAnsi(part, safeWidth);
     return rows.length > 0 ? rows : [""];
   });
@@ -140,10 +138,7 @@ export function frame(
   const border = (s: string) => theme.fg("borderAccent", s);
 
   let body = lines;
-  if (
-    options.fixedInnerRows !== undefined &&
-    body.length > options.fixedInnerRows
-  ) {
+  if (options.fixedInnerRows !== undefined && body.length > options.fixedInnerRows) {
     const hidden = body.length - options.fixedInnerRows + 1;
     body = [
       ...body.slice(0, Math.max(0, options.fixedInnerRows - 1)),
@@ -153,8 +148,7 @@ export function frame(
 
   const blank = `${border("│")}${" ".repeat(inner)}${border("│")}`;
   const top = (): string => {
-    if (!options.title)
-      return `${border("╭")}${border("─".repeat(inner))}${border("╮")}`;
+    if (!options.title) return `${border("╭")}${border("─".repeat(inner))}${border("╮")}`;
     // Title pill: `── <title> ──`, truncated to fit; surrounded by border
     // dashes on both sides so the pill always reaches the corners.
     const titlePlain = ` ${truncateToWidth(options.title, Math.max(1, inner - 4), "…")} `;
@@ -171,13 +165,8 @@ export function frame(
   const out: string[] = [top()];
   if (options.subtitle) {
     for (const line of options.subtitle.split(/\r?\n/)) {
-      const text = theme.fg(
-        "dim",
-        pad(truncateToWidth(line, contentWidth, "…"), contentWidth),
-      );
-      out.push(
-        `${border("│")}${" ".repeat(paddingX)}${text}${" ".repeat(paddingX)}${border("│")}`,
-      );
+      const text = theme.fg("dim", pad(truncateToWidth(line, contentWidth, "…"), contentWidth));
+      out.push(`${border("│")}${" ".repeat(paddingX)}${text}${" ".repeat(paddingX)}${border("│")}`);
     }
   }
   for (let i = 0; i < paddingY; i += 1) out.push(blank);
@@ -207,8 +196,5 @@ export function responsiveInnerRows(
     minimum + FRAME_VERTICAL_CHROME,
     Math.floor(Math.max(1, terminalRows) * ratio),
   );
-  return Math.max(
-    minimum,
-    Math.min(preferred, available - FRAME_VERTICAL_CHROME),
-  );
+  return Math.max(minimum, Math.min(preferred, available - FRAME_VERTICAL_CHROME));
 }

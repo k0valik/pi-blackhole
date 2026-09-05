@@ -72,17 +72,11 @@ describe("V3 dropper reflection coverage helpers", () => {
     ]);
     const after = reflectionCoverageMap(observations, [
       reflection("rrrrrrrrrrr1", ["bbbbbbbbbbbb"]),
-      reflection("rrrrrrrrrrr2", [
-        "aaaaaaaaaaaa",
-        "bbbbbbbbbbbb",
-        "cccccccccccc",
-      ]),
+      reflection("rrrrrrrrrrr2", ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]),
       reflection("rrrrrrrrrrr3", ["cccccccccccc"]),
     ]);
 
-    expect(
-      summarizeCoverageTransitionsByRelevance(observations, before, after),
-    ).toEqual({
+    expect(summarizeCoverageTransitionsByRelevance(observations, before, after)).toEqual({
       low: {},
       medium: {},
       high: { "none->partial": { count: 1, tokens: 3 } },

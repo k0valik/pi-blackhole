@@ -11,7 +11,7 @@ export const actionRenderer: FieldRenderer<ActionField, void> = {
   renderValue(row, { selected, ctx }) {
     const text = row.field.display ?? "(run)";
     if (row.field.disabled) {
-      return ctx.theme.fg("muted", text);
+      return ctx.theme.fg("muted", `${text} (unavailable)`);
     }
     return ctx.theme.fg(selected ? "accent" : "muted", text);
   },
@@ -21,11 +21,7 @@ export const actionRenderer: FieldRenderer<ActionField, void> = {
   },
   handleKey(row, data, { ctx }) {
     if (row.field.disabled) return {};
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       // Fire and forget — actions are deliberately fire-and-go so the
       // modal stays responsive even when `onActivate` is async.
       try {

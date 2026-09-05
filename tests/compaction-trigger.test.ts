@@ -16,11 +16,7 @@ import {
   resetMidRunRetry,
 } from "../src/om/compaction-trigger.js";
 import { InlineCompactionUnavailableError } from "../src/om/inline-compaction.js";
-import {
-  compactionEntry,
-  textCustomMessage,
-  type TestEntry,
-} from "./fixtures/session.js";
+import { compactionEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
 
 /** Flush microtasks AND fire pending fake timers (setTimeout callbacks).
  * With vi.useFakeTimers(), setTimeout callbacks don't fire automatically.
@@ -63,8 +59,7 @@ function captureHandler(
 ) {
   let agentEndHandler: ((event: unknown, ctx: unknown) => void) | undefined;
   let agentStartHandler: (() => void) | undefined;
-  let turnEndHandler:
-    ((event: unknown, ctx: unknown) => void | Promise<void>) | undefined;
+  let turnEndHandler: ((event: unknown, ctx: unknown) => void | Promise<void>) | undefined;
   const pi = {
     on: vi.fn((name: string, cb: any) => {
       if (name === "agent_end") agentEndHandler = cb;
@@ -101,14 +96,12 @@ function captureHandler(
     compactInFlight: args.compactInFlight ?? false,
     autoCompactionController: null as AbortController | null,
     midRunCompactionRetry: { failures: 0, retryAfter: 0 },
-    inlineCompactionAdapterStatus: undefined as
-      { supported: boolean; reason?: string } | undefined,
+    inlineCompactionAdapterStatus: undefined as { supported: boolean; reason?: string } | undefined,
     inlineCompactionWarningEmitted: false,
   };
   registerCompactionTrigger(pi as any, runtime as any, inlineCompact);
   if (!agentEndHandler) throw new Error("agent_end handler was not registered");
-  if (!agentStartHandler)
-    throw new Error("agent_start handler was not registered");
+  if (!agentStartHandler) throw new Error("agent_start handler was not registered");
   if (!turnEndHandler) throw new Error("turn_end handler was not registered");
   return {
     handler: agentEndHandler,
@@ -144,15 +137,10 @@ function agentEnd(errorMessage?: string) {
   };
 }
 
-function fakeCtx(
-  branches: TestEntry[][],
-  overrides: Record<string, unknown> = {},
-) {
+function fakeCtx(branches: TestEntry[][], overrides: Record<string, unknown> = {}) {
   let branchIndex = 0;
   const sessionId = "test-session-001";
-  const getBranch = vi.fn(
-    () => branches[Math.min(branchIndex++, branches.length - 1)],
-  );
+  const getBranch = vi.fn(() => branches[Math.min(branchIndex++, branches.length - 1)]);
   return {
     cwd: "/tmp/project",
     sessionManager: {
@@ -280,8 +268,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     const staleCtx = {
       get cwd() {
         throw {
-          message:
-            "This extension ctx is stale after session replacement or reload.",
+          message: "This extension ctx is stale after session replacement or reload.",
         };
       },
     };
@@ -300,9 +287,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     handler(agentEnd(), ctx);
     expect(runtime.compactInFlight).toBe(true);
     ctx.sessionManager.getSessionId.mockImplementation(() => {
-      throw new Error(
-        "This extension ctx is stale after session replacement or reload.",
-      );
+      throw new Error("This extension ctx is stale after session replacement or reload.");
     });
     await flushAll();
 
@@ -344,9 +329,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(ctx.compact).toHaveBeenCalledTimes(1);
     const compactOptions = ctx.compact.mock.calls[0][0];
     ctx.ui.notify.mockImplementation(() => {
-      throw new Error(
-        "This extension ctx is stale after session replacement or reload.",
-      );
+      throw new Error("This extension ctx is stale after session replacement or reload.");
     });
 
     runtime.compactInFlight = true;
@@ -354,9 +337,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(runtime.compactInFlight).toBe(false);
 
     runtime.compactInFlight = true;
-    expect(() =>
-      compactOptions.onError({ message: "test failure" }),
-    ).not.toThrow();
+    expect(() => compactOptions.onError({ message: "test failure" })).not.toThrow();
     expect(runtime.compactInFlight).toBe(false);
   });
 
@@ -661,13 +642,8 @@ describe("mid-run compaction trigger (turn_end)", () => {
 
     expect(runtime.compactInFlight).toBe(false);
     expect(runtime.midRunCompactionRetry.failures).toBe(1);
-    expect(runtime.midRunCompactionRetry.retryAfter).toBeGreaterThanOrEqual(
-      Date.now(),
-    );
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("retrying in 1s"),
-      "error",
-    );
+    expect(runtime.midRunCompactionRetry.retryAfter).toBeGreaterThanOrEqual(Date.now());
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("retrying in 1s"), "error");
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
@@ -805,8 +781,7 @@ describe("mid-run compaction trigger (turn_end)", () => {
     const staleCtx = {
       get cwd() {
         throw {
-          message:
-            "This extension ctx is stale after session replacement or reload.",
+          message: "This extension ctx is stale after session replacement or reload.",
         };
       },
     };
@@ -933,10 +908,7 @@ describe("mid-run compaction cancellation resilience", () => {
     turnHandler(turnEnd(), ctx);
     ctx.compact.mock.calls[0][0].onError({ message: "boom" });
     expect(runtime.midRunCompactionRetry.failures).toBe(1);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("retrying in 1s"),
-      "error",
-    );
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("retrying in 1s"), "error");
 
     ctx.compact.mock.calls[0][0].onComplete({});
     expect(runtime.midRunCompactionRetry).toEqual({
@@ -975,9 +947,7 @@ describe("inline adapter classification", () => {
 
   const unavailableInline = () =>
     vi.fn(async () => {
-      throw new InlineCompactionUnavailableError(
-        "pi 0.80.1 lacks inline compaction API",
-      );
+      throw new InlineCompactionUnavailableError("pi 0.80.1 lacks inline compaction API");
     });
 
   it("marks the adapter unsupported and warns once instead of recording backoff", async () => {
@@ -995,9 +965,7 @@ describe("inline adapter classification", () => {
     });
     // One info (threshold reached) + one warning (settled fallback).
     expect(ctx.ui.notify).toHaveBeenCalledTimes(2);
-    const warnCall = ctx.ui.notify.mock.calls.find(
-      (call) => call[1] === "warning",
-    );
+    const warnCall = ctx.ui.notify.mock.calls.find((call) => call[1] === "warning");
     expect(warnCall?.[0]).toContain("using settled compaction fallback");
     // Permanent condition — not a retryable failure.
     expect(runtime.midRunCompactionRetry.failures).toBe(0);

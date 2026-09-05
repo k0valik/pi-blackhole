@@ -45,13 +45,7 @@ function fakeCtx(): ExtensionContext {
 describe("FieldBase.valueNote", () => {
   it("renders a string valueNote as a dim suffix after the value cell", () => {
     const fields: Field[] = [
-      {
-        key: "x",
-        type: "boolean",
-        label: "X",
-        value: true,
-        valueNote: "(from default)",
-      },
+      { key: "x", type: "boolean", label: "X", value: true, valueNote: "(from default)" },
     ];
     const body = createSettingsModalBody(
       { fields },
@@ -108,13 +102,7 @@ describe("FieldBase.valueNote", () => {
   it("truncates long valueNote text to fit the row width", () => {
     const longNote = "n".repeat(100);
     const fields: Field[] = [
-      {
-        key: "x",
-        type: "boolean",
-        label: "X",
-        value: true,
-        valueNote: longNote,
-      },
+      { key: "x", type: "boolean", label: "X", value: true, valueNote: longNote },
     ];
     const body = createSettingsModalBody(
       { fields },

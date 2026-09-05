@@ -93,9 +93,7 @@ describe("number field inline editing", () => {
     // Clear the buffer then type a value below min.
     numberRenderer.handleKey(row as any, "\x15", env as any); // ctrl+u
     numberRenderer.handleKey(row as any, "9", env as any);
-    expect(() =>
-      numberRenderer.handleKey(row as any, "\r", env as any),
-    ).toThrow(/≥ 1000/);
+    expect(() => numberRenderer.handleKey(row as any, "\r", env as any)).toThrow(/≥ 1000/);
   });
 
   it("Kitty CSI-u printable sequences type into the buffer (integration)", () => {

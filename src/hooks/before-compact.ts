@@ -17,19 +17,10 @@ import {
   stripOMContent,
   stripRecallNotes,
 } from "../core/summarize";
-import {
-  buildAppendOnlyDetails,
-  coverageForMessages,
-} from "../core/compaction-chain.js";
-import {
-  getModelProvider,
-  matchesSkippedProvider,
-} from "../core/provider-skip.js";
+import { buildAppendOnlyDetails, coverageForMessages } from "../core/compaction-chain.js";
+import { getModelProvider, matchesSkippedProvider } from "../core/provider-skip.js";
 import type { PiVccCompactionDetails } from "../details";
-import {
-  buildCompactionProjection,
-  renderSummary,
-} from "../om/ledger/index.js";
+import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
 import { effectiveContextWindow } from "../om/model-budget.js";
@@ -55,10 +46,7 @@ export function notifyMigrationReminder(
   if (count >= 2) return;
   if (!configFileNeedsMigration()) return;
   migrationNotifyCount.set(sessionId, count + 1);
-  notify(
-    "blackhole: Use `/blackhole configure` to save your updated configuration.",
-    "info",
-  );
+  notify("blackhole: Use `/blackhole configure` to save your updated configuration.", "info");
 }
 
 const formatTokens = (n: number): string => {
@@ -87,9 +75,7 @@ export interface CompactionStats {
  */
 export const formatCompactionStats = (stats: CompactionStats): string => {
   const parts: string[] = [`${stats.summarized} source entries processed`];
-  parts.push(
-    `tail kept ${stats.keptUserTurns}/${stats.totalUserTurns} user turns`,
-  );
+  parts.push(`tail kept ${stats.keptUserTurns}/${stats.totalUserTurns} user turns`);
   if (stats.smartKeepAdjusted) {
     parts.push(`smart keep:${stats.smartFromKeep}→${stats.keptUserTurns}`);
   }
@@ -102,10 +88,7 @@ export const formatCompactionStats = (stats: CompactionStats): string => {
 const dbg = (debug: boolean, data: Record<string, unknown>) => {
   if (!debug) return;
   try {
-    writeFileSync(
-      "/tmp/pi-blackhole-debug.json",
-      JSON.stringify(data, null, 2),
-    );
+    writeFileSync("/tmp/pi-blackhole-debug.json", JSON.stringify(data, null, 2));
   } catch {}
 };
 
@@ -166,8 +149,7 @@ export function buildOwnCut(
   // compact-all) OR set to an id that no longer exists in the branch. In both cases,
   // start collecting from right after the last compaction entry.
   const hasPriorCompaction = lastCompactionIdx >= 0;
-  const hasValidKeptId =
-    !!lastKeptId && branchEntries.some((e: any) => e.id === lastKeptId);
+  const hasValidKeptId = !!lastKeptId && branchEntries.some((e: any) => e.id === lastKeptId);
   const orphanRecovery = hasPriorCompaction && !hasValidKeptId;
 
   // Collect live messages
@@ -195,27 +177,17 @@ export function buildOwnCut(
   // Minimal normally cuts at the last user message. If Pi found a later safe
   // split-turn boundary, use it too so one oversized current turn is not kept whole.
   let minimalCutIdx = liveMessages.length - 1;
-  while (
-    minimalCutIdx > 0 &&
-    liveMessages[minimalCutIdx]?.message.role !== "user"
-  ) {
+  while (minimalCutIdx > 0 && liveMessages[minimalCutIdx]?.message.role !== "user") {
     minimalCutIdx--;
   }
   if (minimalCutIdx <= 0) minimalCutIdx = liveMessages.length; // compact-all
 
   // ── Pi's cut path: always use in pi-default; in minimal only when later ──
   if (piFirstKeptEntryId) {
-    const cutInBranch = branchEntries.findIndex(
-      (e: any) => e.id === piFirstKeptEntryId,
-    );
+    const cutInBranch = branchEntries.findIndex((e: any) => e.id === piFirstKeptEntryId);
     if (cutInBranch >= 0) {
-      const liveCutIdx = liveMessages.findIndex(
-        (lm) => lm.entry.id === piFirstKeptEntryId,
-      );
-      if (
-        liveCutIdx > 0 &&
-        (tailBehavior === "pi-default" || liveCutIdx > minimalCutIdx)
-      ) {
+      const liveCutIdx = liveMessages.findIndex((lm) => lm.entry.id === piFirstKeptEntryId);
+      if (liveCutIdx > 0 && (tailBehavior === "pi-default" || liveCutIdx > minimalCutIdx)) {
         return {
           ok: true,
           messages: liveMessages.slice(0, liveCutIdx).map((e) => e.message),
@@ -230,10 +202,7 @@ export function buildOwnCut(
         // everything for a fresh page).  If minimal path would aggressively cut
         // (multiple user messages), cancel to respect Pi's guidance.
         let lastUserIdx = liveMessages.length - 1;
-        while (
-          lastUserIdx > 0 &&
-          liveMessages[lastUserIdx].message.role !== "user"
-        ) {
+        while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
           lastUserIdx--;
         }
         if (lastUserIdx > 0) {
@@ -247,36 +216,26 @@ export function buildOwnCut(
       // type:"compaction"). Resolve to the next message entry after pi's cut point.
       if (liveCutIdx < 0) {
         const nextMsgEntry = branchEntries.find(
-          (e: any, i: number) =>
-            i > cutInBranch && e.type === "message" && e.message,
+          (e: any, i: number) => i > cutInBranch && e.type === "message" && e.message,
         );
         if (nextMsgEntry) {
           const resolvedId: string = nextMsgEntry.id;
-          const resolvedLiveIdx = liveMessages.findIndex(
-            (lm) => lm.entry.id === resolvedId,
-          );
+          const resolvedLiveIdx = liveMessages.findIndex((lm) => lm.entry.id === resolvedId);
           if (
             resolvedLiveIdx > 0 &&
             (tailBehavior === "pi-default" || resolvedLiveIdx > minimalCutIdx)
           ) {
             return {
               ok: true,
-              messages: liveMessages
-                .slice(0, resolvedLiveIdx)
-                .map((e) => e.message),
-              selectedIds: liveMessages
-                .slice(0, resolvedLiveIdx)
-                .map((e) => e.entry.id),
+              messages: liveMessages.slice(0, resolvedLiveIdx).map((e) => e.message),
+              selectedIds: liveMessages.slice(0, resolvedLiveIdx).map((e) => e.entry.id),
               firstKeptEntryId: resolvedId,
               compactAll: false,
             };
           }
           if (resolvedLiveIdx === 0 && tailBehavior === "pi-default") {
             let lastUserIdx = liveMessages.length - 1;
-            while (
-              lastUserIdx > 0 &&
-              liveMessages[lastUserIdx].message.role !== "user"
-            ) {
+            while (lastUserIdx > 0 && liveMessages[lastUserIdx].message.role !== "user") {
               lastUserIdx--;
             }
             if (lastUserIdx > 0) {
@@ -294,10 +253,8 @@ export function buildOwnCut(
     // piFirstKeptEntryId not found in branch → fall through to minimal / orphan recovery
   }
 
-  if (liveMessages.length === 0)
-    return { ok: false, reason: "no_live_messages" };
-  if (liveMessages.length <= 2)
-    return { ok: false, reason: "too_few_live_messages" };
+  if (liveMessages.length === 0) return { ok: false, reason: "no_live_messages" };
+  if (liveMessages.length <= 2) return { ok: false, reason: "too_few_live_messages" };
 
   // Summarize all messages, keep only the last user message as context
   let cutIdx = liveMessages.length - 1;
@@ -338,15 +295,16 @@ const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
     'blackhole: Too few live messages — Pi\'s default logic preserves visible context. Set tailBehavior to "minimal" in config to force compaction with fewer messages.',
 };
 
-export const registerBeforeCompactHook = (
-  pi: ExtensionAPI,
-  omRuntime: Runtime,
-) => {
+export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
   pi.on("session_before_compact", (event, ctx) => {
     const { preparation, branchEntries, customInstructions } = event;
-    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) =>
-      ctx.ui?.notify?.(msg, "warning"),
-    );
+    const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
+
+    // Establish attribution for this attempt before config/context access can
+    // throw. Every attempt overwrites stale state; success/failure hooks consume it.
+    omRuntime.compactWasPiVcc = isPiVcc;
+    omRuntime.lastCompactCancelled = false;
+    omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui?.notify?.(msg, "warning"));
     const trace = (ev: string, d?: Record<string, unknown>) =>
       debugLog(ev, d, omRuntime.config.debugLog === true);
 
@@ -365,18 +323,16 @@ export const registerBeforeCompactHook = (
 
     trace("before_compact.enter", {
       customInstructions,
-      isPiVcc: customInstructions === PI_VCC_COMPACT_INSTRUCTION,
+      isPiVcc,
       overrideDefaultCompaction: omRuntime.config.overrideDefaultCompaction,
       manualMode:
-        omRuntime.config.compaction === "manual" ||
-        omRuntime.config.noAutoCompact === true,
+        omRuntime.config.compaction === "manual" || omRuntime.config.noAutoCompact === true,
       branchLength: branchEntries.length,
       hasPreviousSummary: !!preparation.previousSummary,
     });
 
     // Always handle explicit /blackhole marker.
     // Otherwise, only handle when user opted in via settings.
-    const isPiVcc = customInstructions === PI_VCC_COMPACT_INSTRUCTION;
 
     // NEW: Unified compaction guards
     // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
@@ -412,13 +368,13 @@ export const registerBeforeCompactHook = (
       }
 
       if (
-        (omRuntime.config.compaction === "manual" ||
-          omRuntime.config.noAutoCompact) &&
+        (omRuntime.config.compaction === "manual" || omRuntime.config.noAutoCompact) &&
         !isPiVcc
       ) {
         trace("before_compact.cancel", {
           reason: "manual mode and not /blackhole",
         });
+        omRuntime.lastCompactCancelled = true;
         return { cancel: true };
       }
     }
@@ -441,20 +397,14 @@ export const registerBeforeCompactHook = (
       effectiveTailBehavior,
     );
     if (!ownCut.ok) {
-      const lastComp = [...branchEntries]
-        .reverse()
-        .find((e: any) => e.type === "compaction");
-      const lastCompIdx = lastComp
-        ? (branchEntries as any[]).indexOf(lastComp)
-        : -1;
+      const lastComp = [...branchEntries].reverse().find((e: any) => e.type === "compaction");
+      const lastCompIdx = lastComp ? (branchEntries as any[]).indexOf(lastComp) : -1;
 
       // Recompute liveMessages view (same logic as buildOwnCut) for diagnostic
-      const lastKeptId: string | undefined = (lastComp as any)
-        ?.firstKeptEntryId;
+      const lastKeptId: string | undefined = (lastComp as any)?.firstKeptEntryId;
       const hasPriorCompaction = lastCompIdx >= 0;
       const hasValidKeptId =
-        !!lastKeptId &&
-        (branchEntries as any[]).some((e: any) => e.id === lastKeptId);
+        !!lastKeptId && (branchEntries as any[]).some((e: any) => e.id === lastKeptId);
       const diagOrphan = hasPriorCompaction && !hasValidKeptId;
       const liveRoles: string[] = [];
       if (diagOrphan) {
@@ -483,12 +433,8 @@ export const registerBeforeCompactHook = (
         isPiVcc,
         counts: {
           total: branchEntries.length,
-          messages: (branchEntries as any[]).filter(
-            (e: any) => e.type === "message",
-          ).length,
-          compactions: (branchEntries as any[]).filter(
-            (e: any) => e.type === "compaction",
-          ).length,
+          messages: (branchEntries as any[]).filter((e: any) => e.type === "message").length,
+          compactions: (branchEntries as any[]).filter((e: any) => e.type === "compaction").length,
           entriesAfterLastCompaction:
             lastCompIdx >= 0 ? branchEntries.length - lastCompIdx - 1 : null,
         },
@@ -515,8 +461,7 @@ export const registerBeforeCompactHook = (
         tail: (branchEntries as any[]).slice(-5).map((e: any) => ({
           type: e.type,
           role: e.type === "message" ? e.message?.role : undefined,
-          hasContent:
-            e.type === "message" ? e.message?.content != null : undefined,
+          hasContent: e.type === "message" ? e.message?.content != null : undefined,
         })),
       });
 
@@ -524,6 +469,7 @@ export const registerBeforeCompactHook = (
       try {
         ctx?.ui?.notify?.(REASON_MESSAGES[ownCut.reason], "warning");
       } catch {}
+      omRuntime.lastCompactCancelled = true;
       return { cancel: true };
     }
 
@@ -540,14 +486,10 @@ export const registerBeforeCompactHook = (
     const messages = convertToLlm(agentMessages);
 
     // Count kept messages and estimate tokens
-    const keptIdx = (branchEntries as any[]).findIndex(
-      (e: any) => e.id === firstKeptEntryId,
-    );
+    const keptIdx = (branchEntries as any[]).findIndex((e: any) => e.id === firstKeptEntryId);
     const keptEntries =
       keptIdx >= 0
-        ? (branchEntries as any[])
-            .slice(keptIdx)
-            .filter((e: any) => e.type === "message")
+        ? (branchEntries as any[]).slice(keptIdx).filter((e: any) => e.type === "message")
         : [];
     const keptChars = keptEntries.reduce((sum: number, e: any) => {
       const c = e.message?.content;
@@ -584,9 +526,7 @@ export const registerBeforeCompactHook = (
       ? 0
       : (branchEntries as any[])
           .slice(keptIdx)
-          .filter(
-            (e: any) => e.type === "message" && e.message?.role === "user",
-          ).length;
+          .filter((e: any) => e.type === "message" && e.message?.role === "user").length;
     omRuntime.compactionStats = {
       summarized: agentMessages.length,
       kept: keptEntries.length,
@@ -603,10 +543,7 @@ export const registerBeforeCompactHook = (
 
     const fileOps = {
       readFiles: [...preparation.fileOps.read],
-      modifiedFiles: [
-        ...preparation.fileOps.written,
-        ...preparation.fileOps.edited,
-      ],
+      modifiedFiles: [...preparation.fileOps.written, ...preparation.fileOps.edited],
     };
     const summary = compile({
       messages,
@@ -623,18 +560,12 @@ export const registerBeforeCompactHook = (
     const cutWindow =
       cutIdx >= 0
         ? branchEntries
-            .slice(
-              Math.max(0, cutIdx - 3),
-              Math.min(branchEntries.length, cutIdx + 3),
-            )
+            .slice(Math.max(0, cutIdx - 3), Math.min(branchEntries.length, cutIdx + 3))
             .map((e: any) => ({
               id: e.id,
               type: e.type,
               role: e.type === "message" ? e.message?.role : undefined,
-              preview:
-                e.type === "message"
-                  ? previewContent(e.message?.content)
-                  : undefined,
+              preview: e.type === "message" ? previewContent(e.message?.content) : undefined,
             }))
         : [];
 
@@ -691,33 +622,41 @@ export const registerBeforeCompactHook = (
       retainedToolOutputProjection,
     };
 
-    omRuntime.compactWasPiVcc = isPiVcc;
-
     // ── Inject observational-memory content ───────────────────────────
     let omContent: string;
     let omDetails: Record<string, unknown> | undefined;
+    let omHasContent = false;
     trace("before_compact.om_injection", {
       memoryEnabled: omRuntime.config.memory !== false,
     });
     if (omRuntime.config.memory !== false) {
-      const projection = buildCompactionProjection(
-        branchEntries as any[],
-        firstKeptEntryId,
-        {
-          observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens,
-          fullFoldAlways: omRuntime.config.fullFoldAlways,
-        },
-      );
-      omContent = renderSummary(
-        projection.reflections,
-        projection.observations,
-      );
+      const projection = buildCompactionProjection(branchEntries as any[], firstKeptEntryId, {
+        observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens,
+        fullFoldAlways: omRuntime.config.fullFoldAlways,
+      });
+      omContent = renderSummary(projection.reflections, projection.observations);
       omDetails = projection.details;
+      omHasContent = projection.reflections.length > 0 || projection.observations.length > 0;
     } else {
       omContent = renderSummary([], []);
     }
 
+    // An empty replacement summary would discard the context Pi's native
+    // compactor is designed to preserve. Decline ownership only when neither
+    // Blackhole's VCC summary nor the OM projection produced any content;
+    // non-empty Blackhole summaries retain the existing deterministic path.
+    // (renderSummary([], []) always emits the OM recall footer, so the check
+    // must not key off footer-inclusive omContent.)
     const fallbackSummary = summary + "\n\n" + omContent;
+    if (summary.trim().length === 0 && !omHasContent) {
+      // Returning undefined delegates to Pi's native summarizer:
+      // ExtensionHandler permits void, and pi only acts on result?.compaction.
+      trace("before_compact.native_fallback", {
+        reason: "empty_blackhole_summary",
+      });
+      return;
+    }
+
     const warnAppendFallback = (reason: string) => {
       trace("before_compact.append_fallback", { reason });
       if (omRuntime.appendFallbackNotified) return;
@@ -735,9 +674,7 @@ export const registerBeforeCompactHook = (
         firstKeptEntryId,
       );
       const aggregateSummary = stripRecallNotes(stripOMContent(summary)).trim();
-      const hasPriorCompaction = branchEntries.some(
-        (entry) => entry.type === "compaction",
-      );
+      const hasPriorCompaction = branchEntries.some((entry) => entry.type === "compaction");
       const hasCompletePreviousSummary =
         !hasPriorCompaction || Boolean(preparation.previousSummary);
       if (
@@ -794,17 +731,17 @@ export const registerBeforeCompactHook = (
   // Fire success toast for /compact path only (delayed to let UI settle).
   // /blackhole path uses its own onComplete callback in the command handler.
   pi.on("session_compact", (event, ctx) => {
+    const compactWasPiVcc = omRuntime.compactWasPiVcc;
+    omRuntime.compactWasPiVcc = false;
     if (!event.fromExtension) return;
-    if (omRuntime.compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
+    if (compactWasPiVcc) return; // /blackhole handles its own toast via onComplete
     const stats = omRuntime.compactionStats;
     if (!stats) return;
     const sessionId = ctx.sessionManager.getSessionId();
     setTimeout(() => {
       try {
         ctx?.ui?.notify?.(formatCompactionStats(stats), "info");
-        notifyMigrationReminder(sessionId, (msg, level) =>
-          ctx?.ui?.notify?.(msg, level as any),
-        );
+        notifyMigrationReminder(sessionId, (msg, level) => ctx?.ui?.notify?.(msg, level as any));
       } catch {}
     }, 500);
   });

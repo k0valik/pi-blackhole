@@ -24,16 +24,12 @@
  */
 
 import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import type {
-  Api,
-  Model,
-  ModelThinkingLevel,
-  ThinkingLevelMap,
-} from "@earendil-works/pi-ai";
+import type { Api, Model, ModelThinkingLevel, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import {
   matchesKey,
   SelectList,
   truncateToWidth,
+  type Component,
   type SelectItem,
 } from "@earendil-works/pi-tui";
 import { formatHintLine, type KeyHint } from "../frame";
@@ -93,10 +89,7 @@ function effortDisplayLabel(
   return LEVEL_FALLBACK_LABELS[level] ?? level;
 }
 
-function listModelOptions(
-  field: ModelField,
-  ctx: FieldRenderContext,
-): ModelOption[] {
+function listModelOptions(field: ModelField, ctx: FieldRenderContext): ModelOption[] {
   if (field.models) return field.models;
   const sessionLabel = field.sessionLabel ?? DEFAULT_SESSION_LABEL;
   const available = ctx.ctx.modelRegistry.getAvailable();
@@ -106,9 +99,7 @@ function listModelOptions(
     label: `${m.name}  [${m.provider}]`,
     model: m,
   }));
-  return field.hideSession
-    ? live
-    : [{ value: "", label: sessionLabel }, ...live];
+  return field.hideSession ? live : [{ value: "", label: sessionLabel }, ...live];
 }
 
 /**
@@ -142,9 +133,7 @@ function resolveModelForValue(
 function supportedEfforts(model: Model<Api> | undefined): ModelThinkingLevel[] {
   if (!model || !model.thinkingLevelMap) return ALL_THINKING_LEVELS;
   const map = model.thinkingLevelMap;
-  return ALL_THINKING_LEVELS.filter(
-    (lvl) => !(lvl in map && map[lvl] === null),
-  );
+  return ALL_THINKING_LEVELS.filter((lvl) => !(lvl in map && map[lvl] === null));
 }
 
 function clampEffort(
@@ -160,11 +149,7 @@ function modelDisplay(field: ModelField, value: ModelValue): string {
   return value.id;
 }
 
-function rowLabel(
-  field: ModelField,
-  value: ModelValue,
-  ctx: FieldRenderContext,
-): string {
+function rowLabel(field: ModelField, value: ModelValue, ctx: FieldRenderContext): string {
   const left = modelDisplay(field, value);
   if (field.hideEffort) return left;
   if (!value.thinking) return left;
@@ -220,15 +205,13 @@ function makeSubmenu(
       const query = filter.buffer.trim().toLowerCase();
       visibleOptions = query
         ? allOptions.filter(
-            (o) =>
-              o.label.toLowerCase().includes(query) ||
-              o.value.toLowerCase().includes(query),
+            (o) => o.label.toLowerCase().includes(query) || o.value.toLowerCase().includes(query),
           )
         : allOptions;
 
-      const items: SelectItem[] = visibleOptions.map((m) => ({
+      const items: SelectItem[] = visibleOptions.map((m, idx) => ({
         value: m.value,
-        label: m.label,
+        label: !query ? `${idx + 1}. ${m.label}` : m.label,
         description: m.value || undefined,
       }));
       list = new SelectList(
@@ -237,13 +220,12 @@ function makeSubmenu(
         getSelectListTheme(),
       );
       const idx =
-        preserveValue !== undefined
-          ? items.findIndex((i) => i.value === preserveValue)
-          : -1;
+        preserveValue !== undefined ? items.findIndex((i) => i.value === preserveValue) : -1;
       list.setSelectedIndex(idx >= 0 ? idx : 0);
 
       list.onSelect = (item) => {
         if (showEffort) {
+          refreshEffort(supported[effortIndex]);
           const effort = supported[effortIndex] ?? "off";
           done({ id: item.value, thinking: effort });
         } else {
@@ -271,18 +253,10 @@ function makeSubmenu(
       // internal level name.
       const item = list.getSelectedItem();
       const opt = visibleOptions.find((m) => m.value === item?.value);
-      const displayLabel = effortDisplayLabel(
-        currentLevel,
-        opt?.model?.thinkingLevelMap,
-      );
-      const left =
-        effortIndex > 0
-          ? ctx.theme.fg("accent", "‹")
-          : ctx.theme.fg("dim", "‹");
+      const displayLabel = effortDisplayLabel(currentLevel, opt?.model?.thinkingLevelMap);
+      const left = effortIndex > 0 ? ctx.theme.fg("accent", "‹") : ctx.theme.fg("dim", "‹");
       const right =
-        effortIndex < supported.length - 1
-          ? ctx.theme.fg("accent", "›")
-          : ctx.theme.fg("dim", "›");
+        effortIndex < supported.length - 1 ? ctx.theme.fg("accent", "›") : ctx.theme.fg("dim", "›");
       const label = ctx.theme.fg("muted", "  effort: ");
       // Show the canonical level name in dim parentheses next to the
       // override so power-users still know which pi level they're
@@ -292,16 +266,8 @@ function makeSubmenu(
           ? displayLabel
           : `${displayLabel} ${ctx.theme.fg("dim", `(${currentLevel})`)}`;
       const value = ctx.theme.fg("accent", ctx.theme.bold(valueText));
-      const counter = ctx.theme.fg(
-        "dim",
-        `  (${effortIndex + 1}/${supported.length})`,
-      );
-      return truncateToWidth(
-        `${label}${left} ${value} ${right}${counter}`,
-        width,
-        "…",
-        true,
-      );
+      const counter = ctx.theme.fg("dim", `  (${effortIndex + 1}/${supported.length})`);
+      return truncateToWidth(`${label}${left} ${value} ${right}${counter}`, width, "…", true);
     };
 
     const renderFilterRow = (width: number): string => {
@@ -309,7 +275,7 @@ function makeSubmenu(
       const buf = filter.buffer;
       const before = buf.slice(0, filter.cursor);
       const after = buf.slice(filter.cursor);
-      const placeholder = !buf ? ctx.theme.fg("dim", "  type to filter…") : "";
+      const placeholder = !buf ? ctx.theme.fg("dim", "  filter models…") : "";
       const hasMatches = visibleOptions.length > 0;
       const colorKey = hasMatches ? "accent" : "warning";
       const text = buf
@@ -321,21 +287,22 @@ function makeSubmenu(
     const renderHints = (width: number): string => {
       const hints: KeyHint[] = [{ key: "↑↓", label: "model" }];
       if (showEffort) hints.push({ key: "←→", label: "effort" });
-      hints.push(
-        { key: "type", label: "filter" },
-        { key: "enter", label: "save" },
-      );
+      if (!filter.buffer && visibleOptions.length > 1) {
+        hints.push({ key: `1-${Math.min(9, visibleOptions.length)}`, label: "choose" });
+      }
+      hints.push({ key: "type", label: "filter" });
+      if (field.default !== undefined) {
+        hints.push({ key: "alt+r", label: "reset" });
+      }
+      hints.push({ key: "enter", label: "save" });
       if (filter.buffer !== "") {
+        hints.push({ key: "ctrl+w", label: "delete word" });
+        hints.push({ key: "ctrl+u", label: "clear" });
         hints.push({ key: "esc", label: "clear filter" });
       } else {
         hints.push({ key: "esc", label: "cancel" });
       }
-      return truncateToWidth(
-        `  ${formatHintLine(hints, ctx.theme)}`,
-        width,
-        "…",
-        true,
-      );
+      return truncateToWidth(`  ${formatHintLine(hints, ctx.theme)}`, width, "…", true);
     };
 
     return {
@@ -344,9 +311,14 @@ function makeSubmenu(
         lines.push(renderFilterRow(width));
         lines.push("");
         if (visibleOptions.length === 0) {
-          lines.push(
-            ctx.theme.fg("muted", "  No matching models. (press esc to clear)"),
-          );
+          if (filter.buffer) {
+            const prefix = ctx.theme.fg("muted", "  No matching models for '");
+            const q = ctx.theme.fg("warning", filter.buffer);
+            const suffix = ctx.theme.fg("muted", "'. (press esc or ctrl+u to clear)");
+            lines.push(`${prefix}${q}${suffix}`);
+          } else {
+            lines.push(ctx.theme.fg("muted", "  No models available. (press esc to cancel)"));
+          }
         } else {
           for (const line of list.render(width)) lines.push(line);
         }
@@ -362,6 +334,40 @@ function makeSubmenu(
         list.invalidate();
       },
       handleInput(data: string): void {
+        if (matchesKey(data, "alt+r") && field.default !== undefined) {
+          filter.buffer = "";
+          filter.cursor = 0;
+          buildList(field.default.id);
+          refreshEffort(field.default.thinking);
+          ctx.tui.requestRender();
+          return;
+        }
+
+        // Numeric keypad selection shortcut when empty
+        if (!filter.buffer) {
+          const num = parseInt(data, 10);
+          if (
+            data.length === 1 &&
+            !isNaN(num) &&
+            num >= 1 &&
+            num <= Math.min(9, visibleOptions.length)
+          ) {
+            const item = visibleOptions[num - 1];
+            if (item) {
+              if (showEffort) {
+                const idx = visibleOptions.findIndex((m) => m.value === item.value);
+                if (idx >= 0) list.setSelectedIndex(idx);
+                refreshEffort(supported[effortIndex]);
+                const effort = supported[effortIndex] ?? "off";
+                done({ id: item.value, thinking: effort });
+              } else {
+                done({ id: item.value });
+              }
+              return;
+            }
+          }
+        }
+
         // Effort axis (only when not hidden) — must run before the
         // filter handler so ←/→ aren't typed into the search buffer.
         if (showEffort) {
@@ -437,15 +443,8 @@ export const modelRenderer: FieldRenderer<ModelField, ModelValue> = {
   },
   handleKey(row, data, { ctx }) {
     if (row.field.disabled) return {};
-    if (
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return") ||
-      data === " "
-    ) {
-      return {
-        consumed: true,
-        submenu: makeSubmenu(row.field, row.value, ctx),
-      };
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
+      return { consumed: true, submenu: makeSubmenu(row.field, row.value, ctx) };
     }
     return {};
   },

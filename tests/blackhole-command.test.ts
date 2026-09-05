@@ -10,10 +10,7 @@ const { testRoot } = vi.hoisted(() => {
   const { join } = require("node:path");
   const { tmpdir } = require("node:os");
   return {
-    testRoot: join(
-      tmpdir(),
-      `pi-blackhole-cmd-test-${process.pid}-${Date.now()}`,
-    ),
+    testRoot: join(tmpdir(), `pi-blackhole-cmd-test-${process.pid}-${Date.now()}`),
   };
 });
 
@@ -61,14 +58,8 @@ function createMockEnvironment() {
     }),
   };
 
-  const handlerMap = new Map<
-    string,
-    (args: unknown, ctx: unknown) => Promise<void>
-  >();
-  const completionMap = new Map<
-    string,
-    (prefix: string) => Array<{ value: string }>
-  >();
+  const handlerMap = new Map<string, (args: unknown, ctx: unknown) => Promise<void>>();
+  const completionMap = new Map<string, (prefix: string) => Array<{ value: string }>>();
 
   const runtime: any = {
     ensureConfig: vi.fn(),
@@ -163,9 +154,7 @@ describe("/blackhole command", () => {
     expect(values).not.toContain("configure");
 
     // Typing /blackhole config… surfaces the settings entry via its alias
-    const configMatches = completionMap.get("blackhole")!("config").map(
-      (c) => c.value,
-    );
+    const configMatches = completionMap.get("blackhole")!("config").map((c) => c.value);
     expect(configMatches).toEqual(["settings"]);
   });
 
@@ -183,8 +172,7 @@ describe("/blackhole command", () => {
   });
 
   it("calls ctx.compact with PI_VCC_COMPACT_INSTRUCTION", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
     const ctx = makeHandlerArgs();
@@ -196,8 +184,7 @@ describe("/blackhole command", () => {
   });
 
   it("sends onComplete notification with stats when available", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     runtime.compactionStats = { summarized: 42, kept: 10, keptTokensEst: 5000 };
     registerPiVccCommand(pi as any, runtime as any);
 
@@ -207,15 +194,12 @@ describe("/blackhole command", () => {
     const call = ctx.compact.mock.calls[0][0];
     call.onComplete();
 
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain(
-      "42 source entries",
-    );
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("42 source entries");
     expect(notifyCalls[notifyCalls.length - 1].msg).toContain("5.0k tok");
   });
 
   it("sends onComplete fallback notification without stats", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
     const ctx = makeHandlerArgs();
@@ -224,14 +208,11 @@ describe("/blackhole command", () => {
     const call = ctx.compact.mock.calls[0][0];
     call.onComplete();
 
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain(
-      "Compacted with blackhole",
-    );
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("Compacted with blackhole");
   });
 
   it("handles onError for cancellation", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
     const ctx = makeHandlerArgs();
@@ -241,14 +222,11 @@ describe("/blackhole command", () => {
     call.onError(new Error("Compaction cancelled"));
 
     expect(notifyCalls[notifyCalls.length - 1].level).toBe("warning");
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain(
-      "Nothing to compact",
-    );
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("Nothing to compact");
   });
 
   it("handles onError for general failure", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
     const ctx = makeHandlerArgs();
@@ -258,14 +236,11 @@ describe("/blackhole command", () => {
     call.onError(new Error("Model API error"));
 
     expect(notifyCalls[notifyCalls.length - 1].level).toBe("error");
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain(
-      "Compaction failed: Model API error",
-    );
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("Compaction failed: Model API error");
   });
 
   it("/blackhole om-off disables memory and saves config", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
     runtime.config.memory = true;
 
@@ -277,8 +252,7 @@ describe("/blackhole command", () => {
   });
 
   it("/blackhole om-on enables memory and saves config", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
     runtime.config.memory = false;
 
@@ -290,8 +264,7 @@ describe("/blackhole command", () => {
   });
 
   it("flush pending entries when noAutoCompact is active and pending data exists", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     runtime.config.compaction = "manual";
     registerPiVccCommand(pi as any, runtime as any);
 
@@ -366,8 +339,7 @@ describe("/blackhole follow-up prompt", () => {
 
   it("extracts follow-up text from /blackhole <args> and sends it after compaction", async () => {
     const sendUserMessageCalls: Array<{ content: string }> = [];
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     (pi as any).sendUserMessage = vi.fn((content: string) => {
       sendUserMessageCalls.push({ content });
     });
@@ -386,8 +358,7 @@ describe("/blackhole follow-up prompt", () => {
   });
 
   it("does NOT extract subcommands as follow-up", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
     const ctx = makeHandlerArgs();
@@ -398,8 +369,7 @@ describe("/blackhole follow-up prompt", () => {
   });
 
   it("treats 'settings' as an alias for 'configure'", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
     const ctx = makeHandlerArgs();
@@ -411,8 +381,7 @@ describe("/blackhole follow-up prompt", () => {
 
   it("no args → no follow-up prompt sent", async () => {
     const sendUserMessageCalls: Array<{ content: string }> = [];
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     (pi as any).sendUserMessage = vi.fn((content: string) => {
       sendUserMessageCalls.push({ content });
     });
@@ -429,8 +398,7 @@ describe("/blackhole follow-up prompt", () => {
 
   it("fires follow-up via sendUserMessage after compaction completes", async () => {
     const sendUserMessageCalls: Array<{ content: string }> = [];
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     (pi as any).sendUserMessage = vi.fn((content: string) => {
       sendUserMessageCalls.push({ content });
     });
@@ -450,8 +418,7 @@ describe("/blackhole follow-up prompt", () => {
 
   it("does not fire follow-up when compaction fails", async () => {
     const sendUserMessageCalls: Array<{ content: string }> = [];
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     (pi as any).sendUserMessage = vi.fn((content: string) => {
       sendUserMessageCalls.push({ content });
     });

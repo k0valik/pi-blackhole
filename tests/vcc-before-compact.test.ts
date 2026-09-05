@@ -1,11 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { buildOwnCut } from "../src/hooks/before-compact.js";
 
-const msg = (
-  id: string,
-  role: "user" | "assistant" | "toolResult",
-  content = "x",
-) => ({
+const msg = (id: string, role: "user" | "assistant" | "toolResult", content = "x") => ({
   id,
   type: "message",
   message: { role, content },
@@ -230,11 +226,7 @@ describe("buildOwnCut", () => {
   });
 
   test("cancels with too_few_live_messages when liveMessages <= 2", () => {
-    const r = buildOwnCut([
-      comp("c1", "m1"),
-      msg("m1", "user", "x"),
-      msg("m2", "assistant", "y"),
-    ]);
+    const r = buildOwnCut([comp("c1", "m1"), msg("m1", "user", "x"), msg("m2", "assistant", "y")]);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toBe("too_few_live_messages");

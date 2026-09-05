@@ -13,9 +13,7 @@ interface RegisteredProviderConfig {
 
 interface ProviderRegistry {
   getRegisteredProviderIds?: () => readonly string[];
-  getRegisteredProviderConfig?: (
-    providerId: string,
-  ) => RegisteredProviderConfig | undefined;
+  getRegisteredProviderConfig?: (providerId: string) => RegisteredProviderConfig | undefined;
   registeredProviders?: Map<string, RegisteredProviderConfig>;
 }
 
@@ -23,17 +21,10 @@ export function captureRegisteredProviderStreams(
   registry: ProviderRegistry,
   providerStreams: Map<string, Function>,
 ): void {
-  if (
-    registry.getRegisteredProviderIds &&
-    registry.getRegisteredProviderConfig
-  ) {
+  if (registry.getRegisteredProviderIds && registry.getRegisteredProviderConfig) {
     for (const providerId of registry.getRegisteredProviderIds()) {
       const config = registry.getRegisteredProviderConfig(providerId);
-      if (
-        config?.streamSimple &&
-        config.api &&
-        !providerStreams.has(config.api)
-      ) {
+      if (config?.streamSimple && config.api && !providerStreams.has(config.api)) {
         providerStreams.set(config.api, config.streamSimple);
       }
     }
@@ -69,16 +60,11 @@ const GLOBAL_DISPATCHER_SYMBOLS = [
 function getGlobalDispatcher(): Dispatcher {
   for (const symbol of GLOBAL_DISPATCHER_SYMBOLS) {
     const dispatcher = (globalThis as Record<symbol, unknown>)[symbol];
-    if (
-      dispatcher &&
-      typeof (dispatcher as Dispatcher).dispatch === "function"
-    ) {
+    if (dispatcher && typeof (dispatcher as Dispatcher).dispatch === "function") {
       return dispatcher as Dispatcher;
     }
   }
-  throw new Error(
-    "Blackhole provider idle timeout requires Pi's Undici dispatcher",
-  );
+  throw new Error("Blackhole provider idle timeout requires Pi's Undici dispatcher");
 }
 
 /**
@@ -92,18 +78,13 @@ function getGlobalDispatcher(): Dispatcher {
  * If the caller already supplied an `init.dispatcher`, we chain through it
  * rather than silently overwriting it.
  */
-export function createProviderFetch(
-  timeoutMs?: number,
-): typeof fetch | undefined {
+export function createProviderFetch(timeoutMs?: number): typeof fetch | undefined {
   // Unset or explicitly disabled → let pi's global default / caller setup apply.
   if (timeoutMs === undefined || timeoutMs === 0) return undefined;
 
   const dispatcher: Dispatcher = {
     dispatch(options, handler) {
-      return getGlobalDispatcher().dispatch(
-        { ...options, bodyTimeout: timeoutMs },
-        handler,
-      );
+      return getGlobalDispatcher().dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
     },
   };
 
@@ -113,10 +94,7 @@ export function createProviderFetch(
       // Respect caller-provided dispatcher by chaining our timeout through it.
       const chained: Dispatcher = {
         dispatch(options, handler) {
-          return callerDispatcher.dispatch(
-            { ...options, bodyTimeout: timeoutMs },
-            handler,
-          );
+          return callerDispatcher.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
         },
       };
       return fetch(input, { ...init, dispatcher: chained } as RequestInit & {
@@ -132,13 +110,11 @@ export function createProviderFetch(
 export function createBridgeStreamFn(streamSimple: any) {
   const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
   return (model: any, ctx: any, opts: any) => {
-    const providerStreams: Map<string, Function> | undefined = (
-      globalThis as any
-    )[PROVIDER_STREAMS_KEY];
+    const providerStreams: Map<string, Function> | undefined = (globalThis as any)[
+      PROVIDER_STREAMS_KEY
+    ];
     if (!providerStreams) return streamSimple(model, ctx, opts);
     const customFn = model?.api ? providerStreams.get(model.api) : undefined;
-    return customFn
-      ? customFn(model, ctx, opts)
-      : streamSimple(model, ctx, opts);
+    return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
   };
 }

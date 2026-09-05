@@ -1,11 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderMessage } from "../src/core/render-entries.js";
-import {
-  userMsg,
-  assistantText,
-  assistantWithToolCall,
-  toolResult,
-} from "./vcc-fixtures.js";
+import { userMsg, assistantText, assistantWithToolCall, toolResult } from "./vcc-fixtures.js";
 
 describe("renderMessage", () => {
   it("renders user message", () => {

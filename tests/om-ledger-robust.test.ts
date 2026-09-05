@@ -108,10 +108,7 @@ describe("om-ledger-robust", () => {
     });
 
     it("handles missing upToEntryId by folding all", () => {
-      const entries = [
-        obsEntry("e1", [obs(1, "t1")]),
-        obsEntry("e2", [obs(2, "t2")]),
-      ];
+      const entries = [obsEntry("e1", [obs(1, "t1")]), obsEntry("e2", [obs(2, "t2")])];
       const folded = foldLedger(entries);
       expect(folded.observations).toHaveLength(2);
     });
@@ -212,10 +209,7 @@ describe("om-ledger-robust", () => {
     });
 
     it("returns all reflections regardless of fullFold", () => {
-      const entries = [
-        reflEntry("e1", [refl(1, "ref1")]),
-        obsEntry("e2", [obs(1, "t1", 2000)]),
-      ];
+      const entries = [reflEntry("e1", [refl(1, "ref1")]), obsEntry("e2", [obs(1, "t1", 2000)])];
       const res = buildCompactionProjection(entries, "e2", {
         observationsPoolMaxTokens: 1000,
       });
@@ -277,29 +271,20 @@ describe("om-ledger-robust", () => {
     });
 
     it("fullProjection collects everything up to tip when no ID provided", () => {
-      const entries = [
-        obsEntry("e1", [obs(1, "t1")]),
-        reflEntry("e2", [refl(1, "r1")]),
-      ];
+      const entries = [obsEntry("e1", [obs(1, "t1")]), reflEntry("e2", [refl(1, "r1")])];
       const res = fullProjection(entries);
       expect(res.observations).toHaveLength(1);
       expect(res.reflections).toHaveLength(1);
     });
 
     it("respects dropped observations in full projection", () => {
-      const entries = [
-        obsEntry("e1", [obs(1, "t1")]),
-        dropEntry("e2", [id(1)]),
-      ];
+      const entries = [obsEntry("e1", [obs(1, "t1")]), dropEntry("e2", [id(1)])];
       const res = fullProjection(entries);
       expect(res.observations).toHaveLength(0);
     });
 
     it("fullProjection upToEntryId limits collection", () => {
-      const entries = [
-        obsEntry("e1", [obs(1, "t1")]),
-        obsEntry("e2", [obs(2, "t2")]),
-      ];
+      const entries = [obsEntry("e1", [obs(1, "t1")]), obsEntry("e2", [obs(2, "t2")])];
       const res = fullProjection(entries, "e1");
       expect(res.observations).toHaveLength(1);
       expect(res.observations[0].id).toBe(id(1));
@@ -338,10 +323,7 @@ describe("om-ledger-robust", () => {
     });
 
     it("handles drops for IDs that haven't been seen yet", () => {
-      const entries = [
-        dropEntry("e1", [id(999)]),
-        obsEntry("e2", [obs(999, "t1")]),
-      ];
+      const entries = [dropEntry("e1", [id(999)]), obsEntry("e2", [obs(999, "t1")])];
       const folded = foldLedger(entries);
       expect(folded.activeObservations).toHaveLength(0);
       expect(folded.droppedObservationIds.has(id(999))).toBe(true);

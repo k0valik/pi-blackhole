@@ -6,7 +6,8 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   deepMerge,
@@ -35,9 +36,15 @@ function setupDirs(label: string) {
 // ── getExtensionsDir ─────────────────────────────────────────────────
 
 describe("getExtensionsDir", () => {
-  it("returns a path ending in extensions", () => {
+  it("returns a path ending in extensions (or the per-process vitest temp dir)", () => {
     const dir = getExtensionsDir();
-    expect(dir).toMatch(/extensions\/?$/);
+    const redirected = process.env.VITEST === "true" && !process.env.PI_CODING_AGENT_DIR;
+    if (redirected) {
+      expect(dir.startsWith(tmpdir())).toBe(true);
+      expect(basename(dir)).toMatch(/^pi-agent-extensions-/);
+    } else {
+      expect(dir).toMatch(/extensions\/?$/);
+    }
   });
 });
 
@@ -52,10 +59,7 @@ describe("readConfig", () => {
 
   it("returns parsed JSON when file exists", () => {
     const { globalDir, cleanup } = setupDirs("read-ok");
-    writeFileSync(
-      join(globalDir, "test.json"),
-      JSON.stringify({ enabled: true, count: 42 }),
-    );
+    writeFileSync(join(globalDir, "test.json"), JSON.stringify({ enabled: true, count: 42 }));
     expect(readConfig("test.json", globalDir)).toEqual({
       enabled: true,
       count: 42,
@@ -207,10 +211,7 @@ describe("loadConfig", () => {
 
   it("merges global file with shallow defaults", () => {
     const { globalDir, cleanup } = setupDirs("load-global");
-    writeFileSync(
-      join(globalDir, FILENAME),
-      JSON.stringify({ enabled: false }),
-    );
+    writeFileSync(join(globalDir, FILENAME), JSON.stringify({ enabled: false }));
     const config = loadConfig(FILENAME, DEFAULTS, { configDir: globalDir });
     expect(config).toEqual({ enabled: false, timeout: 30, label: "default" });
     cleanup();
@@ -218,14 +219,8 @@ describe("loadConfig", () => {
 
   it("merges global + project with shallow merge", () => {
     const { globalDir, projectDir, cleanup } = setupDirs("load-global-project");
-    writeFileSync(
-      join(globalDir, FILENAME),
-      JSON.stringify({ enabled: false }),
-    );
-    writeFileSync(
-      join(projectDir, ".pi", FILENAME),
-      JSON.stringify({ timeout: 60 }),
-    );
+    writeFileSync(join(globalDir, FILENAME), JSON.stringify({ enabled: false }));
+    writeFileSync(join(projectDir, ".pi", FILENAME), JSON.stringify({ timeout: 60 }));
     const config = loadConfig(FILENAME, DEFAULTS, {
       configDir: globalDir,
       cwd: projectDir,
@@ -235,17 +230,9 @@ describe("loadConfig", () => {
   });
 
   it("project overrides global (shallow)", () => {
-    const { globalDir, projectDir, cleanup } = setupDirs(
-      "load-project-override",
-    );
-    writeFileSync(
-      join(globalDir, FILENAME),
-      JSON.stringify({ enabled: false }),
-    );
-    writeFileSync(
-      join(projectDir, ".pi", FILENAME),
-      JSON.stringify({ enabled: true }),
-    );
+    const { globalDir, projectDir, cleanup } = setupDirs("load-project-override");
+    writeFileSync(join(globalDir, FILENAME), JSON.stringify({ enabled: false }));
+    writeFileSync(join(projectDir, ".pi", FILENAME), JSON.stringify({ enabled: true }));
     const config = loadConfig(FILENAME, DEFAULTS, {
       configDir: globalDir,
       cwd: projectDir,
@@ -263,13 +250,8 @@ describe("loadConfig", () => {
   });
 
   it("gracefully handles malformed project JSON", () => {
-    const { globalDir, projectDir, cleanup } = setupDirs(
-      "load-malformed-project",
-    );
-    writeFileSync(
-      join(globalDir, FILENAME),
-      JSON.stringify({ label: "global" }),
-    );
+    const { globalDir, projectDir, cleanup } = setupDirs("load-malformed-project");
+    writeFileSync(join(globalDir, FILENAME), JSON.stringify({ label: "global" }));
     writeFileSync(join(projectDir, ".pi", FILENAME), "bad json");
     const config = loadConfig(FILENAME, DEFAULTS, {
       configDir: globalDir,
@@ -285,14 +267,8 @@ describe("loadConfig", () => {
       components: { spinner: true, cwd: true, model: true },
       backends: { standard: true, tmux: false },
     };
-    writeFileSync(
-      join(globalDir, FILENAME),
-      JSON.stringify({ components: { spinner: false } }),
-    );
-    writeFileSync(
-      join(projectDir, ".pi", FILENAME),
-      JSON.stringify({ backends: { tmux: true } }),
-    );
+    writeFileSync(join(globalDir, FILENAME), JSON.stringify({ components: { spinner: false } }));
+    writeFileSync(join(projectDir, ".pi", FILENAME), JSON.stringify({ backends: { tmux: true } }));
     const config = loadConfig(FILENAME, nestedDefaults, {
       configDir: globalDir,
       cwd: projectDir,
@@ -308,10 +284,7 @@ describe("loadConfig", () => {
   it("with deep merge, project deep-overrides global", () => {
     const { globalDir, projectDir, cleanup } = setupDirs("load-deep-override");
     const nestedDefaults = { components: { spinner: true, cwd: false } };
-    writeFileSync(
-      join(globalDir, FILENAME),
-      JSON.stringify({ components: { spinner: false } }),
-    );
+    writeFileSync(join(globalDir, FILENAME), JSON.stringify({ components: { spinner: false } }));
     writeFileSync(
       join(projectDir, ".pi", FILENAME),
       JSON.stringify({ components: { spinner: true } }),

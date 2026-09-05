@@ -3,7 +3,7 @@
  * Changes: bun:test → vitest, added .js import extensions
  */
 import { describe, it, expect } from "vitest";
-import { searchEntries } from "../src/core/search-entries.js";
+import { searchEntries, searchEntriesDetailed } from "../src/core/search-entries.js";
 import type { RenderedEntry } from "../src/core/render-entries.js";
 import type { Message } from "@earendil-works/pi-ai";
 
@@ -52,9 +52,7 @@ describe("searchEntries", () => {
 
   it("finds keyword beyond clip boundary in full content", () => {
     const longText = "A".repeat(400) + " hidden_keyword here";
-    const longEntries: RenderedEntry[] = [
-      { index: 0, role: "user", summary: "A".repeat(300) },
-    ];
+    const longEntries: RenderedEntry[] = [{ index: 0, role: "user", summary: "A".repeat(300) }];
     const longMsgs: Message[] = [{ role: "user", content: longText } as any];
     const r = searchEntries(longEntries, longMsgs, "hidden_keyword");
     expect(r).toHaveLength(1);
@@ -117,9 +115,7 @@ describe("searchEntries", () => {
   it("natural language ranks by BM25 score", () => {
     const r = searchEntries(entries, messages, "root cause auth");
     // Top result has more terms matched = higher BM25 score
-    expect(r[0].matchCount!).toBeGreaterThanOrEqual(
-      r[r.length - 1].matchCount!,
-    );
+    expect(r[0].matchCount!).toBeGreaterThanOrEqual(r[r.length - 1].matchCount!);
   });
 
   it("filters stopwords from queries", () => {
@@ -165,9 +161,7 @@ describe("searchEntries", () => {
   // ── file content searchability (Phase 1) ──
 
   it("finds text written via tool call content field", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "write path=a.ts" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "write path=a.ts" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -191,9 +185,7 @@ describe("searchEntries", () => {
   });
 
   it("finds text from edit tool call edits array", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "edit path=main.go" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "edit path=main.go" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -244,9 +236,7 @@ describe("searchEntries", () => {
   // ── mode filtering (Phase 4) ──
 
   it("mode:'file' only searches tool call args, not transcript text", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "summary" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "summary" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -278,9 +268,7 @@ describe("searchEntries", () => {
   });
 
   it("mode:'file' populates fileMatches correctly", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "write step" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "write step" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -305,9 +293,7 @@ describe("searchEntries", () => {
   });
 
   it("mode field works with regex queries", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "editing" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "editing" }];
     const m: Message[] = [
       {
         role: "assistant",
@@ -331,9 +317,7 @@ describe("searchEntries", () => {
   });
 
   it("mode:'file' does not include bash command output", () => {
-    const e: RenderedEntry[] = [
-      { index: 0, role: "assistant", summary: "ran bash" },
-    ];
+    const e: RenderedEntry[] = [{ index: 0, role: "assistant", summary: "ran bash" }];
     const m: Message[] = [
       {
         role: "bashExecution" as any,
@@ -347,5 +331,77 @@ describe("searchEntries", () => {
     // In hybrid mode, bash output should still be searchable (existing behavior)
     const hybrid = searchEntries(e, m, "secret_api_key");
     expect(hybrid).toHaveLength(1);
+  });
+
+  it("indexes generic tool-call arguments but excludes recall self-search", () => {
+    const e: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "called a tool" },
+      { index: 1, role: "assistant", summary: "searched history" },
+      { index: 2, role: "tool_result", summary: "1 matches for secret-marker" },
+    ];
+    const m: Message[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc-generic",
+            name: "custom_tool",
+            arguments: { query: "secret-marker" },
+          },
+        ],
+      } as any,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tc-recall",
+            name: "recall",
+            arguments: { query: "secret-marker" },
+          },
+        ],
+      } as any,
+      {
+        role: "toolResult",
+        toolName: "recall",
+        content: "secret-marker",
+      } as any,
+    ];
+
+    expect(searchEntries(e, m, "secret-marker").map((hit) => hit.index)).toEqual([0]);
+  });
+
+  it("caps broad results and reports the uncapped count", () => {
+    const e = Array.from({ length: 60 }, (_, index) => ({
+      index,
+      role: "user" as const,
+      summary: `common-marker entry ${index}`,
+    }));
+    const m = e.map((entry) => ({ role: "user", content: entry.summary }) as any);
+    const result = searchEntriesDetailed(e, m, "common-marker", {
+      relativeFloor: 0,
+    });
+    expect(result.hits).toHaveLength(50);
+    expect(result.totalBeforeCap).toBe(60);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("filters the low-score tail only for distinct multi-term queries", () => {
+    const texts = [
+      "alpha beta gamma delta ".repeat(3),
+      "alpha mentioned once in an unrelated paragraph",
+    ];
+    const e = texts.map((summary, index) => ({
+      index,
+      role: "user" as const,
+      summary,
+    }));
+    const m = texts.map((content) => ({ role: "user", content }) as any);
+
+    expect(searchEntriesDetailed(e, m, "alpha beta gamma delta").hits.map((h) => h.index)).toEqual([
+      0,
+    ]);
+    expect(searchEntriesDetailed(e, m, "alpha alpha", { relativeFloor: 0.9 }).hits).toHaveLength(2);
   });
 });

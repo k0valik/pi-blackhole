@@ -23,8 +23,7 @@ let __cachedAgentDir: string | null = null;
  */
 export function getAgentDir(): string {
   const current = process.env.PI_CODING_AGENT_DIR?.trim();
-  if (current === __lastAgentDirEnv && __cachedAgentDir !== null)
-    return __cachedAgentDir;
+  if (current === __lastAgentDirEnv && __cachedAgentDir !== null) return __cachedAgentDir;
   __lastAgentDirEnv = current;
   __cachedAgentDir = current || originalGetAgentDir();
   return __cachedAgentDir;
@@ -232,6 +231,7 @@ const THINKING_LEVELS: readonly string[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ];
 
 // String enums for new config surface
@@ -243,34 +243,19 @@ const TAIL_BEHAVIOR_VALUES = ["pi-default", "minimal"] as const;
 const MID_RUN_COMPACTION_VALUES = ["resume", "pause", "off"] as const;
 
 function isCompaction(v: unknown): v is "auto" | "manual" | "off" {
-  return (
-    typeof v === "string" &&
-    (COMPACTION_VALUES as readonly string[]).includes(v)
-  );
+  return typeof v === "string" && (COMPACTION_VALUES as readonly string[]).includes(v);
 }
 function isCompactionEngine(v: unknown): v is "blackhole" | "pi-default" {
-  return (
-    typeof v === "string" &&
-    (COMPACTION_ENGINE_VALUES as readonly string[]).includes(v)
-  );
+  return typeof v === "string" && (COMPACTION_ENGINE_VALUES as readonly string[]).includes(v);
 }
 function isCompactionSummaryMode(v: unknown): v is "default" | "append" {
-  return (
-    typeof v === "string" &&
-    (COMPACTION_SUMMARY_MODE_VALUES as readonly string[]).includes(v)
-  );
+  return typeof v === "string" && (COMPACTION_SUMMARY_MODE_VALUES as readonly string[]).includes(v);
 }
 function isTailBehavior(v: unknown): v is "pi-default" | "minimal" {
-  return (
-    typeof v === "string" &&
-    (TAIL_BEHAVIOR_VALUES as readonly string[]).includes(v)
-  );
+  return typeof v === "string" && (TAIL_BEHAVIOR_VALUES as readonly string[]).includes(v);
 }
 function isMidRunCompaction(v: unknown): v is "resume" | "pause" | "off" {
-  return (
-    typeof v === "string" &&
-    (MID_RUN_COMPACTION_VALUES as readonly string[]).includes(v)
-  );
+  return typeof v === "string" && (MID_RUN_COMPACTION_VALUES as readonly string[]).includes(v);
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -310,9 +295,7 @@ function parseModel(v: unknown): OmModelConfig | undefined {
 
 function parseModelArray(v: unknown): OmModelConfig[] | undefined {
   if (!Array.isArray(v)) return undefined;
-  const parsed = v
-    .map(parseModel)
-    .filter((m): m is OmModelConfig => m !== undefined);
+  const parsed = v.map(parseModel).filter((m): m is OmModelConfig => m !== undefined);
   return parsed.length > 0 ? parsed : undefined;
 }
 
@@ -321,13 +304,11 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
 
   // String enums — compaction surface
   if (isCompaction(raw.compaction)) c.compaction = raw.compaction;
-  if (isCompactionEngine(raw.compactionEngine))
-    c.compactionEngine = raw.compactionEngine;
+  if (isCompactionEngine(raw.compactionEngine)) c.compactionEngine = raw.compactionEngine;
   if (isCompactionSummaryMode(raw.compactionSummaryMode))
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
-  if (isMidRunCompaction(raw.midRunCompaction))
-    c.midRunCompaction = raw.midRunCompaction;
+  if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
 
   // Provider-aware skip list (entries: provider or "provider:api")
   if (Array.isArray(raw.skipForProviders)) {
@@ -344,14 +325,11 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (typeof raw.debug === "boolean") c.debug = raw.debug;
 
   // Booleans — om
-  if (typeof raw.sessionFallback === "boolean")
-    c.sessionFallback = raw.sessionFallback;
-  if (typeof raw.noAutoCompact === "boolean")
-    c.noAutoCompact = raw.noAutoCompact;
+  if (typeof raw.sessionFallback === "boolean") c.sessionFallback = raw.sessionFallback;
+  if (typeof raw.noAutoCompact === "boolean") c.noAutoCompact = raw.noAutoCompact;
   if (typeof raw.passive === "boolean") c.passive = raw.passive;
   if (typeof raw.memory === "boolean") c.memory = raw.memory;
-  if (typeof raw.fullFoldAlways === "boolean")
-    c.fullFoldAlways = raw.fullFoldAlways;
+  if (typeof raw.fullFoldAlways === "boolean") c.fullFoldAlways = raw.fullFoldAlways;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
   // Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
@@ -430,10 +408,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
  */
 function migrateOldKnobs(parsed: Record<string, unknown>): void {
   // Only run if new keys are absent AND old keys are present
-  if (
-    parsed.compaction !== undefined ||
-    parsed.compactionEngine !== undefined
-  ) {
+  if (parsed.compaction !== undefined || parsed.compactionEngine !== undefined) {
     return; // new keys already set — no migration
   }
 
@@ -511,21 +486,18 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     const settingsResult = readJson(settingsPath);
     const settingsRaw = settingsResult.data;
     if (settingsResult.error && onWarn) onWarn(settingsResult.error);
-    const omRaw =
-      settingsRaw?.["pi-blackhole"] ?? settingsRaw?.["observational-memory"];
+    const omRaw = settingsRaw?.["pi-blackhole"] ?? settingsRaw?.["observational-memory"];
     const projectSettingsPath = join(cwd, ".pi", "settings.json");
     const projectResult = readJson(projectSettingsPath);
     const projectRaw = projectResult.data;
     if (projectResult.error && onWarn) onWarn(projectResult.error);
-    const projectOmRaw =
-      projectRaw?.["pi-blackhole"] ?? projectRaw?.["observational-memory"];
+    const projectOmRaw = projectRaw?.["pi-blackhole"] ?? projectRaw?.["observational-memory"];
 
     // Merge legacy sources
     const merged: Record<string, unknown> = {};
     if (piVccRaw && isRecord(piVccRaw)) Object.assign(merged, piVccRaw);
     if (omRaw && isRecord(omRaw)) Object.assign(merged, omRaw);
-    if (projectOmRaw && isRecord(projectOmRaw))
-      Object.assign(merged, projectOmRaw);
+    if (projectOmRaw && isRecord(projectOmRaw)) Object.assign(merged, projectOmRaw);
     raw = merged;
   }
 
@@ -572,9 +544,7 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     if (isCompaction(trimmed)) {
       merged.compaction = trimmed as "auto" | "manual" | "off";
     } else {
-      console.warn(
-        `blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`,
-      );
+      console.warn(`blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`);
     }
   }
 
@@ -651,10 +621,7 @@ export function saveUnifiedConfigScoped(
   cwd: string,
 ): boolean {
   try {
-    const dir =
-      scope === "project"
-        ? join(cwd, ".pi")
-        : join(getAgentDir(), "pi-blackhole");
+    const dir = scope === "project" ? join(cwd, ".pi") : join(getAgentDir(), "pi-blackhole");
     const path = join(dir, CONFIG_FILE);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const existingResult = readJson(path);
@@ -703,10 +670,7 @@ export function configFileNeedsMigration(): boolean {
   try {
     const path = configPath();
     if (!existsSync(path)) return false;
-    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<
-      string,
-      unknown
-    >;
+    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
     if (
       raw.compaction !== undefined ||
       raw.compactionEngine !== undefined ||
@@ -737,9 +701,6 @@ export function configFileNeedsMigration(): boolean {
  *
  * @param config — The current runtime config (may include legacy noAutoCompact)
  */
-export function isManualMode(config: {
-  compaction?: string;
-  noAutoCompact?: boolean;
-}): boolean {
+export function isManualMode(config: { compaction?: string; noAutoCompact?: boolean }): boolean {
   return config.compaction === "manual" || config.noAutoCompact === true;
 }

@@ -65,9 +65,7 @@ describe("formatSummary", () => {
       briefTranscript: `[assistant]\n${"word ".repeat(80)}`,
     };
     const r = formatSummary(data);
-    expect(
-      Math.max(...r.split("\n").map((line) => line.length)),
-    ).toBeLessThanOrEqual(120);
+    expect(Math.max(...r.split("\n").map((line) => line.length))).toBeLessThanOrEqual(120);
   });
 
   describe("capBrief omission count", () => {

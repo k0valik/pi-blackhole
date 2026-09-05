@@ -46,9 +46,7 @@ const sectionOf = (text: string, header: string): string => {
     })
     .filter((n) => n >= 0);
   const nextSep = after.indexOf("\n\n---\n\n");
-  const candidates = [...nextSection, ...(nextSep > 0 ? [nextSep] : [])].sort(
-    (a, b) => a - b,
-  );
+  const candidates = [...nextSection, ...(nextSep > 0 ? [nextSep] : [])].sort((a, b) => a - b);
   const end = candidates[0];
   return (end ? after.slice(0, end) : after).trim();
 };
@@ -61,11 +59,7 @@ const briefOf = (text: string): string => {
 };
 
 /** Merge a header section */
-const mergeHeaderSection = (
-  header: string,
-  prev: string,
-  fresh: string,
-): string => {
+const mergeHeaderSection = (header: string, prev: string, fresh: string): string => {
   // Outstanding Context is volatile -- always use fresh only
   if (header === "Outstanding Context") return fresh;
   if (!prev) return fresh;
@@ -130,10 +124,8 @@ const mergeFileLines = (prev: string, fresh: string): string => {
   };
 
   const lines: string[] = [];
-  if (merged.Modified.size > 0)
-    lines.push(`- Modified: ${cap(merged.Modified, 10)}`);
-  if (merged.Created.size > 0)
-    lines.push(`- Created: ${cap(merged.Created, 10)}`);
+  if (merged.Modified.size > 0) lines.push(`- Modified: ${cap(merged.Modified, 10)}`);
+  if (merged.Created.size > 0) lines.push(`- Created: ${cap(merged.Created, 10)}`);
   if (merged.Read.size > 0) lines.push(`- Read: ${cap(merged.Read, 10)}`);
   if (lines.length === 0) return "";
   return `[Files And Changes]\n${lines.join("\n")}`;
@@ -169,18 +161,14 @@ const mergePrevious = (prev: string, fresh: string): string => {
   return parts.join(SEPARATOR);
 };
 
-const compileFresh = (
-  input: Pick<CompileInput, "messages" | "fileOps">,
-): string => {
+const compileFresh = (input: Pick<CompileInput, "messages" | "fileOps">): string => {
   const blocks = filterNoise(normalize(input.messages));
   const data = buildSections({ blocks });
   return formatSummary(data);
 };
 
 /** Build one fresh immutable VCC segment. It never reads an older summary. */
-export const compileSegment = (
-  input: Pick<CompileInput, "messages" | "fileOps">,
-): string => {
+export const compileSegment = (input: Pick<CompileInput, "messages" | "fileOps">): string => {
   const fresh = compileFresh(input);
   return fresh ? wrapLongLines(fresh) : "";
 };
@@ -193,9 +181,7 @@ export const compile = (input: CompileInput): string => {
   // matching. Order matters: OM sections appear before the recall note in the
   // stored summary, so we must remove them first to avoid leaving the recall
   // stripper with fragments.
-  let prev = input.previousSummary
-    ? stripOMContent(input.previousSummary)
-    : undefined;
+  let prev = input.previousSummary ? stripOMContent(input.previousSummary) : undefined;
   prev = prev ? stripRecallNotes(prev) : undefined;
   const merged = prev ? mergePrevious(prev, fresh) : fresh;
   if (!merged) return "";
@@ -216,8 +202,7 @@ export const compile = (input: CompileInput): string => {
  * into paragraphs (double-newline boundaries) and drop any paragraph that
  * contains the identifying sentence.
  */
-const RECALL_NOTE_MARKER =
-  "The conversation before this point has been compacted";
+const RECALL_NOTE_MARKER = "The conversation before this point has been compacted";
 
 /** Return the one mutable recall-note paragraph from a complete summary. */
 export const extractRecallNote = (text: string): string =>
@@ -250,9 +235,7 @@ export const stripOMContent = (text: string): string => {
   // Find the start of OM content: either the instructions preamble or the first section header
   let stripFrom = -1;
   if (reflIdx >= 0 || obsIdx >= 0) {
-    const preambleIdx = text.indexOf(
-      "These are condensed memories from earlier in this session.",
-    );
+    const preambleIdx = text.indexOf("These are condensed memories from earlier in this session.");
     const minSectionIdx = Math.min(
       reflIdx >= 0 ? reflIdx : Infinity,
       obsIdx >= 0 ? obsIdx : Infinity,

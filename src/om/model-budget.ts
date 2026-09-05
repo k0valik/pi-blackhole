@@ -24,10 +24,7 @@ export function effectiveContextWindow(
   resolvedModel: Model<any>,
   modelConfig?: OmModelConfig,
 ): number {
-  if (
-    modelConfig?.contextWindow !== undefined &&
-    modelConfig.contextWindow > 0
-  ) {
+  if (modelConfig?.contextWindow !== undefined && modelConfig.contextWindow > 0) {
     return modelConfig.contextWindow;
   }
   if (

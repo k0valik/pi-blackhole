@@ -116,9 +116,7 @@ describe("validateFieldValue", () => {
     });
 
     it("rejects non-numbers", () => {
-      expect(validateFieldValue(field, "5")).toMatch(
-        /must be a finite number/i,
-      );
+      expect(validateFieldValue(field, "5")).toMatch(/must be a finite number/i);
     });
   });
 
