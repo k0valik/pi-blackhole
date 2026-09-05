@@ -1,5 +1,7 @@
 /**
- * @k0valik/pi-base/settings — public entry point for the settings *
+ * @k0valik/pi-base/settings — public entry point for the settings
+ * modal feature.
+ *
  * High-level: `openSettingsModal(ctx, opts)` opens a centered popup,
  * persists changes via `opts.onChange`, and resolves on close.
  *

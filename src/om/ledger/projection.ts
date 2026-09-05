@@ -38,8 +38,7 @@ export type CompactionProjection = Projection & {
   details: MemoryDetails;
 };
 
-type ProjectionBoundary =
-  { kind: "entry"; entryId: string } | { kind: "tip" } | { kind: "none" };
+type ProjectionBoundary = { kind: "entry"; entryId: string } | { kind: "tip" } | { kind: "none" };
 
 type ProjectionFoldOptions = {
   observationsBoundary: ProjectionBoundary;
@@ -94,21 +93,10 @@ function isCoveredAtOrBefore(
   return isAtOrBefore(coverageIndex(entry, indexes), boundaryIndex);
 }
 
-function foldProjection(
-  entries: Entry[],
-  options: ProjectionFoldOptions,
-): Projection {
+function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Projection {
   const indexes = entryIndexById(entries);
-  const observationsBoundary = boundaryIndex(
-    entries,
-    indexes,
-    options.observationsBoundary,
-  );
-  const reflectionsBoundary = boundaryIndex(
-    entries,
-    indexes,
-    options.reflectionsBoundary,
-  );
+  const observationsBoundary = boundaryIndex(entries, indexes, options.observationsBoundary);
+  const reflectionsBoundary = boundaryIndex(entries, indexes, options.reflectionsBoundary);
   const dropsBoundary = boundaryIndex(entries, indexes, options.dropsBoundary);
   const observations: Observation[] = [];
   const reflections: Reflection[] = [];
@@ -141,19 +129,14 @@ function foldProjection(
       continue;
     }
 
-    if (
-      isObservationsDroppedEntry(entry) &&
-      isCoveredAtOrBefore(entry, indexes, dropsBoundary)
-    ) {
+    if (isObservationsDroppedEntry(entry) && isCoveredAtOrBefore(entry, indexes, dropsBoundary)) {
       for (const observationId of entry.data.observationIds)
         droppedObservationIds.add(observationId);
     }
   }
 
   return {
-    observations: observations.filter(
-      (observation) => !droppedObservationIds.has(observation.id),
-    ),
+    observations: observations.filter((observation) => !droppedObservationIds.has(observation.id)),
     reflections,
   };
 }
@@ -165,9 +148,7 @@ function projectionFromMemoryDetails(details: MemoryDetails): Projection {
   };
 }
 
-function latestV3CompactionDetails(
-  entries: Entry[],
-): MemoryDetails | undefined {
+function latestV3CompactionDetails(entries: Entry[]): MemoryDetails | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "compaction") continue;
@@ -177,10 +158,7 @@ function latestV3CompactionDetails(
   return undefined;
 }
 
-export function fullProjection(
-  entries: Entry[],
-  upToEntryId?: string,
-): Projection {
+export function fullProjection(entries: Entry[], upToEntryId?: string): Projection {
   const boundary = upToEntryId ? entryBoundary(upToEntryId) : tipBoundary();
   return foldProjection(entries, {
     observationsBoundary: boundary,
@@ -189,10 +167,7 @@ export function fullProjection(
   });
 }
 
-export function visibleProjection(
-  entries: Entry[],
-  upToEntryId?: string,
-): Projection {
+export function visibleProjection(entries: Entry[], upToEntryId?: string): Projection {
   if (!upToEntryId) {
     const details = latestV3CompactionDetails(entries);
     if (details) return projectionFromMemoryDetails(details);
@@ -208,11 +183,7 @@ export function visibleProjection(
 
 function unwrapMemoryDetails(entry: Entry): MemoryDetails | undefined {
   if (isMemoryDetails(entry.details)) return entry.details;
-  if (
-    entry.details &&
-    typeof entry.details === "object" &&
-    !Array.isArray(entry.details)
-  ) {
+  if (entry.details && typeof entry.details === "object" && !Array.isArray(entry.details)) {
     const nested = (entry.details as Record<string, unknown>)["om.folded"];
     if (isMemoryDetails(nested)) return nested;
   }
@@ -255,9 +226,7 @@ export function buildCompactionProjection(
     0,
   );
   const fullFold = observationTokens >= config.observationsPoolMaxTokens;
-  let projection = fullFold
-    ? fullProjection(entries, firstKeptEntryId)
-    : normalProjection;
+  let projection = fullFold ? fullProjection(entries, firstKeptEntryId) : normalProjection;
 
   // Cap observations to budget using relevance-tiered + recency scoring.
   // Even if the dropper determined some old observations are worth keeping,
@@ -292,19 +261,10 @@ export function buildCompactionProjection(
   };
 }
 
-export function diffProjection(
-  visible: Projection,
-  full: Projection,
-): ProjectionDiff {
-  const visibleObservationIds = new Set(
-    visible.observations.map((observation) => observation.id),
-  );
-  const fullObservationIds = new Set(
-    full.observations.map((observation) => observation.id),
-  );
-  const visibleReflectionIds = new Set(
-    visible.reflections.map((reflection) => reflection.id),
-  );
+export function diffProjection(visible: Projection, full: Projection): ProjectionDiff {
+  const visibleObservationIds = new Set(visible.observations.map((observation) => observation.id));
+  const fullObservationIds = new Set(full.observations.map((observation) => observation.id));
+  const visibleReflectionIds = new Set(visible.reflections.map((reflection) => reflection.id));
 
   return {
     observationsOnlyInFull: full.observations.filter(

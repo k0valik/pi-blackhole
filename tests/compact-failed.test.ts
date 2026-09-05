@@ -22,17 +22,12 @@ import {
 import { registerCompactionTrigger } from "../src/om/compaction-trigger.js";
 
 function traceEvents(): string[] {
-  return (vi.mocked(debugLog).mock.calls as unknown as [string][]).map(
-    (c) => c[0],
-  );
+  return (vi.mocked(debugLog).mock.calls as unknown as [string][]).map((c) => c[0]);
 }
 
 function traceData(event: string): Record<string, unknown> | undefined {
   const call = (
-    vi.mocked(debugLog).mock.calls as unknown as [
-      string,
-      Record<string, unknown>,
-    ][]
+    vi.mocked(debugLog).mock.calls as unknown as [string, Record<string, unknown>][]
   ).find((c) => c[0] === event);
   return call?.[1];
 }
@@ -72,8 +67,7 @@ function captureHandler(
     lastCompactCancelled: args.lastCompactCancelled ?? false,
   };
   registerCompactFailedHook(pi as any, runtime as any);
-  if (!handler)
-    throw new Error("session_compact_failed handler was not registered");
+  if (!handler) throw new Error("session_compact_failed handler was not registered");
   return { handler: handler!, pi, runtime };
 }
 
@@ -104,10 +98,7 @@ describe("compact-failed hook", () => {
 
   it("registers a session_compact_failed handler", () => {
     const { pi } = captureHandler();
-    expect(pi.on).toHaveBeenCalledWith(
-      "session_compact_failed",
-      expect.any(Function),
-    );
+    expect(pi.on).toHaveBeenCalledWith("session_compact_failed", expect.any(Function));
   });
 
   it("aborts the pending controller before resetting compactInFlight", () => {
@@ -129,10 +120,7 @@ describe("compact-failed hook", () => {
     const { handler, runtime } = captureHandler({ compactInFlight: true });
     const ctx = fakeCtx();
 
-    handler(
-      failedEvent({ reason: "threshold", errorMessage: "provider 500" }),
-      ctx,
-    );
+    handler(failedEvent({ reason: "threshold", errorMessage: "provider 500" }), ctx);
 
     expect(runtime.compactInFlight).toBe(false);
     expect(runtime.autoCompactionController).toBeNull();
@@ -153,10 +141,7 @@ describe("compact-failed hook", () => {
     const { handler } = captureHandler();
     const ctx = fakeCtx();
 
-    handler(
-      failedEvent({ reason: "overflow", aborted: true, willRetry: true }),
-      ctx,
-    );
+    handler(failedEvent({ reason: "overflow", aborted: true, willRetry: true }), ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       "blackhole: overflow compaction aborted, retrying turn",
@@ -168,10 +153,7 @@ describe("compact-failed hook", () => {
     const { handler } = captureHandler();
     const ctx = fakeCtx();
 
-    handler(
-      failedEvent({ reason: "overflow", aborted: true, willRetry: false }),
-      ctx,
-    );
+    handler(failedEvent({ reason: "overflow", aborted: true, willRetry: false }), ctx);
 
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
@@ -249,10 +231,7 @@ describe("compact-failed hook", () => {
     // compactWasPiVcc means the current failure is ours: not skipped, error
     // surfaced, and the attempt marker consumed before a later failure arrives.
     expect(traceEvents()).not.toContain("compact_failed.skipped_pi_default");
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "blackhole: compaction failed — boom",
-      "error",
-    );
+    expect(ctx.ui.notify).toHaveBeenCalledWith("blackhole: compaction failed — boom", "error");
     expect(traceData("compact_failed.received")).toMatchObject({
       fromExtension: false,
       compactWasPiVcc: true,
@@ -270,10 +249,7 @@ describe("compact-failed hook", () => {
     });
     const ctx = fakeCtx();
 
-    handler(
-      failedEvent({ reason: "manual", aborted: true, fromExtension: false }),
-      ctx,
-    );
+    handler(failedEvent({ reason: "manual", aborted: true, fromExtension: false }), ctx);
 
     expect(traceData("compact_failed.received")).toMatchObject({
       aborted: true,
@@ -292,15 +268,12 @@ describe("compact-failed hook", () => {
     const staleCtx = {
       get cwd() {
         throw {
-          message:
-            "This extension ctx is stale after session replacement or reload.",
+          message: "This extension ctx is stale after session replacement or reload.",
         };
       },
     };
 
-    expect(() =>
-      handler(failedEvent({ reason: "manual", aborted: true }), staleCtx),
-    ).not.toThrow();
+    expect(() => handler(failedEvent({ reason: "manual", aborted: true }), staleCtx)).not.toThrow();
     expect(runtime.ensureConfig).not.toHaveBeenCalled();
   });
 });
@@ -339,12 +312,9 @@ describe("compact-failed attribution × before-compact hook", () => {
     };
     registerBeforeCompactHook(pi as any, runtime as any);
     registerCompactFailedHook(pi as any, runtime as any);
-    if (!handler)
-      throw new Error("session_before_compact handler was not registered");
-    if (!compactHandler)
-      throw new Error("session_compact handler was not registered");
-    if (!failedHandler)
-      throw new Error("session_compact_failed handler was not registered");
+    if (!handler) throw new Error("session_before_compact handler was not registered");
+    if (!compactHandler) throw new Error("session_compact handler was not registered");
+    if (!failedHandler) throw new Error("session_compact_failed handler was not registered");
     return {
       handler: handler!,
       compactHandler: compactHandler!,
@@ -449,10 +419,7 @@ describe("compact-failed attribution × before-compact hook", () => {
     expect(handler(makeEvent(branch), ctx)).toBeUndefined();
     expect(runtime.compactWasPiVcc).toBe(false);
 
-    failedHandler(
-      failedEvent({ reason: "threshold", errorMessage: "provider 500" }),
-      ctx,
-    );
+    failedHandler(failedEvent({ reason: "threshold", errorMessage: "provider 500" }), ctx);
 
     expect(traceEvents()).toContain("compact_failed.skipped_pi_default");
     expect(ctx.ui.notify).not.toHaveBeenCalled();
@@ -478,10 +445,7 @@ describe("compact-failed attribution × before-compact hook", () => {
       },
     ];
 
-    const result = handler(
-      makeEvent(branch, PI_VCC_COMPACT_INSTRUCTION),
-      fakeCtx2(),
-    );
+    const result = handler(makeEvent(branch, PI_VCC_COMPACT_INSTRUCTION), fakeCtx2());
     expect(result?.compaction).toBeTruthy();
     expect(runtime.compactWasPiVcc).toBe(true);
 

@@ -28,10 +28,7 @@ function getErrorMessage(error: unknown): string {
 
 function isStaleExtensionContextError(error: unknown): boolean {
   const message = getErrorMessage(error);
-  return (
-    message.includes("extension ctx is stale") ||
-    message.includes("ctx is stale")
-  );
+  return message.includes("extension ctx is stale") || message.includes("ctx is stale");
 }
 
 function notifySafely(
@@ -48,10 +45,7 @@ function notifySafely(
   }
 }
 
-export function registerCompactFailedHook(
-  pi: ExtensionAPI,
-  runtime: Runtime,
-): void {
+export function registerCompactFailedHook(pi: ExtensionAPI, runtime: Runtime): void {
   // `session_compact_failed` ships in pi >= 0.84.3; our dev-time types pin an
   // older version, so register through a widened signature. On older pi the
   // event never fires and this handler stays dormant.
@@ -87,8 +81,7 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
     sessionId = undefined;
   }
 
-  const reason = event?.reason as
-    "manual" | "threshold" | "overflow" | undefined;
+  const reason = event?.reason as "manual" | "threshold" | "overflow" | undefined;
   const errorMessage = event?.errorMessage as string | undefined;
   const aborted = event?.aborted === true;
   const willRetry = event?.willRetry === true;
@@ -101,8 +94,7 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // side effects can throw; the next before-compact event establishes new state.
   const compactWasPiVcc = runtime.compactWasPiVcc === true;
   const lastCompactCancelled = runtime.lastCompactCancelled === true;
-  const attributedFromExtension =
-    fromExtension || compactWasPiVcc || lastCompactCancelled;
+  const attributedFromExtension = fromExtension || compactWasPiVcc || lastCompactCancelled;
   runtime.compactWasPiVcc = false;
   runtime.lastCompactCancelled = false;
 
@@ -124,10 +116,7 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // its runtime reference; otherwise its captured signal stays live and can
   // launch a second compaction after a later agent_start/agent_end cycle.
   const pendingController = runtime.autoCompactionController;
-  if (
-    (aborted || errorMessage) &&
-    (runtime.compactInFlight || pendingController)
-  ) {
+  if ((aborted || errorMessage) && (runtime.compactInFlight || pendingController)) {
     pendingController?.abort();
     runtime.compactInFlight = false;
     if (runtime.autoCompactionController === pendingController) {
@@ -142,20 +131,12 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // Overflow-retry visibility: pi aborts the turn's compaction and retries the
   // turn after compaction — previously this was completely invisible.
   if (reason === "overflow" && aborted && willRetry) {
-    notifySafely(
-      hasUI,
-      ui,
-      "blackhole: overflow compaction aborted, retrying turn",
-      "info",
-    );
+    notifySafely(hasUI, ui, "blackhole: overflow compaction aborted, retrying turn", "info");
   }
 
   // Noise filter: with compactionEngine "pi-default" the failure belongs to
   // pi's engine (unless the content or the trigger was ours) — light trace only.
-  if (
-    runtime.config.compactionEngine === "pi-default" &&
-    !attributedFromExtension
-  ) {
+  if (runtime.config.compactionEngine === "pi-default" && !attributedFromExtension) {
     trace("compact_failed.skipped_pi_default", { reason });
     return;
   }
@@ -164,11 +145,6 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // Gated on attribution — a pi-default/threshold failure we didn't produce
   // (no extension content, no /blackhole trigger, no hook cancel) isn't ours.
   if (!aborted && errorMessage && attributedFromExtension) {
-    notifySafely(
-      hasUI,
-      ui,
-      `blackhole: compaction failed — ${errorMessage}`,
-      "error",
-    );
+    notifySafely(hasUI, ui, `blackhole: compaction failed — ${errorMessage}`, "error");
   }
 }

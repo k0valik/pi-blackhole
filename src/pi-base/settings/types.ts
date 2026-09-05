@@ -1,4 +1,6 @@
-/** *
+/**
+ * Public types for the `@k0valik/pi-base` settings modal.
+ *
  * The modal accepts a flat array of `Field`s (or, when `tabs` is set,
  * one such array per tab) and a single `onChange` callback. Every
  * built-in field is a discriminated-union variant of `Field`. Callers
@@ -12,12 +14,7 @@
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type {
-  Component,
-  KeybindingsManager,
-  OverlayOptions,
-  TUI,
-} from "@earendil-works/pi-tui";
+import type { Component, KeybindingsManager, OverlayOptions, TUI } from "@earendil-works/pi-tui";
 
 // ─────────────────────────────────────────────────────────────────────
 // Visibility context for visibleWhen
@@ -352,12 +349,7 @@ export interface FieldRenderer<F extends Field = Field, V = unknown> {
   /** Render the right-hand value cell for one row. */
   renderValue(
     row: FieldRow<F, V>,
-    args: {
-      width: number;
-      selected: boolean;
-      isEditing: boolean;
-      ctx: FieldRenderContext;
-    },
+    args: { width: number; selected: boolean; isEditing: boolean; ctx: FieldRenderContext },
   ): string;
   /** Footer-hint pieces shown when this row is focused. */
   hints(row: FieldRow<F, V>, args: { isEditing: boolean }): FieldKeyHint[];
@@ -369,11 +361,7 @@ export interface FieldRenderer<F extends Field = Field, V = unknown> {
   handleKey(
     row: FieldRow<F, V>,
     data: string,
-    args: {
-      isEditing: boolean;
-      ctx: FieldRenderContext;
-      setEditing: (v: boolean) => void;
-    },
+    args: { isEditing: boolean; ctx: FieldRenderContext; setEditing: (v: boolean) => void },
   ): FieldKeyResult<V>;
 }
 
@@ -423,6 +411,8 @@ export interface SettingsModalOptions<F extends Field = Field> {
   initialTab?: string;
   /** Show a fuzzy-search bar above the list. */
   enableSearch?: boolean;
+  /** Customizable placeholder shown in the search box when empty. */
+  searchPlaceholder?: string;
   /** Theme overrides (mostly used for callers with fixed-palette aesthetics). */
   theme?: SettingsTheme;
   /** Override the overlay positioning (defaults: anchor center, 92% × 85%). */
@@ -474,11 +464,7 @@ export interface SettingsModalOptions<F extends Field = Field> {
    * with the reorderable ones do NOT participate and do NOT shift the
    * peer index.
    */
-  onReorder?: (info: {
-    fieldKey: string;
-    fromIndex: number;
-    toIndex: number;
-  }) => void;
+  onReorder?: (info: { fieldKey: string; fromIndex: number; toIndex: number }) => void;
   /**
    * Optional footer actions rendered as a pill strip below the rows.
    * Tab/Shift+Tab cycle through tabs then actions. Enter on an enabled

@@ -43,10 +43,7 @@ const invoke = async (
     .execute("tool-call", params, undefined, undefined, {
       sessionManager: {
         getSessionFile: () => file,
-        getBranch: () =>
-          lineageEntryIds
-            ? lineageEntryIds.map((id) => ({ id }))
-            : [{ id: "m1" }],
+        getBranch: () => (lineageEntryIds ? lineageEntryIds.map((id) => ({ id })) : [{ id: "m1" }]),
         getEntries: () => [{ id: "m1" }, { id: "m2" }],
       },
     })
@@ -76,9 +73,7 @@ describe("vcc_recall scope", () => {
       const tool = register();
 
       const lineage = await invoke(tool, file, { expand: [1] });
-      expect(lineage).toContain(
-        "Cannot expand indices outside active lineage: 1",
-      );
+      expect(lineage).toContain("Cannot expand indices outside active lineage: 1");
 
       const all = await invoke(tool, file, { expand: [1], scope: "all" });
       expect(all).toContain("Scope: all");
@@ -151,9 +146,7 @@ describe("drill-down scope", () => {
 
       // off-lineage entry blocked under default scope
       const blocked = await invoke(tool, file, { query: "#1:off.ts" }, lineage);
-      expect(blocked).toContain(
-        "Cannot expand indices outside active lineage: 1",
-      );
+      expect(blocked).toContain("Cannot expand indices outside active lineage: 1");
       expect(blocked).not.toContain("secret-old");
 
       // on-lineage entry still drills under default scope

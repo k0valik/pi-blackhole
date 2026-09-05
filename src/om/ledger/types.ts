@@ -73,10 +73,7 @@ export type V3MemoryCustomType =
   | typeof OM_OBSERVATIONS_DROPPED;
 
 export function isRelevance(value: unknown): value is Relevance {
-  return (
-    typeof value === "string" &&
-    (RELEVANCE_VALUES as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (RELEVANCE_VALUES as readonly string[]).includes(value);
 }
 
 export function isNonEmptyString(value: unknown): value is string {
@@ -84,9 +81,7 @@ export function isNonEmptyString(value: unknown): value is string {
 }
 
 export function isNonEmptyStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString)
-  );
+  return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
 }
 
 export function isMemoryId(value: unknown): value is string {
@@ -124,9 +119,7 @@ export function isReflection(value: unknown): value is Reflection {
   );
 }
 
-export function isObservationsRecordedData(
-  value: unknown,
-): value is ObservationsRecordedEntryData {
+export function isObservationsRecordedData(value: unknown): value is ObservationsRecordedEntryData {
   if (!isPlainRecord(value)) return false;
   return (
     Array.isArray(value.observations) &&
@@ -136,9 +129,7 @@ export function isObservationsRecordedData(
   );
 }
 
-export function isReflectionsRecordedData(
-  value: unknown,
-): value is ReflectionsRecordedEntryData {
+export function isReflectionsRecordedData(value: unknown): value is ReflectionsRecordedEntryData {
   if (!isPlainRecord(value)) return false;
   return (
     Array.isArray(value.reflections) &&
@@ -148,14 +139,9 @@ export function isReflectionsRecordedData(
   );
 }
 
-export function isObservationsDroppedData(
-  value: unknown,
-): value is ObservationsDroppedEntryData {
+export function isObservationsDroppedData(value: unknown): value is ObservationsDroppedEntryData {
   if (!isPlainRecord(value)) return false;
-  return (
-    isNonEmptyStringArray(value.observationIds) &&
-    isNonEmptyString(value.coversUpToId)
-  );
+  return isNonEmptyStringArray(value.observationIds) && isNonEmptyString(value.coversUpToId);
 }
 
 export function isMemoryDetails(value: unknown): value is MemoryDetails {
@@ -211,8 +197,7 @@ export function buildObservationsRecordedData(
   observations: Observation[],
   coversUpToId: string,
 ): ObservationsRecordedEntryData | undefined {
-  if (observations.length === 0 || !isNonEmptyString(coversUpToId))
-    return undefined;
+  if (observations.length === 0 || !isNonEmptyString(coversUpToId)) return undefined;
   return { observations, coversUpToId };
 }
 
@@ -220,8 +205,7 @@ export function buildReflectionsRecordedData(
   reflections: Reflection[],
   coversUpToId: string,
 ): ReflectionsRecordedEntryData | undefined {
-  if (reflections.length === 0 || !isNonEmptyString(coversUpToId))
-    return undefined;
+  if (reflections.length === 0 || !isNonEmptyString(coversUpToId)) return undefined;
   return { reflections, coversUpToId };
 }
 
@@ -229,7 +213,6 @@ export function buildObservationsDroppedData(
   observationIds: string[],
   coversUpToId: string,
 ): ObservationsDroppedEntryData | undefined {
-  if (observationIds.length === 0 || !isNonEmptyString(coversUpToId))
-    return undefined;
+  if (observationIds.length === 0 || !isNonEmptyString(coversUpToId)) return undefined;
   return { observationIds, coversUpToId };
 }

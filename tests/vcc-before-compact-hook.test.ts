@@ -6,16 +6,7 @@
  *   - Added mockRuntime with ensureConfig that reads our config format
  *   - Removed PI_VCC_CONFIG_PATH env var (blackhole uses unified config)
  */
-import {
-  describe,
-  test,
-  expect,
-  beforeEach,
-  afterEach,
-  beforeAll,
-  afterAll,
-  vi,
-} from "vitest";
+import { describe, test, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from "vitest";
 import { existsSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -38,10 +29,7 @@ afterAll(() => {
 });
 
 // Minimal ExtensionAPI stub: capture handler + provide ctx with mocked ui.notify
-function createMockPi(
-  initialConfig?: Record<string, unknown>,
-  ctxModel?: unknown,
-) {
+function createMockPi(initialConfig?: Record<string, unknown>, ctxModel?: unknown) {
   let handler: ((event: any, ctx: any) => any) | undefined;
   const notifyCalls: Array<{ msg: string; level: string }> = [];
   const config = {
@@ -93,11 +81,7 @@ function makeEvent(branchEntries: any[], customInstructions?: string) {
   };
 }
 
-const msg = (
-  id: string,
-  role: "user" | "assistant" | "toolResult",
-  content = "x",
-) => ({
+const msg = (id: string, role: "user" | "assistant" | "toolResult", content = "x") => ({
   id,
   type: "message",
   message: { role, content },
@@ -131,11 +115,7 @@ describe("registerBeforeCompactHook: cancel paths", () => {
     omRuntime.config.overrideDefaultCompaction = false;
     registerBeforeCompactHook(pi, omRuntime);
 
-    const entries = [
-      msg("m1", "assistant"),
-      msg("m2", "assistant"),
-      msg("m3", "assistant"),
-    ];
+    const entries = [msg("m1", "assistant"), msg("m2", "assistant"), msg("m3", "assistant")];
     const result = invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION));
     // No longer cancels — compacts all to recover from context overflow
     expect(result.cancel).toBeUndefined();
@@ -545,12 +525,7 @@ describe("registerBeforeCompactHook: provider-aware skip", () => {
     expect(
       invoke(
         makeEvent(
-          [
-            msg("m1", "user"),
-            msg("m2", "assistant"),
-            msg("m3", "user"),
-            msg("m4", "assistant"),
-          ],
+          [msg("m1", "user"), msg("m2", "assistant"), msg("m3", "user"), msg("m4", "assistant")],
           PI_VCC_COMPACT_INSTRUCTION,
         ),
       ),

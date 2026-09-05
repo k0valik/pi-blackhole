@@ -16,8 +16,7 @@ const firstLineOf = (text: string): string => {
   return line.trim();
 };
 
-const cleanMessage = (msg: string): string =>
-  msg.replace(/\\"/g, '"').replace(/\\'/g, "'").trim();
+const cleanMessage = (msg: string): string => msg.replace(/\\"/g, '"').replace(/\\'/g, "'").trim();
 
 /** Extract commit hash from git output text (tool_result or bash output). */
 const extractHashFromOutput = (text: string): string | undefined => {
@@ -62,8 +61,7 @@ export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
 
     // ── Case 1: tool_call (agent calls bash tool) ──
     if (b.kind === "tool_call" && b.name === "bash") {
-      const cmd =
-        b.args && typeof b.args.command === "string" ? b.args.command : "";
+      const cmd = b.args && typeof b.args.command === "string" ? b.args.command : "";
       const message = tryExtractMessage(cmd);
       if (!message) continue;
 

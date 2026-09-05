@@ -96,8 +96,7 @@ export interface BuildCorpusOptions {
 }
 
 function normalizeRelevance(value: unknown): Relevance {
-  return typeof value === "string" &&
-    (RELEVANCE_VALUES as readonly string[]).includes(value)
+  return typeof value === "string" && (RELEVANCE_VALUES as readonly string[]).includes(value)
     ? (value as Relevance)
     : "low";
 }
@@ -124,13 +123,7 @@ function readFirstLine(filePath: string): string | null {
     const buf = Buffer.alloc(HEADER_MAX);
     let total = 0;
     while (total < HEADER_MAX) {
-      const n = readSync(
-        fd,
-        buf,
-        total,
-        Math.min(HEADER_CHUNK, HEADER_MAX - total),
-        total,
-      );
+      const n = readSync(fd, buf, total, Math.min(HEADER_CHUNK, HEADER_MAX - total), total);
       if (n <= 0) break;
       const slice = buf.subarray(total, total + n);
       const nl = slice.indexOf(0x0a);
@@ -198,14 +191,9 @@ function extractFromEntries(
     const customType = entry.customType;
     const data = (entry.data ?? {}) as RawMarkerData;
     const entryTs = parseTimestamp(entry.timestamp);
-    if (
-      customType === OM_OBSERVATIONS_RECORDED ||
-      customType === LEGACY_OM_OBSERVATION
-    ) {
+    if (customType === OM_OBSERVATIONS_RECORDED || customType === LEGACY_OM_OBSERVATION) {
       const list =
-        customType === LEGACY_OM_OBSERVATION
-          ? (data.records ?? [])
-          : (data.observations ?? []);
+        customType === LEGACY_OM_OBSERVATION ? (data.records ?? []) : (data.observations ?? []);
       for (const o of list) {
         if (typeof o.content !== "string" || !o.content.trim()) continue;
         observations.push({
@@ -299,8 +287,7 @@ function extractFromPendingState(
       }
     }
   }
-  const reflectionTimestamp =
-    maxObsTs != null ? new Date(maxObsTs).toISOString() : null;
+  const reflectionTimestamp = maxObsTs != null ? new Date(maxObsTs).toISOString() : null;
 
   for (const batch of allObsBatches) {
     for (const o of batch.data?.observations ?? []) {
@@ -348,9 +335,7 @@ function extractFromPendingState(
  * candidate when it differs (catches sessions launched from the repo root).
  * Sync by design — bounded by those project-owned files only.
  */
-export function buildProjectMemoryCorpus(
-  options: BuildCorpusOptions,
-): ProjectCorpus {
+export function buildProjectMemoryCorpus(options: BuildCorpusOptions): ProjectCorpus {
   const agentDir = options.agentDir ?? getAgentDir();
   const projectRoot = options.gitRoot || options.cwd;
   const activeSessionFile = options.activeSessionFile
@@ -492,10 +477,7 @@ export function buildProjectMemoryCorpus(
           if (!f.endsWith(".jsonl")) continue;
           const header = parseSessionHeader(readFirstLine(join(scopePath, f)));
           const sid =
-            header?.id ||
-            (f.includes("_")
-              ? f.slice(f.lastIndexOf("_") + 1, -6)
-              : f.slice(0, -6));
+            header?.id || (f.includes("_") ? f.slice(f.lastIndexOf("_") + 1, -6) : f.slice(0, -6));
           if (sid) globalSessionIds.add(sid);
         }
       }
@@ -521,12 +503,9 @@ export function buildProjectMemoryCorpus(
       }
 
       const hasBatches =
-        (Array.isArray(state.observationBatches) &&
-          state.observationBatches.length > 0) ||
-        (Array.isArray(state.reflectionBatches) &&
-          state.reflectionBatches.length > 0) ||
-        (Array.isArray(state.droppedBatches) &&
-          state.droppedBatches.length > 0) ||
+        (Array.isArray(state.observationBatches) && state.observationBatches.length > 0) ||
+        (Array.isArray(state.reflectionBatches) && state.reflectionBatches.length > 0) ||
+        (Array.isArray(state.droppedBatches) && state.droppedBatches.length > 0) ||
         // Legacy / singular form: older pending files may only have the
         // singular observation/reflection/dropped keys without batch arrays.
         (typeof (state as Record<string, unknown>).observation === "object" &&
@@ -750,10 +729,7 @@ export async function buildProjectMemoryCorpusAsync(
           if (!f.endsWith(".jsonl")) continue;
           const header = parseSessionHeader(readFirstLine(join(scopePath, f)));
           const sid =
-            header?.id ||
-            (f.includes("_")
-              ? f.slice(f.lastIndexOf("_") + 1, -6)
-              : f.slice(0, -6));
+            header?.id || (f.includes("_") ? f.slice(f.lastIndexOf("_") + 1, -6) : f.slice(0, -6));
           if (sid) globalSessionIds.add(sid);
         }
       }
@@ -779,12 +755,9 @@ export async function buildProjectMemoryCorpusAsync(
       }
 
       const hasBatches =
-        (Array.isArray(state.observationBatches) &&
-          state.observationBatches.length > 0) ||
-        (Array.isArray(state.reflectionBatches) &&
-          state.reflectionBatches.length > 0) ||
-        (Array.isArray(state.droppedBatches) &&
-          state.droppedBatches.length > 0) ||
+        (Array.isArray(state.observationBatches) && state.observationBatches.length > 0) ||
+        (Array.isArray(state.reflectionBatches) && state.reflectionBatches.length > 0) ||
+        (Array.isArray(state.droppedBatches) && state.droppedBatches.length > 0) ||
         (typeof (state as Record<string, unknown>).observation === "object" &&
           (state as Record<string, unknown>).observation !== null) ||
         (typeof (state as Record<string, unknown>).reflection === "object" &&

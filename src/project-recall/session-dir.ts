@@ -17,14 +17,10 @@ interface FindGitRootResult {
 /** Absolute path of the enclosing git worktree top-level, or null. */
 export async function findGitRoot(cwd: string): Promise<FindGitRootResult> {
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["rev-parse", "--show-toplevel"],
-      {
-        cwd,
-        timeout: 5000,
-      },
-    );
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      timeout: 5000,
+    });
     const root = stdout.trim();
     return { root: root || null };
   } catch (error) {

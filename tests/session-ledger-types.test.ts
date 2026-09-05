@@ -46,33 +46,25 @@ describe("session-ledger V3 type guards and builders", () => {
 
   it("accepts valid V3 observation records and rejects observations without source ids", () => {
     expect(isObservation(observation("aaaaaaaaaaaa"))).toBe(true);
-    expect(
-      isObservation({ ...observation("bbbbbbbbbbbb"), sourceEntryIds: [] }),
-    ).toBe(false);
+    expect(isObservation({ ...observation("bbbbbbbbbbbb"), sourceEntryIds: [] })).toBe(false);
     expect(
       isObservation({
         ...observation("cccccccccccc"),
         sourceEntryIds: undefined,
       }),
     ).toBe(false);
-    expect(
-      isObservation({ ...observation("dddddddddddd"), tokenCount: undefined }),
-    ).toBe(false);
+    expect(isObservation({ ...observation("dddddddddddd"), tokenCount: undefined })).toBe(false);
   });
 
   it("accepts valid V3 reflection records", () => {
-    expect(isReflection(reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"]))).toBe(
-      true,
-    );
+    expect(isReflection(reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"]))).toBe(true);
     expect(
       isReflection({
         ...reflection("ffffffffffff"),
         supportingObservationIds: undefined,
       }),
     ).toBe(false);
-    expect(
-      isReflection({ ...reflection("111111111111"), tokenCount: undefined }),
-    ).toBe(false);
+    expect(isReflection({ ...reflection("111111111111"), tokenCount: undefined })).toBe(false);
   });
 
   it("accepts non-empty V3 ledger entry data", () => {
@@ -95,15 +87,9 @@ describe("session-ledger V3 type guards and builders", () => {
   });
 
   it("rejects empty ledger entry data so no empty progress entries can be appended", () => {
-    expect(
-      isObservationsRecordedData({ observations: [], coversUpToId: "raw-1" }),
-    ).toBe(false);
-    expect(
-      isReflectionsRecordedData({ reflections: [], coversUpToId: "raw-1" }),
-    ).toBe(false);
-    expect(
-      isObservationsDroppedData({ observationIds: [], coversUpToId: "raw-1" }),
-    ).toBe(false);
+    expect(isObservationsRecordedData({ observations: [], coversUpToId: "raw-1" })).toBe(false);
+    expect(isReflectionsRecordedData({ reflections: [], coversUpToId: "raw-1" })).toBe(false);
+    expect(isObservationsDroppedData({ observationIds: [], coversUpToId: "raw-1" })).toBe(false);
   });
 
   it("builders return undefined for empty arrays and data for non-empty arrays", () => {
@@ -111,24 +97,17 @@ describe("session-ledger V3 type guards and builders", () => {
     expect(buildReflectionsRecordedData([], "raw-1")).toBeUndefined();
     expect(buildObservationsDroppedData([], "raw-1")).toBeUndefined();
 
-    expect(
-      buildObservationsRecordedData([observation("aaaaaaaaaaaa")], "raw-1"),
-    ).toEqual({
+    expect(buildObservationsRecordedData([observation("aaaaaaaaaaaa")], "raw-1")).toEqual({
       observations: [observation("aaaaaaaaaaaa")],
       coversUpToId: "raw-1",
     });
     expect(
-      buildReflectionsRecordedData(
-        [reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"])],
-        "raw-1",
-      ),
+      buildReflectionsRecordedData([reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"])], "raw-1"),
     ).toEqual({
       reflections: [reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"])],
       coversUpToId: "raw-1",
     });
-    expect(
-      buildObservationsDroppedData(["aaaaaaaaaaaa"], "ref-entry-1"),
-    ).toEqual({
+    expect(buildObservationsDroppedData(["aaaaaaaaaaaa"], "ref-entry-1")).toEqual({
       observationIds: ["aaaaaaaaaaaa"],
       coversUpToId: "ref-entry-1",
     });
@@ -174,9 +153,7 @@ describe("session-ledger V3 type guards and builders", () => {
   });
 
   it("ignores old V2 observation entries and old V2 compaction details", () => {
-    expect(isObservationsRecordedEntry(oldV2ObservationEntry("v2-entry"))).toBe(
-      false,
-    );
+    expect(isObservationsRecordedEntry(oldV2ObservationEntry("v2-entry"))).toBe(false);
     expect(isMemoryDetails(oldV2CompactionDetails())).toBe(false);
   });
 });

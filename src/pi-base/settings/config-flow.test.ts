@@ -14,20 +14,9 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { Mock } from "vitest";
-import {
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  Component,
-  TUI,
-  KeybindingsManager,
-} from "@earendil-works/pi-tui";
+import type { Component, TUI, KeybindingsManager } from "@earendil-works/pi-tui";
 import type {
   ExtensionContext,
   ExtensionUIContext,
@@ -92,10 +81,7 @@ const DEFAULTS: TestConfig = { enabled: true, threshold: 5 };
 // ── Stubs ──────────────────────────────────────────────────────────────
 
 function fakeTui(): TUI {
-  return {
-    terminal: { rows: 40, columns: 80 },
-    requestRender: vi.fn(),
-  } as unknown as TUI;
+  return { terminal: { rows: 40, columns: 80 }, requestRender: vi.fn() } as unknown as TUI;
 }
 
 function fakeTheme(): Theme {
@@ -177,7 +163,8 @@ function writeProject(data: Record<string, unknown>) {
 }
 
 /**
- * Drive the selector to choose the first available entry.
+ * Drive the selector to choose the first edit-mode entry (Global).
+ * Display All is now the first entry, so skip it with one down press.
  * Returns after the selector's done() has resolved the outer Promise.
  */
 async function selectFirst(ctx: FakeContext): Promise<void> {
@@ -189,15 +176,11 @@ async function selectFirst(ctx: FakeContext): Promise<void> {
     done: (r: unknown) => void,
   ) => Component;
 
-  const sel = factory(
-    fakeTui(),
-    fakeTheme(),
-    null! as KeybindingsManager,
-    (r) => {
-      ctx.ui.done(r);
-    },
-  );
-  sel.handleInput?.("\r"); // Enter → select first available
+  const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+    ctx.ui.done(r);
+  });
+  sel.handleInput?.("\x1b[B"); // down → skip Display All, reach Global
+  sel.handleInput?.("\r"); // Enter → select Global
   // done() fires synchronously → Promise resolves immediately
   await ctx.ui.done(vi.fn());
 }
@@ -214,14 +197,9 @@ function getEditBody(ctx: FakeContext, callIndex = 1): Component {
     kb: KeybindingsManager,
     done: (r: unknown) => void,
   ) => Component;
-  return editFactory(
-    fakeTui(),
-    fakeTheme(),
-    null! as KeybindingsManager,
-    (r) => {
-      ctx.ui.done(r);
-    },
-  );
+  return editFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+    ctx.ui.done(r);
+  });
 }
 
 /**
@@ -286,21 +264,14 @@ function availableCount(
 }
 
 /**
- * Navigate from the first entry to display-all in the selector.
+ * Display All is now the first entry (index 0), already selected by default.
  */
 function navigateToDisplayAll(
-  sel: Component,
-  sessionInitialized: boolean,
-  scopes?: { global?: boolean; project?: boolean; session?: boolean },
+  _sel: Component,
+  _sessionInitialized: boolean,
+  _scopes?: { global?: boolean; project?: boolean; session?: boolean },
 ): void {
-  const available = availableCount(sessionInitialized, scopes);
-  // Advance selection to the last available entry (Display All).
-  // Each down-press that lands on an available entry increments
-  // selectedAvailableIndex; unavailable entries are skipped.
-  const target = available - 1;
-  for (let i = 0; i < target; i++) {
-    sel.handleInput?.("\x1b[B");
-  }
+  // Display All is pre-selected as the first entry — no navigation needed.
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -323,14 +294,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       const out = sel.render(80).join("\n");
       expect(out).toContain("FlowTest");
@@ -359,14 +325,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       sel.handleInput?.("\x1b");
 
       await promise;
@@ -386,14 +347,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       const out = sel.render(80).join("\n");
       expect(out).toContain("╭");
@@ -544,9 +500,7 @@ describe("ConfigFlow smoke tests", () => {
       await promise;
 
       // File written with changed key
-      const saved = JSON.parse(
-        readFileSync(join(tempDir, "flow-test-config.json"), "utf-8"),
-      );
+      const saved = JSON.parse(readFileSync(join(tempDir, "flow-test-config.json"), "utf-8"));
       expect(saved).toEqual({ enabled: false, threshold: 5 });
       // onSave called with validated config
       expect(onSave).toHaveBeenCalledWith({ enabled: false, threshold: 5 });
@@ -559,7 +513,7 @@ describe("ConfigFlow smoke tests", () => {
 
       const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
 
-      // Select project (global=0, project=1, session=2, display-all=3)
+      // Select project (display-all=0, global=1, project=2, session=3)
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
         tui: TUI,
@@ -567,14 +521,10 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
+      sel.handleInput?.("\x1b[B"); // down → global
       sel.handleInput?.("\x1b[B"); // down → project
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -613,14 +563,10 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
+      sel.handleInput?.("\x1b[B"); // down → global
       sel.handleInput?.("\x1b[B"); // down → project
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -667,9 +613,7 @@ describe("ConfigFlow smoke tests", () => {
       await promise;
 
       // File unchanged
-      const content = JSON.parse(
-        readFileSync(join(tempDir, "flow-test-config.json"), "utf-8"),
-      );
+      const content = JSON.parse(readFileSync(join(tempDir, "flow-test-config.json"), "utf-8"));
       expect(content).toEqual({ enabled: true, threshold: 5 });
     });
 
@@ -832,32 +776,21 @@ describe("ConfigFlow smoke tests", () => {
   describe("session edit mode", () => {
     it("no Delete action; seeds from existing session overrides", async () => {
       const ctx = fakeCtx();
-      const mgr = createManager({
-        sessionConfig: true,
-        env: { enabled: "PI_FLOW_ENABLED" },
-      });
+      const mgr = createManager({ sessionConfig: true, env: { enabled: "PI_FLOW_ENABLED" } });
 
       const leafEntry = {
         type: "message" as const,
         id: "leaf-1",
         parentId: null as string | null,
         timestamp: "2024-01-01T00:00:00.000Z",
-        message: {
-          role: "user" as const,
-          content: "",
-          timestamp: 1704110400000,
-        },
+        message: { role: "user" as const, content: "", timestamp: 1704110400000 },
       } as const satisfies FileEntry;
-      mgr.initSession("sid", "leaf-1", [leafEntry], undefined, () => [
-        leafEntry,
-      ]);
-      setSessionConfig("session-config-flow-test", tempDir, "sid", "leaf-1", {
-        threshold: 3,
-      });
+      mgr.initSession("sid", "leaf-1", [leafEntry], undefined, () => [leafEntry]);
+      setSessionConfig("session-config-flow-test", tempDir, "sid", "leaf-1", { threshold: 3 });
 
       const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
 
-      // Select session (0=global, 1=project, 2=session)
+      // Select session (0=display-all, 1=global, 2=project, 3=session)
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const factory = customMock.mock.calls[0]?.[0] as (
         tui: TUI,
@@ -865,15 +798,10 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
-      for (let i = 0; i < 2; i++) sel.handleInput?.("\x1b[B"); // down twice → session
+      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
+      for (let i = 0; i < 3; i++) sel.handleInput?.("\x1b[B"); // down thrice → session
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
@@ -909,14 +837,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, true);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -945,14 +868,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -979,14 +897,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, true);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1020,14 +933,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1056,22 +964,16 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // From Global tab, ← enters at last action (Edit) with currentTabId=global
-      daBody.handleInput?.("\x1b[D"); // Left → last action (Edit)
+      // Edit is pre-focused on mount; Enter opens edit mode directly
       daBody.handleInput?.("\r");
       await Promise.resolve(); // flush microtask for openEditMode call
 
@@ -1097,21 +999,17 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // Cancel is pre-focused on mount; Enter closes directly
+      // Navigate from Edit (pre-focused first action) to Cancel (second action)
+      daBody.handleInput?.("\x1b[C"); // Right → Cancel
       daBody.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
@@ -1133,29 +1031,23 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // Tab to Defaults (3 tabs forward), then ← enters action row at last action (Edit)
-      for (let i = 0; i < 3; i++) daBody.handleInput?.("\t"); // Global→Project→Env→Defaults
-      daBody.handleInput?.("\x1b[D"); // Left from Defaults → last action (Edit)
-      daBody.handleInput?.("\r");
+      // Tab to Defaults: 3 tabs from pre-focused Edit (Global→Project→Env→Defaults)
+      for (let i = 0; i < 3; i++) daBody.handleInput?.("\t");
+      daBody.handleInput?.("\r"); // Edit is already focused
       await Promise.resolve(); // flush microtasks: cleanup + selector
 
-      // Re-opened selector is the 4th custom call (cleanup factory at [2])
+      // Re-opened selector is the 3rd custom call
       expect(customMock.mock.calls.length).toBeGreaterThanOrEqual(3);
-      const sel2Factory = customMock.mock.calls[3]?.[0] as (
+      const sel2Factory = customMock.mock.calls[2]?.[0] as (
         tui: TUI,
         theme: Theme,
         kb: KeybindingsManager,
@@ -1168,25 +1060,15 @@ describe("ConfigFlow smoke tests", () => {
         const fallback = customMock.mock.calls[lastIdx]?.[0] as (
           ...args: unknown[]
         ) => Component | undefined;
-        const test = fallback?.(
-          fakeTui(),
-          fakeTheme(),
-          null! as KeybindingsManager,
-          () => {},
-        );
+        const test = fallback?.(fakeTui(), fakeTheme(), null! as KeybindingsManager, () => {});
         if (test?.render) {
           const sel2Out = test.render(80).join("\n");
           expect(sel2Out).toContain("Configure Global settings");
         }
       } else {
-        sel2 = sel2Factory(
-          fakeTui(),
-          fakeTheme(),
-          null! as KeybindingsManager,
-          (r) => {
-            ctx.ui.done(r);
-          },
-        );
+        sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+          ctx.ui.done(r);
+        });
         const sel2Out = sel2.render(80).join("\n");
         expect(sel2Out).toContain("Configure Global settings");
       }
@@ -1211,26 +1093,19 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // Navigate to Env tab (1 Tab forward from pre-focused Cancel)
-      daBody.handleInput?.("\t"); // Cancel→Global (1st tab)
-      daBody.handleInput?.("\t"); // Global→Project (2nd tab)
-      daBody.handleInput?.("\t"); // Project→Env (3rd tab)
-      daBody.handleInput?.("\x1b[D"); // Left from Env → last action (Edit)
-      daBody.handleInput?.("\r");
+      // Tab to Env: 2 tabs from pre-focused Edit (Global→Project→Env)
+      daBody.handleInput?.("\t");
+      daBody.handleInput?.("\t");
+      daBody.handleInput?.("\r"); // Edit is already focused
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
@@ -1245,14 +1120,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel2 = sel2Factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       const sel2Out = sel2.render(80).join("\n");
       expect(sel2Out).toContain("Configure Project local settings");
 
@@ -1275,24 +1145,18 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // Tab to Defaults (3 tabs forward), then ← enters action row at last action (Edit)
-      for (let i = 0; i < 3; i++) daBody.handleInput?.("\t"); // Global→Project→Env→Defaults
-      daBody.handleInput?.("\x1b[D"); // Left from Defaults → last action (Edit)
-      daBody.handleInput?.("\r");
+      // Tab to Defaults: 3 tabs from pre-focused Edit (Global→Project→Env→Defaults)
+      for (let i = 0; i < 3; i++) daBody.handleInput?.("\t");
+      daBody.handleInput?.("\r"); // Edit is already focused
       await Promise.resolve();
 
       // Re-opened selector (call 3)
@@ -1303,37 +1167,17 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel2 = sel2Factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       // Cancel the re-opened selector
       sel2.handleInput?.("\x1b");
       await ctx.ui.done(vi.fn());
-      await Promise.resolve(); // flush openDisplayAll
+      await Promise.resolve(); // flush
 
-      // Display-all re-mounted as 4th call
+      // Selector cancelled, flow ends
       expect(customMock).toHaveBeenCalledTimes(4);
-      const da2Factory = customMock.mock.calls[3]?.[0] as (
-        tui: TUI,
-        theme: Theme,
-        kb: KeybindingsManager,
-        done: (r: unknown) => void,
-      ) => Component;
-      const da2 = da2Factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
-      expect(da2.render(80).join("\n")).toContain("▸ Global");
 
       await promise;
     });
@@ -1351,24 +1195,18 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // Tab to Defaults (3 tabs forward), then ← enters action row at last action (Edit)
-      for (let i = 0; i < 3; i++) daBody.handleInput?.("\t"); // Global→Project→Env→Defaults
-      daBody.handleInput?.("\x1b[D"); // Left from Defaults → last action (Edit)
-      daBody.handleInput?.("\r");
+      // Tab to Defaults: 3 tabs from pre-focused Edit (Global→Project→Env→Defaults)
+      for (let i = 0; i < 3; i++) daBody.handleInput?.("\t");
+      daBody.handleInput?.("\r"); // Edit is already focused
       await Promise.resolve();
 
       // Re-opened selector (call 3)
@@ -1378,16 +1216,11 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel2 = sel2Factory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
-      // Pick Project Local from the re-opened selector
+      // Pick Project Local from the re-opened selector (1 down from global)
       sel2.handleInput?.("\x1b[B"); // down → project
       sel2.handleInput?.("\r");
       await Promise.resolve();
@@ -1400,27 +1233,17 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const editBody = editFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
-      expect(editBody.render(80).join("\n")).toContain(
-        "FlowTest — Project Local",
-      );
+      const editBody = editFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
+      expect(editBody.render(80).join("\n")).toContain("FlowTest — Project Local");
 
       await promise;
     });
 
     it("Session tab Edit opens session edit mode directly", async () => {
       const ctx = fakeCtx();
-      const mgr = createManager({
-        sessionConfig: true,
-        env: { enabled: "PI_FLOW_ENABLED" },
-      });
+      const mgr = createManager({ sessionConfig: true, env: { enabled: "PI_FLOW_ENABLED" } });
       mgr.initSession("sid", "leaf-1", []);
 
       const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
@@ -1432,14 +1255,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, true);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1450,7 +1268,7 @@ describe("ConfigFlow smoke tests", () => {
       // Esc back to field zone, then ← enters ring at last action (Edit) while currentTabId is "session"
       for (let i = 0; i < 3; i++) daBody.handleInput?.("\t"); // Cancel→Project→Env→Session
       daBody.handleInput?.("\x1b"); // Esc → field zone
-      daBody.handleInput?.("\x1b[D"); // Left → last action (Edit)
+      daBody.handleInput?.("\x1b[C"); // Right → first action (Edit)
       daBody.handleInput?.("\r");
       await Promise.resolve();
 
@@ -1475,21 +1293,17 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
       const daBody = getDisplayAllBody(ctx);
 
-      // Cancel is pre-focused on mount; Enter closes without opening edit mode
+      // Navigate from Edit (pre-focused first action) to Cancel
+      daBody.handleInput?.("\x1b[C"); // Right → Cancel
       daBody.handleInput?.("\r");
       await Promise.resolve();
       await Promise.resolve();
@@ -1516,14 +1330,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       const out = sel.render(80).join("\n");
       expect(out).toContain("Configure Global settings");
@@ -1553,14 +1362,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       // Project is disabled in selector
       const selOut = sel.render(80).join("\n");
@@ -1568,11 +1372,7 @@ describe("ConfigFlow smoke tests", () => {
       expect(selOut).toContain("Configure Project local settings");
 
       // Select display-all (2 downs from global: session, display-all)
-      navigateToDisplayAll(sel, false, {
-        global: true,
-        project: false,
-        session: true,
-      });
+      navigateToDisplayAll(sel, false, { global: true, project: false, session: true });
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
@@ -1599,25 +1399,16 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       const selOut = sel.render(80).join("\n");
       expect(selOut).toContain("(disabled by extension)");
       expect(selOut).toContain("Configure Session settings");
 
       // Select display-all (2 downs: project, display-all)
-      navigateToDisplayAll(sel, false, {
-        global: true,
-        project: true,
-        session: false,
-      });
+      navigateToDisplayAll(sel, false, { global: true, project: true, session: false });
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
 
@@ -1649,22 +1440,16 @@ describe("ConfigFlow smoke tests", () => {
       // Second session: project
       const promise2 = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
-      const selFactory = customMock.mock.calls[
-        customMock.mock.calls.length - 1
-      ]?.[0] as (
+      const selFactory = customMock.mock.calls[customMock.mock.calls.length - 1]?.[0] as (
         tui: TUI,
         theme: Theme,
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
+      sel.handleInput?.("\x1b[B"); // down → global
       sel.handleInput?.("\x1b[B"); // down → project
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1685,10 +1470,7 @@ describe("ConfigFlow smoke tests", () => {
     it("session dimmed with (session not initialized) note", async () => {
       const ctx = fakeCtx();
       // sessionConfig enabled but initSession NOT called
-      const mgr = createManager({
-        sessionConfig: true,
-        env: { enabled: "PI_FLOW_ENABLED" },
-      });
+      const mgr = createManager({ sessionConfig: true, env: { enabled: "PI_FLOW_ENABLED" } });
 
       const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
 
@@ -1699,14 +1481,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       const out = sel.render(80).join("\n");
       expect(out).toContain("Configure Session settings");
@@ -1722,10 +1499,7 @@ describe("ConfigFlow smoke tests", () => {
   describe("lazy session detection", () => {
     it("session entry available when session file exists without explicit initSession", async () => {
       const ctx = fakeCtx();
-      const mgr = createManager({
-        sessionConfig: true,
-        env: { enabled: "PI_FLOW_ENABLED" },
-      });
+      const mgr = createManager({ sessionConfig: true, env: { enabled: "PI_FLOW_ENABLED" } });
 
       const sessionFile = join(tempDir, "session.jsonl");
       writeFileSync(
@@ -1748,14 +1522,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
 
       const out = sel.render(80).join("\n");
       expect(out).toContain("Configure Session settings");
@@ -1811,14 +1580,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1847,14 +1611,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1883,14 +1642,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1908,9 +1662,7 @@ describe("ConfigFlow smoke tests", () => {
     it("env tab shows unset for EnvParser mapping", async () => {
       const ctx = fakeCtx();
       const mgr = createManager({
-        env: {
-          threshold: { var: "PI_FLOW_THRESHOLD", parse: (raw) => Number(raw) },
-        },
+        env: { threshold: { var: "PI_FLOW_THRESHOLD", parse: (raw) => Number(raw) } },
       });
 
       const promise = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
@@ -1922,14 +1674,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1958,14 +1705,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());
@@ -1995,14 +1737,9 @@ describe("ConfigFlow smoke tests", () => {
         kb: KeybindingsManager,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(
-        fakeTui(),
-        fakeTheme(),
-        null! as KeybindingsManager,
-        (r) => {
-          ctx.ui.done(r);
-        },
-      );
+      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        ctx.ui.done(r);
+      });
       navigateToDisplayAll(sel, false);
       sel.handleInput?.("\r");
       await ctx.ui.done(vi.fn());

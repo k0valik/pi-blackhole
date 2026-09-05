@@ -1,11 +1,4 @@
-import {
-  mkdir,
-  mkdtemp,
-  copyFile,
-  chmod,
-  readdir,
-  stat,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, copyFile, chmod, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 
@@ -40,9 +33,7 @@ const pickLargest = async (limit: number): Promise<string[]> => {
     .map((x) => x.file);
 };
 
-export const prepareSessionSamples = async (
-  limit = 2,
-): Promise<SessionSample[]> => {
+export const prepareSessionSamples = async (limit = 2): Promise<SessionSample[]> => {
   const selected = await pickLargest(limit);
   const dir = await mkdtemp(join(tmpdir(), "pi-vcc-sessions-"));
   await mkdir(dir, { recursive: true });

@@ -7,10 +7,7 @@ const testDir = join(tmpdir(), `pi-blackhole-append-config-${Date.now()}`);
 const writeConfig = (data: unknown) => {
   const dir = join(testDir, "pi-blackhole");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, "pi-blackhole-config.json"),
-    JSON.stringify(data, null, 2),
-  );
+  writeFileSync(join(dir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
 };
 
 beforeEach(() => {

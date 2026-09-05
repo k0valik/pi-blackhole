@@ -19,10 +19,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function writeConfig(
-  data: unknown,
-  filename = "pi-blackhole/pi-blackhole-config.json",
-): string {
+function writeConfig(data: unknown, filename = "pi-blackhole/pi-blackhole-config.json"): string {
   const dir = join(testDir, dirname(filename));
   mkdirSync(dir, { recursive: true });
   const path = join(testDir, filename);
@@ -282,9 +279,7 @@ describe("Config with model IDs containing slashes and colons", () => {
         { provider: "openrouter", id: "fb1:free", cooldownHours: 6 },
         { provider: "openrouter", id: "fb2:free", cooldownHours: 2 },
       ],
-      reflectorFallbackModels: [
-        { provider: "cerebras", id: "llama-3.3-70b", thinking: "low" },
-      ],
+      reflectorFallbackModels: [{ provider: "cerebras", id: "llama-3.3-70b", thinking: "low" }],
       dropperFallbackModels: [],
     });
     const config = loadUnifiedConfig(testDir);
@@ -317,10 +312,7 @@ describe("Config with model IDs containing slashes and colons", () => {
 describe("Legacy config fallback", () => {
   it("loads from legacy pi-vcc-config.json and migrates to new keys", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig(
-      { overrideDefaultCompaction: true, debug: true },
-      "pi-vcc-config.json",
-    );
+    writeConfig({ overrideDefaultCompaction: true, debug: true }, "pi-vcc-config.json");
     const config = loadUnifiedConfig(testDir);
     // Legacy overrideDefaultCompaction:true → compactionEngine:blackhole + tailBehavior:minimal
     expect(config.compactionEngine).toBe("blackhole");
@@ -483,8 +475,7 @@ describe("Integer fields are validated as positive integers", () => {
 
 describe("saveUnifiedConfig", () => {
   it("writes config to disk", async () => {
-    const { saveUnifiedConfig, loadUnifiedConfig } =
-      await import("../src/core/unified-config.js");
+    const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const result = saveUnifiedConfig({ compaction: "manual", debug: true });
     expect(result).toBe(true);
 
@@ -494,8 +485,7 @@ describe("saveUnifiedConfig", () => {
   });
 
   it("preserves existing keys when saving partial config", async () => {
-    const { saveUnifiedConfig, loadUnifiedConfig } =
-      await import("../src/core/unified-config.js");
+    const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compaction: "off", memory: false });
     saveUnifiedConfig({ memory: true });
     const config = loadUnifiedConfig(testDir);

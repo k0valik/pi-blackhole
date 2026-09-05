@@ -35,15 +35,13 @@ export function getUsageTokens(msg: unknown): number | undefined {
   if (typeof msg !== "object" || msg === null) return undefined;
   const record = msg as Record<string, unknown>;
   if (record.role !== "assistant") return undefined;
-  if (record.stopReason === "error" || record.stopReason === "aborted")
-    return undefined;
+  if (record.stopReason === "error" || record.stopReason === "aborted") return undefined;
   if (record.usage === undefined) return undefined;
   try {
     const tokens = calculateContextTokens(
       record.usage as Parameters<typeof calculateContextTokens>[0],
     );
-    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0)
-      return undefined;
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens <= 0) return undefined;
     return tokens;
   } catch {
     return undefined;
@@ -57,9 +55,7 @@ export function estimateEntryTokens(entry: {
   summary?: unknown;
 }): number {
   if (entry.type === "message" && entry.message) {
-    return estimateMessageTokens(
-      entry.message as Parameters<typeof estimateMessageTokens>[0],
-    );
+    return estimateMessageTokens(entry.message as Parameters<typeof estimateMessageTokens>[0]);
   }
   if (entry.type === "custom_message" && entry.content) {
     const content = entry.content;
@@ -67,8 +63,7 @@ export function estimateEntryTokens(entry: {
     if (Array.isArray(content)) {
       let total = 0;
       for (const block of content) {
-        if (block.type === "text" && block.text)
-          total += estimateStringTokens(block.text);
+        if (block.type === "text" && block.text) total += estimateStringTokens(block.text);
       }
       return total;
     }

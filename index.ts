@@ -38,9 +38,8 @@ export default async (pi: ExtensionAPI) => {
   // This works regardless of extension load order and includes providers added
   // after startup.
   const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
-  const providerStreams: Map<string, Function> = ((globalThis as any)[
-    PROVIDER_STREAMS_KEY
-  ] ??= new Map());
+  const providerStreams: Map<string, Function> = ((globalThis as any)[PROVIDER_STREAMS_KEY] ??=
+    new Map());
   pi.on("agent_start", (_event: unknown, ctx: any) => {
     captureRegisteredProviderStreams(ctx.modelRegistry, providerStreams);
   });

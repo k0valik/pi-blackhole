@@ -10,12 +10,7 @@ import { booleanRenderer } from "./boolean";
 import { customRenderer } from "./custom";
 import { enumRenderer } from "./enum";
 import { modelRenderer } from "./model";
-import {
-  numberRenderer,
-  pathRenderer,
-  secretRenderer,
-  stringRenderer,
-} from "./string";
+import { numberRenderer, pathRenderer, secretRenderer, stringRenderer } from "./string";
 import { readonlyRenderer } from "./readonly";
 import { textRenderer } from "./text";
 
@@ -34,11 +29,9 @@ export {
 };
 
 /** Map of field discriminator → renderer. */
+
 type RenderableField = Exclude<Field, { type: "section" }>;
-export const RENDERERS: Record<
-  RenderableField["type"],
-  FieldRenderer<any, any>
-> = {
+export const RENDERERS: Record<RenderableField["type"], FieldRenderer<any, any>> = {
   boolean: booleanRenderer,
   enum: enumRenderer,
   string: stringRenderer,

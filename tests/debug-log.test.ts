@@ -10,10 +10,7 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const testRoot = join(
-  tmpdir(),
-  `pi-blackhole-debug-test-${process.pid}-${Date.now()}`,
-);
+const testRoot = join(tmpdir(), `pi-blackhole-debug-test-${process.pid}-${Date.now()}`);
 const agentDir = join(testRoot, "agent");
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -54,12 +51,9 @@ describe("debug-log", () => {
   });
 
   it("writes enabled events with context metadata", () => {
-    withDebugLogContext(
-      { enabled: true, cwd: "/tmp/project", runId: "run-1" },
-      () => {
-        debugLog("test.event", { reason: "something" });
-      },
-    );
+    withDebugLogContext({ enabled: true, cwd: "/tmp/project", runId: "run-1" }, () => {
+      debugLog("test.event", { reason: "something" });
+    });
     flushDebugLog();
 
     const entries = readLog();
@@ -105,9 +99,7 @@ describe("debug-log", () => {
       debugLog("check.path");
     });
     flushDebugLog();
-    expect(existsSync(join(agentDir, "pi-blackhole", "debug.ndjson"))).toBe(
-      true,
-    );
+    expect(existsSync(join(agentDir, "pi-blackhole", "debug.ndjson"))).toBe(true);
   });
 
   it("never throws on write failure", () => {

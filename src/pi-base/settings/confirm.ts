@@ -56,21 +56,24 @@ export function createConfirm(
       const item = items[i]!;
       const isSelected = i === selectedIndex;
       const prefix = isSelected ? args.theme.fg("accent", "▌ ") : "  ";
-      const label = isSelected
-        ? args.theme.fg("text", item.label)
-        : args.theme.fg("muted", item.label);
-      lines.push(`${prefix}${label}`);
+      const rawLabel = `${i + 1}. ${item.label}`;
+      const label = isSelected ? args.theme.fg("text", rawLabel) : args.theme.fg("muted", rawLabel);
+      const rowText = `${prefix}${label}`;
+      if (isSelected) {
+        lines.push(args.theme.bg("selectedBg", rowText));
+      } else {
+        lines.push(rowText);
+      }
     }
 
     lines.push("");
     const hints: KeyHint[] = [
       { key: "↑↓", label: "select" },
-      { key: "enter", label: "confirm" },
+      { key: "1-2/y/n", label: "choose" },
+      { key: "enter/space", label: "confirm" },
       { key: "esc", label: "cancel" },
     ];
-    lines.push(
-      args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`),
-    );
+    lines.push(args.theme.fg("muted", `  ${formatHintLine(hints, args.theme)}`));
     return lines;
   };
 
@@ -85,13 +88,34 @@ export function createConfirm(
       args.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "enter") || matchesKey(data, "return")) {
+    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === " ") {
       done(items[selectedIndex]!.confirmed);
       return;
     }
-    if (matchesKey(data, "escape")) {
+    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
       done(false);
       return;
+    }
+    if (data === "1" || data === "2") {
+      const idx = parseInt(data, 10) - 1;
+      if (idx >= 0 && idx < items.length) {
+        done(items[idx]!.confirmed);
+        return;
+      }
+    }
+    if (data === "y" || data === "Y") {
+      const confirmItem = items.find((i) => i.confirmed);
+      if (confirmItem) {
+        done(confirmItem.confirmed);
+        return;
+      }
+    }
+    if (data === "n" || data === "N") {
+      const cancelItem = items.find((i) => !i.confirmed);
+      if (cancelItem) {
+        done(cancelItem.confirmed);
+        return;
+      }
     }
   };
 

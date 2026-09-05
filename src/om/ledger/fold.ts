@@ -37,10 +37,7 @@ export type FoldedLedger = {
   reflectionsById: Map<string, Reflection>;
 };
 
-function foldEndIndex(
-  entries: Entry[],
-  upToEntryId: string | undefined,
-): number {
+function foldEndIndex(entries: Entry[], upToEntryId: string | undefined): number {
   if (!upToEntryId) return entries.length - 1;
   const idx = entries.findIndex((entry) => entry.id === upToEntryId);
   return idx === -1 ? entries.length - 1 : idx;
@@ -57,10 +54,7 @@ function isCustomEntry(entry: Entry, customType: string): boolean {
  * Observations and reflections use first-valid-record-wins semantics. Drops are tombstones and are
  * retained even when the dropped id is unknown at the time of folding.
  */
-export function foldLedger(
-  entries: Entry[],
-  options: FoldLedgerOptions = {},
-): FoldedLedger {
+export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): FoldedLedger {
   const observationsById = new Map<string, Observation>();
   const reflectionsById = new Map<string, Reflection>();
   const droppedObservationIds = new Set<string>();

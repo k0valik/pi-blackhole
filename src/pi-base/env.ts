@@ -13,10 +13,7 @@ export function isGhostty(): boolean {
 }
 
 export function isIterm(): boolean {
-  return (
-    process.env.TERM_PROGRAM === "iTerm.app" ||
-    Boolean(process.env.ITERM_SESSION_ID)
-  );
+  return process.env.TERM_PROGRAM === "iTerm.app" || Boolean(process.env.ITERM_SESSION_ID);
 }
 
 export function isWindowsTerminal(): boolean {

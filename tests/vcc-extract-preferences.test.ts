@@ -15,16 +15,12 @@ describe("extractPreferences", () => {
   });
 
   it("ignores assistant blocks", () => {
-    const blocks: NormalizedBlock[] = [
-      { kind: "assistant", text: "I always use best practices" },
-    ];
+    const blocks: NormalizedBlock[] = [{ kind: "assistant", text: "I always use best practices" }];
     expect(extractPreferences(blocks)).toEqual([]);
   });
 
   it("captures please use pattern", () => {
-    const blocks: NormalizedBlock[] = [
-      { kind: "user", text: "please use bun instead of node" },
-    ];
+    const blocks: NormalizedBlock[] = [{ kind: "user", text: "please use bun instead of node" }];
     expect(extractPreferences(blocks).length).toBe(1);
   });
 });

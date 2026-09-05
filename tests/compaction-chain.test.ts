@@ -10,12 +10,7 @@ import {
 } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
 
-const compactionEntry = (
-  id: string,
-  summary: string,
-  details: unknown,
-  timestamp: number,
-) => ({
+const compactionEntry = (id: string, summary: string, details: unknown, timestamp: number) => ({
   id,
   type: "compaction",
   summary,
@@ -25,12 +20,7 @@ const compactionEntry = (
   timestamp,
 });
 
-const coverage = (
-  first: string,
-  last: string,
-  firstKeptEntryId: string,
-  count: number,
-) => ({
+const coverage = (first: string, last: string, firstKeptEntryId: string, count: number) => ({
   firstCoveredEntryId: first,
   lastCoveredEntryId: last,
   firstKeptEntryId,
@@ -74,9 +64,7 @@ describe("append compaction chain", () => {
       { id: "m1", type: "message", message: { role: "user", content: "a" } },
       { id: "m3", type: "message", message: { role: "user", content: "tail" } },
     ];
-    expect(
-      coverageForMessages(branch, ["m1", "missing"], "m3"),
-    ).toBeUndefined();
+    expect(coverageForMessages(branch, ["m1", "missing"], "m3")).toBeUndefined();
     expect(coverageForMessages(branch, [], "m3")).toBeUndefined();
   });
 
@@ -164,23 +152,15 @@ describe("append compaction chain", () => {
       type: "tools",
       tools: [{ name: "read", description: "Read one file" }],
     };
-    const frame = (value: unknown): Buffer =>
-      Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
-    const providerPrefix = (
-      messages: unknown[],
-      segmentCount: number,
-    ): Buffer =>
+    const frame = (value: unknown): Buffer => Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+    const providerPrefix = (messages: unknown[], segmentCount: number): Buffer =>
       Buffer.concat([
         frame(stableSystem),
         frame(stableTools),
         ...messages.slice(0, segmentCount).map(frame),
       ]);
     const providerRequest = (messages: unknown[]): Buffer =>
-      Buffer.concat([
-        frame(stableSystem),
-        frame(stableTools),
-        ...messages.map(frame),
-      ]);
+      Buffer.concat([frame(stableSystem), frame(stableTools), ...messages.map(frame)]);
 
     const first = build({
       freshSummary: "[Goal]\nCOMPACTED WORDS S1",
@@ -225,14 +205,8 @@ describe("append compaction chain", () => {
         [c1, c2],
       ) as any,
     );
-    const prefixAfterSecondThroughS1 = providerPrefix(
-      secondProviderMessages,
-      1,
-    );
-    const prefixAfterSecondThroughS2 = providerPrefix(
-      secondProviderMessages,
-      2,
-    );
+    const prefixAfterSecondThroughS1 = providerPrefix(secondProviderMessages, 1);
+    const prefixAfterSecondThroughS2 = providerPrefix(secondProviderMessages, 2);
     const secondRequest = providerRequest(secondProviderMessages);
 
     const third = build({
@@ -261,19 +235,17 @@ describe("append compaction chain", () => {
     const thirdRequest = providerRequest(thirdProviderMessages);
 
     expect(prefixAfterSecondThroughS1).toEqual(prefixAfterFirst);
-    expect(secondRequest.subarray(0, prefixAfterFirst.length)).toEqual(
-      prefixAfterFirst,
-    );
+    expect(secondRequest.subarray(0, prefixAfterFirst.length)).toEqual(prefixAfterFirst);
     expect(prefixAfterThirdThroughS2).toEqual(prefixAfterSecondThroughS2);
     expect(thirdRequest.subarray(0, prefixAfterSecondThroughS2.length)).toEqual(
       prefixAfterSecondThroughS2,
     );
-    expect(
-      secondRequest.subarray(prefixAfterFirst.length).toString("utf8"),
-    ).toContain("COMPACTED WORDS S2");
-    expect(
-      thirdRequest.subarray(prefixAfterSecondThroughS2.length).toString("utf8"),
-    ).toContain("COMPACTED WORDS S3");
+    expect(secondRequest.subarray(prefixAfterFirst.length).toString("utf8")).toContain(
+      "COMPACTED WORDS S2",
+    );
+    expect(thirdRequest.subarray(prefixAfterSecondThroughS2.length).toString("utf8")).toContain(
+      "COMPACTED WORDS S3",
+    );
   });
 
   it("manual rebase starts a new one-segment chain", () => {
@@ -531,12 +503,7 @@ describe("append compaction chain", () => {
   it("ignores an orphaned append chain below a later legacy compaction", () => {
     const orphan = build();
     const cOrphan = compactionEntry("orphan", "fallback o", orphan, 10);
-    const legacy = compactionEntry(
-      "legacy-late",
-      "fallback late",
-      legacyDetails(),
-      20,
-    );
+    const legacy = compactionEntry("legacy-late", "fallback late", legacyDetails(), 20);
 
     const details = build({
       branchEntries: [cOrphan, legacy],
@@ -544,9 +511,7 @@ describe("append compaction chain", () => {
     });
 
     expect(details.chainStart).toBe(true);
-    expect(details.segment.coverage.rebasedFromCompactionId).toBe(
-      "legacy-late",
-    );
+    expect(details.segment.coverage.rebasedFromCompactionId).toBe("legacy-late");
     expect(details.segment.coverage.sourceMessageCount).toBe(2);
   });
 
@@ -566,11 +531,7 @@ describe("append compaction chain", () => {
     expect(chain.ok).toBe(true);
     if (!chain.ok) return;
 
-    const tokens = estimateChainTokens(
-      chain.segments,
-      "y".repeat(200),
-      "z".repeat(80),
-    );
+    const tokens = estimateChainTokens(chain.segments, "y".repeat(200), "z".repeat(80));
     const expectedChars =
       chain.segments.reduce((total, item) => {
         return total + item.segment.summary.length;
@@ -631,10 +592,7 @@ describe("append compaction chain", () => {
     const trailing = "recall\n\ncurrent OM";
     // A window where the chars/4 estimate stays under half the window.
     const estimateWindow =
-      Math.ceil(
-        estimateChainTokens(chain.segments, fresh, trailing) /
-          MAX_CHAIN_WINDOW_RATIO,
-      ) + 50;
+      Math.ceil(estimateChainTokens(chain.segments, fresh, trailing) / MAX_CHAIN_WINDOW_RATIO) + 50;
 
     const usageEntry = {
       id: "u1",
@@ -698,10 +656,7 @@ describe("append compaction chain", () => {
     const fresh = "[Goal]\nnext delta";
     const trailing = "recall\n\ncurrent OM";
     const estimateWindow =
-      Math.ceil(
-        estimateChainTokens(chain.segments, fresh, trailing) /
-          MAX_CHAIN_WINDOW_RATIO,
-      ) + 50;
+      Math.ceil(estimateChainTokens(chain.segments, fresh, trailing) / MAX_CHAIN_WINDOW_RATIO) + 50;
 
     const tinyUsage = {
       id: "u1",
@@ -744,5 +699,4 @@ describe("append compaction chain", () => {
   });
 });
 
-const rebuilt = (details: ReturnType<typeof buildAppendOnlyDetails>) =>
-  details.segment.coverage;
+const rebuilt = (details: ReturnType<typeof buildAppendOnlyDetails>) => details.segment.coverage;

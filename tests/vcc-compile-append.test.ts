@@ -21,9 +21,7 @@ describe("append VCC compilation", () => {
     const complete = compile({ messages, previousSummary, fileOps });
 
     expect(segment).not.toContain("old state");
-    expect(segment).not.toContain(
-      "The conversation before this point has been compacted",
-    );
+    expect(segment).not.toContain("The conversation before this point has been compacted");
     expect(complete).toContain("- old state");
     expect(extractRecallNote(complete)).toContain(
       "The conversation before this point has been compacted",

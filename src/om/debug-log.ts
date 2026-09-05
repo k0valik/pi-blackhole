@@ -8,14 +8,7 @@
  * Modified: path changed from observational-memory/ to pi-blackhole/; async buffered.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import {
-  existsSync,
-  mkdirSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  appendFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, appendFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -31,10 +24,7 @@ interface DebugLogContext {
 
 const storage = new AsyncLocalStorage<DebugLogContext>();
 
-export function withDebugLogContext<T>(
-  context: DebugLogContext,
-  fn: () => T,
-): T {
+export function withDebugLogContext<T>(context: DebugLogContext, fn: () => T): T {
   const parent = storage.getStore();
   return storage.run({ ...parent, ...context }, fn);
 }
@@ -52,11 +42,7 @@ function ensureFlushTimer(): void {
   if (flushTimer) return;
   flushTimer = setInterval(() => {
     // Stop the timer if buffer has been empty for a while
-    if (
-      buffer.length === 0 &&
-      lastWriteMs > 0 &&
-      Date.now() - lastWriteMs > FLUSH_IDLE_MS
-    ) {
+    if (buffer.length === 0 && lastWriteMs > 0 && Date.now() - lastWriteMs > FLUSH_IDLE_MS) {
       clearInterval(flushTimer!);
       flushTimer = null;
       return;

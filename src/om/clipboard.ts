@@ -5,10 +5,7 @@ export interface ClipboardCommand {
   args: string[];
 }
 
-export type ClipboardCommandRunner = (
-  command: ClipboardCommand,
-  text: string,
-) => Promise<boolean>;
+export type ClipboardCommandRunner = (command: ClipboardCommand, text: string) => Promise<boolean>;
 
 export function getClipboardCommands(
   platform: NodeJS.Platform = process.platform,
@@ -39,10 +36,7 @@ export async function copyTextToClipboard(
   return false;
 }
 
-export function runClipboardCommand(
-  command: ClipboardCommand,
-  text: string,
-): Promise<boolean> {
+export function runClipboardCommand(command: ClipboardCommand, text: string): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;

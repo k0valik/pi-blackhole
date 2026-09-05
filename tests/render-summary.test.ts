@@ -10,10 +10,7 @@ import type { Observation, Reflection } from "../src/om/ledger/types.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function makeObservation(
-  id: string,
-  overrides: Partial<Observation> = {},
-): Observation {
+function makeObservation(id: string, overrides: Partial<Observation> = {}): Observation {
   return {
     id,
     content: `User mentioned they prefer TypeScript over JavaScript`,
@@ -25,10 +22,7 @@ function makeObservation(
   };
 }
 
-function makeReflection(
-  id: string,
-  overrides: Partial<Reflection> = {},
-): Reflection {
+function makeReflection(id: string, overrides: Partial<Reflection> = {}): Reflection {
   return {
     id,
     content: "User prefers TypeScript with strict mode enabled",
@@ -42,8 +36,7 @@ function makeReflection(
 
 describe("observationToSummaryLine", () => {
   it("formats an observation line", async () => {
-    const { observationToSummaryLine } =
-      await import("../src/om/ledger/render-summary.js");
+    const { observationToSummaryLine } = await import("../src/om/ledger/render-summary.js");
     const obs = makeObservation("aaaaaaaaaaaa", { relevance: "high" as const });
     const line = observationToSummaryLine(obs);
     expect(line).toContain("[aaaaaaaaaaaa]");
@@ -53,8 +46,7 @@ describe("observationToSummaryLine", () => {
   });
 
   it("handles critical relevance", async () => {
-    const { observationToSummaryLine } =
-      await import("../src/om/ledger/render-summary.js");
+    const { observationToSummaryLine } = await import("../src/om/ledger/render-summary.js");
     const obs = makeObservation("bbbbbbbbbbbb", {
       relevance: "critical" as const,
     });
@@ -65,8 +57,7 @@ describe("observationToSummaryLine", () => {
 
 describe("reflectionToSummaryLine", () => {
   it("formats a reflection line with id", async () => {
-    const { reflectionToSummaryLine } =
-      await import("../src/om/ledger/render-summary.js");
+    const { reflectionToSummaryLine } = await import("../src/om/ledger/render-summary.js");
     const ref = makeReflection("ref00000000aa");
     const line = reflectionToSummaryLine(ref);
     expect(line).toContain("[ref00000000aa]");
@@ -76,8 +67,7 @@ describe("reflectionToSummaryLine", () => {
 
 describe("renderSummary", () => {
   it("returns basic recall footer when both lists are empty", async () => {
-    const { renderSummary } =
-      await import("../src/om/ledger/render-summary.js");
+    const { renderSummary } = await import("../src/om/ledger/render-summary.js");
     const result = renderSummary([], []);
     expect(result).toContain("Use `recall` with an id");
     expect(result).toContain("most recent entry");
@@ -86,8 +76,7 @@ describe("renderSummary", () => {
   });
 
   it("includes reflections section when reflections present", async () => {
-    const { renderSummary } =
-      await import("../src/om/ledger/render-summary.js");
+    const { renderSummary } = await import("../src/om/ledger/render-summary.js");
     const ref = makeReflection("ref00000000aa");
     const result = renderSummary([ref], []);
     expect(result).toContain("## Reflections");
@@ -96,8 +85,7 @@ describe("renderSummary", () => {
   });
 
   it("includes observations section when observations present", async () => {
-    const { renderSummary } =
-      await import("../src/om/ledger/render-summary.js");
+    const { renderSummary } = await import("../src/om/ledger/render-summary.js");
     const obs = makeObservation("obs00000000aa");
     const result = renderSummary([], [obs]);
     expect(result).toContain("## Observations");
@@ -106,8 +94,7 @@ describe("renderSummary", () => {
   });
 
   it("includes both sections when both present", async () => {
-    const { renderSummary } =
-      await import("../src/om/ledger/render-summary.js");
+    const { renderSummary } = await import("../src/om/ledger/render-summary.js");
     const ref = makeReflection("ref00000000aa");
     const obs = makeObservation("obs00000000aa");
     const result = renderSummary([ref], [obs]);
@@ -117,8 +104,7 @@ describe("renderSummary", () => {
   });
 
   it("includes full context instructions when observations/reflections present", async () => {
-    const { renderSummary } =
-      await import("../src/om/ledger/render-summary.js");
+    const { renderSummary } = await import("../src/om/ledger/render-summary.js");
     const ref = makeReflection("ref00000000aa");
     const result = renderSummary([ref], []);
     expect(result).toContain("Bracketed ids in reflections and observations");
@@ -127,8 +113,7 @@ describe("renderSummary", () => {
   });
 
   it("handles multiple reflections and observations in order", async () => {
-    const { renderSummary } =
-      await import("../src/om/ledger/render-summary.js");
+    const { renderSummary } = await import("../src/om/ledger/render-summary.js");
     const ref1 = makeReflection("ref1111111111", {
       content: "First reflection",
     });

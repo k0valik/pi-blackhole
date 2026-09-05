@@ -9,10 +9,7 @@ import { clipSentence, firstLine, nonEmptyLines } from "./content";
 import type { SectionData } from "../sections";
 import { extractGoals } from "../extract/goals";
 import { extractFiles } from "../extract/files";
-import {
-  extractPreferences,
-  dedupPreferencesAgainstGoals,
-} from "../extract/preferences";
+import { extractPreferences, dedupPreferencesAgainstGoals } from "../extract/preferences";
 import { extractCommits, formatCommits } from "../extract/commits";
 import { buildBriefSections, stringifyBrief } from "./brief";
 
@@ -43,9 +40,7 @@ const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
         // Require sentence-like start: capital letter, code identifier, or quote
         if (!/^\s*["'`*_]?[A-Z`]/.test(line)) continue;
         const clipped =
-          b.kind === "user"
-            ? `[user] ${clipSentence(line, 150)}`
-            : clipSentence(line, 150);
+          b.kind === "user" ? `[user] ${clipSentence(line, 150)}` : clipSentence(line, 150);
         if (!items.includes(clipped)) items.push(clipped);
         break;
       }
@@ -75,10 +70,7 @@ export const buildSections = (input: BuildSectionsInput): SectionData => {
   const { blocks } = input;
   const briefSections = buildBriefSections(blocks);
   const sessionGoal = extractGoals(blocks);
-  const userPreferences = dedupPreferencesAgainstGoals(
-    extractPreferences(blocks),
-    sessionGoal,
-  );
+  const userPreferences = dedupPreferencesAgainstGoals(extractPreferences(blocks), sessionGoal);
   return {
     sessionGoal,
     outstandingContext: extractOutstandingContext(blocks),

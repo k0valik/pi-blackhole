@@ -78,10 +78,7 @@ function writeCooldownMap(map: CooldownMap): void {
  *
  * When cooldownHours is explicitly 0, cooldown is disabled — always returns false.
  */
-export function isCooldownActive(
-  model: OmModelConfig,
-  now: Date = new Date(),
-): boolean {
+export function isCooldownActive(model: OmModelConfig, now: Date = new Date()): boolean {
   return getCooldownEntry(model, now) !== undefined;
 }
 
@@ -122,11 +119,7 @@ export function getCooldownEntry(
  * @param reason  Human-readable error reason (e.g. "429 Too Many Requests").
  * @param stage   Which pipeline stage failed ("observer" | "reflector" | "dropper").
  */
-export function recordCooldown(
-  model: OmModelConfig,
-  reason: string,
-  stage: string,
-): void {
+export function recordCooldown(model: OmModelConfig, reason: string, stage: string): void {
   // cooldownHours === 0 means cooldown disabled
   if (model.cooldownHours === 0) return;
 

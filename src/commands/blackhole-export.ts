@@ -50,10 +50,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (userOut && !isAbsolute(userOut)) {
         const rel = relative(resolve(ctx.cwd), resolvedOut);
         if (rel.startsWith("..") || isAbsolute(rel)) {
-          ctx.ui.notify(
-            `Export path escapes current directory: ${outPath}`,
-            "error",
-          );
+          ctx.ui.notify(`Export path escapes current directory: ${outPath}`, "error");
           return;
         }
       }
@@ -62,8 +59,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (gitWarning) {
         ctx.ui.notify(gitWarning, "warning");
       }
-      const activeSessionFile =
-        ctx.sessionManager.getSessionFile() ?? undefined;
+      const activeSessionFile = ctx.sessionManager.getSessionFile() ?? undefined;
 
       // Throttled progress: Scanning N files… keeps the TUI alive during the
       // ~35s (98 files) to ~2min (644 files) corpus walk.
@@ -77,8 +73,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         phase: string;
       }) => {
         const t = Date.now();
-        if (t - lastProgressAt < 800 && scanned !== 0 && scanned !== total)
-          return;
+        if (t - lastProgressAt < 800 && scanned !== 0 && scanned !== total) return;
         lastProgressAt = t;
         if (scanned === 0 && total > 0) {
           ctx.ui.notify(
@@ -128,10 +123,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       try {
         writeFileSync(outPath, markdown, "utf-8");
       } catch (error) {
-        ctx.ui.notify(
-          `Export failed to write ${outPath}: ${String(error)}`,
-          "error",
-        );
+        ctx.ui.notify(`Export failed to write ${outPath}: ${String(error)}`, "error");
         return;
       }
 
@@ -153,10 +145,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
       if (stats.droppedExcluded > 0) {
         lines.push(`- dropper-pruned ids excluded: ${stats.droppedExcluded}`);
       }
-      lines.push(
-        "",
-        "The file is plain markdown — curate it, then import into any memory system.",
-      );
+      lines.push("", "The file is plain markdown — curate it, then import into any memory system.");
 
       pi.sendMessage({
         customType: "blackhole-export",

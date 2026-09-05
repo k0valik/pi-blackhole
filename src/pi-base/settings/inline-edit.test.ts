@@ -23,10 +23,7 @@ import {
   type InlineEditState,
 } from "./inline-edit.ts";
 
-const make = (
-  buffer: string,
-  cursor: number = buffer.length,
-): InlineEditState => ({
+const make = (buffer: string, cursor: number = buffer.length): InlineEditState => ({
   buffer,
   cursor,
 });
@@ -104,8 +101,7 @@ describe("moveInlineCursorByChars", () => {
 
   it("skips over ZWJ family emoji as a single grapheme cluster", () => {
     // 👨‍👩‍👧‍👦 is 7 code units but one grapheme cluster
-    const family =
-      "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66";
+    const family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66";
     const text = `a${family}b`;
     const s = make(text, text.length);
     // cursor at end (13); press left once → should land before 'b' (12)

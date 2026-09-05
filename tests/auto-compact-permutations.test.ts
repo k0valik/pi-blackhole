@@ -140,8 +140,7 @@ function captureFullSystem(config: PermutationConfig) {
   registerBeforeCompactHook(pi as any, runtime as any);
 
   if (!triggerHandler) throw new Error("agent_end handler was not registered");
-  if (!beforeCompactHandler)
-    throw new Error("session_before_compact handler was not registered");
+  if (!beforeCompactHandler) throw new Error("session_before_compact handler was not registered");
 
   return {
     fireAgentEnd: (branch: any[], errorMessage?: string) => {
@@ -297,24 +296,18 @@ describe("Auto-compact trigger: guard permutations (3 knobs)", () => {
         expect(system.ctx.compact).toHaveBeenCalledTimes(1);
         expect(system.runtime.compactInFlight).toBe(false); // reset by onComplete
         // Should show threshold notification
-        expect(
-          system.notifyCalls.some((n) =>
-            n.msg.includes("compaction threshold reached"),
-          ),
-        ).toBe(true);
+        expect(system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached"))).toBe(
+          true,
+        );
         // Should show completion notification
-        expect(
-          system.notifyCalls.some((n) => n.msg.includes("compaction complete")),
-        ).toBe(true);
+        expect(system.notifyCalls.some((n) => n.msg.includes("compaction complete"))).toBe(true);
       } else {
         expect(system.ctx.compact).not.toHaveBeenCalled();
         expect(system.runtime.compactInFlight).toBe(false);
         // Should NOT show threshold notification
-        expect(
-          system.notifyCalls.some((n) =>
-            n.msg.includes("compaction threshold reached"),
-          ),
-        ).toBe(false);
+        expect(system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached"))).toBe(
+          false,
+        );
       }
     });
   }
@@ -448,9 +441,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
     // compactInFlight is STILL true — we are waiting, not bailed
     expect(system.runtime.compactInFlight).toBe(true);
     // No "deferred" notification — that was the buggy old behavior
-    expect(
-      system.notifyCalls.some((n) => n.msg.includes("compaction deferred")),
-    ).toBe(false);
+    expect(system.notifyCalls.some((n) => n.msg.includes("compaction deferred"))).toBe(false);
   });
 
   it("skips when token pressure was reduced by another compaction between trigger and microtask", async () => {
@@ -470,9 +461,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 
     expect(system.ctx.compact).not.toHaveBeenCalled();
     expect(system.runtime.compactInFlight).toBe(false);
-    expect(
-      system.notifyCalls.some((n) => n.msg.includes("compaction skipped")),
-    ).toBe(true);
+    expect(system.notifyCalls.some((n) => n.msg.includes("compaction skipped"))).toBe(true);
   });
 
   it("handles session reload between trigger and microtask", async () => {
@@ -494,9 +483,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 
     expect(system.ctx.compact).not.toHaveBeenCalled();
     expect(system.runtime.compactInFlight).toBe(false);
-    expect(
-      system.notifyCalls.some((n) => n.msg.includes("session changed")),
-    ).toBe(true);
+    expect(system.notifyCalls.some((n) => n.msg.includes("session changed"))).toBe(true);
   });
 });
 
@@ -566,9 +553,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
     // compactInFlight should have been reset by catch
     expect(system.runtime.compactInFlight).toBe(false);
     // Error notification should show
-    expect(
-      system.notifyCalls.some((n) => n.msg.includes("compact threw")),
-    ).toBe(true);
+    expect(system.notifyCalls.some((n) => n.msg.includes("compact threw"))).toBe(true);
   });
 
   it("allows subsequent agent_end after successful compaction", async () => {
@@ -609,9 +594,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
     // compactInFlight still true
     expect(system.runtime.compactInFlight).toBe(true);
     // No threshold notification (handler bailed before reaching it)
-    expect(
-      system.notifyCalls.some((n) => n.msg.includes("compaction threshold")),
-    ).toBe(false);
+    expect(system.notifyCalls.some((n) => n.msg.includes("compaction threshold"))).toBe(false);
   });
 });
 
@@ -642,9 +625,7 @@ describe("Full 16-permutation matrix", () => {
           // Determine expected behavior
           // memory no longer gates compaction in the trigger
           const guardsBlock =
-            noAutoCompact === true ||
-            passive === true ||
-            overrideDefaultCompaction === false;
+            noAutoCompact === true || passive === true || overrideDefaultCompaction === false;
           const shouldFire = !guardsBlock;
 
           it(`[${++caseIndex}/16] ${label}`, async () => {
@@ -668,10 +649,7 @@ describe("Full 16-permutation matrix", () => {
               expect(typeof compactOpts.onComplete).toBe("function");
 
               // Simulate the before-compact hook to see what pipeline runs
-              system.fireBeforeCompact(
-                dueBranch,
-                compactOpts.customInstructions,
-              );
+              system.fireBeforeCompact(dueBranch, compactOpts.customInstructions);
 
               if (overrideDefaultCompaction) {
                 // Blackhole pipeline should run
@@ -736,22 +714,16 @@ describe("New config key trigger permutations", () => {
             expect(system.ctx.compact).toHaveBeenCalledTimes(1);
             expect(system.runtime.compactInFlight).toBe(false);
             expect(
-              system.notifyCalls.some((n) =>
-                n.msg.includes("compaction threshold reached"),
-              ),
+              system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached")),
             ).toBe(true);
-            expect(
-              system.notifyCalls.some((n) =>
-                n.msg.includes("compaction complete"),
-              ),
-            ).toBe(true);
+            expect(system.notifyCalls.some((n) => n.msg.includes("compaction complete"))).toBe(
+              true,
+            );
           } else {
             expect(system.ctx.compact).not.toHaveBeenCalled();
             expect(system.runtime.compactInFlight).toBe(false);
             expect(
-              system.notifyCalls.some((n) =>
-                n.msg.includes("compaction threshold reached"),
-              ),
+              system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached")),
             ).toBe(false);
           }
         });
