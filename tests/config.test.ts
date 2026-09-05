@@ -52,6 +52,7 @@ describe("Config defaults", () => {
     expect(config.observeAfterTokens).toBe(15_000);
     expect(config.reflectAfterTokens).toBe(25_000);
     expect(config.compactAfterTokens).toBe(81_000);
+    expect(config.retainedToolOutputMaxTokens).toBe(20_000);
     expect(config.observationsPoolMaxTokens).toBe(20_000);
     expect(config.agentMaxTurns).toBe(16);
     expect(config.memory).toBe(true);
@@ -63,6 +64,38 @@ describe("Config defaults", () => {
     // Legacy fields are deleted during migration so not present
     expect((config as any).overrideDefaultCompaction).toBeUndefined();
     expect((config as any).passive).toBeUndefined();
+  });
+});
+
+describe("retainedToolOutputMaxTokens", () => {
+  const envKey = "PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS";
+
+  afterEach(() => {
+    delete process.env[envKey];
+  });
+
+  it("accepts a positive file override", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ retainedToolOutputMaxTokens: 12_000 });
+    expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(12_000);
+  });
+
+  it("accepts 0 as disabled (opt-out)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ retainedToolOutputMaxTokens: 0 });
+    expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(0);
+  });
+
+  it("rejects negative values", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ retainedToolOutputMaxTokens: -5 });
+    expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(20_000);
+  });
+
+  it("accepts a positive environment override", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    process.env[envKey] = "9000";
+    expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(9_000);
   });
 });
 

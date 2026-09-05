@@ -25,6 +25,7 @@ import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
 import { effectiveContextWindow } from "../om/model-budget.js";
 import { configFileNeedsMigration } from "../core/unified-config.js";
+import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -593,12 +594,32 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       messageCount: agentMessages.length,
     });
 
+    let allEntries: any[] = [];
+    try {
+      const entries = ctx.sessionManager?.getEntries?.();
+      if (Array.isArray(entries)) allEntries = entries;
+    } catch {
+      // Omitted outputs remain generically recallable when an index is unproven.
+    }
+    const retainedToolOutputProjection = buildRetainedToolOutputProjection(
+      keptEntries,
+      allEntries,
+      omRuntime.config.retainedToolOutputMaxTokens,
+    );
+    trace("before_compact.tool_output_budget", {
+      retainedTokens: retainedToolOutputProjection.retainedTokens,
+      omittedTokens: retainedToolOutputProjection.omittedTokens,
+      omittedCount: retainedToolOutputProjection.omissions.length,
+      pendingCount: retainedToolOutputProjection.pendingCount,
+    });
+
     const legacyDetails: PiVccCompactionDetails = {
       compactor: "blackhole",
       version: 1,
       sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
       sourceMessageCount: agentMessages.length,
       previousSummaryUsed: Boolean(preparation.previousSummary),
+      retainedToolOutputProjection,
     };
 
     // ── Inject observational-memory content ───────────────────────────
@@ -677,6 +698,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
             tokensBefore: preparation.tokensBefore,
             sections: legacyDetails.sections,
             previousSummaryUsed: legacyDetails.previousSummaryUsed,
+            retainedToolOutputProjection,
             contextWindowTokens: ctx.model ? effectiveContextWindow(ctx.model) : undefined,
           });
         } catch (error) {
