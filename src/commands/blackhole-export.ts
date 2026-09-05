@@ -7,9 +7,6 @@ import { writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { buildProjectMemoryCorpusAsync } from "../project-recall/corpus.js";
-import { buildExportMarkdownAsync } from "../project-recall/format-export.js";
-import { findGitRoot } from "../project-recall/session-dir.js";
 
 function defaultOutPath(cwd: string, now: Date): string {
   const iso = now.toISOString();
@@ -55,6 +52,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         }
       }
 
+      const { findGitRoot } = await import("../project-recall/session-dir.js");
       const { root: gitRoot, warning: gitWarning } = await findGitRoot(ctx.cwd);
       if (gitWarning) {
         ctx.ui.notify(gitWarning, "warning");
@@ -85,6 +83,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         }
       };
 
+      const { buildProjectMemoryCorpusAsync } = await import("../project-recall/corpus.js");
       const corpus = await buildProjectMemoryCorpusAsync(
         {
           cwd: ctx.cwd,
@@ -115,6 +114,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
+      const { buildExportMarkdownAsync } = await import("../project-recall/format-export.js");
       const { markdown, stats } = await buildExportMarkdownAsync(corpus, {
         now: now.getTime(),
         title: basename(corpus.projectRoot),

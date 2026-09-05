@@ -4,6 +4,23 @@ pi-blackhole merges deterministic algorithmic compaction with session-surviving 
 
 The entry point is `index.ts` (default export factory registered via `pi.extensions`).
 
+## Startup loading
+
+Startup registers commands, tools and lifecycle hooks, scaffolds configuration,
+and installs the host inline-compaction adapter before Pi binds the session.
+The adapter must remain eager so it can capture the correct host session identity.
+
+Optional implementations load on first use: each memory worker is imported only
+after its stage is due and a usable model passes the context-budget check;
+settings, changelog and cleanup modules load when their subcommands run. Export
+modules load after output-path validation, and the formatter is not loaded for an
+empty corpus. Normal module caching reuses these imports on later calls.
+
+No new setting is needed. Worker thresholds, fallback behavior, configuration
+precedence, command discovery and compaction semantics are unchanged. First use
+pays the deferred module-loading cost; this does not defer the host adapter or
+all shared runtime modules.
+
 ## Design philosophy
 
 The core insight: Pi's native LLM compaction erodes detail after repeated cycles. pi-blackhole replaces it with deterministic extraction plus a surviving memory layer.
