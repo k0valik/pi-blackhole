@@ -64,6 +64,8 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         // Open the config overlay ("configure" kept as a hidden alias)
         const { openBlackholeSettings } = await import("../pi-base/blackhole-settings.js");
         await openBlackholeSettings(ctx);
+        runtime.config = config.loadWithWarnings(ctx.cwd, GLOBAL_CONFIG_DIR).config;
+        runtime.configLoaded = true;
         return;
       }
       if (trimmed === "changelog") {

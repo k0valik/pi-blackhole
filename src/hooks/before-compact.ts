@@ -25,6 +25,7 @@ import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
 import { effectiveContextWindow } from "../om/model-budget.js";
 import { configFileNeedsMigration } from "../core/unified-config.js";
+import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -593,17 +594,38 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       messageCount: agentMessages.length,
     });
 
+    let allEntries: any[] = [];
+    try {
+      const entries = ctx.sessionManager?.getEntries?.();
+      if (Array.isArray(entries)) allEntries = entries;
+    } catch {
+      // Omitted outputs remain generically recallable when an index is unproven.
+    }
+    const retainedToolOutputProjection = buildRetainedToolOutputProjection(
+      keptEntries,
+      allEntries,
+      omRuntime.config.retainedToolOutputMaxTokens,
+    );
+    trace("before_compact.tool_output_budget", {
+      retainedTokens: retainedToolOutputProjection.retainedTokens,
+      omittedTokens: retainedToolOutputProjection.omittedTokens,
+      omittedCount: retainedToolOutputProjection.omissions.length,
+      pendingCount: retainedToolOutputProjection.pendingCount,
+    });
+
     const legacyDetails: PiVccCompactionDetails = {
       compactor: "blackhole",
       version: 1,
       sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
       sourceMessageCount: agentMessages.length,
       previousSummaryUsed: Boolean(preparation.previousSummary),
+      retainedToolOutputProjection,
     };
 
     // ── Inject observational-memory content ───────────────────────────
     let omContent: string;
     let omDetails: Record<string, unknown> | undefined;
+    let omHasContent = false;
     trace("before_compact.om_injection", {
       memoryEnabled: omRuntime.config.memory !== false,
     });
@@ -614,11 +636,27 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       });
       omContent = renderSummary(projection.reflections, projection.observations);
       omDetails = projection.details;
+      omHasContent = projection.reflections.length > 0 || projection.observations.length > 0;
     } else {
       omContent = renderSummary([], []);
     }
 
+    // An empty replacement summary would discard the context Pi's native
+    // compactor is designed to preserve. Decline ownership only when neither
+    // Blackhole's VCC summary nor the OM projection produced any content;
+    // non-empty Blackhole summaries retain the existing deterministic path.
+    // (renderSummary([], []) always emits the OM recall footer, so the check
+    // must not key off footer-inclusive omContent.)
     const fallbackSummary = summary + "\n\n" + omContent;
+    if (summary.trim().length === 0 && !omHasContent) {
+      // Returning undefined delegates to Pi's native summarizer:
+      // ExtensionHandler permits void, and pi only acts on result?.compaction.
+      trace("before_compact.native_fallback", {
+        reason: "empty_blackhole_summary",
+      });
+      return;
+    }
+
     const warnAppendFallback = (reason: string) => {
       trace("before_compact.append_fallback", { reason });
       if (omRuntime.appendFallbackNotified) return;
@@ -660,6 +698,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
             tokensBefore: preparation.tokensBefore,
             sections: legacyDetails.sections,
             previousSummaryUsed: legacyDetails.previousSummaryUsed,
+            retainedToolOutputProjection,
             contextWindowTokens: ctx.model ? effectiveContextWindow(ctx.model) : undefined,
           });
         } catch (error) {

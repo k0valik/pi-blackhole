@@ -1,8 +1,18 @@
 ## [Unreleased]
 
+### Added
+
+- **`max` thinking level support.** Configured memory models now accept and forward Pi's highest reasoning level where supported by the provider ([upstream OM `e6c0fd9`](https://github.com/elpapi42/pi-observational-memory/commit/e6c0fd9d8e43ffb5d3c1a271bf1ec4a4640bde02)).
+
 ### Changed
 
 - **Fast prebuilt bundle with git-install fallback (`pi-entry.js`).** Restores `dist/index.js` speed (≈1.6–2× faster, 645KB ESM vs jiti on ~85 files) without breaking `pi install git:` on `npm`/`pnpm`/`bun` with `--omit=dev`. New committed entry `pi-entry.js` loads `dist/index.js` when present, otherwise falls back to `index.ts` via pi's outer `jiti` hook (Node) or native TS (Bun) — zero runtime dependencies, so registry installs stay lean. `prepare` still builds `dist/` when `tsup` is available. Reverses the `c4be93e` trade-off that reverted `pi.extensions` to `["./index.ts"]` for git robustness.
+- **Recall search now indexes bounded generic tool arguments, filters multi-term BM25 noise, caps results at 50, and reports pagination/truncation accurately** ([upstream VCC `f7b80bb`, `4bb7115`](https://github.com/sting8k/pi-vcc/commit/f7b80bbbe22315acf9f7925c0c3be2d4ae9feee5)).
+
+### Fixed
+
+- **OM workers now receive provider environment substitutions, and stale ambient-credential availability snapshots are rechecked before rejecting request-time-signed providers** ([upstream OM `ce9fc98`, `699ccc7`](https://github.com/elpapi42/pi-observational-memory/commit/ce9fc982b3a219a7839f07c9f4a3e054e81a2b21)).
+- **Empty Blackhole compaction output now delegates to Pi's native summarizer instead of replacing context with an empty summary** ([upstream OM PR #39](https://github.com/elpapi42/pi-observational-memory/pull/39)).
 
 ---
 

@@ -1,5 +1,6 @@
 import type { PiVccCompactionDetailsV2, PiVccSegment, PiVccSegmentCoverage } from "../details.js";
 import { isPiVccCompactionDetailsV2 } from "../details.js";
+import type { RetainedToolOutputProjection } from "./tool-output-budget.js";
 import { estimateEntryTokens, getUsageTokens } from "../om/tokens.js";
 
 export interface SessionEntryLike {
@@ -40,6 +41,7 @@ export interface BuildAppendOnlyDetailsInput {
   tokensBefore: number;
   sections: string[];
   previousSummaryUsed: boolean;
+  retainedToolOutputProjection?: RetainedToolOutputProjection;
   /** Session model context window; when set, an overgrown chain auto-rebases. */
   contextWindowTokens?: number;
 }
@@ -369,6 +371,9 @@ export function buildAppendOnlyDetails(
     sections: input.sections,
     sourceMessageCount: input.currentCoverage.sourceMessageCount,
     previousSummaryUsed: input.previousSummaryUsed,
+    ...(input.retainedToolOutputProjection
+      ? { retainedToolOutputProjection: input.retainedToolOutputProjection }
+      : {}),
   };
 }
 
