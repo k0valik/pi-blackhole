@@ -80,9 +80,15 @@ describe("retainedToolOutputMaxTokens", () => {
     expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(12_000);
   });
 
-  it("rejects non-positive values", async () => {
+  it("accepts 0 as disabled (opt-out)", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ retainedToolOutputMaxTokens: 0 });
+    expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(0);
+  });
+
+  it("rejects negative values", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ retainedToolOutputMaxTokens: -5 });
     expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(20_000);
   });
 

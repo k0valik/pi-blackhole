@@ -108,7 +108,8 @@ export interface UnifiedConfig {
   tailBehavior: "pi-default" | "minimal";
 
   /** Maximum historical tool-output text tokens retained in provider context.
-   *  Newest consumed outputs are retained first; omitted outputs remain recallable. */
+   *  Newest consumed outputs are retained first; omitted outputs remain recallable.
+   *  0 = disabled (opt-out). */
   retainedToolOutputMaxTokens: number;
 
   /** Token threshold for observer runs. */
@@ -332,7 +333,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (typeof raw.fullFoldAlways === "boolean") c.fullFoldAlways = raw.fullFoldAlways;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
 
-  // Numeric fields — use nonNegativeInt for observerPreambleMaxTokens (0 = auto)
+  // Numeric fields — use nonNegativeInt for keys where 0 is meaningful
+  // (observerPreambleMaxTokens 0 = auto, retainedToolOutputMaxTokens 0 = disabled)
   const numKeys = [
     "observeAfterTokens",
     "reflectAfterTokens",
@@ -370,7 +372,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
     // everything else must be > 0.
     const validator =
-      k === "observerPreambleMaxTokens" || k === "providerIdleTimeoutMs"
+      k === "observerPreambleMaxTokens" ||
+      k === "providerIdleTimeoutMs" ||
+      k === "retainedToolOutputMaxTokens" // 0 = disabled (opt-in)
         ? nonNegativeInt
         : positiveInt;
     const v = validator(raw[k]);

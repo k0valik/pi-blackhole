@@ -25,7 +25,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
   "compactAfterTokens": 81000,    // Token threshold for auto-compaction
-  "retainedToolOutputMaxTokens": 20000, // Full historical tool-output budget
+  "retainedToolOutputMaxTokens": 20000, // 0 = disabled; otherwise full historical tool-output budget
 
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
@@ -189,13 +189,15 @@ Token threshold for auto-compaction. When `compaction: "auto"` and accumulated t
 
 ### `retainedToolOutputMaxTokens`
 
+Set to `0` to disable the budget entirely (opt-out). By default a 20000-token budget is applied.
+
 Dedicated token budget for historical `toolResult` text and shell output retained by a Blackhole compaction. At the compaction boundary, Blackhole scans the retained tail newest-first, retaining each full text output while it fits. The text crossing the budget and all older text outputs are represented by compact markers that point to `recall #N` when a stable transcript index is available. That representation is persisted with the compaction and stays unchanged during ordinary provider calls until the next Blackhole compaction. Non-text parts such as images are preserved and do not count against this budget.
 
 This only changes the retained context sent to the provider. Session JSONL, compaction summaries' source messages, and recall data remain full fidelity. Trailing results that have not yet been consumed by an assistant response are protected even when they exceed the budget; they can become eligible when a later compaction constructs a new retained representation.
 
 | Type | Default | Range |
 |------|---------|-------|
-| number | 20000 | positive integer |
+| number | 20000 | `0` (disabled) or positive integer |
 
 ## Observational Memory Section
 

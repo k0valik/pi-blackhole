@@ -188,6 +188,17 @@ export function applyToolOutputBudget(
   recallIndexes: ReadonlyMap<number, number> = new Map(),
   protectedOutputIndexes: ReadonlySet<number> = new Set(),
 ): ToolOutputBudgetResult {
+  // Opt-in feature: 0 or negative budget disables the projection entirely.
+  if (maxTokens <= 0) {
+    return {
+      messages,
+      retainedTokens: 0,
+      omittedTokens: 0,
+      omittedCount: 0,
+      pendingCount: 0,
+    };
+  }
+
   let lastSuccessfulAssistantIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
