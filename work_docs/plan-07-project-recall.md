@@ -32,20 +32,20 @@ The user describes the desired design as **layered**: recall tool layer → proj
 
 ## 4. Design decisions (decision log)
 
-| # | Decision | Rationale |
-|---|---|---|
-| **D1** | **Vendor chrollo's core primitives** (`search.ts`, `normalize.ts`, `tokenize.ts`, `format.ts`, `read.ts`) into `src/chrollo/` with MIT attribution header + version note. **Never** register its `search_memory`/`read_memory` tools. | Same precedent as `src/pi-base/` (vendored upstream, surgical rewiring only). The npm package would register its own tools (conflict) and its root is hardcoded to `~/.pi/agent/sessions` — vendoring lets us parameterize root + role filter. |
-| **D2** | **One rg pass over an explicit file list** (paths as args, not `-- <dir>`), with per-term `-m 200` caps, 30s timeout, 100MB maxBuffer (chrollo's `runRipgrep` flags). | Chrollo v0.4.0 deliberately removed BM25/corpus-stats/recency-decay ("13s-freeze class of global-corpus-stat scanning"). We keep that discipline: no global scans, bounded candidate set. |
-| **D3** | **Approximate tf-idf computed over candidate matched lines only** (idf = `log((N-df+0.5)/(df+0.5)+1)` over the candidate line set; tf per line). | The user asked for tf-idf; chrollo dropped corpus stats for latency. Compromise: document frequencies over the **already-matched candidate lines** — no extra I/O, still meaningful discrimination. |
-| **D4** | **RRF merge of two ranked lists** (chrollo term-overlap order ∪ tf-idf order), then **recency decay** `1/(1+days)^0.3` and **first-seen boost** as tie-breakers. | Satisfies req 3 with bounded compute: overlap is chrollo's proven fast ranker, tf-idf adds precision, RRF is the standard way to fuse them, recency/first-seen break ties. |
-| **D5** | **Role weights:** user/assistant ×1.0; toolResult/bashExecution ×0.4; tool-call args searchable only in `tool_outputs`/`all` scopes. | Req 5. File-read noise (e.g. `Read` tool results echoing file content) must not outrank real conversation. |
-| **D6** | **First-appearance = min line timestamp per session** among matching lines; surfaced in output and used as a tie-break (earlier first-seen wins). | Req 3's "oldest session entry where a snippet was first seen". Cheap: timestamps only parsed for matched lines. |
-| **D7** | **Active session excluded** from the candidate list by path equality with `ctx.sessionManager.getSessionFile()`; also `stat`-skip any file whose mtime equals the active session's or is being written (same inode check). | Req 7 — never race the live session file (half-written line, torn JSON). |
-| **D8** | **Basename/fuzzy fallback:** if the query contains a path-like token (`src/foo.ts`), additionally emit an rg pattern on the basename (`foo.ts`); matches annotate `(basename match)`. | Req 6 — survives renames/moves inside the project. |
-| **D9** | **New params on the `recall` tool:** `project: boolean` (default `false`) + `projectScope: StringEnum ["conversation","tool_outputs","all"]` (default `conversation`); `query` required when `project: true`. Command adds `project:true` and `pscope:(...)` parsing (new regex alongside `SCOPE_RE`/`MODE_RE` — `pscope` avoids colliding with the existing `scope:(lineage|all)`). | Matches "boolean/object param" intent; explicit separate scope keeps the existing `scope`/`mode` semantics untouched. |
-| **D10** | **Staleness header:** the project formatter emits, once per results block (every page), exactly `<--old context-->` plus a one-liner: `entries from older sessions may be stale — decisions may have changed since; tread lightly`. Shared by tool and command (single constant string). | Req 10. The `<--old context-->` marker mirrors pi's compaction labeling, so it reads naturally to the agent. |
-| **D11** | **rg is a hard requirement** for project recall (chrollo is rg-native); graceful error if `rg` is not on PATH. | Blackhole currently has zero binary deps — this is the accepted tradeoff (decision point, see §13 Q1). ripgrep 15.1.0 present on the dev machine; ~102MB corpus per project dir makes pure-Node scanning too slow. Need to figure out where pi ships the rg binary to point at it |
-| **D12** | **New config fields:** `projectRecallSessionCount` (default **60**, in the 50–75 range) and `projectRecallEnabled` (default `true`). | Bounds the corpus; doc-consistency rule applies (README.md / CONFIG.md / llms.txt must mirror `src/core/unified-config.ts` defaults). |
+| #       | Decision                                                                                                                                                                                                                                                                                                                                                                     | Rationale                                                                                                                                                                                                                                                                         |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D1**  | **Vendor chrollo's core primitives** (`search.ts`, `normalize.ts`, `tokenize.ts`, `format.ts`, `read.ts`) into `src/chrollo/` with MIT attribution header + version note. **Never** register its `search_memory`/`read_memory` tools.                                                                                                                                        | Same precedent as `src/pi-base/` (vendored upstream, surgical rewiring only). The npm package would register its own tools (conflict) and its root is hardcoded to `~/.pi/agent/sessions` — vendoring lets us parameterize root + role filter.                                    |
+| **D2**  | **One rg pass over an explicit file list** (paths as args, not `-- <dir>`), with per-term `-m 200` caps, 30s timeout, 100MB maxBuffer (chrollo's `runRipgrep` flags).                                                                                                                                                                                                        | Chrollo v0.4.0 deliberately removed BM25/corpus-stats/recency-decay ("13s-freeze class of global-corpus-stat scanning"). We keep that discipline: no global scans, bounded candidate set.                                                                                         |
+| **D3**  | **Approximate tf-idf computed over candidate matched lines only** (idf = `log((N-df+0.5)/(df+0.5)+1)` over the candidate line set; tf per line).                                                                                                                                                                                                                             | The user asked for tf-idf; chrollo dropped corpus stats for latency. Compromise: document frequencies over the **already-matched candidate lines** — no extra I/O, still meaningful discrimination.                                                                               |
+| **D4**  | **RRF merge of two ranked lists** (chrollo term-overlap order ∪ tf-idf order), then **recency decay** `1/(1+days)^0.3` and **first-seen boost** as tie-breakers.                                                                                                                                                                                                             | Satisfies req 3 with bounded compute: overlap is chrollo's proven fast ranker, tf-idf adds precision, RRF is the standard way to fuse them, recency/first-seen break ties.                                                                                                        |
+| **D5**  | **Role weights:** user/assistant ×1.0; toolResult/bashExecution ×0.4; tool-call args searchable only in `tool_outputs`/`all` scopes.                                                                                                                                                                                                                                         | Req 5. File-read noise (e.g. `Read` tool results echoing file content) must not outrank real conversation.                                                                                                                                                                        |
+| **D6**  | **First-appearance = min line timestamp per session** among matching lines; surfaced in output and used as a tie-break (earlier first-seen wins).                                                                                                                                                                                                                            | Req 3's "oldest session entry where a snippet was first seen". Cheap: timestamps only parsed for matched lines.                                                                                                                                                                   |
+| **D7**  | **Active session excluded** from the candidate list by path equality with `ctx.sessionManager.getSessionFile()`; also `stat`-skip any file whose mtime equals the active session's or is being written (same inode check).                                                                                                                                                   | Req 7 — never race the live session file (half-written line, torn JSON).                                                                                                                                                                                                          |
+| **D8**  | **Basename/fuzzy fallback:** if the query contains a path-like token (`src/foo.ts`), additionally emit an rg pattern on the basename (`foo.ts`); matches annotate `(basename match)`.                                                                                                                                                                                        | Req 6 — survives renames/moves inside the project.                                                                                                                                                                                                                                |
+| **D9**  | **New params on the `recall` tool:** `project: boolean` (default `false`) + `projectScope: StringEnum ["conversation","tool_outputs","all"]` (default `conversation`); `query` required when `project: true`. Command adds `project:true` and `pscope:(...)` parsing (new regex alongside `SCOPE_RE`/`MODE_RE` — `pscope` avoids colliding with the existing `scope:(lineage | all)`).                                                                                                                                                                                                                                                                           | Matches "boolean/object param" intent; explicit separate scope keeps the existing `scope`/`mode` semantics untouched. |
+| **D10** | **Staleness header:** the project formatter emits, once per results block (every page), exactly `<--old context-->` plus a one-liner: `entries from older sessions may be stale — decisions may have changed since; tread lightly`. Shared by tool and command (single constant string).                                                                                     | Req 10. The `<--old context-->` marker mirrors pi's compaction labeling, so it reads naturally to the agent.                                                                                                                                                                      |
+| **D11** | **rg is a hard requirement** for project recall (chrollo is rg-native); graceful error if `rg` is not on PATH.                                                                                                                                                                                                                                                               | Blackhole currently has zero binary deps — this is the accepted tradeoff (decision point, see §13 Q1). ripgrep 15.1.0 present on the dev machine; ~102MB corpus per project dir makes pure-Node scanning too slow. Need to figure out where pi ships the rg binary to point at it |
+| **D12** | **New config fields:** `projectRecallSessionCount` (default **60**, in the 50–75 range) and `projectRecallEnabled` (default `true`).                                                                                                                                                                                                                                         | Bounds the corpus; doc-consistency rule applies (README.md / CONFIG.md / llms.txt must mirror `src/core/unified-config.ts` defaults).                                                                                                                                             |
 
 ## 5. Target architecture (the layered approach)
 
@@ -82,6 +82,7 @@ The user describes the desired design as **layered**: recall tool layer → proj
 ## 6. Tool / command parameter surface
 
 **`recall` tool** (src/tools/recall.ts) — schema additions:
+
 - `project: Type.Boolean()` — default `false`. When `true`, search across the project's session history instead of the active session.
 - `projectScope: Type.StringEnum(["conversation", "tool_outputs", "all"])` — default `conversation`; only meaningful with `project: true`.
   - `conversation` — user/assistant text only (chrollo's parseLine default).
@@ -90,6 +91,7 @@ The user describes the desired design as **layered**: recall tool layer → proj
 - Dispatch in `execute()`: `params.project === true` → `projectRecall(params, ctx)` (before the drill-down/om paths). `query` is required in this branch; no `DEFAULT_RECENT` fallback. `page` reused for pagination (PAGE_SIZE=5, existing header/footer pattern).
 
 **`/blackhole recall` command** (src/commands/vcc-recall.ts):
+
 - Parse `project:true` and `pscope:(conversation|tool_outputs|all)` (new `PROJECT_SCOPE_RE` in src/core/recall-scope.ts, mirroring `SCOPE_RE`/`MODE_RE` style).
 - Same pipeline and output, delivered via `pi.sendMessage({customType: "blackhole-recall", content, display: true}, {triggerTurn: true})`.
 
@@ -135,10 +137,10 @@ entries from older sessions may be stale — decisions may have changed since; t
 
 ## 10. Config surface (new fields)
 
-| Field | Default | Meaning |
-|---|---|---|
-| `projectRecallEnabled` | `true` | master switch for project recall |
-| `projectRecallSessionCount` | `60` | newest N sessions scanned (author range: 50–75) |
+| Field                       | Default | Meaning                                         |
+| --------------------------- | ------- | ----------------------------------------------- |
+| `projectRecallEnabled`      | `true`  | master switch for project recall                |
+| `projectRecallSessionCount` | `60`    | newest N sessions scanned (author range: 50–75) |
 
 Both mirrored in `src/core/unified-config.ts`, README.md, CONFIG.md, llms.txt (docs-consistency rule). Env overrides: `PI_BLACKHOLE_*` pattern.
 
@@ -170,13 +172,13 @@ tests/project-recall.test.ts   fixture dir + stubbed RgRunner + JSONL v3 fixture
 
 ## 13. Risks
 
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| `ctx.sessionManager.getSessionDir()` availability on pi 0.81.1 (min supported peer) unverified — only 0.84.0 in store | Medium | Fallback: compute dir from `getCwd()` with pi's exact sanitize pattern (`--${cwd.replace(/^[/\\]/,"").replace(/[/\\:]/g,"-")}--` under `agentDir/sessions`); compat CI job re-pins and re-tests |
-| Cold-disk latency on first pass over ~102MB corpus | Medium | One bounded rg pass over explicit files with `-m` caps; candidate list cached with TTL (reuse load-messages LRU pattern); parse timestamps only for matched lines |
-| rg missing on user machines (new binary dep) | Low→Medium | D11 graceful error message; documented in README/llms.txt; decision point Q1 |
-| Chrollo parseLine drops assistant toolCalls for indexing | By design | Extended only for scope ≠ conversation (req 8); conversation stays chrollo-faithful |
-| Vendored copy drifts from upstream chrollo | Low | Attribution header + version note; re-vendor on demand |
+| Risk                                                                                                                  | Likelihood | Mitigation                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.sessionManager.getSessionDir()` availability on pi 0.81.1 (min supported peer) unverified — only 0.84.0 in store | Medium     | Fallback: compute dir from `getCwd()` with pi's exact sanitize pattern (`--${cwd.replace(/^[/\\]/,"").replace(/[/\\:]/g,"-")}--` under `agentDir/sessions`); compat CI job re-pins and re-tests |
+| Cold-disk latency on first pass over ~102MB corpus                                                                    | Medium     | One bounded rg pass over explicit files with `-m` caps; candidate list cached with TTL (reuse load-messages LRU pattern); parse timestamps only for matched lines                               |
+| rg missing on user machines (new binary dep)                                                                          | Low→Medium | D11 graceful error message; documented in README/llms.txt; decision point Q1                                                                                                                    |
+| Chrollo parseLine drops assistant toolCalls for indexing                                                              | By design  | Extended only for scope ≠ conversation (req 8); conversation stays chrollo-faithful                                                                                                             |
+| Vendored copy drifts from upstream chrollo                                                                            | Low        | Attribution header + version note; re-vendor on demand                                                                                                                                          |
 
 ## 14. Open questions / decision points
 
@@ -199,58 +201,54 @@ tests/project-recall.test.ts   fixture dir + stubbed RgRunner + JSONL v3 fixture
 **Problem**
 Currently, the `recall` tool (and `/blackhole recall` command) only searches within the active session. In larger projects with hundreds of `.jsonl` session files, historical context is lost. For instance:
 
-* A user refers to a decision made a week ago in a different session.
-* A code comment references a specific error (e.g., `bugfix 1 - undefined variable threw`), and the agent needs to track down when and where that code section was previously read or modified across past sessions.
+- A user refers to a decision made a week ago in a different session.
+- A code comment references a specific error (e.g., `bugfix 1 - undefined variable threw`), and the agent needs to track down when and where that code section was previously read or modified across past sessions.
 
 **Proposed Solution & Design**
 
 1. **Tool Parameter:** Add a `project` boolean option/object to the existing `recall` tool interface.
 2. **Session File Filtering:** When `project = true`, scan the project's historical `.jsonl` files, focusing on the $50\text{--}75$ most recent sessions based on `mtime`.
 3. **Search & Reranking:** Utilize `pi-chrollo` primitives to process the session logs. Rank and retrieve results using a combination of:
-* **Recency:** Session timestamp (`mtime`).
-* **Frequency & Relevance:** TF-IDF and Reciprocal Rank Fusion (RRF).
-* **First Appearance:** Pinpointing the oldest session entry where a snippet was first encountered.
+
+- **Recency:** Session timestamp (`mtime`).
+- **Frequency & Relevance:** TF-IDF and Reciprocal Rank Fusion (RRF).
+- **First Appearance:** Pinpointing the oldest session entry where a snippet was first encountered.
 
 Here are the key edge cases, performance considerations, and potential enhancements you should consider before building out the architecture:
 
 ### Edge Cases & Technical Pitfalls
 
-* **Token Window & Context Pollution:**
-* Searching across $50\text{--}75$ full session logs could return a massive amount of matching text. If the tool injects raw matches back into the context, it will easily blow through token budgets or degrade model attention.
-* *Fix:* The project recall tool response should yield highly condensed snippets (e.g., Session ID, date, path/line referenced, and 2–3 sentences of context around the hit), rather than raw turn dumps.
+- **Token Window & Context Pollution:**
+- Searching across $50\text{--}75$ full session logs could return a massive amount of matching text. If the tool injects raw matches back into the context, it will easily blow through token budgets or degrade model attention.
+- _Fix:_ The project recall tool response should yield highly condensed snippets (e.g., Session ID, date, path/line referenced, and 2–3 sentences of context around the hit), rather than raw turn dumps.
 
+- **Noise from File Reads vs. Actual Discussion:**
+- In `pi` sessions, a file might be read automatically 20 times during mundane tool runs without meaningful user discussion. If you search for `foo.ts`, TF-IDF might over-index on raw tool read payloads rather than high-value assistant/user messages.
+- _Fix:_ Implement a weighting strategy or score booster for user messages and assistant summaries over raw tool output payloads.
 
-* **Noise from File Reads vs. Actual Discussion:**
-* In `pi` sessions, a file might be read automatically 20 times during mundane tool runs without meaningful user discussion. If you search for `foo.ts`, TF-IDF might over-index on raw tool read payloads rather than high-value assistant/user messages.
-* *Fix:* Implement a weighting strategy or score booster for user messages and assistant summaries over raw tool output payloads.
+- **Data Drift Across Renamed/Moved Files:**
+- Searching for `src/foo.ts` will miss historical references if the file was moved from `src/legacy/foo.ts` a week ago.
+- _Fix:_ Include term-based fuzzy fallback or strip path prefixes (search by filename `foo.ts` alongside relative paths).
 
-
-* **Data Drift Across Renamed/Moved Files:**
-* Searching for `src/foo.ts` will miss historical references if the file was moved from `src/legacy/foo.ts` a week ago.
-* *Fix:* Include term-based fuzzy fallback or strip path prefixes (search by filename `foo.ts` alongside relative paths).
-
-
-* **Stale Session Locking / Incomplete Files:**
-* The current active session file is open and actively being written to.
-* *Fix:* Ensure the historical file reader explicitly ignores or safely reads around the currently active `.jsonl` lock/file pointer to prevent read/write race conditions.
+- **Stale Session Locking / Incomplete Files:**
+- The current active session file is open and actively being written to.
+- _Fix:_ Ensure the historical file reader explicitly ignores or safely reads around the currently active `.jsonl` lock/file pointer to prevent read/write race conditions.
 
 ---
 
 ### Architectural & Usability Enhancements
 
-* **Two-Tier Search Strategy (Lexical + Metadata Filter):**
-* Deeply parsing and running TF-IDF/RRF over 75 large `.jsonl` files on every recall call can introduce non-trivial latency if done synchronously.
-* *Fix:* Pre-filter sessions using quick filesystem heuristics (e.g., last modified window, file size) or keep a lightweight, in-memory inverted index / SQLite metadata store for session summaries if performance becomes an issue.
+- **Two-Tier Search Strategy (Lexical + Metadata Filter):**
+- Deeply parsing and running TF-IDF/RRF over 75 large `.jsonl` files on every recall call can introduce non-trivial latency if done synchronously.
+- _Fix:_ Pre-filter sessions using quick filesystem heuristics (e.g., last modified window, file size) or keep a lightweight, in-memory inverted index / SQLite metadata store for session summaries if performance becomes an issue.
 
+- **Explicit Target Modes (`code` vs `chat`):**
+- A user asking _"When did we implement the auth middleware?"_ requires searching assistant/user conversation turns.
+- A user asking _"Where was this error printed?"_ requires searching tool outputs/logs.
+- _Idea:_ Allow the agent or user to specify a sub-scope (or let RRF balance them), e.g., `scope: "conversation" | "tool_outputs" | "all"`.
 
-* **Explicit Target Modes (`code` vs `chat`):**
-* A user asking *"When did we implement the auth middleware?"* requires searching assistant/user conversation turns.
-* A user asking *"Where was this error printed?"* requires searching tool outputs/logs.
-* *Idea:* Allow the agent or user to specify a sub-scope (or let RRF balance them), e.g., `scope: "conversation" | "tool_outputs" | "all"`.
-
-
-* **Structured Traceability Output:**
-* When the tool returns results to the agent, include relative timestamps (e.g., *"3 days ago in session `a1b2c3`"*). Agents perform significantly better at temporal reasoning when given relative offsets rather than raw epoch or UTC timestamps.
+- **Structured Traceability Output:**
+- When the tool returns results to the agent, include relative timestamps (e.g., _"3 days ago in session `a1b2c3`"_). Agents perform significantly better at temporal reasoning when given relative offsets rather than raw epoch or UTC timestamps.
 
 ---
 
@@ -264,46 +262,47 @@ Combining `pi-chrollo`'s structural extraction with hybrid lexical search (TF-ID
 
 **1. RRF Score Distortion Across Granularity Levels**
 
-* **Issue:** `pi-chrollo` parses sessions into macro components (entire turns or tool call outputs). If RRF ranks entire raw turns against small code snippets, a 2,000-line tool output payload containing the search term once will compete directly with a 2-line user message that mentions the term multiple times.
-* **Fix:** When slicing `.jsonl` data via `pi-chrollo` primitives, chunk text into atomic, uniform blocks (e.g., individual user/assistant turns, or sliding window chunks of large tool outputs) *before* building TF-IDF term frequencies. RRF requires list items to represent equivalent semantic granularity.
+- **Issue:** `pi-chrollo` parses sessions into macro components (entire turns or tool call outputs). If RRF ranks entire raw turns against small code snippets, a 2,000-line tool output payload containing the search term once will compete directly with a 2-line user message that mentions the term multiple times.
+- **Fix:** When slicing `.jsonl` data via `pi-chrollo` primitives, chunk text into atomic, uniform blocks (e.g., individual user/assistant turns, or sliding window chunks of large tool outputs) _before_ building TF-IDF term frequencies. RRF requires list items to represent equivalent semantic granularity.
 
 **2. Asynchronous Multi-Session File I/O Deadlocks**
 
-* **Issue:** Iterating and parsing 50–75 raw session files synchronously using standard filesystem reads during an active tool call can block Node's main execution loop for several seconds.
-* **Fix:** Stream the file reads or use worker threads (`worker_threads`) when reading and scoring large batch batches of historical `.jsonl` files. Set a hard time budget (e.g., 800 ms execution ceiling) that truncates historical depth if search takes too long.
+- **Issue:** Iterating and parsing 50–75 raw session files synchronously using standard filesystem reads during an active tool call can block Node's main execution loop for several seconds.
+- **Fix:** Stream the file reads or use worker threads (`worker_threads`) when reading and scoring large batch batches of historical `.jsonl` files. Set a hard time budget (e.g., 800 ms execution ceiling) that truncates historical depth if search takes too long.
 
 **3. Fragmented Code Block Scoring (Escaped JSON Artifacts)**
 
-* **Issue:** In raw `pi` session `.jsonl` files, tool calls (like file reads or edits) store code inside double-escaped JSON strings (e.g., `\n`, `\"`, `\\`). Raw TF-IDF calculations over unescaped JSON strings treat control syntax as keywords or fail to tokenize terms like `foo.ts` correctly.
-* **Fix:** Run text through `pi-chrollo`'s unescape/normalizer transformations *first* to extract plain text before tokenization and term-frequency extraction.
+- **Issue:** In raw `pi` session `.jsonl` files, tool calls (like file reads or edits) store code inside double-escaped JSON strings (e.g., `\n`, `\"`, `\\`). Raw TF-IDF calculations over unescaped JSON strings treat control syntax as keywords or fail to tokenize terms like `foo.ts` correctly.
+- **Fix:** Run text through `pi-chrollo`'s unescape/normalizer transformations _first_ to extract plain text before tokenization and term-frequency extraction.
 
 **4. Project Path Disconnects Across Sessions**
 
-* **Issue:** `pi` session files are typically grouped by directory or workspace hash. If the user moved or renamed the root folder across sessions, filtering by absolute path will fail to group past sessions into the same "project."
-* **Fix:** Identify project boundaries using `git` repository root anchors (`.git` head or hash) or workspace relative paths rather than absolute file system strings.
+- **Issue:** `pi` session files are typically grouped by directory or workspace hash. If the user moved or renamed the root folder across sessions, filtering by absolute path will fail to group past sessions into the same "project."
+- **Fix:** Identify project boundaries using `git` repository root anchors (`.git` head or hash) or workspace relative paths rather than absolute file system strings.
 
 ---
 
 ### Key Architectural Recommendations
 
-| Feature Dimension | Single Session Recall | Project Recall Extension |
-| --- | --- | --- |
-| **Search Scope** | Current active `.jsonl` memory | Historical 50–75 `.jsonl` logs filtered by `mtime` |
-| **Unit of Retrieval** | Exact turn / message context | High-density snippet + Session ID + Relative age |
-| **Ranking Metric** | Chronological index | Reciprocal Rank Fusion ($RRF = \sum \frac{1}{k + r}$) |
-| **Context Payload** | Full raw turns | Condensed inline context (max 150 tokens per hit) |
+| Feature Dimension     | Single Session Recall          | Project Recall Extension                              |
+| --------------------- | ------------------------------ | ----------------------------------------------------- |
+| **Search Scope**      | Current active `.jsonl` memory | Historical 50–75 `.jsonl` logs filtered by `mtime`    |
+| **Unit of Retrieval** | Exact turn / message context   | High-density snippet + Session ID + Relative age      |
+| **Ranking Metric**    | Chronological index            | Reciprocal Rank Fusion ($RRF = \sum \frac{1}{k + r}$) |
+| **Context Payload**   | Full raw turns                 | Condensed inline context (max 150 tokens per hit)     |
 
 ```
-Query -> Filter last N files (mtime) 
-      -> Parse via pi-chrollo primitives 
-      -> Rank [TF-IDF Keyword Score] + [Recency Weight] 
-      -> RRF Fusion 
+Query -> Filter last N files (mtime)
+      -> Parse via pi-chrollo primitives
+      -> Rank [TF-IDF Keyword Score] + [Recency Weight]
+      -> RRF Fusion
       -> Format top K hits -> Return to Agent
 
 ```
 
-* **Query Expansion for Code Identifiers:** If searching for a symbol like `handleAuthError`, split terms on camelCase and snake_case (`handle`, `auth`, `error`). Historical logs often contain parts of function names in stack traces or conversation logs rather than exact verbatim matches.
-* **Dynamic Recency Decay:** Apply an exponential time-decay multiplier to the TF-IDF term scores based on session age. A match from 2 days ago should outrank an identical match from 3 weeks ago unless the term frequency in the older file is significantly higher.
+- **Query Expansion for Code Identifiers:** If searching for a symbol like `handleAuthError`, split terms on camelCase and snake_case (`handle`, `auth`, `error`). Historical logs often contain parts of function names in stack traces or conversation logs rather than exact verbatim matches.
+- **Dynamic Recency Decay:** Apply an exponential time-decay multiplier to the TF-IDF term scores based on session age. A match from 2 days ago should outrank an identical match from 3 weeks ago unless the term frequency in the older file is significantly higher.
+
 ---
 
 ## 16. Recall query handling rework — lexical fusion (finding, appended 2026-08-20)
@@ -315,8 +314,7 @@ Supersedes the §15 non-goal wording "Changes to the active-session search path"
 `src/core/search-entries.ts:64-65`:
 
 ```ts
-const looksLikeRegex = (query: string): boolean =>
-  /[|*+?{}()[\]\\^$.]/.test(query);
+const looksLikeRegex = (query: string): boolean => /[|*+?{}()[\]\\^$.]/.test(query);
 ```
 
 `.` is in the metacharacter set. Every query containing a dot — **i.e. any query mentioning a filename** — is treated as ONE literal regex pattern, matched verbatim against whole messages. The model's prose query `"foo.ts should not be rewritten to bar.ts"` becomes a single wildcard-heavy pattern → **zero hits**, every time. This is the observed failure: the model "thinks it is a first-class google search" and the tool silently returns nothing.
@@ -330,10 +328,12 @@ Secondary failure, even with the dot-bug fixed: the BM25 path (line 431) splits 
 **D14 — Single pipeline, dual-pass fusion.** One code path: upstream `searchEntries` (fixed) + new `lexicalSearchEntries` on the same entries/messages; merge via RRF (`Σ 1/(k+r)`, k≈60), dedupe by entry index, prefer the lexical snippet (atomic-path-aware) when an entry appears in both lists. Cheap early-out: trivial queries (≤2 terms, no path tokens) run the upstream path only.
 
 **D15 — Surgical edits to `search-entries.ts`:**
+
 - Fix `looksLikeRegex`: drop `.` from the metachar set; regex path fires only for pattern-forming metachars (`^ $ ( ) [ ] { } * + ? | \`).
 - Export what the lexical pass needs: `fullText`, `buildBM25Context`, `bm25Score`, `snippetRegex`, `lineSnippet` (or the computed BM25 result list).
 
 **D16 — Lexical pass (`src/core/lexical-search.ts`):**
+
 - Atomic term extraction BEFORE splitting: path/file tokens kept whole (`foo.ts`, `src/foo.ts`) + basename variant; identifiers kept whole (`parseDrillDown`); quoted phrases as exact terms; remainder → general words, stopword-filtered.
 - Weighted tiers: path ×3, identifier ×2, general ×1; primary rank = count of strong terms matched (AND-boost: docs mentioning both `foo.ts` AND `bar.ts` float up).
 - Proximity bonus: min line-distance between matched strong terms (same line = the "foo.ts ... bar.ts mentioned together" signal).
@@ -390,14 +390,16 @@ Chrollo's `parseLine` keeps only user/assistant message lines — `om.*` custom 
 ## §18 — ripgrep discovery (no bundling, no hard requirement)
 
 **Verified facts (0.84.0):**
+
 - `tools-manager.js` exports `getToolPath(tool)` / `ensureTool(tool, silent?)` but they are **not re-exported** from the package index (`dist/index.d.ts`) — deep import only, not public API, 0.81.1-compat risk → **do not import them**; mirror the logic locally instead (~15 lines).
 - `getToolPath` logic (tools-manager.js:78-91): check `join(getBinDir(), "rg" + (win32 ? ".exe" : ""))` first, then system PATH via `commandExists`.
 - `getBinDir() = join(getAgentDir(), "bin")` (config.js:440-441) → `~/.pi/agent/bin/` (matches CHANGELOG #470). Blackhole already resolves agentDir via the same `getAgentDir()` for session paths, so the bin dir is consistent.
 - On Android/Termux pi skips download (`pkg install rg` → PATH only).
 
 **Design (D19 — replace/extend D11):**
+
 - New module `src/core/resolve-rg.ts`: `resolveRgPath(): string | null` with candidate resolution in order:
-  1. NO explicit override `PI_BLACKHOLE_RG_PATH` env (consistent with existing `PI_BLACKHOLE_*` convention), no new config knob, overkill for simple ripgrep finding! 
+  1. NO explicit override `PI_BLACKHOLE_RG_PATH` env (consistent with existing `PI_BLACKHOLE_*` convention), no new config knob, overkill for simple ripgrep finding!
   2. Pi managed dir: `join(getAgentDir(), "bin", "rg" | "rg.exe")` — `existsSync`.
   3. PATH walk: split `process.env.PATH` by `path.delimiter`, `existsSync(join(dir, rg|rg.exe))`, `fs.accessSync(X_OK)` on non-win32.
 - Verify the chosen candidate with `execFile(rgPath, ["--version"])` (5s timeout); on failure fall through to next candidate.
@@ -415,22 +417,22 @@ Empirical validation of §17/Appendix A assumptions against the real corpus (`~/
 
 ### 19.1 Corpus inventory
 
-| Signal | Value |
-|---|---|
-| Sessions carrying om markers | 305 of 1202 (571MB), range 2026-05-11 → 2026-08-14 |
-| `om.observations.recorded` | 297 entries → **17,646 observations, 100% shape-valid** against current validators |
-| Relevance spread | high 9919 / medium 4829 / critical 1789 / low 1109 |
-| Observation content mass | ~759k est tokens (3.0M chars) |
-| `om.reflections.recorded` | 221 entries → 2396 reflections; `supportingObservationIds` resolve vs same-file obs ids at **99.9%** |
-| `om.observations.dropped` | only 12 entries / 1200 ids — dropper status signal is thin |
-| Legacy `om.observation` | 8 entries, different shape (`data.records`, `YYYY-MM-DD HH:MM` timestamps, no tokenCount/coversUpToId) → tiny export shim needed |
-| `om.folded` | **zero occurrences in the wild** → MemoryDetails handling can be deferred |
-| Internal linkage | `sourceEntryIds` resolve in-file 99.97%, `coversUpToId` 99.87% |
-| Pending files | 2204 obs + 531 refl + 42 drops across 86 batch-bearing files (+330 cursor-only shells from the known June 19–24 manual-mode recording gap — ignore that window); **249 orphaned** (no matching session file) still holding real data → export must include orphans and prefer main over `.stale` |
+| Signal                       | Value                                                                                                                                                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sessions carrying om markers | 305 of 1202 (571MB), range 2026-05-11 → 2026-08-14                                                                                                                                                                                                                                               |
+| `om.observations.recorded`   | 297 entries → **17,646 observations, 100% shape-valid** against current validators                                                                                                                                                                                                               |
+| Relevance spread             | high 9919 / medium 4829 / critical 1789 / low 1109                                                                                                                                                                                                                                               |
+| Observation content mass     | ~759k est tokens (3.0M chars)                                                                                                                                                                                                                                                                    |
+| `om.reflections.recorded`    | 221 entries → 2396 reflections; `supportingObservationIds` resolve vs same-file obs ids at **99.9%**                                                                                                                                                                                             |
+| `om.observations.dropped`    | only 12 entries / 1200 ids — dropper status signal is thin                                                                                                                                                                                                                                       |
+| Legacy `om.observation`      | 8 entries, different shape (`data.records`, `YYYY-MM-DD HH:MM` timestamps, no tokenCount/coversUpToId) → tiny export shim needed                                                                                                                                                                 |
+| `om.folded`                  | **zero occurrences in the wild** → MemoryDetails handling can be deferred                                                                                                                                                                                                                        |
+| Internal linkage             | `sourceEntryIds` resolve in-file 99.97%, `coversUpToId` 99.87%                                                                                                                                                                                                                                   |
+| Pending files                | 2204 obs + 531 refl + 42 drops across 86 batch-bearing files (+330 cursor-only shells from the known June 19–24 manual-mode recording gap — ignore that window); **249 orphaned** (no matching session file) still holding real data → export must include orphans and prefer main over `.stale` |
 
 ### 19.2 Compaction is a view boundary, not deletion (docs corrected)
 
-Claim found in session-forensics skill + `scripts/om-session-parser.mjs` header was wrong. Measured: pre-compaction-boundary `coversUpToId` resolves 200/200, pre-boundary `sourceEntryIds` 956/956 across sampled compacted sessions; parser reads all lines (0 mismatches). pi appends a `compaction` entry with `firstKeptEntryId`; `buildSessionContext` slices the view only. Fixed: skill SKILL.md (4 spots), parser comments (on `feat/token-rework`, where the script lives). Consequence for this plan: whole-file scanning sees full history; D7 race safety only needs to exclude the *active* file.
+Claim found in session-forensics skill + `scripts/om-session-parser.mjs` header was wrong. Measured: pre-compaction-boundary `coversUpToId` resolves 200/200, pre-boundary `sourceEntryIds` 956/956 across sampled compacted sessions; parser reads all lines (0 mismatches). pi appends a `compaction` entry with `firstKeptEntryId`; `buildSessionContext` slices the view only. Fixed: skill SKILL.md (4 spots), parser comments (on `feat/token-rework`, where the script lives). Consequence for this plan: whole-file scanning sees full history; D7 race safety only needs to exclude the _active_ file.
 
 ### 19.3 Two id spaces (wiring note for §17.4)
 
@@ -440,16 +442,17 @@ Observation/reflection `id`s are 12-hex **memory ids**; observations' `sourceEnt
 
 Author guidance: relevance tiers feed RRF criticality, timestamps feed recency/scoring, memory ids carry no rendered value → output slices to content only. Measured duplication:
 
-| Metric | Value |
-|---|---|
-| Exact-normalized duplicate copies | **47.9% of all obs** (8554 redundant); tokens 767k → 371k by hash dedup alone |
-| Fuzzy lev@0.92 adds | only ~4% further savings (387k vs 371k); insensitive across 0.90–0.95 |
-| Cluster profile @0.92 | 9740 clusters, 74.2% singletons; dup clusters: 1805 span >1 file, 705 same-file bursts |
-| Mega-clusters (50–84×) | all trace to **one logical session copied into 3 scope dirs × within-file repeat bursts** (member timestamps span ~2 minutes) |
-| Cross-scope session copies | 51 session ids present in >1 scope dir (50× three-way, all project-move artifacts) |
-| Low/med boilerplate repeats (author's hypothesis) | real but small: 759 groups of 2–3; every large group traces back to copy inflation |
+| Metric                                            | Value                                                                                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Exact-normalized duplicate copies                 | **47.9% of all obs** (8554 redundant); tokens 767k → 371k by hash dedup alone                                                 |
+| Fuzzy lev@0.92 adds                               | only ~4% further savings (387k vs 371k); insensitive across 0.90–0.95                                                         |
+| Cluster profile @0.92                             | 9740 clusters, 74.2% singletons; dup clusters: 1805 span >1 file, 705 same-file bursts                                        |
+| Mega-clusters (50–84×)                            | all trace to **one logical session copied into 3 scope dirs × within-file repeat bursts** (member timestamps span ~2 minutes) |
+| Cross-scope session copies                        | 51 session ids present in >1 scope dir (50× three-way, all project-move artifacts)                                            |
+| Low/med boilerplate repeats (author's hypothesis) | real but small: 759 groups of 2–3; every large group traces back to copy inflation                                            |
 
 Design consequences:
+
 1. **Exact-normalized dedup FIRST** (cheap content hash) — halves the corpus, kills fork/move inflation and record bursts. Levenshtein clustering is a refinement (paraphrase merge + display cap ≤3 per A.1), not the main lever.
 2. **Session-id dedup**: same header `session.id` in multiple scope dirs = one logical session (keep newest mtime). This also mitigates the project-identity fragmentation (this repo's history spans `projects/pi-blackhole-dev`, `~/pi-blackhole-dev`, `.pi/agent/extensions/pi-blackhole`).
 3. **Cluster-size boost must be damped** (`log(1+distinctLogicalSessions)`): raw repetition counts pipeline artifacts and single-episode bursts, not long-horizon recurrence. Linear boosting would be badly wrong.
@@ -496,20 +499,20 @@ Instead, the export command turns the observation pipeline's accumulated output 
 
 The first export commit (a123e12) was a deterministic, deduplicated dump: 83 sessions → 3053 observations → 1421 unique bullets + 568 reflections, tiered but flat. The improvements below move it **from a deduplicated dump toward a distilled, topic-organized brief** (the direction agreed with the author: anyone in possession of the `.md` can import it into their own memory system). Commit is `A4-shipped` (see CHANGELOG/commit message); rationale for each decision:
 
-| # | Decision | Rationale |
-|---|---|---|
-| **A4-D1** | Command output is delivered via `pi.sendMessage({customType:"blackhole-export", content, display:true})` with **no `triggerTurn`**; a `ctx.ui.notify("Exporting project memory…", "info")` shows the working indicator | `triggerTurn:true` made the agent start reading the export as a new turn — the export is a **user artifact**, not agent context. `display:true` (the pi-context/pi-cache pattern) renders the notification in the TUI; the agent stays on task. The file on disk is the artifact. |
-| **A4-D2** | `CorpusReflection` preserves `supportingObservationIds: string[]` instead of collapsing to `supportingCount: number` | Coverage-weighted ranking needs the actual id set: an observation's export score must reflect **how many reflections validated it**. Damping (log-scale) happens at scoring time, not parse time. |
-| **A4-D3** | Three-pass dedup: exact normalized → Levenshtein@0.92 (bigram-Jaccard prefilters) → **Sørensen-Dice token-set similarity** over remaining reps | Levenshtein edits catch near-identical wording but miss paraphrases that reorder/swap vocabulary. Sørensen-Dice is order-independent: `2·|A∩B|/(|A|+|B|)` over stop-word-stripped token sets. Merges require **Sørensen-Dice ≥ 0.75 AND Levenshtein ≥ 0.60** — the Levenshtein floor prevents pure keyword overlap from merging distinct facts. |
-| **A4-D4** | Stop-word stripping before tokenization, explicitly including `user`/`agent` | Those two words appear in a vast majority of observations (observer prompt patterns); they would dominate token-set overlap and inflate similarity for unrelated items. The stop list covers English function words + discourse markers (exported as `STOP_WORDS`). |
-| **A4-D5** | Coverage-weighted ranking: score × `(1 + 0.3·log2(1 + coverage))`, where coverage = count of reflections citing any member id | A reflection is a second LLM pass that reviewed and validated the observation; covered observations are verified durable facts and outrank equal-tier unsupported ones. Log-scaled so 10 citations don't dominate the tier term. |
-| **A4-D6** | Consensus rerank: score × `(1 + 0.2 · maxRelatedSimilarity)`, where maxRelatedSimilarity = max Sørensen-Dice to any sibling cluster | Clusters sharing vocabulary with a sibling represent recurring themes; the small weight breaks ties without letting keyword overlap masquerade as importance. |
-| **A4-D7** | Viability gate: low-tier clusters with <2 distinct sessions and zero reflection coverage are dropped; medium similarly but kept when ≥50 chars | Cuts the noise floor (single-session transient notes, setup scaffolding) with zero LLM involvement. Measured corpus: removes the majority of the ~1421 unique observations while keeping all high/critical and every recurrence. |
-| **A4-D8** | Orphan (unattributed pending) observations render only when their cluster spans ≥2 orphaned sessions | The measured corpus had 858 orphan observations from 34 lost sessions — almost entirely single-occurrence crash noise. Cross-session orphans are the only ones likely to carry durable signal. |
-| **A4-D9** | Topic grouping replaces the flat tier dump: observation clusters group by shared content keywords (top-2 TF per cluster), connected via union-find; sections labeled by top-2 shared keywords; reflections matching a topic render beneath it; unmatched reflections stay in the top Reflections section (with a note when distribution happened) | Wiki-importability is the stated goal (§A.1): a flat 600+ bullet list is a database dump, not a document. Keyword-derived topics are deterministic, dependency-free, and stable across runs. Fallback to tier sections when <2 topics form (corpus too diverse). |
-| **A4-D10** | Generic-keyword guard: keywords shared by >30% of clusters are excluded from topic edges (`GENERIC_KEYWORD_RATIO = 0.3`) | Words like `config`/`code`/`file` appear everywhere; connecting on them would merge the whole corpus into one topic. |
-| **A4-D11** | Bullets surface provenance inline: `(across N sessions)`, `(recorded N×)`; fuzzy extras render as indented sub-bullets; wording `seen across` → `across` | Frequency signal was previously hidden in the stats footer only; surfacing it inline makes recurrence visible to a reader (human or importing agent) without parsing headers. |
-| **A4-D12** | Stats extended: `observationsClustered`, `observationsRendered`, `observationsFiltered`, `topicGroups`; header shows rendered count after the viability gate | The old "1421 unique" overstated what the reader actually receives; the new header says how many survive dedup **and** the gate, plus how many clusters the gate removed. |
-| **A4-D13** | Multi-pass clustering runs statelessly on every export (no caching layer) | Deterministic output is the author requirement (same corpus → same file); the corpus walk is already bounded to the project scope folders + pending dir (§19.5). |
+| #          | Decision                                                                                                                                                                                                                                                                                                                                          | Rationale                                                                                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A4-D1**  | Command output is delivered via `pi.sendMessage({customType:"blackhole-export", content, display:true})` with **no `triggerTurn`**; a `ctx.ui.notify("Exporting project memory…", "info")` shows the working indicator                                                                                                                            | `triggerTurn:true` made the agent start reading the export as a new turn — the export is a **user artifact**, not agent context. `display:true` (the pi-context/pi-cache pattern) renders the notification in the TUI; the agent stays on task. The file on disk is the artifact. |
+| **A4-D2**  | `CorpusReflection` preserves `supportingObservationIds: string[]` instead of collapsing to `supportingCount: number`                                                                                                                                                                                                                              | Coverage-weighted ranking needs the actual id set: an observation's export score must reflect **how many reflections validated it**. Damping (log-scale) happens at scoring time, not parse time.                                                                                 |
+| **A4-D3**  | Three-pass dedup: exact normalized → Levenshtein@0.92 (bigram-Jaccard prefilters) → **Sørensen-Dice token-set similarity** over remaining reps                                                                                                                                                                                                    | Levenshtein edits catch near-identical wording but miss paraphrases that reorder/swap vocabulary. Sørensen-Dice is order-independent: `2·                                                                                                                                         | A∩B | /(  | A   | +   | B   | )` over stop-word-stripped token sets. Merges require **Sørensen-Dice ≥ 0.75 AND Levenshtein ≥ 0.60** — the Levenshtein floor prevents pure keyword overlap from merging distinct facts. |
+| **A4-D4**  | Stop-word stripping before tokenization, explicitly including `user`/`agent`                                                                                                                                                                                                                                                                      | Those two words appear in a vast majority of observations (observer prompt patterns); they would dominate token-set overlap and inflate similarity for unrelated items. The stop list covers English function words + discourse markers (exported as `STOP_WORDS`).               |
+| **A4-D5**  | Coverage-weighted ranking: score × `(1 + 0.3·log2(1 + coverage))`, where coverage = count of reflections citing any member id                                                                                                                                                                                                                     | A reflection is a second LLM pass that reviewed and validated the observation; covered observations are verified durable facts and outrank equal-tier unsupported ones. Log-scaled so 10 citations don't dominate the tier term.                                                  |
+| **A4-D6**  | Consensus rerank: score × `(1 + 0.2 · maxRelatedSimilarity)`, where maxRelatedSimilarity = max Sørensen-Dice to any sibling cluster                                                                                                                                                                                                               | Clusters sharing vocabulary with a sibling represent recurring themes; the small weight breaks ties without letting keyword overlap masquerade as importance.                                                                                                                     |
+| **A4-D7**  | Viability gate: low-tier clusters with <2 distinct sessions and zero reflection coverage are dropped; medium similarly but kept when ≥50 chars                                                                                                                                                                                                    | Cuts the noise floor (single-session transient notes, setup scaffolding) with zero LLM involvement. Measured corpus: removes the majority of the ~1421 unique observations while keeping all high/critical and every recurrence.                                                  |
+| **A4-D8**  | Orphan (unattributed pending) observations render only when their cluster spans ≥2 orphaned sessions                                                                                                                                                                                                                                              | The measured corpus had 858 orphan observations from 34 lost sessions — almost entirely single-occurrence crash noise. Cross-session orphans are the only ones likely to carry durable signal.                                                                                    |
+| **A4-D9**  | Topic grouping replaces the flat tier dump: observation clusters group by shared content keywords (top-2 TF per cluster), connected via union-find; sections labeled by top-2 shared keywords; reflections matching a topic render beneath it; unmatched reflections stay in the top Reflections section (with a note when distribution happened) | Wiki-importability is the stated goal (§A.1): a flat 600+ bullet list is a database dump, not a document. Keyword-derived topics are deterministic, dependency-free, and stable across runs. Fallback to tier sections when <2 topics form (corpus too diverse).                  |
+| **A4-D10** | Generic-keyword guard: keywords shared by >30% of clusters are excluded from topic edges (`GENERIC_KEYWORD_RATIO = 0.3`)                                                                                                                                                                                                                          | Words like `config`/`code`/`file` appear everywhere; connecting on them would merge the whole corpus into one topic.                                                                                                                                                              |
+| **A4-D11** | Bullets surface provenance inline: `(across N sessions)`, `(recorded N×)`; fuzzy extras render as indented sub-bullets; wording `seen across` → `across`                                                                                                                                                                                          | Frequency signal was previously hidden in the stats footer only; surfacing it inline makes recurrence visible to a reader (human or importing agent) without parsing headers.                                                                                                     |
+| **A4-D12** | Stats extended: `observationsClustered`, `observationsRendered`, `observationsFiltered`, `topicGroups`; header shows rendered count after the viability gate                                                                                                                                                                                      | The old "1421 unique" overstated what the reader actually receives; the new header says how many survive dedup **and** the gate, plus how many clusters the gate removed.                                                                                                         |
+| **A4-D13** | Multi-pass clustering runs statelessly on every export (no caching layer)                                                                                                                                                                                                                                                                         | Deterministic output is the author requirement (same corpus → same file); the corpus walk is already bounded to the project scope folders + pending dir (§19.5).                                                                                                                  |
 
 **Tests** — `tests/blackhole-export.test.ts` gained an `orphan456-pending.json` fixture (a cross-session orphan survivor, needed because A4-D8 requires ≥2 orphaned sessions to render) and asserts the new `across 2 sessions` meta. All 1421 tests green; typecheck, lint, and format all clean.

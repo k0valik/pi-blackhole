@@ -4,5 +4,6 @@
   "lineEnding": "lf",
   "semicolons": "always",
   "trailingComma": "all",
-  "quoteStyle": "double"
+  "quoteStyle": "double",
+  "ignorePatterns": ["dist/", "node_modules/", "pnpm-lock.yaml", ".pi/", "docs/", "tests/fixtures/"]
 }

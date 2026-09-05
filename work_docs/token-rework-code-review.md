@@ -14,11 +14,11 @@ Verified: `pnpm test` 1422/1422 green (84 files), typecheck clean, lint clean.
 - `src/om/consolidation.ts:1010-1035` — `reflectionTokens = rawTokensAfterIndex(entries, refIdx)` vs `reflectThreshold = resolveTriggerThresholds(...)` (0.40 x window)
 - `src/om/consolidation.ts:1344` — same pattern for dropper
 
-At a 128k window, manual mode now fires at ~51.2k *raw estimate* tokens vs. the old explicit 25k default => **~2x later cadence for manual-mode users**. Compounding: `anyStageDue` (trigger side) uses the usage-basis measure functions, so trigger and re-check disagree — the trigger can report "due" while the stage returns `continue` (spurious due notifications, and the reverse). The `basis === "usage"` not_due guard exists only in the auto branch (L671/1042/1364); manual-mode not_due advances (L1024, L1348) still fire on estimate basis, contrary to the plan's fallback-safety rule.
+At a 128k window, manual mode now fires at ~51.2k _raw estimate_ tokens vs. the old explicit 25k default => **~2x later cadence for manual-mode users**. Compounding: `anyStageDue` (trigger side) uses the usage-basis measure functions, so trigger and re-check disagree — the trigger can report "due" while the stage returns `continue` (spurious due notifications, and the reverse). The `basis === "usage"` not_due guard exists only in the auto branch (L671/1042/1364); manual-mode not_due advances (L1024, L1348) still fire on estimate basis, contrary to the plan's fallback-safety rule.
 
 ### 1.2 — breaking-notice persists before checking `hasUI` [MEDIUM]
 
-`src/om/breaking-notice.ts:83-84` — `writeLastSeenVersion(BREAKING_SINCE)` runs *before* `if (!ctx?.hasUI) return;`. A headless-first run (CI, ssh, cron) permanently swallows the one-time breaking-change notice for that install. Plan-03 D10 order was notify-then-persist, gated on `hasUI`.
+`src/om/breaking-notice.ts:83-84` — `writeLastSeenVersion(BREAKING_SINCE)` runs _before_ `if (!ctx?.hasUI) return;`. A headless-first run (CI, ssh, cron) permanently swallows the one-time breaking-change notice for that install. Plan-03 D10 order was notify-then-persist, gated on `hasUI`.
 
 ### 1.3 — `observer.chunk_capped` under-reports [LOW]
 

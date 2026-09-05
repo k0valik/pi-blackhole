@@ -40,7 +40,6 @@ pnpm check         # typecheck + lint
 - `docs/` — committed product docs: `architecture.md`, `observational-memory.md`, `recall.md`, `vcc-compaction.md`, `APPEND_COMPACTION.md`. `docs/archived_docs/` is local-only (gitignored) — working notes, bughunts, handovers.
 - `work_docs/` — separate planning - committed and tracked directory.
 
-
 ## Workflow conventions
 
 - Working branch is `dev`; `main` is the npm-published release branch. Releases: finalize CHANGELOG.md on `dev`, merge `dev` → `main` with `--no-ff`, bump version + tag `v*` on `main` (tag triggers `publish.yml`), then merge `main` back into `dev` (post-release sync). See `.pi/skills/git-ops/SKILL.md`.

@@ -53,15 +53,18 @@ New tab in the configure overlay (`src/om/configure-overlay.ts`, alongside the e
 ### 2.4 Docs rewrite
 
 **`CONFIG.md`:**
+
 - Settings table: every threshold field documents `0 = auto (derived)` with its derivation rule; "absolute override" semantics; usage-basis vs estimate-basis clearly labeled per field (triggers = real usage; budgets = estimate).
 - Migration section (from `plan-03` §10): defaults users do nothing; custom-threshold users multiply by ~1.45 or set `0`; author's-config worked example (25k→36k/0, 80k→116k/0, 185k→260k/0).
 - Env-var table: same `0 = auto` notes.
 
 **`README.md`:**
+
 - "Configuration presets" section (L306+) → replaced by "How thresholds auto-derive" (the formula table from plan-00 D6, in prose) + "When to override" (small windows, degraded long-range attention models, cost tuning via `thresholdScale`) + the modal Presets tab + link to migration notes.
 - Defaults table updated (0 = auto everywhere + `thresholdScale: 1.0`).
 
 **`llms.txt`:**
+
 - "Context size presets" section (L323–348) → rewritten: derivation is now runtime behavior; the old guidance formulas are superseded by the documented auto-derivation constants; preset blocks removed; guidance becomes "install, pick a posture in /blackhole configure, done — override individual fields only if you know why".
 
 **`CHANGELOG.md`:** breaking-change entry (counting basis, defaults → auto, migration ×1.45, new debug events `observer.chunk_capped` / `*.stream_error` / `observer.upper_bound`).
