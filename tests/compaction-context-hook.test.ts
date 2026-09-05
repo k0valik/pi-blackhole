@@ -204,10 +204,7 @@ describe("append context hook", () => {
       toolName: "read",
       content: "12345678",
     };
-    const firstMessages = [
-      oldOutput,
-      { role: "assistant", content: "used old" },
-    ];
+    const firstMessages = [oldOutput, { role: "assistant", content: "used old" }];
     expect(
       handler!(
         { messages: firstMessages },
@@ -316,12 +313,8 @@ describe("append context hook", () => {
       context,
     ).messages;
 
-    const firstToolIndex = first.findIndex(
-      (message: any) => message.toolCallId === "call-1",
-    );
-    const secondToolIndex = second.findIndex(
-      (message: any) => message.toolCallId === "call-1",
-    );
+    const firstToolIndex = first.findIndex((message: any) => message.toolCallId === "call-1");
+    const secondToolIndex = second.findIndex((message: any) => message.toolCallId === "call-1");
     expect(first[firstToolIndex].content).toBe(marker);
     expect(second[secondToolIndex].content).toBe(marker);
     expect(JSON.stringify(second.slice(0, secondToolIndex + 1))).toBe(

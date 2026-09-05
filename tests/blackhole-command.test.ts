@@ -159,8 +159,7 @@ describe("/blackhole command", () => {
   });
 
   it("refreshes runtime config after saving settings", async () => {
-    const { pi, runtime, handlerMap, makeHandlerArgs } =
-      createMockEnvironment();
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
     vi.mocked(openConfigFlow).mockImplementationOnce(async (params: any) => {
       await params.save({ retainedToolOutputMaxTokens: 9_000 }, "global");
     });

@@ -699,9 +699,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
             sections: legacyDetails.sections,
             previousSummaryUsed: legacyDetails.previousSummaryUsed,
             retainedToolOutputProjection,
-            contextWindowTokens: ctx.model
-              ? effectiveContextWindow(ctx.model)
-              : undefined,
+            contextWindowTokens: ctx.model ? effectiveContextWindow(ctx.model) : undefined,
           });
         } catch (error) {
           warnAppendFallback(

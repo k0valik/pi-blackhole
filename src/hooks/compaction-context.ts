@@ -1,8 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  findLatestCompactionEntry,
-  projectAppendOnlyContext,
-} from "../core/compaction-chain.js";
+import { findLatestCompactionEntry, projectAppendOnlyContext } from "../core/compaction-chain.js";
 import {
   applyRetainedToolOutputProjection,
   isRetainedToolOutputProjection,
@@ -12,10 +9,7 @@ import { debugLog } from "../om/debug-log.js";
 import type { Runtime } from "../om/runtime.js";
 
 /** Replay persisted compaction state without moving it between provider calls. */
-export function registerCompactionContextHook(
-  pi: ExtensionAPI,
-  runtime: Runtime,
-): void {
+export function registerCompactionContextHook(pi: ExtensionAPI, runtime: Runtime): void {
   pi.on("context", (event: any, ctx: any) => {
     runtime.ensureConfig(ctx.cwd ?? process.cwd());
     const dbg = (ev: string, data?: Record<string, unknown>) =>
@@ -35,15 +29,11 @@ export function registerCompactionContextHook(
       return;
     }
 
-    if (
-      isPiVccCompactionDetailsV2(latest?.details) &&
-      projected === event.messages
-    ) {
+    if (isPiVccCompactionDetailsV2(latest?.details) && projected === event.messages) {
       return;
     }
 
-    const persistedProjection = (latest?.details as any)
-      ?.retainedToolOutputProjection;
+    const persistedProjection = (latest?.details as any)?.retainedToolOutputProjection;
     if (isRetainedToolOutputProjection(persistedProjection)) {
       try {
         projected = applyRetainedToolOutputProjection(

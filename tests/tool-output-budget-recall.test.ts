@@ -11,8 +11,7 @@ describe("tool-output budget recovery", () => {
   it("recovers an omitted output through its recall index without changing raw history", async () => {
     const dir = mkdtempSync(join(tmpdir(), "blackhole-tool-budget-"));
     const sessionFile = join(dir, "session.jsonl");
-    const fullOutput =
-      "full historical tool output that must remain recoverable";
+    const fullOutput = "full historical tool output that must remain recoverable";
     const entries = [
       {
         id: "u1",
@@ -89,9 +88,8 @@ describe("tool-output budget recovery", () => {
         },
         { sessionManager },
       ).messages;
-      const marker = masked.find(
-        (message: any) => message.toolCallId === "call-1",
-      ).content[0].text as string;
+      const marker = masked.find((message: any) => message.toolCallId === "call-1").content[0]
+        .text as string;
       const recallQuery = marker.match(/recall (#\d+)/)?.[1];
       expect(recallQuery).toBe("#1");
       expect(marker).not.toContain(fullOutput);
@@ -111,9 +109,9 @@ describe("tool-output budget recovery", () => {
       );
 
       expect(recalled.content[0].text).toContain(fullOutput);
-      expect(loadAllMessages(sessionFile, true).rawMessages[1].content).toEqual(
-        [{ type: "text", text: fullOutput }],
-      );
+      expect(loadAllMessages(sessionFile, true).rawMessages[1].content).toEqual([
+        { type: "text", text: fullOutput },
+      ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

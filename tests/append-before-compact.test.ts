@@ -126,10 +126,7 @@ describe("append before-compact integration", () => {
     expect(projection.omissions).not.toContainEqual(
       expect.objectContaining({ entryId: "t-pending" }),
     );
-    expect(oldOutput.content).toEqual([
-      { type: "text", text: "o".repeat(12) },
-      image,
-    ]);
+    expect(oldOutput.content).toEqual([{ type: "text", text: "o".repeat(12) }, image]);
     expect(pendingOutput.content).toBe("p".repeat(40));
   });
 
@@ -160,9 +157,7 @@ describe("append before-compact integration", () => {
     const firstEvent = event(firstBranch);
     firstEvent.preparation.firstKeptEntryId = "m3";
     const first = invoke(firstEvent);
-    expect(
-      first.compaction.details.retainedToolOutputProjection.omissions,
-    ).toEqual([]);
+    expect(first.compaction.details.retainedToolOutputProjection.omissions).toEqual([]);
 
     const c1 = {
       id: "c1",
@@ -189,9 +184,7 @@ describe("append before-compact integration", () => {
     secondEvent.preparation.firstKeptEntryId = "m4";
     const second = invoke(secondEvent);
 
-    expect(
-      second.compaction.details.retainedToolOutputProjection.omissions,
-    ).toEqual([
+    expect(second.compaction.details.retainedToolOutputProjection.omissions).toEqual([
       {
         entryId: "t-old",
         marker: "[Tool output text omitted from active context; recall #4.]",

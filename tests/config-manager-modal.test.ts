@@ -93,8 +93,7 @@ describe("openSettings configDir forwarding (canonical config-flow)", () => {
   });
 
   it("validates retainedToolOutputMaxTokens through ConfigManager", async () => {
-    const { config, GLOBAL_CONFIG_DIR } =
-      await import("../src/pi-base/blackhole-settings.js");
+    const { config, GLOBAL_CONFIG_DIR } = await import("../src/pi-base/blackhole-settings.js");
     const { mkdirSync, writeFileSync } = await import("node:fs");
     mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
     writeFileSync(
@@ -102,8 +101,6 @@ describe("openSettings configDir forwarding (canonical config-flow)", () => {
       JSON.stringify({ retainedToolOutputMaxTokens: 0 }),
     );
 
-    expect(
-      config.load(testDir, GLOBAL_CONFIG_DIR).retainedToolOutputMaxTokens,
-    ).toBe(20_000);
+    expect(config.load(testDir, GLOBAL_CONFIG_DIR).retainedToolOutputMaxTokens).toBe(20_000);
   });
 });

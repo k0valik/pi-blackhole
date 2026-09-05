@@ -50,11 +50,7 @@ describe("applyToolOutputBudget", () => {
 
     const projection = buildRetainedToolOutputProjection(entries, entries, 2);
     const messages = entries.map((entry) => structuredClone(entry.message));
-    const projected = applyRetainedToolOutputProjection(
-      messages,
-      entries,
-      projection,
-    );
+    const projected = applyRetainedToolOutputProjection(messages, entries, projection);
 
     expect(projected[0].content[0].text).toContain("recall #0");
     expect(projected[0].content[1]).toEqual(image);
@@ -91,17 +87,9 @@ describe("applyToolOutputBudget", () => {
       retained[1],
     ];
 
-    const projection = buildRetainedToolOutputProjection(
-      retained,
-      allEntries,
-      1,
-    );
+    const projection = buildRetainedToolOutputProjection(retained, allEntries, 1);
     const messages = retained.map((entry) => entry.message);
-    const projected = applyRetainedToolOutputProjection(
-      messages,
-      allEntries,
-      projection,
-    );
+    const projected = applyRetainedToolOutputProjection(messages, allEntries, projection);
 
     expect(projection.omissions).toEqual([]);
     expect(projection.omittedTokens).toBe(0);
@@ -215,9 +203,7 @@ describe("applyToolOutputBudget", () => {
   });
 
   it("protects outputs when no successful assistant has consumed them", () => {
-    const messages = [
-      { role: "bashExecution", command: "build", output: "x".repeat(20) },
-    ];
+    const messages = [{ role: "bashExecution", command: "build", output: "x".repeat(20) }];
 
     const result = applyToolOutputBudget(messages, 1);
 

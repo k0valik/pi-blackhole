@@ -39,9 +39,7 @@ export const omitToolOutputText = (message: any, marker: string): any => {
     return { ...message, content: marker };
   }
   if (Array.isArray(message.content)) {
-    const nonText = message.content.filter(
-      (part: any) => part?.type !== "text",
-    );
+    const nonText = message.content.filter((part: any) => part?.type !== "text");
     return {
       ...message,
       content: [{ type: "text", text: marker }, ...nonText],
@@ -88,9 +86,7 @@ const markerFromOutput = (message: any): string | undefined => {
   }
   if (typeof message?.content === "string") return message.content;
   if (Array.isArray(message?.content)) {
-    const text = message.content.find(
-      (part: any) => part?.type === "text",
-    )?.text;
+    const text = message.content.find((part: any) => part?.type === "text")?.text;
     return typeof text === "string" ? text : undefined;
   }
   return undefined;
@@ -128,12 +124,7 @@ export function buildRetainedToolOutputProjection(
     if (recallIndex !== undefined) recallIndexes.set(index, recallIndex);
   });
   const messages = messageEntries.map((entry) => entry.message);
-  const result = applyToolOutputBudget(
-    messages,
-    maxTokens,
-    recallIndexes,
-    protectedOutputIndexes,
-  );
+  const result = applyToolOutputBudget(messages, maxTokens, recallIndexes, protectedOutputIndexes);
   const omissions: RetainedToolOutputProjection["omissions"] = [];
   result.messages.forEach((message, index) => {
     if (message === messages[index]) return;
@@ -173,8 +164,7 @@ export function applyRetainedToolOutputProjection(
   let output = messages;
   for (const omission of projection.omissions) {
     const entry = branchEntries.find(
-      (candidate) =>
-        candidate?.type === "message" && candidate.id === omission.entryId,
+      (candidate) => candidate?.type === "message" && candidate.id === omission.entryId,
     );
     if (!entry?.message || !isToolOutput(entry.message)) continue;
     let matchIndex = messages.indexOf(entry.message);
@@ -187,10 +177,7 @@ export function applyRetainedToolOutputProjection(
       matchIndex = matches[0]!;
     }
     if (output === messages) output = [...messages];
-    output[matchIndex] = omitToolOutputText(
-      output[matchIndex],
-      omission.marker,
-    );
+    output[matchIndex] = omitToolOutputText(output[matchIndex], omission.marker);
   }
   return output;
 }
