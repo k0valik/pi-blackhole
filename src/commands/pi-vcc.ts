@@ -19,9 +19,6 @@ import {
   OM_OBSERVATIONS_RECORDED,
   OM_REFLECTIONS_RECORDED,
 } from "../om/ledger/index.js";
-import { handleCleanup } from "./cleanup.js";
-import { openBlackholeSettings, config, GLOBAL_CONFIG_DIR } from "../pi-base/blackhole-settings.js";
-import { openChangelogView } from "../changelog/changelog.js";
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   const prefixMatch = (value: string, prefix: string): boolean => {
@@ -65,18 +62,22 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       const trimmed = (typeof args === "string" ? args : "").trim();
       if (trimmed === "configure" || trimmed === "settings") {
         // Open the config overlay ("configure" kept as a hidden alias)
+        const { openBlackholeSettings } = await import("../pi-base/blackhole-settings.js");
         await openBlackholeSettings(ctx);
         return;
       }
       if (trimmed === "changelog") {
+        const { openChangelogView } = await import("../changelog/changelog.js");
         await openChangelogView(ctx);
         return;
       }
       if (trimmed === "cleanup") {
+        const { handleCleanup } = await import("./cleanup.js");
         await handleCleanup(ctx);
         return;
       }
       if (trimmed === "om-off") {
+        const { config, GLOBAL_CONFIG_DIR } = await import("../pi-base/blackhole-settings.js");
         try {
           config.save(
             { ...config.load(ctx.cwd, GLOBAL_CONFIG_DIR), memory: false },
@@ -99,6 +100,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         return;
       }
       if (trimmed === "om-on") {
+        const { config, GLOBAL_CONFIG_DIR } = await import("../pi-base/blackhole-settings.js");
         try {
           config.save(
             { ...config.load(ctx.cwd, GLOBAL_CONFIG_DIR), memory: true },
