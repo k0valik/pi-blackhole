@@ -2,11 +2,20 @@
 
 ### Added
 
-- **Newest-first retained tool-output budgeting.** At each Blackhole compaction boundary, retained historical tool and shell output text is projected through a dedicated budget (default 20000 tokens) and the resulting omission decisions are persisted with that compaction. Set `retainedToolOutputMaxTokens` to `0` to disable. When enabled, the provider-visible representation remains fixed until the next compaction, while raw session history and compaction inputs remain full fidelity. Pending results and non-text content remain visible, and omitted text points to `recall #N` when a stable transcript index is available.
+- **Newest-first retained tool-output budgeting.** At each Blackhole compaction boundary, retained historical tool and shell output text is projected through a dedicated budget (default 20000 tokens) and the resulting omission decisions are persisted with that compaction. Set `retainedToolOutputMaxTokens` to `0` to disable. When enabled, the provider-visible representation remains fixed until the next compaction, while raw session history and compaction inputs remain full fidelity. Pending results and non-text content remain visible, and omitted text points to `recall #N` when a stable transcript index is available. ([#66](https://github.com/k0valik/pi-blackhole/pull/66))
+- **`max` thinking level support.** Configured memory models now accept and forward Pi's highest reasoning level where supported by the provider ([upstream OM `e6c0fd9`](https://github.com/elpapi42/pi-observational-memory/commit/e6c0fd9d8e43ffb5d3c1a271bf1ec4a4640bde02)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
 
 ### Changed
 
+- **Lazy loading of optional command modules and memory workers.** The settings overlay, changelog viewer, cleanup handler, export pipeline, and OM worker imports now load on demand instead of at extension startup, cutting per-session startup cost. ([#71](https://github.com/k0valik/pi-blackhole/pull/71))
 - **Fast prebuilt bundle with git-install fallback (`pi-entry.js`).** Restores `dist/index.js` speed (≈1.6–2× faster, 645KB ESM vs jiti on ~85 files) without breaking `pi install git:` on `npm`/`pnpm`/`bun` with `--omit=dev`. New committed entry `pi-entry.js` loads `dist/index.js` when present, otherwise falls back to `index.ts` via pi's outer `jiti` hook (Node) or native TS (Bun) — zero runtime dependencies, so registry installs stay lean. `prepare` still builds `dist/` when `tsup` is available. Reverses the `c4be93e` trade-off that reverted `pi.extensions` to `["./index.ts"]` for git robustness.
+- **Recall search now indexes bounded generic tool arguments, filters multi-term BM25 noise, caps results at 50, and reports pagination/truncation accurately — including in `/blackhole-recall`** ([upstream VCC `f7b80bb`, `4bb7115`](https://github.com/sting8k/pi-vcc/commit/f7b80bbbe22315acf9f7925c0c3be2d4ae9feee5)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
+
+### Fixed
+
+- **Custom provider streams are now keyed by provider + API, not API alone.** Several extensions can register different providers sharing one wire API (e.g. `anthropic` and a Databricks-hosted Claude both speak `anthropic-messages`); keying by API alone let the first-registered provider hijack every model speaking that protocol, routing requests through the wrong transport/URL/auth. Streams also overwrite on re-registration instead of first-wins. ([#70](https://github.com/k0valik/pi-blackhole/pull/70))
+- **OM workers now receive provider environment substitutions, and stale ambient-credential availability snapshots are rechecked before rejecting request-time-signed providers** ([upstream OM `ce9fc98`, `699ccc7`](https://github.com/elpapi42/pi-observational-memory/commit/ce9fc982b3a219a7839f07c9f4a3e054e81a2b21)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
+- **Empty Blackhole compaction output now delegates to Pi's native summarizer instead of replacing context with an empty summary** ([upstream OM PR #39](https://github.com/elpapi42/pi-observational-memory/pull/39)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
 
 ---
 

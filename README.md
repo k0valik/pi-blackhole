@@ -31,7 +31,7 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.4.10](docs/CHANGELOG.md#0410---2026-08-29)**
+> **Latest release: [0.4.10](CHANGELOG.md#0410---2026-08-29)**
 >
 > - **Recall & export ranking upgrade** — BM25+, SimHash64, c-TF-IDF, technical density scoring, and surface-form-preserving topic labels for sharper dedup and more readable exports; export preamble now carries a best-effort heuristic warning.
 > - **`/blackhole-export` — distilled project-memory export** — Export for long-term agent memory tools - scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
@@ -39,7 +39,7 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 > - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
 > - **Robust compaction-failure handling** — unified `session_compact_failed` (pi >=0.84.3) with correct attribution, overflow-retry visibility, and noise filtering; plus bundled-CLI `AgentSession` resolution so inline compaction works from `dist/bundle/cli.js` ([#62](https://github.com/k0valik/pi-blackhole/pull/62)).
 
-See [`docs/CHANGELOG.md`](docs/CHANGELOG.md) for the full history.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ### ⚠️ Upcoming change
 
@@ -286,7 +286,7 @@ rm -rf ~/.pi/agent/pi-blackhole
 | Doc | Audience | What's in it |
 |---|---|---|
 | **[`README.md`](README.md)** | You, now | Install, commands, the pitch, the value, the demo. |
-| **[`docs/CHANGELOG.md`](docs/CHANGELOG.md)** | You | Every release, what changed, who contributed. |
+| **[`CHANGELOG.md`](CHANGELOG.md)** | You | Every release, what changed, who contributed. |
 | **[`docs/CONFIG.md`](docs/CONFIG.md)** | You, when tuning | Every config key with type, default, behavior, and env-var overrides. |
 | **[`llms.txt`](llms.txt)** | Your agent | Step-by-step guided setup interview, anti-patterns, exact file paths, internal constants. |
 | **[`docs/MIGRATION-GUIDE.md`](docs/MIGRATION-GUIDE.md)** | You, if upgrading | Old → new config key mapping, semantic changes, automatic migration behavior. |
@@ -294,7 +294,7 @@ rm -rf ~/.pi/agent/pi-blackhole
 | **[`example-config.json`](example-config.json)** | You | Annotated example config with comments. |
 | **[`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md)** | You, if curious | Rules for `compactionSummaryMode: "append"`. |
 
-> **Note:** All docs except `README.md` and `llms.txt` live under `docs/` — product docs (`architecture.md`, `CONFIG.md`, `CHANGELOG.md`, etc.) and `archived_docs/` is local-only (gitignored).
+> **Note:** All docs except `README.md`, `CHANGELOG.md` (package root, read by `/blackhole changelog`), and `llms.txt` live under `docs/` — product docs (`architecture.md`, `CONFIG.md`, etc.); `archived_docs/` is local-only (gitignored).
 
 ---
 

@@ -33,7 +33,6 @@
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
-    "docs/CHANGELOG.md",
     "example-config.json"
   ],
   "type": "module",
