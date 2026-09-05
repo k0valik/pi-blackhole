@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+---
+
+## [0.5.0] - 2026-09-06
+
 ### Added
 
 - **Newest-first retained tool-output budgeting.** At each Blackhole compaction boundary, retained historical tool and shell output text is projected through a dedicated budget (default 20000 tokens) and the resulting omission decisions are persisted with that compaction. Set `retainedToolOutputMaxTokens` to `0` to disable. When enabled, the provider-visible representation remains fixed until the next compaction, while raw session history and compaction inputs remain full fidelity. Pending results and non-text content remain visible, and omitted text points to `recall #N` when a stable transcript index is available. ([#66](https://github.com/k0valik/pi-blackhole/pull/66))

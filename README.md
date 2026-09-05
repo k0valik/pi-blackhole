@@ -31,7 +31,7 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.4.10](CHANGELOG.md#0410---2026-08-29)**
+> **Latest release: [0.5.0](CHANGELOG.md#050---2026-09-06)**
 >
 > - **Recall & export ranking upgrade** — BM25+, SimHash64, c-TF-IDF, technical density scoring, and surface-form-preserving topic labels for sharper dedup and more readable exports; export preamble now carries a best-effort heuristic warning.
 > - **`/blackhole-export` — distilled project-memory export** — Export for long-term agent memory tools - scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
