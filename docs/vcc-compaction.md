@@ -173,6 +173,12 @@ The `buildOwnCut()` function determines which messages to compile:
 - **Compact-all**: Single user prompt → compact everything, `firstKeptEntryId=""` sentinel
 - **Too few messages**: Cancel if <3 messages (or <2 with pi-default tail)
 
+### Ownership and native fallback
+
+When blackhole is active (`compactionEngine: "blackhole"`), the hook owns the summary for every Pi-initiated compaction — threshold auto-compact, overflow recovery, and manual `/compact` — and returns `{ compaction: { ... } }` to take ownership. In `manual`/`off` modes and for `compactionEngine: "pi-default"` it returns `undefined` so Pi handles the compaction natively (only `/blackhole` forces VCC).
+
+Defensive delegation: `compile()` returns `""` when everything before the cut is noise-filtered and no previous summary exists. If the VCC summary is empty **and** the OM projection produced no reflections/observations, the hook returns `undefined` (emitting a `before_compact.native_fallback` trace) so Pi's native summarizer writes the summary instead of blackhole replacing the context with a footer-only block. `ExtensionHandler` permits `void`, and Pi only acts on `result?.compaction`, so the bare return is a safe fall-through.
+
 ### Cancellation flag
 
 Every `{ cancel: true }` return (own-cut guards, legacy `noAutoCompact`) sets `runtime.lastCompactCancelled = true` so the failure handler can attribute the aborted compaction.

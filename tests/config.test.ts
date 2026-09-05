@@ -198,6 +198,19 @@ describe("Config with model IDs containing slashes and colons", () => {
     expect(config.observerModel!.thinking).toBe("low");
   });
 
+  it("accepts max thinking level", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({
+      observerModel: {
+        provider: "openai",
+        id: "gpt-5.4",
+        thinking: "max",
+      },
+    });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.observerModel!.thinking).toBe("max");
+  });
+
   it("rejects model without provider (falls back to undefined)", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({

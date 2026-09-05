@@ -37,6 +37,7 @@ interface RunReflectorArgs {
   model: Model<any>;
   apiKey: string;
   headers?: Record<string, string>;
+  env?: Record<string, string>;
   reflections: Reflection[];
   observations: Observation[];
   /** Compact summary of existing reflections for context (not to re-process). */
@@ -98,7 +99,7 @@ function normalizeReflectionContent(content: string): string | undefined {
 }
 
 export async function runReflector(args: RunReflectorArgs): Promise<Reflection[] | undefined> {
-  const { model, apiKey, headers, reflections, observations, signal } = args;
+  const { model, apiKey, headers, env, reflections, observations, signal } = args;
   if (observations.length === 0) return undefined;
 
   const allowedObservationIds = observations.map((observation) => observation.id);
@@ -178,6 +179,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
     model,
     apiKey,
     headers,
+    env,
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],

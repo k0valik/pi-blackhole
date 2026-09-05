@@ -219,7 +219,15 @@ export const DEFAULTS: UnifiedConfig = {
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
 
-const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_LEVELS: readonly string[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 // String enums for new config surface
 const COMPACTION_VALUES = ["auto", "manual", "off"] as const;

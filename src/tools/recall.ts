@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
-import { searchEntries, getFileIndicators, getTouchedFiles } from "../core/search-entries";
+import { searchEntriesDetailed, getFileIndicators, getTouchedFiles } from "../core/search-entries";
 import type { RenderedEntry } from "../core/render-entries";
 import type { SearchHit } from "../core/search-entries";
 import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall";
@@ -148,8 +148,11 @@ async function vccRecall(
   }
 
   const { rendered: msgs, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
-  let allResults: SearchHit[] = params.query?.trim()
-    ? searchEntries(msgs, rawMessages, params.query, undefined, mode)
+  const searchResult = params.query?.trim()
+    ? searchEntriesDetailed(msgs, rawMessages, params.query, undefined, mode)
+    : undefined;
+  let allResults: SearchHit[] = searchResult
+    ? searchResult.hits
     : msgs.slice(-DEFAULT_RECENT).map((entry, i) => {
         const msgIndex = Math.max(0, msgs.length - DEFAULT_RECENT) + i;
         const msg = rawMessages[msgIndex];
@@ -174,15 +177,29 @@ async function vccRecall(
 
   if (params.query?.trim()) {
     const page = Math.max(1, params.page ?? 1);
+    const truncationNote = searchResult?.truncated
+      ? ` — showing ${searchResult.hits.length} of ${searchResult.totalBeforeCap} matches, refine your query for more precise results`
+      : "";
+    const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
+    if (allResults.length > 0 && page > totalPages) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Page ${page} is outside the available range 1-${totalPages} (${allResults.length} matches${scope === "all" ? " (scope: all)" : ""}${truncationNote}). Use a page between 1 and ${totalPages}.`,
+          },
+        ],
+        details: undefined,
+      };
+    }
     const start = (page - 1) * PAGE_SIZE;
     const pageResults: SearchHit[] = allResults.slice(start, start + PAGE_SIZE);
-    const totalPages = Math.ceil(allResults.length / PAGE_SIZE);
     const scopeSuffix = scope === "all" ? " (scope: all)" : "";
     const matchCount = allResults.length - appendedExpandCount;
     const header =
       totalPages > 1
-        ? `Page ${page}/${totalPages} (${matchCount} matches${appendedExpandCount > 0 ? ` + ${appendedExpandCount} expanded` : ""}${scopeSuffix})`
-        : `${matchCount} matches${appendedExpandCount > 0 ? ` (+ ${appendedExpandCount} expanded)` : ""}${scopeSuffix}`;
+        ? `Page ${page}/${totalPages} (${matchCount} matches${appendedExpandCount > 0 ? ` + ${appendedExpandCount} expanded` : ""}${scopeSuffix}${truncationNote})`
+        : `${matchCount} matches${appendedExpandCount > 0 ? ` (+ ${appendedExpandCount} expanded)` : ""}${scopeSuffix}${truncationNote}`;
     const footer =
       page < totalPages
         ? `\n--- Use page:${page + 1}${scope === "all" ? " with scope:'all'" : ""} for more results ---`

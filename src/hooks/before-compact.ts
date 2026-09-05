@@ -604,6 +604,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // ── Inject observational-memory content ───────────────────────────
     let omContent: string;
     let omDetails: Record<string, unknown> | undefined;
+    let omHasContent = false;
     trace("before_compact.om_injection", {
       memoryEnabled: omRuntime.config.memory !== false,
     });
@@ -614,11 +615,27 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       });
       omContent = renderSummary(projection.reflections, projection.observations);
       omDetails = projection.details;
+      omHasContent = projection.reflections.length > 0 || projection.observations.length > 0;
     } else {
       omContent = renderSummary([], []);
     }
 
+    // An empty replacement summary would discard the context Pi's native
+    // compactor is designed to preserve. Decline ownership only when neither
+    // Blackhole's VCC summary nor the OM projection produced any content;
+    // non-empty Blackhole summaries retain the existing deterministic path.
+    // (renderSummary([], []) always emits the OM recall footer, so the check
+    // must not key off footer-inclusive omContent.)
     const fallbackSummary = summary + "\n\n" + omContent;
+    if (summary.trim().length === 0 && !omHasContent) {
+      // Returning undefined delegates to Pi's native summarizer:
+      // ExtensionHandler permits void, and pi only acts on result?.compaction.
+      trace("before_compact.native_fallback", {
+        reason: "empty_blackhole_summary",
+      });
+      return;
+    }
+
     const warnAppendFallback = (reason: string) => {
       trace("before_compact.append_fallback", { reason });
       if (omRuntime.appendFallbackNotified) return;
