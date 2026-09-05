@@ -6,6 +6,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { copyTextToClipboard } from "../om/clipboard.js";
+import { autoCompactThreshold, sessionContextWindow } from "../om/model-budget.js";
 import type { Runtime } from "../om/runtime.js";
 import {
   diffProjection,
@@ -38,6 +39,25 @@ function firstArg(args: unknown): string | undefined {
 
 function pct(current: number, total: number): number {
   return total > 0 ? Math.round((current / total) * 100) : 0;
+}
+
+/**
+ * Basis suffix for the auto-compaction threshold line. Empty when the
+ * threshold is the fixed token count (explicit or legacy default); describes
+ * the window-derived basis otherwise (issue #60).
+ */
+function compactThresholdSuffix(
+  cfg: { compactAfterTokens?: number; compactAfterRatio?: number; compactReserveTokens?: number },
+  window: number,
+): string {
+  if (cfg.compactAfterTokens !== undefined) return ""; // explicit / fixed default
+  if (cfg.compactAfterRatio !== undefined) {
+    return ` · ${Math.round(cfg.compactAfterRatio * 100)}% of ${window.toLocaleString()}-token window`;
+  }
+  if (cfg.compactReserveTokens !== undefined) {
+    return ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+  }
+  return "";
 }
 
 function tokenSum(items: { tokenCount: number }[]): number {
@@ -178,7 +198,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"
-            : ` (triggers at ${runtime.config.compactAfterTokens.toLocaleString()})`),
+            : ` (triggers at ${autoCompactThreshold(runtime.config, ctx.model).toLocaleString()}${compactThresholdSuffix(runtime.config, sessionContextWindow(ctx.model, runtime.config))})`),
         `Obs pool:       ~${visibleObservationTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(visibleObservationTokens, runtime.config.observationsPoolMaxTokens)}%)`,
         `Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
       ];

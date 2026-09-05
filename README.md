@@ -41,9 +41,9 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
-### ⚠️ Upcoming change
+### Auto-compaction threshold & model context window
 
-> **Default compaction thresholds will become model-context-window-aware** in an upcoming release. Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values will continue to be respected verbatim. If you're using the defaults, no action is needed; the migration is automatic.
+> **Auto-compaction can now be context-window-aware** (opt-in, issue #60): set `compactAfterRatio` (e.g. `0.65`) or `compactReserveTokens` and the trigger threshold derives from the active model's context window instead of the fixed 81k — re-derived on every check, so mid-session `/model` switches apply automatically. Explicit `compactAfterTokens` (a non-default value) still wins over both. The fixed 81k default is unchanged unless you opt in. See `docs/CONFIG.md` → `compactAfterRatio` / `compactReserveTokens`.
 
 ---
 

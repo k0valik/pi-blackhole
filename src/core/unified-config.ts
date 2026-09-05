@@ -116,8 +116,31 @@ export interface UnifiedConfig {
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
   reflectAfterTokens: number;
-  /** Token threshold for proactive auto-compaction. */
-  compactAfterTokens: number;
+  /** Token threshold for proactive auto-compaction.
+   *
+   * When set (explicitly, in the config file or via env), this fixed token
+   * count always wins over the window-derived knobs below. Absent in derived
+   * mode — see compactAfterRatio / compactReserveTokens. Defaults to 81000
+   * when neither derived knob is configured. */
+  compactAfterTokens?: number;
+  /**
+   * Context-window-derived auto-compaction threshold (issue #60): when set,
+   * the effective threshold is `floor(contextWindow × compactAfterRatio)` for
+   * the active session model's window, so compaction tracks the model instead
+   * of a fixed token count. The fixed default is NOT applied when this (or
+   * compactReserveTokens) is set and compactAfterTokens is absent.
+   * Precedence when multiple knobs are set:
+   *   compactAfterTokens (explicit) > compactAfterRatio > compactReserveTokens.
+   * Optional; unset by default. Must be in (0, 1].
+   */
+  compactAfterRatio?: number;
+  /**
+   * Alternative window-derived threshold: keep this many tokens of headroom
+   * free — threshold = `contextWindow − compactReserveTokens` (clamped ≥ 1).
+   * Same precedence rules and defaults as compactAfterRatio.
+   * Optional; unset by default. Must be a positive integer.
+   */
+  compactReserveTokens?: number;
   /** Observation pool token pressure for full fold. */
   observationsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
@@ -340,6 +363,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "reflectAfterTokens",
     "compactAfterTokens",
     "retainedToolOutputMaxTokens",
+    "compactReserveTokens",
     "observationsPoolMaxTokens",
     "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
@@ -367,6 +391,15 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     raw.dropperPoolFullnessThreshold <= 1
   ) {
     c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
+  }
+  // compactAfterRatio: fractional, must be in (0, 1]
+  if (
+    typeof raw.compactAfterRatio === "number" &&
+    Number.isFinite(raw.compactAfterRatio) &&
+    raw.compactAfterRatio > 0 &&
+    raw.compactAfterRatio <= 1
+  ) {
+    c.compactAfterRatio = raw.compactAfterRatio;
   }
   for (const k of numKeys) {
     // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
@@ -584,8 +617,32 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   const withEnv = applyEnvOverrides(
     merged,
     DECLARATIVE_ENV_OVERRIDES,
+    // SAFETY: DEFAULTS is a flat object literal (UnifiedConfig); its runtime
+    // shape is exactly the Record<string, unknown> applyEnvOverrides expects.
     DEFAULTS as unknown as Record<string, unknown>,
   );
+
+  // Derived-threshold mode (issue #60): when a window-derived knob is
+  // configured (config file or env) but compactAfterTokens is not EXPLICITLY
+  // chosen, drop the fixed 81000 default so the derived knob governs
+  // auto-compaction. Must run AFTER applyEnvOverrides so an env-driven
+  // ratio/reserve is visible.
+  //
+  // "Explicit" deliberately excludes a compactAfterTokens that merely equals
+  // the fixed default: scaffoldConfig() and the settings modal write the full
+  // defaults (81000) into the file, which must not silently block derived
+  // mode. An env override always counts as explicit.
+  const tokenEnvVar = (DECLARATIVE_ENV_OVERRIDES.compactAfterTokens as { var: string }).var;
+  const tokensExplicit =
+    (parsed.compactAfterTokens !== undefined &&
+      parsed.compactAfterTokens !== DEFAULTS.compactAfterTokens) ||
+    process.env[tokenEnvVar] !== undefined;
+  if (
+    !tokensExplicit &&
+    (withEnv.compactAfterRatio !== undefined || withEnv.compactReserveTokens !== undefined)
+  ) {
+    delete withEnv.compactAfterTokens;
+  }
 
   return withEnv;
 }

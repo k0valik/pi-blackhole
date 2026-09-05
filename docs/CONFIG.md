@@ -24,7 +24,9 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "tailBehavior": "minimal",   // "pi-default" | "minimal"
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
-  "compactAfterTokens": 81000,    // Token threshold for auto-compaction
+  "compactAfterTokens": 81000,    // Explicit fixed threshold; overrides derived knobs below when set to a non-default value
+  "compactAfterRatio": 0.65,      // OPT-IN: compact at this fraction of the active model's context window
+  "compactReserveTokens": 32768,  // OPT-IN: compact when this many tokens of window headroom remain
   "retainedToolOutputMaxTokens": 20000, // 0 = disabled; otherwise full historical tool-output budget
 
   // ── Observational Memory ──
@@ -179,7 +181,7 @@ Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
 ### `compactAfterTokens`
 
-Token threshold for auto-compaction. When `compaction: "auto"` and accumulated tokens since the last compaction exceed this threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
+Explicit fixed token threshold for auto-compaction. When `compaction: "auto"` and the measured context since the last compaction reaches this threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
 
 | Type | Default |
 |------|---------|
@@ -198,6 +200,49 @@ This only changes the retained context sent to the provider. Session JSONL, comp
 | Type | Default | Range |
 |------|---------|-------|
 | number | 20000 | `0` (disabled) or positive integer |
+
+### `compactAfterRatio` *(context-window-aware threshold, opt-in)*
+
+Instead of a fixed token count, derive the auto-compaction threshold from the **active session model's context window**: blackhole compacts when the context reaches `floor(contextWindow × compactAfterRatio)`. The threshold is re-derived on every evaluation, so switching models mid-session (`/model`) takes effect on the next check automatically.
+
+| Type | Default |
+|------|---------|
+| number (0, 1] | unset |
+
+Examples on common windows at `0.65`:
+
+```text
+128k model → ~83k   200k model → ~130k   1M model → ~650k
+```
+
+**How the window is resolved** (see `model.contextWindow` below): per-model config override → Pi's model registry → 128k fallback. If Pi doesn't know your custom-provider model's window, set `contextWindow` on its model entry in this config so the ratio targets the real window.
+
+### `compactReserveTokens` *(context-window-aware threshold, opt-in)*
+
+Alternative derivation that keeps constant headroom: blackhole compacts when only `compactReserveTokens` of window remain — threshold `= contextWindow − compactReserveTokens` (clamped to ≥ 1).
+
+| Type | Default |
+|------|---------|
+| positive integer | unset |
+
+```text
+200k window − 32k reserve → ~168k    1M window − 32k reserve → ~968k
+```
+
+**Precedence & enabling:** when several knobs are set, `compactAfterTokens` (explicit, i.e. a non-default value) > `compactAfterRatio` > `compactReserveTokens`. When a derived knob is configured and `compactAfterTokens` is unset **or still at its 81000 default** (config scaffold and the settings modal write the default into the file), the fixed default is dropped so the derived knob governs. Remove the derived key to fall back to the fixed default.
+
+**Example:**
+
+```jsonc
+// Compact at ~65% of whatever model is active (128k → 83k, 200k → 130k, 1M → 650k)
+{ "compactAfterRatio": 0.65 }
+
+// Keep at least 32k tokens of headroom free, regardless of window size
+{ "compactReserveTokens": 32768 }
+
+// Explicit tokens still win when set deliberately
+{ "compactAfterTokens": 180000, "compactAfterRatio": 0.65 }
+```
 
 ## Observational Memory Section
 

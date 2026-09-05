@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { rawTokensSinceLastCompaction, type Entry } from "./ledger/index.js";
+import { autoCompactThreshold } from "./model-budget.js";
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
 import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
@@ -168,9 +169,14 @@ async function handleTurnEnd(
     return;
   }
 
+  // Effective threshold derived from the session model's context window when
+  // compactAfterRatio / compactReserveTokens are configured; fixed token
+  // count otherwise (issue #60). Evaluated per event, so a mid-session
+  // /model switch is picked up on the next check.
+  const threshold = autoCompactThreshold(runtime.config, ctx.model);
   const entries = ctx.sessionManager.getBranch() as Entry[];
   const tokens = rawTokensSinceLastCompaction(entries);
-  if (tokens < runtime.config.compactAfterTokens) {
+  if (tokens < threshold) {
     // Pressure relieved (a compaction ran) — clear any failure backoff.
     resetMidRunRetry(runtime);
     return;
@@ -201,7 +207,7 @@ async function handleTurnEnd(
   const ui = ctx.ui;
   dbg("compaction_trigger.turn_end.threshold_reached", {
     tokens,
-    threshold: runtime.config.compactAfterTokens,
+    threshold,
     mode,
   });
   runtime.tryEmitInfo(
@@ -315,6 +321,10 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   const dbg = (ev: string, d?: Record<string, unknown>) =>
     debugLog(ev, d, runtime.config.debugLog === true);
 
+  // Effective auto-compaction threshold for this evaluation (issue #60) — see
+  // handleTurnEnd for the derivation rationale. Logged as the resolved number.
+  const threshold = autoCompactThreshold(runtime.config, ctx.model);
+
   dbg("compaction_trigger.agent_end", {
     passive: runtime.config.passive,
     memory: runtime.config.memory,
@@ -322,6 +332,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
     overrideDefaultCompaction: runtime.config.overrideDefaultCompaction,
     compactInFlight: runtime.compactInFlight,
     compactAfterTokens: runtime.config.compactAfterTokens,
+    threshold,
   });
 
   // Unified + legacy compaction guards (shared with the turn_end path)
@@ -360,14 +371,14 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   const tokens = rawTokensSinceLastCompaction(entries);
   dbg("compaction_trigger.tokens", {
     tokens,
-    compactAfterTokens: runtime.config.compactAfterTokens,
+    threshold,
     branchLength: entries.length,
   });
-  if (tokens < runtime.config.compactAfterTokens) {
+  if (tokens < threshold) {
     dbg("compaction_trigger.skip", {
       reason: "below_threshold",
       tokens,
-      threshold: runtime.config.compactAfterTokens,
+      threshold,
     });
     return;
   }
@@ -491,16 +502,16 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
       const currentTokens = rawTokensSinceLastCompaction(currentEntries);
       dbg("compaction_trigger.microtask.recheck_tokens", {
         currentTokens,
-        threshold: runtime.config.compactAfterTokens,
-        ok: currentTokens >= runtime.config.compactAfterTokens,
+        threshold,
+        ok: currentTokens >= threshold,
       });
-      if (currentTokens < runtime.config.compactAfterTokens) {
+      if (currentTokens < threshold) {
         runtime.compactInFlight = false;
         runtime.autoCompactionController = null;
         dbg("compaction_trigger.microtask.bail", {
           reason: "pressure_relieved",
           currentTokens,
-          threshold: runtime.config.compactAfterTokens,
+          threshold,
         });
         runtime.tryEmitInfo(
           hasUI,

@@ -20,10 +20,56 @@ import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import { DEFAULTS, type UnifiedConfig } from "../core/unified-config.js";
 import { openChangelogView } from "../changelog/changelog.js";
+import type { Field } from "./settings/types.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
 
 export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
+
+// SAFETY: the fixed token default (81000) is always present in DEFAULTS — the
+// interface field is optional only because derived mode (ratio/reserve) deletes
+// it from the merged config.
+const DEFAULT_COMPACT_AFTER_TOKENS = DEFAULTS.compactAfterTokens as number;
+
+/**
+ * Context-window-derived threshold fields (issue #60). Returned as a separate
+ * list so they only appear in the modal once configured — they have no fixed
+ * default, and an unset numeric field would otherwise render as "undefined".
+ * Configure them via the config file or PI_BLACKHOLE_* env vars.
+ */
+function derivedThresholdFields(cfg: {
+  compactAfterRatio?: number;
+  compactReserveTokens?: number;
+}): Field[] {
+  const fields: Field[] = [];
+  if (cfg.compactAfterRatio !== undefined) {
+    fields.push({
+      key: "compactAfterRatio",
+      type: "number",
+      label: "Auto-compact ratio (of context window)",
+      description:
+        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). Overrides the fixed threshold; explicit tokens win over it.",
+      value: cfg.compactAfterRatio,
+      min: 0.05,
+      max: 1,
+      step: 0.05,
+    });
+  }
+  if (cfg.compactReserveTokens !== undefined) {
+    fields.push({
+      key: "compactReserveTokens",
+      type: "number",
+      label: "Auto-compact headroom reserve",
+      description:
+        "Alternative derivation: compact when only this many tokens of headroom remain (threshold = window − reserve). Explicit tokens win over it; ratio wins when both are set.",
+      value: cfg.compactReserveTokens,
+      min: 1_000,
+      max: 2_000_000,
+      step: 1_000,
+    });
+  }
+  return fields;
+}
 
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
@@ -107,9 +153,10 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactAfterTokens",
       type: "number",
-      label: "Auto-compact threshold",
-      description: "Token count that triggers auto-compaction when reached",
-      value: cfg.compactAfterTokens,
+      label: "Auto-compact threshold (tokens)",
+      description:
+        "Explicit fixed token threshold. When set to a non-default value it overrides the context-window knobs below; at its default it is treated as unset so a ratio/reserve can govern.",
+      value: cfg.compactAfterTokens ?? DEFAULT_COMPACT_AFTER_TOKENS,
       min: 1_000,
       max: 500_000,
       step: 1_000,
@@ -125,6 +172,10 @@ export const config = new ConfigManager<UnifiedConfig>({
       max: 200_000,
       step: 1_000,
     },
+    // Context-window-derived knobs only show once configured (no fixed
+    // default; unset would render "undefined"). Add them in the config file
+    // or via PI_BLACKHOLE_* env vars — see docs/CONFIG.md.
+    ...derivedThresholdFields(cfg),
 
     // ── Observational Memory ──
     {
@@ -400,6 +451,8 @@ export const config = new ConfigManager<UnifiedConfig>({
       "agentMaxTurns",
     ];
     for (const k of REQUIRED_NUMERIC_KEYS) {
+      // SAFETY: merged is a plain config object; indexing by dynamic key needs
+      // the Record view to read/write numeric fields uniformly.
       const v = (merged as unknown as Record<string, unknown>)[k];
       const minVal = k === "observerPreambleMaxTokens" ? 0 : 1;
       if (
@@ -408,6 +461,8 @@ export const config = new ConfigManager<UnifiedConfig>({
         (k === "retainedToolOutputMaxTokens" && !Number.isInteger(v)) ||
         v < minVal
       ) {
+        // SAFETY: dynamic-key write as above; DEFAULTS[k] is always a number
+        // for keys in REQUIRED_NUMERIC_KEYS.
         (merged as unknown as Record<string, unknown>)[k] = DEFAULTS[k];
       }
     }

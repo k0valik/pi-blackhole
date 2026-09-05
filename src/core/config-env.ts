@@ -85,7 +85,33 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   sessionFallback: "PI_BLACKHOLE_SESSION_FALLBACK",
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
   // Positive integers
-  compactAfterTokens: "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
+  compactAfterTokens: {
+    // Parser (not the plain string form) so an UNSET var never re-injects the
+    // 81000 default into derived mode: the string form falls back to the
+    // DEFAULTS value when the env var is absent, resurrecting a deleted
+    // compactAfterTokens. Only applied when the var is actually set.
+    var: "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
+    parse: (raw: string) => {
+      const n = Number(raw);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    },
+  },
+  // Float in (0, 1] — window-derived threshold ratio (issue #60)
+  compactAfterRatio: {
+    var: "PI_BLACKHOLE_COMPACT_AFTER_RATIO",
+    parse: (raw: string) => {
+      const n = Number.parseFloat(raw);
+      return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
+    },
+  },
+  // Positive integer — window headroom reserve (issue #60)
+  compactReserveTokens: {
+    var: "PI_BLACKHOLE_COMPACT_RESERVE_TOKENS",
+    parse: (raw: string) => {
+      const n = Number(raw);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    },
+  },
   retainedToolOutputMaxTokens: "PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS",
   observeAfterTokens: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
   reflectAfterTokens: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
