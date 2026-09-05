@@ -8,7 +8,6 @@
 ### Changed
 
 - **Lazy loading of optional command modules and memory workers.** The settings overlay, changelog viewer, cleanup handler, export pipeline, and OM worker imports now load on demand instead of at extension startup, cutting per-session startup cost. ([#71](https://github.com/k0valik/pi-blackhole/pull/71))
-- **Fast prebuilt bundle with git-install fallback (`pi-entry.js`).** Restores `dist/index.js` speed (≈1.6–2× faster, 645KB ESM vs jiti on ~85 files) without breaking `pi install git:` on `npm`/`pnpm`/`bun` with `--omit=dev`. New committed entry `pi-entry.js` loads `dist/index.js` when present, otherwise falls back to `index.ts` via pi's outer `jiti` hook (Node) or native TS (Bun) — zero runtime dependencies, so registry installs stay lean. `prepare` still builds `dist/` when `tsup` is available. Reverses the `c4be93e` trade-off that reverted `pi.extensions` to `["./index.ts"]` for git robustness.
 - **Recall search now indexes bounded generic tool arguments, filters multi-term BM25 noise, caps results at 50, and reports pagination/truncation accurately — including in `/blackhole-recall`** ([upstream VCC `f7b80bb`, `4bb7115`](https://github.com/sting8k/pi-vcc/commit/f7b80bbbe22315acf9f7925c0c3be2d4ae9feee5)). ([#67](https://github.com/k0valik/pi-blackhole/pull/67))
 
 ### Fixed
@@ -339,6 +338,7 @@ Audit surfaced 7 correctness/performance edge cases in the cursor pipeline.
 Four were fixed; three were deferred as harmless or cosmetic.
 
 **Fixed:**
+
 - **Session fork cursor bleed (#2).** `cursorsLoaded` was a one-shot boolean
   — on session fork, stale cursors bled into the new branch because
   `validateCursors` was never re-invoked. Now keyed by `cursorsLoadedSessionId`
@@ -359,6 +359,7 @@ Four were fixed; three were deferred as harmless or cosmetic.
   last source entry (`findLast(isSourceEntry)`).
 
 **Deferred:**
+
 - **"unknown" magic entry ID (#4).** Functional but cosmetic — the sentinel
   triggers fallback on next load. 9 call sites; zero behavioral change.
 - **Observer re-checks tokens (#5).** Harmless — only reached when pipeline
@@ -372,8 +373,6 @@ Four were fixed; three were deferred as harmless or cosmetic.
 - 17 new tests for cursor gating, persistence, stale recovery, and debug log events
 - 3 new tests for manual-mode pending awareness (reflector, dropper, post-first-run)
 - `dropperPressureThreshold` added to config validation tests
-
-
 
 # Changelog
 
@@ -423,7 +422,7 @@ Four were fixed; three were deferred as harmless or cosmetic.
 - **Section headers in summaries use line-boundary regex.** `sectionOf` and `stripOMContent` now match `## Reflections` / `## Observations` at the start of a line instead of using bare `indexOf`. Prevents false positives when those phrases appear inside file paths or conversation text. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **Read+same-path-Modified dedup in file summaries.** `mergeFileLines` now removes a path from `Read` if it also appears in `Modified` — a file that was read then edited shouldn't show twice. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **`reverse-recall` outputs related reflections.** The `_reflections` dead parameter is now used — related reflections are shown alongside observations when expanding session entries. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
-- **Cooldown reason in UI notification.** The `getCooldownEntry` function now returns the actual entry (with reason), so the status notification shows *why* a model was cooled down, not just "cooldown active". ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
+- **Cooldown reason in UI notification.** The `getCooldownEntry` function now returns the actual entry (with reason), so the status notification shows _why_ a model was cooled down, not just "cooldown active". ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **Env override validation.** Invalid `PI_BLACKHOLE_COMPACTION` / `PI_BLACKHOLE_COMPACTION_ENGINE` values now print a warning instead of being silently ignored. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 - **`observerPreambleMaxTokens` accepts 0.** Now uses `nonNegativeInt` validator instead of `positiveInt` — 0 means "auto-compute", which was the intended semantics. ([#20](https://github.com/k0valik/pi-blackhole/pull/20))
 
