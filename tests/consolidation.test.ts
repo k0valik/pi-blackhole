@@ -747,3 +747,55 @@ describe("anyStageDue cursor vs branch-marker coversUpToId (auto mode)", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
 });
+
+describe("observer zero-chunk backoff", () => {
+  /**
+   * TDD validation: Can the zero-chunk observer re-fire bug manifest in our codebase?
+   *
+   * Analysis: The upstream test (PR #57) uses getContextUsage() to report provider-
+   * reported token growth, making the observer due despite zero source tokens.
+   * Our codebase does NOT have getContextUsage — we only check source entry tokens
+   * via rawTokensAfterIndex(). This means:
+   *
+   * - Zero-chunk entries (empty content) = 0 source tokens
+   * - Observer is due only when source tokens >= observeAfterTokens
+   * - These are contradictory: you can't be due AND have zero tokens
+   *
+   * Therefore: the zero-chunk re-fire bug CANNOT manifest in our current architecture.
+   * The observer never runs on zero-token entries, so it never re-fires on them.
+   *
+   * Verdict: Fix 3 (zero-chunk backoff) is NOT needed for our codebase.
+   * The upstream only needs it because they have getContextUsage-based triggering.
+   */
+  test("zero-chunk re-fire bug cannot manifest — observer not due on zero-token entries", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const { anyStageDue } = await import("../src/om/consolidation.js");
+    const { observationsRecordedEntry, rawMessage } = await import("../tests/fixtures/session.js");
+
+    const runtime = new Runtime();
+    runtime.config.observeAfterTokens = 5;
+    runtime.config.reflectAfterTokens = 999999;
+    runtime.config.observationsPoolMaxTokens = 1000;
+    runtime.config.dropperPressureThreshold = 0.7;
+    runtime.config.reflectorInputMaxTokens = 500;
+
+    // Entries: raw-1 (10 tokens) + raw-2 (assistant with EMPTY content = 0 tokens) + obs-marker
+    // Cursor at raw-1 → rawTokensAfterIndex counts 0 tokens from raw-2
+    const entries = [
+      rawMessage("raw-1", "a".repeat(40)), // ~10 tokens
+      rawMessage("raw-2", "", {
+        message: { role: "assistant", content: [], stopReason: "end_turn" },
+      }),
+      observationsRecordedEntry("obs-marker", {
+        observations: [{ id: "o1", content: "test", tokenCount: 10 }],
+        coversUpToId: "raw-1",
+      }),
+    ];
+
+    // Cursor at raw-1 (index 0)
+    runtime.advanceCursor("observer", "raw-1", "recorded");
+
+    // Observer should NOT be due — rawTokensAfterIndex from cursor = 0 tokens
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+});

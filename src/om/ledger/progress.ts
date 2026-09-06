@@ -17,9 +17,24 @@ export function isSourceEntry(entry: Entry): boolean {
   return SOURCE_ENTRY_TYPES.has(entry.type);
 }
 
+// Session branches grow by appending at the tip and never rewrite history, so
+// the entry index only changes when the set of entry IDs changes. Caching the
+// Map here removes a full-branch rebuild from every progress/coverage helper
+// on the per-turn trigger path. The cache key uses all entry IDs (not just the
+// tip) to avoid collisions when different entry arrays happen to share the same
+// tip entry but differ in earlier entries (e.g., across test runs).
+let cachedEntryIdsKey: string | undefined;
+let cachedEntryIndex: Map<string, number> | undefined;
+
 export function entryIndexById(entries: Entry[]): Map<string, number> {
+  const idsKey = entries.map((e) => e.id).join(",");
+  if (cachedEntryIndex !== undefined && cachedEntryIdsKey === idsKey) {
+    return cachedEntryIndex;
+  }
   const idToIndex = new Map<string, number>();
   for (let i = 0; i < entries.length; i++) idToIndex.set(entries[i].id, i);
+  cachedEntryIdsKey = idsKey;
+  cachedEntryIndex = idToIndex;
   return idToIndex;
 }
 
