@@ -2,6 +2,14 @@
 
 ---
 
+## [0.5.1] - 2026-09-06
+
+### Fixed
+
+- **Host inline-compaction adapter now prefers pi's already-loaded bundled runtime chunk over its `dist/index.js` barrel.** Probe on pi 0.85.1 showed the barrel import cost 484ms (fresh graph) while the bundled chunk pi already loaded cost 5ms (cache-hit); the adapter tried the barrel first and kept iterating after a successful chunk patch. Reordered candidates so the chunk is tried first per host path, with the barrel only as a fallback for roots that never resolve a chunk, while still patching every unique host identity. Adapter total 506ms → 16ms, factory ~490ms saved.
+
+---
+
 ## [0.5.0] - 2026-09-06
 
 ### Added
