@@ -461,19 +461,31 @@ export async function installHostInlineCompactionAdapter(
     if (root) packageRoots.add(root);
   }
 
+  // Collect fast candidates first: per package root, pi's already-loaded
+  // bundled runtime chunk (cache-hit, ~0-10ms). A root that resolves a chunk
+  // never needs its modular dist/index.js barrel (fresh graph, ~400-500ms).
   const modulePaths = new Set<string>();
-  for (const packageRoot of packageRoots) {
-    modulePaths.add(join(packageRoot, "dist", "index.js"));
-    for (const hostPath of hostPaths) {
+  const rootsWithChunk = new Set<string>();
+  for (const hostPath of hostPaths) {
+    for (const packageRoot of packageRoots) {
       if (findPiPackageRoot(hostPath) !== packageRoot) continue;
       const bundledRuntime = findBundledRuntimeModule(hostPath, packageRoot);
-      if (bundledRuntime) modulePaths.add(bundledRuntime);
+      if (bundledRuntime) {
+        modulePaths.add(bundledRuntime);
+        rootsWithChunk.add(packageRoot);
+      }
     }
+  }
+  // Fallback barrels: only for roots that had no bundled runtime (e.g. pi
+  // versions whose entrypoint is the plain unbundled dist layout).
+  for (const packageRoot of packageRoots) {
+    if (rootsWithChunk.has(packageRoot)) continue;
+    modulePaths.add(join(packageRoot, "dist", "index.js"));
   }
   getRegistry().hostCandidateCount = modulePaths.size;
 
-  let supportedStatus: InlineCompactionAdapterStatus | undefined;
   const failureReasons: string[] = [];
+  let supportedStatus: InlineCompactionAdapterStatus | undefined;
   for (const modulePath of modulePaths) {
     try {
       const hostModule = (await import(pathToFileURL(modulePath).href)) as {
