@@ -210,14 +210,24 @@ export function buildCompactionProjection(
   firstKeptEntryId: string,
   config: CompactionProjectionConfig,
 ): CompactionProjection {
+  // firstKeptEntryId === "" is the compact-all sentinel: pi-core keeps 0 raw
+  // entries, so the OM fold must cover the whole branch (tip). Without this
+  // special case, entryBoundary("") resolves to index -1 and every recorded
+  // observation/reflection is silently dropped from the compaction summary
+  // (#313).
+  const compactAll = firstKeptEntryId === "";
   const fullFoldBoundaryId = latestFullFoldBoundaryId(entries);
-  const maintenanceBoundary = fullFoldBoundaryId
-    ? entryBoundary(fullFoldBoundaryId)
-    : config.fullFoldAlways
-      ? entryBoundary(firstKeptEntryId)
-      : noneBoundary();
+  const maintenanceBoundary = compactAll
+    ? tipBoundary()
+    : fullFoldBoundaryId
+      ? entryBoundary(fullFoldBoundaryId)
+      : config.fullFoldAlways
+        ? entryBoundary(firstKeptEntryId)
+        : noneBoundary();
   const normalProjection = foldProjection(entries, {
-    observationsBoundary: entryBoundary(firstKeptEntryId),
+    observationsBoundary: compactAll
+      ? tipBoundary()
+      : entryBoundary(firstKeptEntryId),
     reflectionsBoundary: maintenanceBoundary,
     dropsBoundary: maintenanceBoundary,
   });

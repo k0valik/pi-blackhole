@@ -205,6 +205,96 @@ describe("buildCompactionProjection", () => {
   });
 });
 
+describe('buildCompactionProjection — compact-all (firstKeptEntryId="")', () => {
+  function dropEntry(
+    id: string,
+    observationIds: string[],
+    coversUpToId: string,
+  ): Entry {
+    return makeEntry(id, "custom", {
+      customType: "om.observations.dropped",
+      data: { observationIds, coversUpToId },
+    });
+  }
+
+  it("folds all observations and reflections up to the tip", async () => {
+    const { buildCompactionProjection } =
+      await import("../src/om/ledger/projection.js");
+    const obs1 = makeObservation(hexId("obs-compact-all-a"));
+    const obs2 = makeObservation(hexId("obs-compact-all-b"));
+    const ref1 = makeReflection(hexId("ref-compact-all-a"));
+    const entries: Entry[] = [
+      src("boundary-001"),
+      recordEntry("e1", [obs1, obs2], "boundary-001"),
+      src("boundary-002"),
+      reflectEntry("e2", [ref1], "boundary-002"),
+    ];
+    const result = buildCompactionProjection(entries, "", {
+      observationsPoolMaxTokens: 20_000,
+    });
+    // #313: compact-all must fold up to tip, not to index -1.
+    expect(result.observations).toHaveLength(2);
+    expect(result.observations[0].id).toBe(obs1.id);
+    expect(result.observations[1].id).toBe(obs2.id);
+    expect(result.reflections).toHaveLength(1);
+    expect(result.reflections[0].id).toBe(ref1.id);
+    expect(result.fullFold).toBe(false);
+    expect(result.details.observations).toEqual(result.observations);
+    expect(result.details.reflections).toEqual(result.reflections);
+  });
+
+  it("still excludes dropped observations on compact-all", async () => {
+    const { buildCompactionProjection } =
+      await import("../src/om/ledger/projection.js");
+    const kept = makeObservation(hexId("obs-compact-all-kept"));
+    const dropped = makeObservation(hexId("obs-compact-all-dropped"));
+    const entries: Entry[] = [
+      src("boundary-001"),
+      recordEntry("e1", [kept, dropped], "boundary-001"),
+      dropEntry("e2", [dropped.id], "boundary-001"),
+    ];
+    const result = buildCompactionProjection(entries, "", {
+      observationsPoolMaxTokens: 20_000,
+    });
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0].id).toBe(kept.id);
+  });
+
+  it("triggers full fold and caps observations when pool exceeds budget", async () => {
+    const { buildCompactionProjection } =
+      await import("../src/om/ledger/projection.js");
+    const bigHigh = makeObservation(hexId("obs-compact-all-big-high"), {
+      relevance: "high" as const,
+      tokenCount: 25_000,
+    });
+    const bigMedium = makeObservation(hexId("obs-compact-all-big-med"), {
+      relevance: "medium" as const,
+      tokenCount: 25_000,
+    });
+    const ref1 = makeReflection(hexId("ref-compact-all-big"));
+    const entries: Entry[] = [
+      src("boundary-001"),
+      recordEntry("e1", [bigHigh, bigMedium], "boundary-001"),
+      reflectEntry("e2", [ref1], "boundary-001"),
+    ];
+    // tokenCount (25_000 each) triggers the full-fold check against the
+    // pool budget; the cap itself uses rendered summary-line tokens (~15),
+    // so a 20-token budget keeps the high-relevance observation and drops
+    // the medium one.
+    const result = buildCompactionProjection(entries, "", {
+      observationsPoolMaxTokens: 20,
+    });
+    expect(result.fullFold).toBe(true);
+    // Cap keeps the high-relevance observation, drops the medium one.
+    expect(result.observations).toHaveLength(1);
+    expect(result.observations[0].id).toBe(bigHigh.id);
+    // Reflections still survive the compact-all fold.
+    expect(result.reflections).toHaveLength(1);
+    expect(result.reflections[0].id).toBe(ref1.id);
+    expect(result.details.fullFold).toBe(true);
+  });
+});
+
 describe("diffProjection", () => {
   it("diffs two projections", async () => {
     const { diffProjection } = await import("../src/om/ledger/projection.js");

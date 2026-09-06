@@ -352,7 +352,10 @@ describe("saveUnifiedConfig — atomic write", () => {
     expect(config.memory).toBe(false); // preserved
   });
 
-  it("does not crash on read-only filesystem (returns false)", async () => {
+  // Root bypasses write permission bits (chmod 0o555 still writable), so the
+  // read-only-failure expectation cannot hold — skip under root.
+  it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
+    "does not crash on read-only filesystem (returns false)", async () => {
     const { saveUnifiedConfig } = await import("../src/core/unified-config.js");
     // Make the config dir read-only so write fails
     const dir = join(testDir, "pi-blackhole");
