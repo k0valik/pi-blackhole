@@ -95,7 +95,18 @@
 
   "observeAfterTokens": 15000,
   "reflectAfterTokens": 25000,
-  "compactAfterTokens": 81000,
+  "compactAfterPreset": "default",
+  "_comment_compactAfterPreset": "Compaction threshold preset selection (default 'default'). The no-knob default is no longer a fixed 81000 tokens: the built-in 'default' curve auto-scales the trigger to the model's context window (fires at floor(window x ratio), 0.90 @ 32,768 -> 0.40 @ 1,048,576). To pin a fixed threshold instead, set compactAfterTokens to any value other than exactly 81000 - that exact value is legacy scaffold residue and is dropped at load.",
+  "compactAfterPresets": {
+    "default": [
+      { "window": 32768, "ratio": 0.9 },
+      { "window": 131072, "ratio": 0.8 },
+      { "window": 262144, "ratio": 0.7 },
+      { "window": 1048576, "ratio": 0.4 }
+    ],
+    "early-1m": [{ "window": 131072, "ratio": 0.6 }]
+  },
+  "_comment_compactAfterPresets": "Hand-edited preset definitions only - never a settings-modal field, and config saves carry them verbatim. Same-name entries override the built-in curve; new names extend the table and appear in the modal's preset select. 'early-1m' is an example user preset (single anchor = constant ratio).",
   "retainedToolOutputMaxTokens": 20000,
   "observationsPoolMaxTokens": 20000,
   "observationsPoolTargetTokens": 10000,
@@ -123,6 +134,7 @@
     "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
     "  dropperPressureThreshold (0-1, default 0.70) — pressure relief valve: fraction of reflectorInputMaxTokens where dropper fires even without new data",
     "  providerIdleTimeoutMs (ms, 0=disabled, unset=inherit pi default) — body-idle timeout for background provider streams",
+    "  compactAfterPreset / compactAfterPresets — auto-compaction preset curve selection + definitions (default curve 0.90@32k → 0.40@1M); replaces the flat 81000 default — a file compactAfterTokens of exactly 81000 is legacy residue and is dropped",
     "",
     "Backward compat: old keys (overrideDefaultCompaction, noAutoCompact, passive)",
     "are migrated to new keys at load time.",
@@ -132,6 +144,7 @@
     "  PI_BLACKHOLE_COMPACTION  → override compaction setting",
     "  PI_BLACKHOLE_COMPACTION_ENGINE → override compactionEngine setting",
     "  PI_BLACKHOLE_COMPACTION_SUMMARY_MODE → override compactionSummaryMode setting",
+    "  PI_BLACKHOLE_COMPACT_AFTER_PRESET → override the compaction preset curve selection",
     "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget"
   ]
 }

@@ -43,7 +43,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
 ### Auto-compaction threshold & model context window
 
-> **Auto-compaction can now be context-window-aware** (opt-in, issue #60): set `compactAfterRatio` (e.g. `0.65`) or `compactReserveTokens` and the trigger threshold derives from the active model's context window instead of the fixed 81k — re-derived on every check, so mid-session `/model` switches apply automatically. Both knobs are editable under **Compaction** in `/blackhole settings` (0 = not set), or via `docs/CONFIG.md` → `compactAfterRatio` / `compactReserveTokens`. Explicit `compactAfterTokens` (a non-default value) still wins over both. The fixed 81k default is unchanged unless you opt in.
+> **Auto-compaction now auto-scales to your model's context window** (issue #60 + preset curves). Out of the box the trigger follows the built-in **`default` preset curve** — fires at `floor(window × ratio)`, 0.90 @ 32,768 → 0.40 @ 1,048,576 (piecewise-linear between anchors). Small local windows fill near-full (cheap to send); 1M-class paid windows compact early (per-token cost + a sharper working set). Want a different shape? `compactAfterRatio` / `compactReserveTokens` pin window-derived thresholds, and `compactAfterPreset` selects another curve — all under **Compaction** in `/blackhole settings`. Explicit `compactAfterTokens` still wins over all of them; thresholds re-derive on every check, so mid-session `/model` switches apply automatically.
 
 ---
 
@@ -103,14 +103,14 @@ The `/blackhole-recall` command exposes the same engine to the user. Results are
 
 Two modes, one shared goal: keep your agent's context sharp without manual housekeeping. (`compaction: "off"` is a third escape hatch that hands everything back to Pi.)
 
-|                             | Auto (default)                                | Manual (`compaction: "manual"`)                  | Off (`compaction: "off"`)                                  |
-| --------------------------- | --------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
-| Workers run?                | Yes                                           | Yes                                              | Yes (unless `memory: false`)                               |
-| Observations go to          | Conversation markers (invisible in TUI)       | Per-session disk buffers                         | Conversation markers                                       |
-| Auto-compact on `agent_end` | Yes — blackhole fires at `compactAfterTokens` | No                                               | No (Pi handles it)                                         |
-| `/compact` (Pi built-in)    | Replaced by blackhole                         | Pi handles                                       | Pi handles                                                 |
-| `/blackhole`                | Optional                                      | **Required** to flush + compact                  | Optional, but works                                        |
-| Use case                    | "Install and forget"                          | "I want to control when context gets compressed" | "Let Pi handle it, but I want `/blackhole` when I need it" |
+|                             | Auto (default)                                                         | Manual (`compaction: "manual"`)                  | Off (`compaction: "off"`)                                  |
+| --------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
+| Workers run?                | Yes                                                                    | Yes                                              | Yes (unless `memory: false`)                               |
+| Observations go to          | Conversation markers (invisible in TUI)                                | Per-session disk buffers                         | Conversation markers                                       |
+| Auto-compact on `agent_end` | Yes — fires at the auto-compaction threshold (preset curve by default) | No                                               | No (Pi handles it)                                         |
+| `/compact` (Pi built-in)    | Replaced by blackhole                                                  | Pi handles                                       | Pi handles                                                 |
+| `/blackhole`                | Optional                                                               | **Required** to flush + compact                  | Optional, but works                                        |
+| Use case                    | "Install and forget"                                                   | "I want to control when context gets compressed" | "Let Pi handle it, but I want `/blackhole` when I need it" |
 
 Manual mode is the maintainer's daily driver: workers still run, but observations accumulate in `<sessionId>-pending.json` files instead of cluttering the conversation. `/blackhole` flushes the buffer, runs algorithmic compaction, and injects durable reflections in one shot.
 
