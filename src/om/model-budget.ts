@@ -14,21 +14,83 @@ export interface CompactThresholdConfig {
   compactAfterTokens?: number;
   compactAfterRatio?: number;
   compactReserveTokens?: number;
+  /** Selection knob: name of the preset curve to apply (built-in or user-defined). */
+  compactAfterPreset?: string;
+  /** User-editable preset definitions (hand-edited JSON only — never a modal/DEFAULTS key). */
+  compactAfterPresets?: Record<string, PresetAnchor[]>;
+}
+
+/** One anchor of a threshold curve: at `window`, compact at `ratio` of the window. */
+export interface PresetAnchor {
+  window: number;
+  ratio: number;
+}
+
+/**
+ * Built-in preset definitions. Effective presets = these overlaid by any user
+ * `compactAfterPresets` entries in the config file (same-name override, new
+ * names appended). Curve data is user-tunable (spec §7).
+ */
+export const BUILTIN_PRESETS: Record<string, PresetAnchor[]> = {
+  default: [
+    { window: 32_768, ratio: 0.9 },
+    { window: 131_072, ratio: 0.8 },
+    { window: 262_144, ratio: 0.7 },
+    { window: 1_048_576, ratio: 0.4 },
+  ],
+};
+
+/** Built-ins overlaid by the user's file definitions (spec §4.2). */
+export function effectivePresets(
+  cfg: Pick<CompactThresholdConfig, "compactAfterPresets">,
+): Record<string, PresetAnchor[]> {
+  return { ...BUILTIN_PRESETS, ...(cfg.compactAfterPresets ?? {}) };
+}
+
+/**
+ * Ratio of `window` at which to compact under `anchors`: piecewise-linear
+ * interpolation in window space, constant extrapolation outside the anchor
+ * range. Anchors must be non-empty and sorted ascending by `window` (parse
+ * guarantees this; literal callers keep them sorted). A single anchor yields a
+ * constant ratio — a global-ratio preset.
+ */
+export function presetRatioForWindow(anchors: PresetAnchor[], window: number): number {
+  if (anchors.length === 0) return 0.5; // unreachable via validated config; keep pure + finite
+  if (window <= anchors[0].window) return anchors[0].ratio;
+  const last = anchors[anchors.length - 1];
+  if (window >= last.window) return last.ratio;
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const a0 = anchors[i];
+    const a1 = anchors[i + 1];
+    if (window < a0.window || window > a1.window) continue;
+    const span = a1.window - a0.window;
+    if (span <= 0) return a1.ratio; // defensive: duplicate windows
+    const t = (window - a0.window) / span;
+    return a0.ratio + t * (a1.ratio - a0.ratio);
+  }
+  return last.ratio;
 }
 
 /**
  * Resolve the effective auto-compaction threshold.
  *
- * Precedence (issue #60):
+ * Precedence:
  *  1. Explicit `compactAfterTokens` (always wins when set)
  *  2. `compactAfterRatio` → max(1, floor(window × ratio))
  *  3. `compactReserveTokens` → max(1, window − reserve)
- *  4. Fixed legacy default (81000) when no knob is set
+ *  4. Named preset curve (knob `compactAfterPreset`, defaulting to "default")
+ *     → max(1, floor(window × ratio₍window₎)) over the effective anchors
+ *  5. Fixed legacy default (81000) when no knob and no preset surface is set
+ *     (removed in the config-surface flip — the built-in "default" curve then
+ *     becomes the no-knob behavior)
  *
- * The two derived knobs are only ever set in derived mode — the loader drops
- * the fixed default when either is configured without explicit tokens — so
- * passing a config straight from loadUnifiedConfig yields the same result as
- * this function's own fallback.
+ * Numeric knobs are only ever set without the injected fixed default in derived
+ * mode — the loader drops the fixed default when a derived knob or preset is
+ * configured without explicit tokens — so a config straight from
+ * loadUnifiedConfig resolves the same way as this function's own fallback.
+ *
+ * Always returns a positive integer ≥ 1 — never undefined (an undefined
+ * threshold would invert the trigger gate and compact on every event).
  */
 export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindow: number): number {
   if (cfg.compactAfterTokens !== undefined) return cfg.compactAfterTokens;
@@ -37,6 +99,11 @@ export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindo
   }
   if (cfg.compactReserveTokens !== undefined) {
     return Math.max(1, contextWindow - cfg.compactReserveTokens);
+  }
+  if (cfg.compactAfterPreset !== undefined || cfg.compactAfterPresets !== undefined) {
+    const name = cfg.compactAfterPreset ?? "default";
+    const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
+    return Math.max(1, Math.floor(contextWindow * presetRatioForWindow(anchors, contextWindow)));
   }
   return DEFAULT_COMPACT_AFTER_TOKENS;
 }

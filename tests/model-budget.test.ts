@@ -6,8 +6,11 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  BUILTIN_PRESETS,
   compactThresholdTokens,
   effectiveContextWindow,
+  effectivePresets,
+  presetRatioForWindow,
   sessionContextWindow,
 } from "../src/om/model-budget.js";
 
@@ -160,6 +163,116 @@ describe("compactThresholdTokens", () => {
   it("falls back to the 81000 legacy default when no knob is set", () => {
     expect(compactThresholdTokens({}, 200_000)).toBe(81_000);
     expect(compactThresholdTokens({}, 32_000)).toBe(81_000);
+  });
+});
+
+describe("presetRatioForWindow", () => {
+  const fall = BUILTIN_PRESETS.default;
+
+  it("returns the exact anchor ratio at each anchor", () => {
+    expect(presetRatioForWindow(fall, 32_768)).toBeCloseTo(0.9, 10);
+    expect(presetRatioForWindow(fall, 131_072)).toBeCloseTo(0.8, 10);
+    expect(presetRatioForWindow(fall, 262_144)).toBeCloseTo(0.7, 10);
+    expect(presetRatioForWindow(fall, 1_048_576)).toBeCloseTo(0.4, 10);
+  });
+
+  it("interpolates linearly between anchors", () => {
+    // midpoint of 32768 (0.9) → 131072 (0.8) is 0.85
+    expect(presetRatioForWindow(fall, (32_768 + 131_072) / 2)).toBeCloseTo(0.85, 10);
+    // 65,536 is 1/3 of the way: 0.9 − (1/3)·0.1
+    expect(presetRatioForWindow(fall, 65_536)).toBeCloseTo(0.9 - (1 / 3) * 0.1, 10);
+    // midpoint of 262144 (0.7) → 1048576 (0.4) is 0.55
+    expect(presetRatioForWindow(fall, (262_144 + 1_048_576) / 2)).toBeCloseTo(0.55, 10);
+  });
+
+  it("extrapolates constant below the first and above the last anchor", () => {
+    expect(presetRatioForWindow(fall, 8_000)).toBeCloseTo(0.9, 10);
+    expect(presetRatioForWindow(fall, 2_000_000)).toBeCloseTo(0.4, 10);
+  });
+
+  it("a single anchor is a constant ratio (global-ratio preset)", () => {
+    const flat = [{ window: 131_072, ratio: 0.6 }];
+    expect(presetRatioForWindow(flat, 32_000)).toBeCloseTo(0.6, 10);
+    expect(presetRatioForWindow(flat, 1_000_000)).toBeCloseTo(0.6, 10);
+  });
+});
+
+describe("compactThresholdTokens — preset curves", () => {
+  it("resolves the built-in default curve from the window", () => {
+    const preset = { compactAfterPreset: "default" };
+    expect(compactThresholdTokens(preset, 32_768)).toBe(Math.floor(32_768 * 0.9)); // 29,491
+    expect(compactThresholdTokens(preset, 131_072)).toBe(104_857); // floor(131072 × 0.8)
+    expect(compactThresholdTokens(preset, 262_144)).toBe(183_500); // floor(262144 × 0.7)
+    // above the last anchor → constant 0.4
+    expect(compactThresholdTokens(preset, 2_000_000)).toBe(800_000);
+  });
+
+  it("interpolates the threshold for intermediate windows", () => {
+    const preset = { compactAfterPreset: "default" };
+    // 65,536 → ratio 0.86666… → floor(65536 × 0.86666…) = 56,797
+    expect(compactThresholdTokens(preset, 65_536)).toBe(56_797);
+    // 1M is between 262144 (0.7) and 1048576 (0.4): ratio ≈ 0.41853 → 418,530
+    const t = compactThresholdTokens(preset, 1_000_000);
+    expect(t).toBeGreaterThan(400_000);
+    expect(t).toBeLessThan(420_000);
+  });
+
+  it("falls back to the built-in default preset for an unknown name", () => {
+    expect(compactThresholdTokens({ compactAfterPreset: "no-such-preset" }, 131_072)).toBe(104_857);
+  });
+
+  it("never returns undefined — always a positive integer", () => {
+    const preset = { compactAfterPreset: "default" };
+    const t = compactThresholdTokens(preset, 123_456);
+    expect(Number.isInteger(t)).toBe(true);
+    expect(t).toBeGreaterThan(0);
+  });
+
+  it("merges user definitions over built-ins (same-name override + added name)", () => {
+    const presets = {
+      default: [{ window: 131_072, ratio: 0.5 }],
+      early: [{ window: 131_072, ratio: 0.6 }],
+    };
+    // added user preset "early": constant ratio 0.6
+    expect(
+      compactThresholdTokens(
+        { compactAfterPreset: "early", compactAfterPresets: presets },
+        200_000,
+      ),
+    ).toBe(120_000);
+    // built-in "default" overridden by the user file to 0.5 at 131072
+    expect(
+      compactThresholdTokens(
+        { compactAfterPreset: "default", compactAfterPresets: presets },
+        131_072,
+      ),
+    ).toBe(65_536);
+  });
+
+  it("numeric knobs still win over the preset", () => {
+    expect(
+      compactThresholdTokens({ compactAfterPreset: "default", compactAfterRatio: 0.5 }, 200_000),
+    ).toBe(100_000);
+    expect(
+      compactThresholdTokens(
+        { compactAfterPreset: "default", compactReserveTokens: 32_768 },
+        1_000_000,
+      ),
+    ).toBe(967_232);
+    expect(
+      compactThresholdTokens(
+        { compactAfterPreset: "default", compactAfterTokens: 180_000 },
+        1_000_000,
+      ),
+    ).toBe(180_000);
+  });
+
+  it("effectivePresets overlays built-ins with file definitions only", () => {
+    const presets = { early: [{ window: 131_072, ratio: 0.6 }] };
+    const merged = effectivePresets({ compactAfterPresets: presets });
+    expect(Object.keys(merged).sort()).toEqual(["default", "early"]);
+    expect(merged.default).toBe(BUILTIN_PRESETS.default); // untouched reference
+    expect(merged.early).toBe(presets.early);
   });
 });
 
