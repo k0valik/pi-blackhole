@@ -2,9 +2,10 @@
  * Summary rendering — formats observations/reflections for compaction output.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/render-summary.ts)
- * Unmodified.
+ * Modified: separator-aware whole-record output caps.
  */
 import type { Observation, Reflection } from "./types.js";
+import { estimateStringTokens } from "../tokens.js";
 
 const OM_INSTRUCTIONS_FULL = `Bracketed ids in reflections and observations connect to their source session entries. These are condensed memories from earlier in this session.
 When entries conflict, the most recent observation reflects the latest known state.
@@ -40,87 +41,50 @@ export function scoreObservation(obs: Observation, index: number, total: number)
  *  first and filling the remaining budget with the best-scoring medium and
  *  low observations (relevance-tiered + recency).
  *
- *  The returned lines never exceed the budget: when high/critical items
- *  alone exceed it, the newest are kept within budget and the rest are
- *  dropped from the output. (Reflections are capped separately in
- *  buildCompactionProjection.) Observations stay in the branch either way;
- *  this only caps what is rendered in the compaction summary output. */
+ *  The budget is a hard cap: when high/critical items alone exceed it, the
+ *  newest are kept and the oldest are sacrificed (sessions can accumulate
+ *  hundreds of high-relevance observations, which previously pushed the
+ *  rendered pool far past the budget).
+ *
+ *  Observations stay in the branch either way; this only caps what is rendered
+ *  in the compaction summary output. */
 export function selectPriorObservations(
   observations: Observation[],
   maxTokens: number,
 ): Observation[] {
-  // Track original indices so we can restore chronological order after scoring
-  const indexed = observations.map((obs, i) => ({ obs, originalIndex: i }));
-  const high = indexed.filter(
-    (item) => item.obs.relevance === "high" || item.obs.relevance === "critical",
-  );
-  const rest = indexed.filter(
-    (item) => item.obs.relevance !== "high" && item.obs.relevance !== "critical",
-  );
-
-  let budget = maxTokens;
-  const selected = new Set<{ obs: Observation; originalIndex: number }>();
-  if (high.length > 0 && budget > 0) {
-    const highTokens = high.reduce((total, item) => total + observationRenderedTokens(item.obs), 0);
-    if (highTokens <= budget) {
-      // High fits — keep all of it, consume budget first (previous behavior).
-      for (const item of high) {
-        selected.add(item);
-        budget -= observationRenderedTokens(item.obs);
-      }
-    } else {
-      // High alone exceeds the budget — keep newest-first within budget.
-      // A single item larger than the whole budget ends the selection so the
-      // output never exceeds the cap.
-      const newestFirst = [...high].sort((a, b) => b.originalIndex - a.originalIndex);
-      for (const item of newestFirst) {
-        const lineTokens = observationRenderedTokens(item.obs);
-        if (budget - lineTokens < 0) break;
-        selected.add(item);
-        budget -= lineTokens;
-      }
-      // Restore original chronological order before returning
-      return Array.from(selected)
-        .sort((a, b) => a.originalIndex - b.originalIndex)
-        .map((item) => item.obs);
-    }
+  const ranked = observations.map((obs, index) => ({
+    obs,
+    index,
+    score: scoreObservation(obs, index, observations.length),
+  }));
+  ranked.sort((a, b) => b.score - a.score);
+  const selected: typeof ranked = [];
+  let rendered = "";
+  for (const item of ranked) {
+    const next = rendered + (selected.length ? "\n" : "") + observationToSummaryLine(item.obs);
+    if (estimateStringTokens(next) > maxTokens) continue;
+    selected.push(item);
+    rendered = next;
   }
-
-  // Score medium + low and select best within remaining budget
-  if (rest.length > 0 && budget > 0) {
-    const scored = rest.map((item, i) => ({
-      item,
-      score: scoreObservation(item.obs, i, rest.length),
-    }));
-    scored.sort((a, b) => b.score - a.score); // highest score first
-    for (const { item } of scored) {
-      const lineTokens = observationRenderedTokens(item.obs);
-      if (budget - lineTokens < 0) break;
-      selected.add(item);
-      budget -= lineTokens;
-    }
-  }
-
-  // Restore original chronological order before returning
-  return Array.from(selected)
-    .sort((a, b) => a.originalIndex - b.originalIndex)
-    .map((item) => item.obs);
-}
-
-/** Token estimate for one rendered observation line (chars/4). This is the
- *  measure the pool cap budgets against, so the gate and the fitting step
- *  stay on the same scale. */
-export function observationRenderedTokens(observation: Observation): number {
-  return Math.ceil(observationToSummaryLine(observation).length / 4);
+  return selected.sort((a, b) => a.index - b.index).map((item) => item.obs);
 }
 
 export function reflectionToSummaryLine(reflection: Reflection): string {
   return `[${reflection.id}] ${reflection.content}`;
 }
 
-/** Token estimate for one rendered reflection line (chars/4). */
-export function reflectionRenderedTokens(reflection: Reflection): number {
-  return Math.ceil(reflectionToSummaryLine(reflection).length / 4);
+/** Bound compaction output only; worker reflection prompts stay unchanged. */
+export function selectPriorReflections(reflections: Reflection[], maxTokens: number): Reflection[] {
+  const selected: Reflection[] = [];
+  let rendered = "";
+  for (let i = reflections.length - 1; i >= 0; i--) {
+    const reflection = reflections[i]!;
+    const next = rendered + (selected.length ? "\n" : "") + reflectionToSummaryLine(reflection);
+    if (estimateStringTokens(next) > maxTokens) continue;
+    selected.push(reflection);
+    rendered = next;
+  }
+  return selected.reverse();
 }
 
 export function renderSummary(reflections: Reflection[], observations: Observation[]): string {

@@ -1,4 +1,4 @@
-import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
   PI_VCC_COMPACT_INSTRUCTION,
@@ -7,6 +7,13 @@ import {
 import { projectAppendOnlyContext } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
 
+const decisions = vi.hoisted<any[]>(() => []);
+vi.mock("../src/om/debug-log.js", () => ({
+  debugLog: (event: string, data: any) => {
+    if (event === "before_compact.append_decision") decisions.push(data);
+  },
+}));
+
 const msg = (id: string, role: "user" | "assistant" | "toolResult", content: string) => ({
   id,
   type: "message",
@@ -14,7 +21,10 @@ const msg = (id: string, role: "user" | "assistant" | "toolResult", content: str
   message: { role, content },
 });
 
-const createHarness = (configOverrides: Record<string, unknown> = {}) => {
+const createHarness = (
+  configOverrides: Record<string, unknown> = {},
+  modelOverrides: Record<string, unknown> = {},
+) => {
   let handler: ((event: any, ctx: any) => any) | undefined;
   const config = {
     compaction: "auto",
@@ -28,6 +38,7 @@ const createHarness = (configOverrides: Record<string, unknown> = {}) => {
     debugLog: false,
     observationsPoolMaxTokens: 20_000,
     retainedToolOutputMaxTokens: 20_000,
+    reflectionsPoolMaxTokens: 8_000,
     fullFoldAlways: true,
     ...configOverrides,
   };
@@ -49,7 +60,12 @@ const createHarness = (configOverrides: Record<string, unknown> = {}) => {
     invoke: (event: any) =>
       handler!(event, {
         cwd: process.cwd(),
-        model: { provider: "anthropic", api: "messages", id: "test" },
+        model: {
+          provider: "anthropic",
+          api: "messages",
+          id: "test",
+          ...modelOverrides,
+        },
         sessionManager: { getEntries: () => event.branchEntries },
         ui,
       }),
@@ -59,12 +75,14 @@ const createHarness = (configOverrides: Record<string, unknown> = {}) => {
 
 const event = (branchEntries: any[], previousSummary?: string, customInstructions?: string) => ({
   type: "session_before_compact",
+  reason: "threshold",
   customInstructions,
   branchEntries,
   preparation: {
     previousSummary,
     fileOps: { read: [], written: [], edited: [] },
     tokensBefore: 1000,
+    settings: { reserveTokens: 2000 },
   },
   signal: new AbortController().signal,
 });
@@ -696,5 +714,284 @@ describe("append before-compact integration", () => {
       [c1, { id: "c2", type: "compaction", timestamp: 20, ...second.compaction }],
     ) as any[];
     expect(projected.filter((m) => m.role === "compactionSummary")).toHaveLength(2);
+  });
+});
+
+const withParents = (entries: any[]) =>
+  entries.map((entry, i) => ({
+    ...entry,
+    parentId: entries[i - 1]?.id ?? null,
+  }));
+const accountingMessage = (id: string, role: "user" | "assistant", text: string) => ({
+  ...msg(id, role, text),
+  timestamp: 10,
+  message:
+    role === "user"
+      ? { role, content: text, timestamp: 10 }
+      : {
+          role,
+          content: [{ type: "text", text }],
+          provider: "anthropic",
+          model: "test",
+          timestamp: 10,
+          stopReason: "stop",
+        },
+});
+
+describe("bounded memory and useful rebase provider simulation", () => {
+  it("real hook cycles retain prefixes, rebase below half-window, cap compact-all, and recall omitted sources", async () => {
+    const { recallMemorySources } = await import("../src/om/ledger/recall.js");
+    const { observationToSummaryLine, reflectionToSummaryLine, renderSummary } =
+      await import("../src/om/ledger/render-summary.js");
+    const { estimateStringTokens } = await import("../src/om/tokens.js");
+    const { registerCompactionContextHook } = await import("../src/hooks/compaction-context.js");
+    const { writeFileSync } = await import("node:fs");
+    const harness = createHarness({ memory: true }, { contextWindow: 272000 });
+    const observations = Array.from({ length: 100 }, (_, i) => ({
+      id: i.toString(16).padStart(12, "0"),
+      content: `OBS ${i} ` + "x".repeat(1000),
+      timestamp: "2026-09-07",
+      relevance: "high",
+      sourceEntryIds: ["source"],
+      tokenCount: 100,
+    }));
+    const reflections = Array.from({ length: 20 }, (_, i) => ({
+      id: (i + 1000).toString(16).padStart(12, "0"),
+      content: `REF ${i} ` + "y".repeat(3000),
+      supportingObservationIds: [observations[0].id],
+      tokenCount: 10,
+    }));
+    let branch: any[] = withParents([
+      accountingMessage("source", "user", "original source for recall"),
+      {
+        id: "observations",
+        type: "custom",
+        customType: "om.observations.recorded",
+        data: { observations, coversUpToId: "source" },
+      },
+      {
+        id: "reflections",
+        type: "custom",
+        customType: "om.reflections.recorded",
+        data: { reflections, coversUpToId: "source" },
+      },
+      accountingMessage("answer", "assistant", "first answer"),
+      accountingMessage("tail0", "user", "keep"),
+      accountingMessage("reply0", "assistant", "reply"),
+    ]);
+    let context: any;
+    registerCompactionContextHook(
+      {
+        on: (_: string, fn: any) => {
+          context = fn;
+        },
+      } as any,
+      { config: {}, ensureConfig: () => {} } as any,
+    );
+    let previous: string | undefined;
+    let prefix: string[] = [];
+    const starts: boolean[] = [];
+    const evidence: any[] = [];
+    let sawUsefulRebase = false;
+    for (let cycle = 0; cycle < 60; cycle++) {
+      // Long frozen deltas accumulate; compile() still uses its existing bounded aggregate.
+      if (cycle) {
+        branch.push(
+          accountingMessage(
+            `work${cycle}`,
+            "assistant",
+            Array.from(
+              { length: 90 },
+              (_, i) => `cycle ${cycle} line ${i} ` + "z".repeat(300),
+            ).join("\n"),
+          ),
+        );
+        const visible = convertToLlm(
+          projectAppendOnlyContext(buildSessionContext(withParents(branch)).messages, branch),
+        );
+        const totalTokens =
+          36000 + visible.reduce((sum, message) => sum + estimateTokens(message), 0);
+        branch.push({
+          ...accountingMessage(`usage${cycle}`, "assistant", "measured response"),
+          message: {
+            ...accountingMessage("unused", "assistant", "measured response").message,
+            usage: {
+              totalTokens: totalTokens + estimateStringTokens("measured response"),
+            },
+          },
+        });
+        // After usage, another user starts the kept tail. Last cycle below uses compact-all separately.
+        branch.push(
+          accountingMessage(`tail${cycle}`, "user", "new kept tail"),
+          accountingMessage(`reply${cycle}`, "assistant", "reply"),
+        );
+      }
+      branch = withParents(branch);
+      const result = harness.invoke(event(branch, previous));
+      expect(result.compaction.details.version).toBe(2);
+      const details = result.compaction.details;
+      const memory = details["om.folded"];
+      const observationTokens = estimateStringTokens(
+        memory.observations.map(observationToSummaryLine).join("\n"),
+      );
+      const reflectionTokens = estimateStringTokens(
+        memory.reflections.map(reflectionToSummaryLine).join("\n"),
+      );
+      expect(observationTokens).toBeLessThanOrEqual(20000);
+      expect(reflectionTokens).toBeLessThanOrEqual(8000);
+      expect(memory.observations.length).toBeGreaterThan(0);
+      expect(memory.reflections.length).toBeGreaterThan(0);
+      expect(
+        result.compaction.summary.endsWith(renderSummary(memory.reflections, memory.observations)),
+      ).toBe(true);
+      expect(
+        details.trailingSummary.endsWith(renderSummary(memory.reflections, memory.observations)),
+      ).toBe(true);
+      branch = withParents([
+        ...branch,
+        {
+          id: `c${cycle}`,
+          type: "compaction",
+          timestamp: 20 + cycle,
+          ...result.compaction,
+        },
+      ]);
+      const messages = context(
+        { messages: buildSessionContext(branch).messages },
+        { sessionManager: { getBranch: () => branch } },
+      ).messages;
+      const provider = convertToLlm(messages);
+      const segmentCount = messages.filter(
+        (message: any) => message.role === "compactionSummary",
+      ).length;
+      const currentPrefix = provider
+        .slice(0, segmentCount)
+        .map((message) => JSON.stringify(message));
+      if (!details.chainStart) expect(currentPrefix.slice(0, prefix.length)).toEqual(prefix);
+      if (cycle > 0 && details.chainStart) sawUsefulRebase = true;
+      expect(
+        messages.filter((message: any) => message.customType === "blackhole-compaction-tail"),
+      ).toHaveLength(1);
+      expect(JSON.stringify(provider).split(memory.reflections[0].id)).toHaveLength(2);
+      starts.push(details.chainStart);
+      evidence.push({
+        decision: decisions.at(-1),
+        cycle,
+        chainStart: details.chainStart,
+        segmentCount,
+        observationTokens,
+        reflectionTokens,
+        visibleTokens: provider.reduce((sum, message) => sum + estimateTokens(message), 0),
+      });
+      prefix = currentPrefix;
+      previous = result.compaction.summary;
+      if (sawUsefulRebase) {
+        expect(decisions.at(-1)).toMatchObject({
+          method: "usage-residual",
+          reason: "pressure-useful-saving",
+        });
+        expect(decisions.at(-1).appendTotal).toBeLessThan(136000);
+        break;
+      }
+    }
+    writeFileSync("/tmp/blackhole-floor-cycles.json", JSON.stringify(evidence, null, 2));
+    expect(starts.slice(0, 2)).toEqual([true, false]);
+    expect(sawUsefulRebase).toBe(true);
+    const recall = recallMemorySources(branch, observations[0].id);
+    expect(recall.status).toBe("found");
+    expect(recall.sourceEntries.map((entry) => entry.id)).toContain("source");
+    expect(branch.at(-1).details["om.folded"].observations.map((obs: any) => obs.id)).not.toContain(
+      observations[0].id,
+    );
+    // Compact-all through real hook with same source records, no last user tail.
+    const compactAllBranch = withParents(
+      branch.slice(0, 4).concat(accountingMessage("more", "assistant", "more work")),
+    );
+    const all = harness.invoke(event(compactAllBranch));
+    expect(all.compaction.firstKeptEntryId).toBe("");
+    expect(all.compaction.details["om.folded"].observations.length).toBeGreaterThan(0);
+    expect(all.compaction.details["om.folded"].reflections.length).toBeGreaterThan(0);
+    writeFileSync("/tmp/blackhole-floor-cycles.json", JSON.stringify(evidence, null, 2));
+  });
+
+  it.each(["manual", "overflow", "blackhole"])(
+    "%s respects explicit marker versus recovery",
+    (reason) => {
+      const harness = createHarness({}, { contextWindow: 272000 });
+      const first = harness.invoke(
+        event([
+          msg("m1", "user", "goal"),
+          msg("m2", "assistant", "work"),
+          msg("m3", "user", "keep"),
+          msg("m4", "assistant", "reply"),
+        ]),
+      );
+      const branch = [
+        { id: "c1", type: "compaction", timestamp: 10, ...first.compaction },
+        msg("m3", "user", "keep"),
+        msg("m4", "assistant", "reply"),
+        msg("m5", "user", "next"),
+        msg("m6", "assistant", "reply"),
+      ];
+      const request = event(
+        branch,
+        first.compaction.summary,
+        reason === "blackhole" ? PI_VCC_COMPACT_INSTRUCTION : undefined,
+      );
+      request.reason = reason === "blackhole" ? "manual" : reason;
+      const result = harness.invoke(request);
+      expect(result.compaction.details.chainStart).toBe(reason !== "manual");
+      expect(result.compaction.details["om.folded"]).toBeUndefined();
+    },
+  );
+
+  it("default and invalid-chain fallback both use bounded compact-all memory", () => {
+    const observations = [
+      {
+        id: "aaaaaaaaaaaa",
+        content: "x".repeat(1000),
+        timestamp: "today",
+        relevance: "high",
+        tokenCount: 0,
+        sourceEntryIds: ["m1"],
+      },
+    ];
+    const records = [
+      {
+        id: "om",
+        type: "custom",
+        customType: "om.observations.recorded",
+        data: { observations, coversUpToId: "m1" },
+      },
+    ];
+    for (const mode of ["default", "append"]) {
+      const harness = createHarness({
+        memory: true,
+        observationsPoolMaxTokens: 100,
+        compactionSummaryMode: mode,
+      });
+      const branch = [
+        msg(
+          "m1",
+          "user",
+          "Please fix the authentication bug in src/auth.ts and preserve existing behavior.",
+        ),
+        ...records,
+        msg("m2", "assistant", "work"),
+        msg("m3", "assistant", "work"),
+      ];
+      if (mode === "append")
+        branch.unshift({
+          id: "bad",
+          type: "compaction",
+          firstKeptEntryId: "",
+          summary: "prior",
+          details: { version: 2, summaryMode: "append" },
+        } as any);
+      const result = harness.invoke(event(branch, mode === "append" ? "prior" : undefined));
+      expect(result.compaction.details.version).toBe(1);
+      expect(result.compaction.details["om.folded"].observations).toEqual([]);
+      expect(result.compaction.summary).not.toContain("x".repeat(1000));
+    }
   });
 });

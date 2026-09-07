@@ -174,3 +174,22 @@ describe("renderSummary", () => {
     expect(result.indexOf("Second observation")).toBeGreaterThan(obsSection);
   });
 });
+
+describe("reflection output budget", () => {
+  it("keeps newest whole records that fit, skipping oversized records", async () => {
+    const { selectPriorReflections, reflectionToSummaryLine } =
+      await import("../src/om/ledger/render-summary.js");
+    const { estimateStringTokens } = await import("../src/om/tokens.js");
+    const refs = ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"].map((id) =>
+      makeReflection(id, { content: "x", tokenCount: 0 }),
+    );
+    refs[3].content = "x".repeat(1000);
+    const budget = estimateStringTokens(refs.slice(1, 3).map(reflectionToSummaryLine).join("\n"));
+    const selected = selectPriorReflections(refs, budget);
+    expect(selected).toEqual(refs.slice(1, 3));
+    expect(
+      estimateStringTokens(selected.map(reflectionToSummaryLine).join("\n")),
+    ).toBeLessThanOrEqual(budget);
+    expect(refs).toHaveLength(4);
+  });
+});

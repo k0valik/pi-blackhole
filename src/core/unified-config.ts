@@ -171,7 +171,7 @@ export interface UnifiedConfig {
    * diffing/normalizing it (spec §4.2). Optional; unset by default.
    */
   compactAfterPresets?: Record<string, PresetAnchorDef[]>;
-  /** Observation pool token pressure for full fold. */
+  /** Full-fold pressure and max estimated rendered observation-line tokens. */
   observationsPoolMaxTokens: number;
   /** Cap for rendered reflection lines in the compaction output (newest-first
    *  keep). Reflections otherwise accumulate without bound across compactions.

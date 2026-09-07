@@ -47,7 +47,8 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
   "observeAfterTokens": 15000,    // Token threshold for observer runs
   "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
-  "observationsPoolMaxTokens": 20000, // Observation pool token ceiling
+  "observationsPoolMaxTokens": 20000, // Full-fold pressure + rendered observation-line cap
+  "reflectionsPoolMaxTokens": 8000, // Rendered reflection-line cap
   "observationsPoolTargetTokens": 10000, // Target after dropper prune (no-op)
   "reflectorInputMaxTokens": 80000, // Reflector prompt token cap
   "dropperInputMaxTokens": 80000,  // Dropper prompt token cap
@@ -362,7 +363,7 @@ Token thresholds that control when the OM pipeline runs. Unchanged from the prev
 
 ### `observationsPoolMaxTokens`
 
-Hard ceiling for the active observation pool. The dropper prunes when this ceiling is reached.
+Stored observation-token pressure threshold for full-fold maintenance, plus a hard cap on estimated rendered observation lines in compaction output. IDs, timestamps, relevance labels and newline separators count. High/critical observations are preferred newest-first, then medium/low by relevance and recency. Oversized records are skipped; selected records stay whole and return to source order. Source history is not deleted.
 
 | Type | Default |
 |------|---------|
@@ -370,11 +371,13 @@ Hard ceiling for the active observation pool. The dropper prunes when this ceili
 
 ### `reflectionsPoolMaxTokens`
 
-Cap for rendered reflection lines in the compaction output (newest-first keep). Without it reflections accumulate without bound across compactions. `0` disables the cap.
+Hard cap on estimated rendered reflection lines in compaction output. Selects newest whole records that fit, then restores source order. IDs and newline separators count. Non-negative finite integer; `0` disables the cap. Invalid file values use the default. This does not limit worker prompts or raw/view lookups, and omitted source records remain available through `recall`.
 
 | Type | Default |
 |------|---------|
-| number | 8000 |
+| non-negative integer | 8000 |
+
+Both output budgets use the project's chars/4 estimate, not an exact provider tokenizer. Section headings, recall note and footer add tokens outside these line budgets; total trailing memory is not exactly 28,000 tokens. Compact-all retains eligible bounded memory and applies recorded drops.
 
 ### `observationsPoolTargetTokens`
 
@@ -565,7 +568,7 @@ Boolean fields:
 | `PI_BLACKHOLE_SESSION_FALLBACK` | `sessionFallback` |
 | `PI_BLACKHOLE_FULL_FOLD_ALWAYS` | `fullFoldAlways` |
 
-Positive-integer fields (invalid values fall back):
+Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accepts `0` to disable its cap):
 
 | Variable | Overrides |
 |----------|-----------|
@@ -692,7 +695,10 @@ Controls how auto-compaction summaries are stored and presented to the model. On
 - Auto-compactions append a new segment to the chain; earlier segments stay visible to the model.
 - Explicit `/blackhole` rebases the active chain into one clean segment and starts a new chain.
 - Legacy v1 summaries (from before this feature) enter through one marked rebase.
-- When the projected chain passes half of the model's context window, the next auto-compaction folds it back into one segment.
+- At an existing compaction, ordinary rebase requires pressure **and** useful saving. Pressure means rendered append chain (including incoming segment and host wrappers) exceeds `floor(W / 8)`, or estimated full context exceeds `floor(W / 2)`. Saving must reach `max(1, min(24000, floor(24000 * W / 272000)))`. At a 272k window: 34k chain pressure, 136k context pressure, 24k minimum saving.
+- Both candidates contain the same current memory and kept tail. Full totals use a compatible trusted usage baseline minus reconstructed visible baseline plus reconstructed candidate content. Missing or inconsistent evidence leaves totals **unknown**, with chain-only policy still available. Without a supplied finite positive window, use 34k/24k chain policy and no invented capacity threshold.
+- Explicit `/blackhole` forces rebase after normal guards. `/compact` does not. Overflow recovery, or known append total above `W - reserveTokens`, chooses the smaller candidate without a 24k minimum. Estimates do not prove overflow recovery; Pi retains retry/error control.
+- This governor never requests compaction. Upstream threshold presets and explicit user cadence (including 168,000) are unchanged. No extra model call, price model, or timer.
 - A new `context` hook projects segments before each model call and **fails closed to the fallback** on any malformed state.
 - Falls back to rewrite surgery once per session when append mode encounters unsupported state.
 
