@@ -19,6 +19,7 @@ import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import { DEFAULTS, type UnifiedConfig } from "../core/unified-config.js";
+import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
@@ -152,6 +153,26 @@ export const config = new ConfigManager<UnifiedConfig>({
       integer: true,
       min: 0,
       max: 2_000_000,
+    },
+    {
+      key: "compactAfterPreset",
+      type: "enum",
+      label: "Compaction threshold preset",
+      description:
+        "Window-scaled curve that sets the threshold when no numeric knob above is set (default: compact at 90% of a 32k window, falling to 40% at 1M). To edit the curve or add presets, hand-edit compactAfterPresets in the config file.",
+      value: cfg.compactAfterPreset ?? "default",
+      // Options = built-in preset names + any user-added names from the file
+      // (same effective-presets merge the resolver uses, so the modal list and
+      // runtime resolution cannot disagree).
+      options: Object.keys(effectivePresets(cfg)),
+      optionLabels: Object.fromEntries(
+        Object.keys(effectivePresets(cfg)).map((name) => [
+          name,
+          name === "default"
+            ? "default — falling curve (0.90 @ 32k → 0.40 @ 1M)"
+            : `${name} (custom preset)`,
+        ]),
+      ),
     },
 
     // ── Observational Memory ──

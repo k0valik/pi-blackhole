@@ -169,3 +169,90 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
     expect("compactReserveTokens" in written2).toBe(false);
   });
 });
+
+describe("preset-curve select + hand-edited preset definitions (window curve)", () => {
+  it("exposes the compactAfterPreset select with built-in + user preset names", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+
+    const base = { ...DEFAULTS } as Record<string, unknown>;
+    const fields = config.opts.fields(base as never);
+    const select = fields.find((f: { key: string }) => f.key === "compactAfterPreset");
+    expect(select).toBeDefined();
+    expect(select.type).toBe("enum");
+    // Built-in "default" preset is always offered; default value governs.
+    expect(select.options).toContain("default");
+    expect(select.value).toBe("default");
+
+    // A user-added preset name joins the options (same merge the resolver uses).
+    base.compactAfterPresets = { "early-1m": [{ window: 131_072, ratio: 0.6 }] };
+    const fields2 = config.opts.fields(base as never);
+    const select2 = fields2.find((f: { key: string }) => f.key === "compactAfterPreset");
+    expect(select2.options).toEqual(["default", "early-1m"]);
+  });
+
+  it("compactAfterPresets is NOT a DEFAULTS member (save() must carry it verbatim)", async () => {
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    expect(Object.keys(DEFAULTS)).not.toContain("compactAfterPresets");
+  });
+
+  it("persists a knob edit whose definition exists in the file; definitions survive verbatim", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    const { writeFileSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    const cfgDir = join(testDir, "pi-blackhole-preset-save");
+    const mkdir = await import("node:fs");
+    mkdir.mkdirSync(cfgDir, { recursive: true });
+    const file = join(cfgDir, "pi-blackhole-config.json");
+
+    // User hand-added a preset definition to the file; the modal loads it.
+    const defs = { "early-1m": [{ window: 131_072, ratio: 0.6 }] };
+    writeFileSync(file, JSON.stringify({ compactAfterPresets: defs }, null, 2));
+
+    // Modal selects "early-1m" (valid: it is in the effective option list).
+    const modalCfg = {
+      ...DEFAULTS,
+      compactAfterPreset: "early-1m",
+      compactAfterPresets: defs,
+    } as Record<string, unknown>;
+    config.save(modalCfg as never, "global", undefined, cfgDir);
+
+    const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(written.compactAfterPreset).toBe("early-1m");
+    // The hand-edited definition is preserved byte-for-byte (no normalization).
+    expect(written.compactAfterPresets).toEqual(defs);
+  });
+
+  it("a stale modal snapshot cannot clobber a mid-modal hand edit (R1)", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    const { writeFileSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    const cfgDir = join(testDir, "pi-blackhole-preset-preserve");
+    const mkdir = await import("node:fs");
+    mkdir.mkdirSync(cfgDir, { recursive: true });
+    const file = join(cfgDir, "pi-blackhole-config.json");
+
+    const v1 = { "early-1m": [{ window: 131_072, ratio: 0.6 }] };
+    writeFileSync(file, JSON.stringify({ compactAfterPresets: v1 }, null, 2));
+    // Modal snapshot taken at open (carries v1), then the user hand-edits the
+    // file WHILE the modal is open:
+    const v2 = {
+      "early-1m": [{ window: 262_144, ratio: 0.55 }],
+      default: [{ window: 32_768, ratio: 0.85 }],
+    };
+    writeFileSync(file, JSON.stringify({ compactAfterPresets: v2 }, null, 2));
+
+    // …and saves an unrelated field (ratio). save() re-reads the file, so the
+    // hand edit must survive; the stale v1 snapshot must NOT be written back.
+    const modalCfg = { ...DEFAULTS, compactAfterRatio: 0.5 } as Record<string, unknown>;
+    config.save(modalCfg as never, "global", undefined, cfgDir);
+
+    const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(written.compactAfterPresets).toEqual(v2);
+    expect(written.compactAfterRatio).toBe(0.5);
+  });
+});
