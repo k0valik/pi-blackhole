@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Port of eslint.config.mjs (removed): oxlint has no type-aware rules, so
+  // @typescript-eslint/no-floating-promises, no-misused-promises, and
+  // restrict-template-expressions have no equivalent here. tsc
+  // (noUnusedLocals/noUnusedParameters) plus no-unused-vars below carry the
+  // remaining coverage. Unused floating promises are still worth watching
+  // for in review.
+  // scripts/ is tracked repo code and stays in scope; .pi/ is gitignored
+  // local tooling that is never staged, so it stays out.
+  "ignorePatterns": ["node_modules/", "dist/", "docs/**", "src/pi-base/**/*.test.ts", ".pi/**"],
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      // Vendored pi-base: keep verbatim re-vendor diff minimal, same carve-out
+      // the eslint config had.
+      "files": ["src/pi-base/**/*.ts"],
+      "rules": {
+        "no-unused-vars": "off"
+      }
+    }
+  ]
+}

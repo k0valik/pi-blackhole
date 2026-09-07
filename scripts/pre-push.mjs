@@ -8,10 +8,6 @@
 
 import { execFileSync } from "node:child_process";
 
-function run(command, args) {
-  execFileSync(command, args, { stdio: "inherit" });
-}
-
 function runSilent(command, args) {
   try {
     return {
@@ -39,7 +35,7 @@ const lines = input.trim().split("\n").filter(Boolean);
 let changed = "";
 
 for (const line of lines) {
-  const [localRef, localSha, remoteRef, remoteSha] = line.split(" ");
+  const [localRef, localSha, , remoteSha] = line.split(" ");
   if (!localSha || localSha === "0000000000000000000000000000000000000000") continue; // deletions
   if (localRef && localRef.startsWith("refs/tags/")) {
     changed += " tags";

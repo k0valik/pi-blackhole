@@ -7,7 +7,7 @@ Pi extension package: algorithmic compaction (pi-vcc) + observational memory (pi
 ```bash
 pnpm test          # vitest run (all tests, ~89 files, no network)
 pnpm typecheck     # tsc --noEmit (src/**/*.ts + index.ts only)
-pnpm lint          # eslint .
+pnpm lint          # oxlint .
 pnpm format:check  # oxfmt --check .
 pnpm build         # tsup bundle → dist/ (gitignored; pi-entry.js loads dist/ fast or falls back to index.ts)
 pnpm check         # typecheck + lint
@@ -22,7 +22,7 @@ pnpm check         # typecheck + lint
 ## Testing quirks
 
 - Source imports use `.js` extensions (`../om/tokens.js`); vitest's alias strips them. Keep this convention in new files.
-- **`tests/` is NOT in tsconfig.json** — running tsc over tests surfaces ~150 pre-existing type errors tracked as a separate cleanup. Do not "fix" test type errors; eslint lints tests without type-aware rules.
+- **`tests/` is NOT in tsconfig.json** — running tsc over tests surfaces ~150 pre-existing type errors tracked as a separate cleanup. Do not "fix" test type errors; oxlint covers unused vars there.
 - `src/pi-base/**/*.test.ts` is excluded from tsconfig and type-aware lint by design.
 - Tests are pure unit tests with fake agent loops — no LLM/network. `tests/vcc-support/real-sessions.ts` optionally samples `~/.pi/agent/sessions`, but nothing requires real data.
 
