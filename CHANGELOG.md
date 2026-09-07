@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+---
+
+## [0.5.2] - 2026-09-07
+
 ### Added
 
 - **One-time migration notice for pinned-threshold users.** On the first session start of the 0.5.2 release, users whose config pins a flat `compactAfterTokens` threshold (the pre-curve legacy behavior) get a single TUI notification explaining that auto-compaction can now derive the threshold from the model's context window and how to switch (`/blackhole settings` → Compaction, or `/blackhole changelog` for details). Users already on a derived knob, the preset curve, manual/off mode, or Pi-default engine are never notified; no state is written to disk (read-only filesystems unaffected), and the notice self-disables from 0.5.3 on. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
@@ -19,10 +23,6 @@
 - **Consolidation is cancelled across session reloads.** Reloading or replacing a session during active consolidation could append late observer/reflector output through the stale extension instance while reflection work was lost instead of retried. Observer/reflector/dropper stages, model resolution, and deferred compaction are now guarded by a runtime generation + AbortSignal on `session_start`/`session_shutdown`, and a fresh runtime retries the work without accepting stale output ([upstream OM `#58`](https://github.com/elpapi42/pi-observational-memory/pull/58)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
 - **Cooldown reasons no longer store HTML error pages and skip toasts no longer dump them.** Cooldown reasons are sanitized to a short `HTTP <status>` line (capped at 200 chars) so an HTML WAF block page never lands in `pi-blackhole-cooldown.json` or the skip toast, which now points at the cooldown log only. ([#80](https://github.com/k0valik/pi-blackhole/issues/80))
 - **OM workers resolve `streamSimple` through the model registry for custom providers.** Observer/reflector/dropper were hard-wired to the pi-ai compat `streamSimple`, which cannot dispatch `pi.registerProvider` streams (cursor-sdk, CLIProxyAPI, …), so custom-provider-only setups crashed after a successful turn. Resolution chain: `modelRegistry.streamSimple` (Pi [`#8964`](https://github.com/earendil-works/pi/issues/8964)) → `getRegisteredProviderConfig()` matching `model.provider`, then `model.api` → global `Symbol.for` map → compat fallback. Custom-provider-only setups can now leave `observational-memory.model` unset ([upstream OM `#60`](https://github.com/elpapi42/pi-observational-memory/pull/60), [`#30`](https://github.com/elpapi42/pi-observational-memory/issues/30)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
-
----
-
-## [0.5.1] - 2026-09-06
 
 ---
 

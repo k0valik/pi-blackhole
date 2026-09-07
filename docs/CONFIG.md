@@ -289,7 +289,7 @@ Direction of the built-in curve is intentional: the ratio **falls** as the windo
 | 262,144 | 0.70 | 183,500 | 78,644 |
 | 1,048,576 | 0.40 | 419,430 | 629,146 |
 
-Worked examples: 65,536 → ~0.867 (fires ~56,798); 200,000 → ~0.747 (fires ~149,482, ≈75% full); 1,000,000 → ~0.419 (fires ~418,530); 1,048,576 and above → exactly 0.40 (constant extrapolation); below 32,768 → 0.90 (constant).
+Worked examples: 65,536 → ~0.867 (fires ~56,797); 200,000 → ~0.747 (fires ~149,482, ≈75% full); 1,000,000 → ~0.419 (fires ~418,530); 1,048,576 and above → exactly 0.40 (constant extrapolation); below 32,768 → 0.90 (constant).
 
 **Example:**
 
