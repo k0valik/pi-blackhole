@@ -55,6 +55,8 @@ interface RunDropperArgs {
   maxTurns?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
+  /** Model registry for streamSimple resolution (custom providers, OAuth). */
+  modelRegistry?: any;
 }
 
 const DROP_SKIP_FULLNESS = 0.1;
@@ -364,7 +366,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
 
   const loop = args.agentLoop ?? agentLoop;
   // ── Bridge stream function ──
-  const bridgeStreamFn = createBridgeStreamFn(streamSimple);
+  const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
   const streamFn = args.streamFn ?? bridgeStreamFn;
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;

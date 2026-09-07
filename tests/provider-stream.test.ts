@@ -113,6 +113,122 @@ describe("custom provider stream bridge", () => {
     expect(fallbackStream).not.toHaveBeenCalled();
   });
 
+  it("uses modelRegistry.streamSimple when the global map has no match", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const registryStream = vi.fn(() => "registry");
+    const modelRegistry = {
+      streamSimple: registryStream,
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // No global map entry — should use registry.streamSimple
+    expect(bridge({ provider: "cursor", api: "cursor-sdk" }, "ctx", {})).toBe("registry");
+    expect(registryStream).toHaveBeenCalledOnce();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
+  it("iterates modelRegistry.getRegisteredProviderConfig to find matching model.api", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const cursorStream = vi.fn(() => "cursor");
+    const openaiStream = vi.fn(() => "openai");
+    const modelRegistry = {
+      getRegisteredProviderIds: () => ["openai", "cursor"],
+      getRegisteredProviderConfig: (id: string) => {
+        if (id === "openai") return { api: "openai-completions", streamSimple: openaiStream };
+        if (id === "cursor") return { api: "cursor-sdk", streamSimple: cursorStream };
+        return undefined;
+      },
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // Model with cursor-sdk api should find cursorStream
+    expect(bridge({ provider: "cursor", api: "cursor-sdk" }, "ctx", {})).toBe("cursor");
+    expect(cursorStream).toHaveBeenCalledOnce();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
+  it("prefers registry.streamSimple over getRegisteredProviderConfig iteration", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const registryStream = vi.fn(() => "registry");
+    const matchingStream = vi.fn(() => "matching");
+    const modelRegistry = {
+      streamSimple: registryStream,
+      getRegisteredProviderIds: () => ["cursor"],
+      getRegisteredProviderConfig: () => ({ api: "cursor-sdk", streamSimple: matchingStream }),
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // registry.streamSimple takes precedence
+    expect(bridge({ provider: "cursor", api: "cursor-sdk" }, "ctx", {})).toBe("registry");
+    expect(registryStream).toHaveBeenCalledOnce();
+    expect(matchingStream).not.toHaveBeenCalled();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
+  it("prefers the model's own provider when several registered providers share an api", () => {
+    // Same collision shape as the global-map test above: anthropic and
+    // databricks both declare api "anthropic-messages". The registry iteration
+    // must not let the first-registered provider hijack the model's stream.
+    const fallbackStream = vi.fn(() => "fallback");
+    const anthropicStream = vi.fn(() => "anthropic");
+    const databricksStream = vi.fn(() => "databricks");
+    const configs: Record<string, { api: string; streamSimple: Function }> = {
+      anthropic: { api: "anthropic-messages", streamSimple: anthropicStream },
+      databricks: { api: "anthropic-messages", streamSimple: databricksStream },
+    };
+    const modelRegistry = {
+      getRegisteredProviderIds: () => Object.keys(configs),
+      getRegisteredProviderConfig: (id: string) => configs[id],
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    expect(bridge({ provider: "databricks", api: "anthropic-messages" }, "ctx", {})).toBe(
+      "databricks",
+    );
+    expect(anthropicStream).not.toHaveBeenCalled();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
+  it("falls back to api-only matching when no registered provider matches model.provider", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const cursorStream = vi.fn(() => "cursor");
+    const modelRegistry = {
+      getRegisteredProviderIds: () => ["cursor"],
+      getRegisteredProviderConfig: () => ({ api: "cursor-sdk", streamSimple: cursorStream }),
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // Provider id differs from the registered id (e.g. host alias) — api match applies.
+    expect(bridge({ provider: "cursor-alias", api: "cursor-sdk" }, "ctx", {})).toBe("cursor");
+    expect(cursorStream).toHaveBeenCalledOnce();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
+  it("falls back to compat when registry lookup throws", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const modelRegistry = {
+      getRegisteredProviderIds: () => {
+        throw new Error("no runtime");
+      },
+      getRegisteredProviderConfig: () => undefined,
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // Registry throws — should fall back to compat
+    expect(bridge({ provider: "cursor", api: "cursor-sdk" }, "ctx", {})).toBe("fallback");
+    expect(fallbackStream).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to compat when registry has no streamSimple or provider methods", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const modelRegistry = {};
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // Empty registry — should fall back to compat
+    expect(bridge({ provider: "cursor", api: "cursor-sdk" }, "ctx", {})).toBe("fallback");
+    expect(fallbackStream).toHaveBeenCalledOnce();
+  });
+
   it("falls back to the default stream for a provider without a custom stream", () => {
     const fallbackStream = vi.fn(() => "fallback");
     const anthropicStream = vi.fn();

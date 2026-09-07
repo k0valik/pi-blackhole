@@ -7,7 +7,19 @@
 
 ### Changed
 
+- **Ledger `entryIndexById` map is cached per entry-ID list** instead of being rebuilt on every call, removing a full-branch O(n) rebuild from the per-turn consolidation and compaction trigger paths. Includes a canary test documenting why upstream OM PR #57's zero-chunk observer backoff (fix 3) is unnecessary in our architecture ([upstream OM `#57`](https://github.com/elpapi42/pi-observational-memory/pull/57)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+
 - **No-config auto-compaction now follows the built-in `default` preset curve (behavior change on upgrade).** Users who never set a numeric knob previously auto-compacted at a flat 81,000 tokens; they now compact at `floor(window × ratio)` under the `default` preset, whose ratio _falls_ as the window grows — small 32k/64k local windows fill to ~90% and now auto-compact mid-session where the flat 81k was unreachable, while 1M-class windows compact early (~0.40) instead of at ~8% full. Config files scaffolded or modal-written before this change that literally contain `"compactAfterTokens": 81000` are auto-migrated: exactly `81000` is treated as legacy scaffold residue (never a deliberate pin) and dropped, so the preset curve / derived knobs govern — unless the value came from the `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` env var, which stays explicit. Any other explicit value (e.g. 80,000 or 180,000) still pins a fixed threshold; the flat-81k behavior can no longer be pinned by writing exactly `81000`. Spec: `work_docs/proposal-ratio-presets-by-context-window.md`.
+
+### Fixed
+
+- **Compact-all compactions no longer silently drop every OM observation and reflection.** pi-core's compact-all sentinel (`firstKeptEntryId === ""`) resolved the projection boundary to index −1, producing an empty OM summary on single-prompt and no-user-message sessions; the OM fold now covers the whole branch up to the tip. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+- **Consolidation is cancelled across session reloads.** Reloading or replacing a session during active consolidation could append late observer/reflector output through the stale extension instance while reflection work was lost instead of retried. Observer/reflector/dropper stages, model resolution, and deferred compaction are now guarded by a runtime generation + AbortSignal on `session_start`/`session_shutdown`, and a fresh runtime retries the work without accepting stale output ([upstream OM `#58`](https://github.com/elpapi42/pi-observational-memory/pull/58)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+- **OM workers resolve `streamSimple` through the model registry for custom providers.** Observer/reflector/dropper were hard-wired to the pi-ai compat `streamSimple`, which cannot dispatch `pi.registerProvider` streams (cursor-sdk, CLIProxyAPI, …), so custom-provider-only setups crashed after a successful turn. Resolution chain: `modelRegistry.streamSimple` (Pi [`#8964`](https://github.com/earendil-works/pi/issues/8964)) → `getRegisteredProviderConfig()` matching `model.provider`, then `model.api` → global `Symbol.for` map → compat fallback. Custom-provider-only setups can now leave `observational-memory.model` unset ([upstream OM `#60`](https://github.com/elpapi42/pi-observational-memory/pull/60), [`#30`](https://github.com/elpapi42/pi-observational-memory/issues/30)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+
+---
+
+## [0.5.1] - 2026-09-06
 
 ---
 
