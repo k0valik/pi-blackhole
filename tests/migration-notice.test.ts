@@ -26,10 +26,29 @@ describe("isThresholdMigrationCandidate", () => {
     expect(isThresholdMigrationCandidate(pinnedConfig())).toBe(true);
   });
 
-  test("false when no compactAfterTokens is set (already on the curve)", () => {
+  test("false when no compactAfterTokens is set on auto (already on the curve)", () => {
     expect(
       isThresholdMigrationCandidate({ compaction: "auto", compactionEngine: "blackhole" }),
     ).toBe(false);
+  });
+
+  test("true on manual mode even without a pin — opted out, nudge to reconsider", () => {
+    expect(
+      isThresholdMigrationCandidate({ compaction: "manual", compactionEngine: "blackhole" }),
+    ).toBe(true);
+    expect(
+      isThresholdMigrationCandidate({
+        compaction: "manual",
+        compactionEngine: "blackhole",
+        compactAfterTokens: 120_000,
+      }),
+    ).toBe(true);
+  });
+
+  test("true on off mode even without a pin — opted out, nudge to reconsider", () => {
+    expect(
+      isThresholdMigrationCandidate({ compaction: "off", compactionEngine: "blackhole" }),
+    ).toBe(true);
   });
 
   test.each([
@@ -55,9 +74,18 @@ describe("isThresholdMigrationCandidate", () => {
     ).toBe(true);
   });
 
-  test.each(["manual", "off"] as const)("false when compaction mode is %s", (mode) => {
-    expect(isThresholdMigrationCandidate({ ...pinnedConfig(), compaction: mode })).toBe(false);
-  });
+  test.each(["auto", "manual", "off"] as const)(
+    "false when non-derived knob engaged on mode %s (already adopted)",
+    (mode) => {
+      expect(
+        isThresholdMigrationCandidate({
+          ...pinnedConfig(),
+          compaction: mode,
+          compactAfterRatio: 0.65,
+        }),
+      ).toBe(false);
+    },
+  );
 
   test("false when compactionEngine is pi-default", () => {
     expect(
@@ -97,7 +125,6 @@ describe("maybeNotifyThresholdMigration", () => {
     // T4: assert the unique actionable tokens, not a generic substring.
     expect(calls[0]!.message).toContain("/blackhole settings");
     expect(calls[0]!.message).toContain("/blackhole changelog");
-    expect(calls[0]!.message).toContain("compactAfterTokens");
   });
 
   test("second call in the same process is silent (once-per-process guard)", () => {

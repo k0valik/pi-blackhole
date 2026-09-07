@@ -23,9 +23,9 @@ import { getPackageVersion } from "./changelog.js";
 export const MIGRATION_NOTICE_VERSION = "0.5.2";
 
 const MESSAGE =
-  "pi-blackhole: auto-compaction can now derive its threshold from your model's context window. " +
-  "Your compactAfterTokens pin overrides it — clear it in /blackhole settings → Compaction, " +
-  "or set compactAfterRatio. Details: /blackhole changelog.";
+  "pi-blackhole: auto-compaction can now derive its threshold from your model's context window " +
+  "(preset curve — no fixed threshold needed). If you pinned a threshold or turned compaction off, " +
+  "reconsider: /blackhole settings → Compaction. Details: /blackhole changelog.";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -56,16 +56,22 @@ export interface MigrationNoticeDeps {
 // ── Candidate check ──────────────────────────────────────────────────────
 
 /**
- * True when the user is pinned to the legacy flat threshold with no
- * window-derived knob engaged. The loader (loadUnifiedConfig) already strips
- * a literal 81000 as scaffold residue and never strips env values, so a
- * post-load `compactAfterTokens` is always a deliberate pin.
+ * True when the user is NOT already on the derived/context-window path and
+ * would benefit from a nudge. Audience is deliberately wide:
+ *
+ * - pinned flat `compactAfterTokens` on auto (the pin blocks the curve)
+ * - compaction `manual`/`off` (opted out — possibly exactly because there
+ *   was no context-window derivation before)
+ *
+ * Skipped when the user already engaged with derived mode (any window knob),
+ * when they use Pi's own engine (the threshold message is meaningless), or
+ * when auto + no pin (already on the derived default curve). The loader
+ * (loadUnifiedConfig) strips a literal 81000 as scaffold residue, so a
+ * post-load value is always a deliberate pin.
  */
 export function isThresholdMigrationCandidate(config: MigrationNoticeConfig): boolean {
-  if (config.compaction !== "auto") return false;
   if (config.compactionEngine !== "blackhole") return false;
-  if (typeof config.compactAfterTokens !== "number") return false;
-  // Any derived knob engaged → the user already adopted the new model.
+  // Already engaged with context-window derivation → no nudge.
   if (config.compactAfterRatio !== undefined) return false;
   if (config.compactReserveTokens !== undefined) return false;
   if (config.compactAfterPreset !== undefined && config.compactAfterPreset !== "default") {
@@ -77,6 +83,11 @@ export function isThresholdMigrationCandidate(config: MigrationNoticeConfig): bo
   ) {
     return false;
   }
+  // Auto + no pin → already on the default preset curve.
+  if (config.compaction === "auto") {
+    return typeof config.compactAfterTokens === "number";
+  }
+  // manual / off (or unset) → opted out, worth nudging.
   return true;
 }
 
@@ -98,6 +109,8 @@ export function maybeNotifyThresholdMigration(
   if (notifiedThisProcess) return false;
   const version = deps.version ?? getPackageVersion();
   if (version !== MIGRATION_NOTICE_VERSION) return false;
+  // Passive mode disables compaction + memory entirely — never nudge.
+  if (isPassiveMode()) return false;
   if (!isThresholdMigrationCandidate(config)) return false;
   if (!ctx?.hasUI) return false;
 
@@ -111,6 +124,16 @@ export function maybeNotifyThresholdMigration(
     // Stale extension context — harmless; the guard stays set.
   }
   return true;
+}
+
+/** Mirrors the loader's legacy passive env vars. */
+function isPassiveMode(): boolean {
+  const v =
+    process.env.PI_BLACKHOLE_PASSIVE ??
+    process.env.PI_VCC_OM_PASSIVE ??
+    process.env.PI_OBSERVATIONAL_MEMORY_PASSIVE;
+  if (v === undefined) return false;
+  return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
 }
 
 /** Test isolation: clear the once-per-process guard. */
