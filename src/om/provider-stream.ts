@@ -23,7 +23,7 @@ interface ProviderRegistry {
  * `streamSimple` is the host-composed path (Pi #8964). Until that lands on the
  * facade, `getRegisteredProviderConfig` still exposes each `registerProvider`
  * `streamSimple` handler, keyed by the extension provider id — match on
- * `config.api === model.api`.
+ * `providerId === model.provider` first, then on `config.api === model.api`.
  */
 export interface ModelRegistry {
   streamSimple?: Function;
@@ -148,19 +148,27 @@ export function createBridgeStreamFn(
       return (modelRegistry as any).streamSimple(model, ctx, opts);
     }
 
-    // 2. Iterate getRegisteredProviderConfig to find matching model.api
+    // 2. Iterate getRegisteredProviderConfig: prefer the model's own provider
+    //    (several providers can share one api — providerStreamKey rationale),
+    //    then fall back to an api-only match for aliased provider ids.
     if (
       modelRegistry &&
       typeof (modelRegistry as any).getRegisteredProviderIds === "function" &&
       typeof (modelRegistry as any).getRegisteredProviderConfig === "function"
     ) {
       try {
+        let apiMatch: Function | undefined;
         for (const providerId of (modelRegistry as any).getRegisteredProviderIds()) {
           const config = (modelRegistry as any).getRegisteredProviderConfig(providerId);
-          if (config?.api === model.api && typeof config.streamSimple === "function") {
+          if (!config || typeof config.streamSimple !== "function") continue;
+          if (providerId === model.provider && config.api === model.api) {
             return config.streamSimple(model, ctx, opts);
           }
+          if (config.api === model.api && apiMatch === undefined) {
+            apiMatch = config.streamSimple;
+          }
         }
+        if (apiMatch) return apiMatch(model, ctx, opts);
       } catch {
         // Incomplete host/test doubles — fall through to global map
       }

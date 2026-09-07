@@ -165,6 +165,45 @@ describe("custom provider stream bridge", () => {
     expect(fallbackStream).not.toHaveBeenCalled();
   });
 
+  it("prefers the model's own provider when several registered providers share an api", () => {
+    // Same collision shape as the global-map test above: anthropic and
+    // databricks both declare api "anthropic-messages". The registry iteration
+    // must not let the first-registered provider hijack the model's stream.
+    const fallbackStream = vi.fn(() => "fallback");
+    const anthropicStream = vi.fn(() => "anthropic");
+    const databricksStream = vi.fn(() => "databricks");
+    const configs: Record<string, { api: string; streamSimple: Function }> = {
+      anthropic: { api: "anthropic-messages", streamSimple: anthropicStream },
+      databricks: { api: "anthropic-messages", streamSimple: databricksStream },
+    };
+    const modelRegistry = {
+      getRegisteredProviderIds: () => Object.keys(configs),
+      getRegisteredProviderConfig: (id: string) => configs[id],
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    expect(bridge({ provider: "databricks", api: "anthropic-messages" }, "ctx", {})).toBe(
+      "databricks",
+    );
+    expect(anthropicStream).not.toHaveBeenCalled();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
+  it("falls back to api-only matching when no registered provider matches model.provider", () => {
+    const fallbackStream = vi.fn(() => "fallback");
+    const cursorStream = vi.fn(() => "cursor");
+    const modelRegistry = {
+      getRegisteredProviderIds: () => ["cursor"],
+      getRegisteredProviderConfig: () => ({ api: "cursor-sdk", streamSimple: cursorStream }),
+    };
+    const bridge = createBridgeStreamFn(fallbackStream, modelRegistry);
+
+    // Provider id differs from the registered id (e.g. host alias) — api match applies.
+    expect(bridge({ provider: "cursor-alias", api: "cursor-sdk" }, "ctx", {})).toBe("cursor");
+    expect(cursorStream).toHaveBeenCalledOnce();
+    expect(fallbackStream).not.toHaveBeenCalled();
+  });
+
   it("falls back to compat when registry lookup throws", () => {
     const fallbackStream = vi.fn(() => "fallback");
     const modelRegistry = {
