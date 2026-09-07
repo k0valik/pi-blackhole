@@ -355,28 +355,30 @@ describe("saveUnifiedConfig — atomic write", () => {
   // Root bypasses write permission bits (chmod 0o555 still writable), so the
   // read-only-failure expectation cannot hold — skip under root.
   it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
-    "does not crash on read-only filesystem (returns false)", async () => {
-    const { saveUnifiedConfig } = await import("../src/core/unified-config.js");
-    // Make the config dir read-only so write fails
-    const dir = join(testDir, "pi-blackhole");
-    mkdirSync(dir, { recursive: true });
-    // Set permissions to read+execute only (no write)
-    try {
-      chmodSync(dir, 0o555);
-    } catch {
-      /* skip on Windows */
-    }
+    "does not crash on read-only filesystem (returns false)",
+    async () => {
+      const { saveUnifiedConfig } = await import("../src/core/unified-config.js");
+      // Make the config dir read-only so write fails
+      const dir = join(testDir, "pi-blackhole");
+      mkdirSync(dir, { recursive: true });
+      // Set permissions to read+execute only (no write)
+      try {
+        chmodSync(dir, 0o555);
+      } catch {
+        /* skip on Windows */
+      }
 
-    const result = saveUnifiedConfig({ compaction: "manual" });
-    expect(result).toBe(false);
+      const result = saveUnifiedConfig({ compaction: "manual" });
+      expect(result).toBe(false);
 
-    // Restore permissions so afterEach cleanup works
-    try {
-      chmodSync(dir, 0o755);
-    } catch {
-      /* skip on Windows */
-    }
-  });
+      // Restore permissions so afterEach cleanup works
+      try {
+        chmodSync(dir, 0o755);
+      } catch {
+        /* skip on Windows */
+      }
+    },
+  );
 });
 
 // ── Tests: scaffoldConfig for NixOS safety ────────────────────────────────

@@ -225,9 +225,7 @@ export function buildCompactionProjection(
         ? entryBoundary(firstKeptEntryId)
         : noneBoundary();
   const normalProjection = foldProjection(entries, {
-    observationsBoundary: compactAll
-      ? tipBoundary()
-      : entryBoundary(firstKeptEntryId),
+    observationsBoundary: compactAll ? tipBoundary() : entryBoundary(firstKeptEntryId),
     reflectionsBoundary: maintenanceBoundary,
     dropsBoundary: maintenanceBoundary,
   });
