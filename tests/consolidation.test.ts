@@ -37,7 +37,8 @@ describe("makeModelResolver — per-stage failure notifications", () => {
 
     const notifyCalls: Array<{ message: string; level?: string }> = [];
     const ctx = mockCtx(notifyCalls);
-    const resolver = makeModelResolver(runtime, ctx);
+    const generation = runtime.captureGeneration("test-session");
+    const resolver = makeModelResolver(runtime, ctx, generation);
 
     // Observer stage fails → should show notification
     runtime.consolidationPhase = "observer";
