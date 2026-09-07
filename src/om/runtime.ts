@@ -13,10 +13,10 @@ import { type Config, type ConfiguredModel, DEFAULTS, loadConfig } from "./confi
 import type { CompactionStats } from "../hooks/before-compact.js";
 import {
   isCooldownActive,
-  getCooldownEntry,
   recordCooldown,
   expireCooldowns,
   modelKey,
+  sanitizeCooldownReason,
 } from "./cooldown.js";
 import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
@@ -387,12 +387,12 @@ export class Runtime {
       }
 
       if (isCooldownActive(candidate)) {
-        const entry = getCooldownEntry(candidate);
-        const reason = entry ? `: ${entry.reason}` : "";
+        // Issue #80: the cooldown reason can be an error body — keep it in
+        // the log file only, never interpolate it into the toast.
         this.tryEmitInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${stageName} skipping ${key} (cooldown${reason} — details in cooldown log)`,
+          `Observational memory: ${stageName} skipping ${key} (cooldown — details in cooldown log)`,
         );
         continue;
       }
@@ -601,11 +601,11 @@ export class Runtime {
       return;
     }
     const rawReason = error instanceof Error ? error.message : String(error || "unknown error");
-    // Strip trailing JSON body from API error messages for display cleanliness.
-    // To avoid stripping non-JSON braces like "{host}", only strip if the text
-    // after the brace pair consists solely of whitespace (i.e. JSON is at end).
-    // The full rawReason is NOT stored in the cooldown log — only this brief form.
-    const brief = rawReason.replace(/\s*\{[\s\S]*?\}\s*$/, "").trim();
+    // Issue #80: strip trailing JSON bodies AND HTML error pages (WAF blocks)
+    // down to a short `HTTP <status>` line, capped at ~200 chars, so the
+    // cooldown log never stores a full page and the skip toast stays short.
+    // recordCooldown re-sanitizes as defense-in-depth.
+    const brief = sanitizeCooldownReason(rawReason);
     recordCooldown(modelConfig, brief, stage);
   }
 

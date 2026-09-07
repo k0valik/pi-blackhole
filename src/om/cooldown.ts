@@ -110,6 +110,63 @@ export function getCooldownEntry(
   return entry;
 }
 
+/** Maximum persisted cooldown reason length (issue #80: HTML bodies bloated the log). */
+export const COOLDOWN_REASON_MAX = 200;
+
+/**
+ * Reduce a raw error message to a short single-line status for the cooldown log.
+ *
+ * - Strips a trailing `{json}` API body (pre-existing behavior).
+ * - Cuts an HTML error page (WAF block, proxy page) at the first HTML marker
+ *   and keeps only the `HTTP <status>` prefix — the full page is never stored.
+ * - Collapses whitespace and caps the result at COOLDOWN_REASON_MAX chars.
+ *
+ * Idempotent: safe to call on an already-sanitized reason.
+ */
+export function sanitizeCooldownReason(rawReason: string): string {
+  let s = rawReason.replace(/\s*\{[\s\S]*?\}\s*$/, "").trim();
+
+  const htmlStart = s.search(/<\s*(!doctype|html|head|body)/i);
+  if (htmlStart !== -1) {
+    const prefix = s.slice(0, htmlStart).trim();
+    if (prefix) {
+      s = prefix;
+    } else {
+      return httpStatusFrom(rawReason) ?? "HTTP error (HTML body omitted)";
+    }
+  } else if (/^\s*</.test(s) || /<[a-zA-Z][^>]*>/.test(s)) {
+    const lt = s.indexOf("<");
+    const prefix = lt > 0 ? s.slice(0, lt).trim() : "";
+    if (prefix) {
+      s = prefix;
+    } else {
+      return httpStatusFrom(rawReason) ?? "HTTP error (HTML body omitted)";
+    }
+  }
+  if (/^\s*</.test(s)) {
+    return httpStatusFrom(rawReason) ?? "HTTP error (HTML body omitted)";
+  }
+
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return httpStatusFrom(rawReason) ?? "unknown error";
+  if (s.length > COOLDOWN_REASON_MAX) s = `${s.slice(0, COOLDOWN_REASON_MAX - 3).trimEnd()}...`;
+  return s;
+}
+
+/** Extract `HTTP <code>[ phrase]` from a raw error, if a status code is present. */
+function httpStatusFrom(text: string): string | undefined {
+  const m = text.match(/HTTP\/?[\d.]*\s+(\d{3})(?:\s+([A-Za-z][A-Za-z'\- ]{0,40}))?/);
+  if (m) {
+    const phrase = m[2]?.trim();
+    return phrase ? `HTTP ${m[1]} ${phrase}` : `HTTP ${m[1]}`;
+  }
+  const st = text.match(/\bstatus\s*:?\s*(\d{3})/i);
+  if (st) return `HTTP ${st[1]}`;
+  const code = text.match(/\b(400|401|402|403|404|407|408|409|422|425|429|500|502|503|504)\b/);
+  if (code) return `HTTP ${code[1]}`;
+  return undefined;
+}
+
 /**
  * Record a cooldown for a model after a retryable error.
  *
@@ -126,7 +183,9 @@ export function recordCooldown(model: OmModelConfig, reason: string, stage: stri
   const hours = model.cooldownHours ?? 1;
   const until = new Date(Date.now() + hours * 3_600_000).toISOString();
   const map = readCooldownMap();
-  map[modelKey(model)] = { until, reason, stage };
+  // Defense-in-depth (issue #80): callers pass a sanitized brief, but never
+  // persist a raw HTML page even if one slips through.
+  map[modelKey(model)] = { until, reason: sanitizeCooldownReason(reason), stage };
   writeCooldownMap(map);
 }
 
