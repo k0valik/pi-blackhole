@@ -33,7 +33,7 @@ The v1 draft optimized the mirror image (fill big windows to ~90%, fire small wi
 
 - **D1 — Direction.** Ratio falls with window; purely falling, no small-end floor. Default anchors 0.90@32k … 0.40@1M (§7).
 - **D2 — Mechanism.** One selection knob (`compactAfterPreset`, a string naming the active preset) **plus** user-editable preset _definitions_ (`compactAfterPresets`, a top-level config key) holding named window→ratio anchor lists. The modal shows only the one-knob select; definitions are hand-edited JSON.
-- **D3 — Default applies out of the box.** No config ⇒ the built-in `default` preset governs. The flat-81,000 no-knob fallback is removed; `DEFAULTS.compactAfterTokens` becomes `undefined`. Flat-81k behavior stays reproducible by explicitly setting `compactAfterTokens: 81000`.
+- **D3 — Default applies out of the box.** No config ⇒ the built-in `default` preset governs. The flat-81,000 no-knob fallback is removed; `DEFAULTS.compactAfterTokens` becomes `undefined`. Flat-81k behavior is reproducible with an explicit fixed `compactAfterTokens` at any value other than the reserved legacy marker `81000` (which the loader auto-migrates — §4.3, §10).
 - **D4 — Small end.** 0.90@32k accepted with the ~3.3k-headroom tradeoff (review finding R2; §11).
 - **D5 — Storage model.** `compactAfterPreset` is a `DEFAULTS`/modal key (edits must persist through the vendored save diff). `compactAfterPresets` is **not** a `DEFAULTS` key and has no modal field — built-in definitions live in a code-side constant merged at resolution. Required by review finding R1 (§4.2).
 - **D6 — Curve semantics.** Piecewise-linear interpolation in window space between anchors; constant extrapolation beyond the first/last anchor. A single-anchor preset degenerates to a global ratio (a feature, not an error).
@@ -99,16 +99,16 @@ Known, accepted cost: because the unknown-key branch sets `hasDiff = true` whene
 
 ### 4.3 `DEFAULTS` changes
 
-| Key                                          | Current     | New                                                       |
-| -------------------------------------------- | ----------- | --------------------------------------------------------- |
-| `compactAfterTokens`                         | `81_000`    | `undefined` (flat 81k reachable only via explicit config) |
-| `compactAfterPreset`                         | —           | `"default"`                                               |
-| `compactAfterPresets`                        | —           | _absent_ (code-side `BUILTIN_PRESETS` instead; see §4.2)  |
-| `compactAfterRatio` / `compactReserveTokens` | `undefined` | unchanged                                                 |
+| Key                                          | Current     | New                                                                                                                                    |
+| -------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `compactAfterTokens`                         | `81_000`    | `undefined` (legacy `81000` is a reserved, auto-migrated scaffold marker — a fixed threshold needs any other explicit value, spec §10) |
+| `compactAfterPreset`                         | —           | `"default"`                                                                                                                            |
+| `compactAfterPresets`                        | —           | _absent_ (code-side `BUILTIN_PRESETS` instead; see §4.2)                                                                               |
+| `compactAfterRatio` / `compactReserveTokens` | `undefined` | unchanged                                                                                                                              |
 
 `DEFAULT_COMPACT_AFTER_TOKENS` (`model-budget.ts:6–9`, duplicated at `blackhole-settings.ts:31`) dies. Its consumers switch to preset resolution: `compactThresholdTokens` fallback (`model-budget.ts:41`), the `compactAfterTokens` modal field default (`blackhole-settings.ts:118` — field now shows unset/placeholder), and the status suffix (`memory.ts:201` area). `status-overlay.ts` / `configure-overlay.ts` references are dead code (unimported) — untouched.
 
-With `DEFAULTS.compactAfterTokens = undefined`, the "explicit" test in `loadUnifiedConfig` (`unified-config.ts:642–645`, `parsed !== DEFAULTS.compactAfterTokens`) collapses to `!== undefined`, so an explicit file value of `81000` is correctly treated as explicit and **not** dropped. The entire derived-mode deletion block (`:642–651`) becomes dead code and is removed (review: the v1 draft's "§5 trap" was a red herring under this design — no new deletion condition is needed).
+**Legacy-scaffold residue (implemented, amends the review's "dead code" read):** old config files carry a literal `compactAfterTokens: 81000` — `scaffoldConfig()` and modal saves materialized the full defaults into every file. A **legacy-residue drop** replaces the old derived-mode block: when the merged value is exactly `81000` and not env-supplied (env stays explicit), it is deleted so the default preset curve or a configured derived knob governs. Without it, the scaffolded value would silently beat every window-derived surface — including the preset — regressing issue #60 for ratio/reserve users whose files carry it. The review's assumption that "no injected default ⇒ no deletion needed" missed that the residue lives in _files_, not the merge.
 
 ## 5. Precedence and resolution
 
@@ -144,7 +144,7 @@ For each preset in `compactAfterPresets`: anchors must be an array; each element
 | 262,144   | 0.70  | 183,500          | 78,644   |
 | 1,048,576 | 0.40  | 419,430          | 629,146  |
 
-Interpolated midpoints (for the actual fleet): 65,536 → ~0.867 (fires ~56,798); 200,000 → ~0.747; 524,288 → 0.60 (fires ~314,573). 1M exactly 0.40. Matches the approved D1 example anchors (0.90@32k, 0.80@128k, ~0.40@1M).
+Interpolated midpoints (for the actual fleet): 65,536 → ~0.867 (fires ~56,798); 200,000 → ~0.747; 524,288 → 0.60 (fires ~314,573). At 1,000,000 the ratio interpolates to ~0.419 (fires ~418,530); only at/above the 1,048,576 anchor does it hit exactly 0.40. Matches the approved D1 example anchors (0.90@32k, 0.80@128k, ~0.40@1M — the 1M shorthand is the interpolated ~0.42).
 
 These numbers are **suggested defaults only** — the whole point of D2 is that users re-tune them by editing the `default` preset in the file.
 
@@ -163,7 +163,7 @@ These numbers are **suggested defaults only** — the whole point of D2 is that 
 ## 9. Test plan (pure unit, repo conventions)
 
 - `model-budget.test.ts` — interpolation exactness at anchors and midpoints; extrapolation below-first/above-last anchor; single-anchor = constant ratio; merged effective presets (built-in + file override + added name); unknown preset name → built-in `default`, never `undefined`; precedence numeric knobs > preset; explicit `compactAfterTokens` (incl. `81000`) wins; unknown window → 128k class value.
-- `config.test.ts` — knob parses as non-empty string; preset dictionary accepted; invalid anchor shapes/ratios dropped with warn; unsorted anchors sorted; empty/invalid preset dropped; single-anchor kept; **no 81000 injection for a no-knob config**; explicit `81000` in file is not dropped (dead derived-mode block gone); env `PI_BLACKHOLE_COMPACT_AFTER_PRESET` engages the preset and an invalid env value keeps configured state. Update existing assertions that expect `toBe(81_000)` / "keeps fixed default" (list from review: `config.test.ts:38`, the derived-mode + invalid-env blocks).
+- `config.test.ts` — knob parses as non-empty string; preset dictionary accepted; invalid anchor shapes/ratios dropped with warn; unsorted anchors sorted; empty/invalid preset dropped; single-anchor kept; **no 81000 injection for a no-knob config**; scaffolded `81000` in a file is dropped as residue (preset/derived govern) while env `81000` stays explicit; env `PI_BLACKHOLE_COMPACT_AFTER_PRESET` engages the preset and an invalid env value keeps configured state. Update existing assertions that expect `toBe(81_000)` / "keeps fixed default" (list from review: `config.test.ts:38`, the derived-mode + invalid-env blocks).
 - `config-manager-modal.test.ts` — **save preserves a hand-edited `compactAfterPresets` key verbatim** (unknown-key branch); an unrelated modal save neither clobbers (incl. a mid-modal file edit) nor normalizes it; the knob persists when changed via the modal. (Review enumerated the test-local `DEFAULTS` literal at `:29` — the new tests must import the real `config`/`DEFAULTS`.)
 - `memory-command.test.ts` — status suffix shows the preset basis and the number matches `autoCompactThreshold`.
 - `compaction-trigger.test.ts` — a 32,768-window model fires at ~29,491 under the default preset while a 1M model does not; re-derives after a `/model` switch. Update the "keeps the fixed-default behavior" case (passes `compactAfterTokens: 81_000` explicitly — semantics unchanged, intent renamed).
@@ -173,7 +173,7 @@ These numbers are **suggested defaults only** — the whole point of D2 is that 
 
 - Numeric knobs still win over the preset; nothing silently changes for users who already set `compactAfterRatio` / `compactReserveTokens` / explicit tokens.
 - **No-config users change behavior on upgrade (intended, D3):** 32k/64k models that never auto-compacted mid-session now fire at ~0.9 of window; 128k-window models go from 81,000 → ~104,857. Root `CHANGELOG.md` `## [Unreleased]` needs an explicit "Behavior change" note, not just an Added entry.
-- Flat-81k behavior is reproduced exactly by explicit `compactAfterTokens: 81000`.
+- **Reserved legacy marker:** exactly `compactAfterTokens: 81000` reads as the old default posture — `scaffoldConfig()` and pre-curve modal saves wrote full defaults into every file, and 81000 always meant "the default", never a true pin (the old loader dropped it whenever a derived knob was set for exactly this reason). The loader therefore drops a file value of `81000` so the preset curve or a configured derived knob governs; env-set values stay explicit. Any **other** explicit fixed value (e.g. `80000`) reproduces flat-threshold behavior. Users pinned to literal 81k must pick a neighbouring value.
 - Docs/fixtures that must change in lockstep (review-verified grep): `README.md`, `docs/CONFIG.md` (new subsection: semantics, curve table, precedence, migration; drop/replace the 81,000 default text), `docs/OLD_CONFIG.md`, `llms.txt`, root `CHANGELOG.md`, `example-config.json`, `example-config-old.json`, `scripts/analyze-token-estimation.mjs`. Every number must mirror the §7 table and `DEFAULTS`.
 
 ## 11. Accepted risks and open items

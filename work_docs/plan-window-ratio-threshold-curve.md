@@ -50,7 +50,7 @@ New pure machinery with hand-built configs in tests. `DEFAULTS` untouched → no
 - Interface + doc comments for both new fields; keep `compactAfterTokens?: number`.
 - `parseConfig`: add `compactAfterPresets` parsing (raw key, not DEFAULTS-bound) + `compactAfterPreset` non-empty-string parse. New anchor validator (spec §6.1): each entry `{window: int>0, ratio: finite, 0<ratio≤1}`; sort ascending by window; duplicate windows keep the last; a preset with no valid anchors is dropped with `console.warn` (existing warn pattern).
 - After the file/env merge: if `compactAfterPreset` names a preset missing from `effectivePresets(...)` → warn once + treat knob as unset (built-in `default` governs). (Env-override path re-checks — see B2.)
-- Delete the dead derived-mode deletion block (`:631–651`) — with no injected 81,000 there is nothing to delete; the "explicit" test collapsing to `!== undefined` is the desired behavior (explicit file `81000` is never dropped). Remove the now-unused 81000-injection comment path (`:581` context).
+- Replace the derived-mode deletion block with a **legacy-residue drop**: the old code deleted the _injected_ 81000 default; post-flip the residue lives in config _files_ (scaffoldConfig/modal materialized `compactAfterTokens: 81000` into every file). When the merged value is exactly `81000` and not env-supplied (env stays explicit), delete it so the preset curve or a configured derived knob governs — preserves issue-#60 parity for ratio/reserve users and extends it to presets. Any other explicit file value is honored. (Deviates from the earlier "never drop 81000" wording — see spec §4.3/§10.) Remove the now-unused 81000-injection comment path (`:581` context).
 - **Blast-radius sweep:** `grep -rn "DEFAULT_COMPACT_AFTER_TOKENS\|81000\|compactAfterTokens" src/ tests/` and update every consumer of the removed constant (see B3) and every test that asserts the no-knob 81,000 default.
 
 **B2. `src/core/config-env.ts`:** add `compactAfterPreset` → `PI_BLACKHOLE_COMPACT_AFTER_PRESET` (string form mirroring the enum-ish parsers at `:165–190`; only applied when the var is set). If the env value names an unknown preset, warn and ignore (mirror the invalid-env-enum warn block in `blackhole-settings.ts` `validate`).
@@ -61,7 +61,7 @@ New pure machinery with hand-built configs in tests. `DEFAULTS` untouched → no
 
 **B5. Test updates (behavior flip):**
 
-- `tests/config.test.ts` — replace the no-knob `toBe(81_000)` asserts (e.g. `:38`, derived-mode + "keeps fixed default" invalid-env blocks) with: no-knob config yields `compactAfterTokens: undefined` and `compactAfterPreset: "default"`; explicit file `81000` is kept (not dropped); preset dictionary parse/validation/sort/drop cases; invalid anchor shapes dropped with warn; knob parse + unknown-name warn; env preset var engages / invalid env keeps state.
+- `tests/config.test.ts` — replace the no-knob `toBe(81_000)` asserts (e.g. `:38`, derived-mode + "keeps fixed default" invalid-env blocks) with: no-knob config yields `compactAfterTokens: undefined` and `compactAfterPreset: "default"`; scaffolded file `81000` dropped as residue while env `81000` stays explicit; preset dictionary parse/validation/sort/drop cases; invalid anchor shapes dropped with warn; knob parse + unknown-name warn; env preset var engages / invalid env keeps state.
 - `tests/model-budget.test.ts:129–131` — replace the "falls back to 81000" asserts with default-preset expectations at the 128k fallback window (~104,857).
 - `tests/compaction-trigger.test.ts` — the "keeps the fixed-default behavior" case passes `compactAfterTokens: 81_000` explicitly; re-aim it at the new no-knob semantics (32,768-window model fires at ~29,491 under the default preset; 1M does not; re-derive after `/model` switch).
 - `tests/memory-command.test.ts` — no-knob status now shows the preset basis (land display in Phase D; here keep it green by updating the number expectations only if the suffix change lands together — if not, defer to D and keep B green).
@@ -90,7 +90,7 @@ New pure machinery with hand-built configs in tests. `DEFAULTS` untouched → no
 
 ### Phase E — Docs & fixtures lockstep (numbers must mirror spec §7 + `DEFAULTS`)
 
-`README.md`, `docs/CONFIG.md` (new subsection: semantics, curve table, precedence, migration; replace 81,000-default text), `docs/OLD_CONFIG.md`, `llms.txt`, root `CHANGELOG.md` (`### Added` + explicit **Behavior change** note for the no-config default), `docs/CHANGELOG.md` if present, `example-config.json` / `example-config-old.json` (drop/replace the `81_000` example), `scripts/analyze-token-estimation.mjs:121` (formula default). Cross-check every number against `DEFAULTS` (AGENTS.md docs-consistency rule). Commit `docs(compaction): ...` (md-only lint-staged may need `--no-verify` per the known oxfmt papercut).
+`README.md`, `docs/CONFIG.md` (new subsection: semantics, curve table, precedence, migration; replace 81,000-default text), `llms.txt`, root `CHANGELOG.md` (`### Added` + explicit **Behavior change** note for the no-config default), `example-config.json`. `example-config-old.json`, `docs/OLD_CONFIG.md`, and `scripts/analyze-token-estimation.mjs` are left unchanged — historical/legacy references or an offline sizing tool outside the AGENTS.md docs-consistency duty (verified: not consumed by tests; decision recorded here). Cross-check every number against `DEFAULTS` (AGENTS.md docs-consistency rule).
 
 ### Phase F — Full gate
 
@@ -108,7 +108,7 @@ New pure machinery with hand-built configs in tests. `DEFAULTS` untouched → no
 ## 5. Definition of done
 
 - `pnpm check` + `pnpm test` + `pnpm format:check` green.
-- No-knob config → threshold from built-in `default` preset at the active model's window; explicit `compactAfterTokens: 81000` reproduces legacy behavior; numeric knobs still win over the preset.
+- No-knob config → threshold from built-in `default` preset at the active model's window; scaffolded `compactAfterTokens: 81000` auto-migrates (any other explicit value pins a fixed threshold); numeric knobs still win over the preset.
 - Hand-edited `compactAfterPresets` survives modal saves verbatim (test-proven).
 - Status line and trigger resolve the same number; modal select lists built-in + user presets.
 - Docs/fixtures/changelogs updated in lockstep with `DEFAULTS`.
