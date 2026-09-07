@@ -9,6 +9,7 @@ import {
   maybeNotifyThresholdMigration,
   resetMigrationNoticeForTests,
 } from "../src/changelog/migration-notice.js";
+import { getPackageVersion } from "../src/changelog/changelog.js";
 import { __setTestConfigDir, loadUnifiedConfig } from "../src/core/unified-config.js";
 
 import type { MigrationNoticeConfig } from "../src/changelog/migration-notice.js";
@@ -146,13 +147,23 @@ describe("maybeNotifyThresholdMigration", () => {
         notify: (message, level) => calls.push({ message, level }),
       }),
     ).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("falls back to the running package version when no override is given", () => {
+    // Version-independent: the expectation is derived from the ambient
+    // package version instead of assuming it differs (it equals the notice
+    // version exactly once the 0.5.2 release is bumped).
+    const running = getPackageVersion();
+    const shouldNotify = running === MIGRATION_NOTICE_VERSION;
+    const calls: Array<{ message: string; level: string }> = [];
     expect(
       maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), {
         version: undefined,
         notify: (message, level) => calls.push({ message, level }),
       }),
-    ).toBe(false);
-    expect(calls).toHaveLength(0);
+    ).toBe(shouldNotify);
+    expect(calls).toHaveLength(shouldNotify ? 1 : 0);
   });
 
   test("silent without UI", () => {
