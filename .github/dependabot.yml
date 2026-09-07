@@ -9,3 +9,7 @@ updates:
       dev-dependencies:
         patterns:
           - "*"
+    # TypeScript stays at 6.0.3: @typescript-eslint v8 does not support TS 7+,
+    # and an unattended bump breaks `pnpm lint` (see AGENTS.md).
+    ignore:
+      - dependency-name: "typescript"

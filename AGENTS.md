@@ -15,7 +15,7 @@ pnpm check         # typecheck + lint
 
 - CI order: `build` → `typecheck` → `lint` → `test` → `format:check` (.github/workflows/ci.yml).
 - pre-commit: lint-staged (now in `package.json:lint-staged`) + typecheck. pre-push: typecheck + test (skipped for docs-only pushes).
-- pnpm only (`packageManager: pnpm@11.2.2`). TypeScript pinned to 6.0.3 for @typescript-eslint v8 compat — never bump TS alone.
+- pnpm only (`packageManager: pnpm@11.2.2`). TypeScript pinned to 6.0.3 for @typescript-eslint v8 compat — never bump TS alone (enforced by a dependabot `ignore` rule in `.github/dependabot.yml`).
 - `oxfmt` config and `lint-staged` live in `package.json` (no separate `.oxfmtrc.json` / `.lintstagedrc.json`); `.oxfmtignore` stays at root.
 - Prepare script (`scripts/prepare.mjs`) builds dist via tsup on install; must never break consumer installs.
 
