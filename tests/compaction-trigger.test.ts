@@ -54,6 +54,9 @@ function captureHandler(
     compactionEngine?: "blackhole" | "pi-default";
     /** NEW: Mid-run (turn_end) compaction behavior */
     midRunCompaction?: "resume" | "pause" | "off";
+    /** NEW: Context-window-derived threshold knobs (issue #60) */
+    compactAfterRatio?: number;
+    compactReserveTokens?: number;
   } = {},
   inlineCompact = vi.fn(async () => ({ summary: "inline summary" })),
 ) {
@@ -82,7 +85,15 @@ function captureHandler(
     }),
     config: {
       overrideDefaultCompaction: args.overrideDefaultCompaction ?? true,
-      compactAfterTokens: args.compactAfterTokens ?? 3,
+      // In derived mode (ratio/reserve configured) no fixed token default is
+      // injected — mirrors loadUnifiedConfig, which drops the 81000 default.
+      compactAfterTokens:
+        args.compactAfterTokens ??
+        (args.compactAfterRatio !== undefined || args.compactReserveTokens !== undefined
+          ? undefined
+          : 3),
+      compactAfterRatio: args.compactAfterRatio,
+      compactReserveTokens: args.compactReserveTokens,
       passive: args.passive ?? false,
       noAutoCompact: args.noAutoCompact ?? false,
       memory: args.memory ?? true,
@@ -1008,5 +1019,100 @@ describe("inline adapter classification", () => {
     ok.runtime.inlineCompactionAdapterStatus = { supported: true };
     ok.startHandler(undefined, fakeCtx([belowBranch]));
     expect(ok.runtime.config.midRunCompaction).toBe("resume");
+  });
+});
+
+describe("Context-window-derived threshold (issue #60)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const windowedCtx = (window: number, branch: TestEntry[]) =>
+    fakeCtx([branch], { model: { provider: "test", id: "test", contextWindow: window } });
+
+  it("compacts above a window-derived ratio threshold (0.5 × 100 = 50)", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterRatio: 0.5 });
+    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]); // 75 tokens ≥ 50
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires exactly at the derived threshold (tokens == threshold)", async () => {
+    const { handler } = captureHandler({ compactAfterRatio: 0.5 });
+    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(200))]); // 50 tokens == 50
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not compact below the derived threshold", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterRatio: 0.5 });
+    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(196))]); // 49 tokens < 50
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).not.toHaveBeenCalled();
+  });
+
+  it("compacts above a reserve-derived threshold (100 − 60 = 40)", async () => {
+    const { handler } = captureHandler({ compactReserveTokens: 60 });
+    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(200))]); // 50 tokens ≥ 40
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-derives from the session model window at each evaluation (/model switch)", async () => {
+    // Same configured ratio, two evaluations with different model windows: a
+    // 100-window model compacts at 50; a 1M-window model's derived threshold
+    // (500k) is far above the same 75-token branch, so it must NOT compact.
+    const small = captureHandler({ compactAfterRatio: 0.5 });
+    const smallCtx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]);
+    small.handler(agentEnd(), smallCtx);
+    await flushAll();
+    expect(smallCtx.compact).toHaveBeenCalledTimes(1);
+
+    const big = captureHandler({ compactAfterRatio: 0.5 });
+    const bigCtx = windowedCtx(1_000_000, [textCustomMessage("raw-1", "a".repeat(300))]);
+    big.handler(agentEnd(), bigCtx);
+    await flushAll();
+    expect(bigCtx.compact).not.toHaveBeenCalled();
+    expect(big.runtime.compactInFlight).toBe(false);
+  });
+
+  it("explicit compactAfterTokens beats a configured ratio", async () => {
+    const { handler } = captureHandler({ compactAfterTokens: 3, compactAfterRatio: 0.5 });
+    const ctx = windowedCtx(100, dueBranch); // 3 tokens ≥ explicit 3; < ratio 50
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("an explicit fixed token threshold applies regardless of window", async () => {
+    // A literal explicit compactAfterTokens (here 81k, the legacy flat value)
+    // wins over any window-derived surface at the resolution level, so a
+    // 75-token branch must NOT auto-compact on a tiny-window model.
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
+    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]);
+    handler(agentEnd(), ctx);
+    await flushAll();
+    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).not.toHaveBeenCalled();
   });
 });

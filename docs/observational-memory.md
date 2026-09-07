@@ -262,7 +262,7 @@ A single regex in [[src/om/retryable-error.ts]] matches: HTTP 429, 5xx, rate lim
 
 ## Compaction trigger
 
-Auto-compaction fires on `agent_end` when tokens exceed `compactAfterTokens`. Defined in [[src/om/compaction-trigger.ts]].
+Auto-compaction fires on `agent_end` when tokens exceed the effective threshold — `compactAfterTokens`, or a window-derived `compactAfterRatio` / `compactReserveTokens` value (see `docs/CONFIG.md`). Defined in [[src/om/compaction-trigger.ts]].
 
 ### Guards
 

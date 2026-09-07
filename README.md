@@ -31,19 +31,15 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.0](CHANGELOG.md#050---2026-09-06)**
+> **Latest release: [0.5.2](CHANGELOG.md)**
 >
-> - **Recall & export ranking upgrade** — BM25+, SimHash64, c-TF-IDF, technical density scoring, and surface-form-preserving topic labels for sharper dedup and more readable exports; export preamble now carries a best-effort heuristic warning.
-> - **`/blackhole-export` — distilled project-memory export** — Export for long-term agent memory tools - scans all project sessions + pending buffers, fuzzy-dedupes, and writes one import-ready Markdown (`Reflections → Critical → High → Medium → Low`) with topic badges and orphan-gated pending. `out:<path>.md` supported.
-> - **Append compaction mode** (`compactionSummaryMode: "append"`) — better prompt caching - keep every auto-compaction summary as an immutable segment visible to the model (`S1 | S2 | …`) instead of rewriting a single summary. `/blackhole` rebases the chain. Opt-in.
-> - **Mid-run auto-compaction** (`midRunCompaction: "resume"` | `"pause"`) — **good for goal/task** opt into transparent compaction during long tool loops without interrupting the agent. Default is `"off"`.
-> - **Robust compaction-failure handling** — unified `session_compact_failed` (pi >=0.84.3) with correct attribution, overflow-retry visibility, and noise filtering; plus bundled-CLI `AgentSession` resolution so inline compaction works from `dist/bundle/cli.js` ([#62](https://github.com/k0valik/pi-blackhole/pull/62)).
+> - **⚠️ Auto-compaction now scales to your model's context window** — the no-knob default no longer fires at a flat 81,000 tokens: a built-in **`default` preset curve** derives the trigger as `floor(window × ratio)` — 0.90 @ 32,768, 0.80 @ 131,072, 0.70 @ 262,144, 0.40 @ 1,048,576 (piecewise-linear between anchors). Small local windows fill near-full (cheap to resend); 1M-class windows compact early. **Behavior change on upgrade:** a config file containing the literal scaffold value `"compactAfterTokens": 81000` is auto-migrated (treated as residue, never a deliberate pin) so the curve governs — any _other_ explicit value still pins a flat threshold. Prefer a different shape? `compactAfterPreset`, `compactAfterRatio`, and `compactReserveTokens` live under **Compaction** in `/blackhole settings`; thresholds re-derive on every check, so mid-session `/model` switches apply automatically. ([#79](https://github.com/k0valik/pi-blackhole/pull/79))
+> - **Observational memory now works with custom providers** — observer/reflector/dropper resolve their streams through the model registry (`pi.registerProvider` providers like cursor-sdk, CLIProxyAPI, …) instead of the built-in compat path. Custom-provider-only setups no longer crash after a turn, and `observational-memory.model` can stay unset — no second built-in provider required. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+> - **Reload-safe memory pipeline** — reloading, forking, or switching a session mid-consolidation now cancels the in-flight observer/reflector/dropper work cleanly instead of appending through the stale session; the fresh session retries the work without losing reflections. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+> - **Compact-all compactions keep your memory** — fixed a silent drop of _all_ observations and reflections when compaction fires on a single-prompt or no-user-message session (the compact-all sentinel resolved to an empty fold). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+> - **Faster session startup** — the host inline-compaction adapter now prefers Pi's already-loaded bundled runtime chunk over the slow barrel import: adapter setup drops from ~506ms to ~16ms, saving ~490ms per session start.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
-
-### ⚠️ Upcoming change
-
-> **Default compaction thresholds will become model-context-window-aware** in an upcoming release. Instead of static absolute tokens (`compactAfterTokens: 81000`), default thresholds will derive from your model's effective context window — keeping the same approximate cadence regardless of model size. Existing explicitly-set values will continue to be respected verbatim. If you're using the defaults, no action is needed; the migration is automatic.
 
 ---
 
@@ -103,14 +99,14 @@ The `/blackhole-recall` command exposes the same engine to the user. Results are
 
 Two modes, one shared goal: keep your agent's context sharp without manual housekeeping. (`compaction: "off"` is a third escape hatch that hands everything back to Pi.)
 
-|                             | Auto (default)                                | Manual (`compaction: "manual"`)                  | Off (`compaction: "off"`)                                  |
-| --------------------------- | --------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
-| Workers run?                | Yes                                           | Yes                                              | Yes (unless `memory: false`)                               |
-| Observations go to          | Conversation markers (invisible in TUI)       | Per-session disk buffers                         | Conversation markers                                       |
-| Auto-compact on `agent_end` | Yes — blackhole fires at `compactAfterTokens` | No                                               | No (Pi handles it)                                         |
-| `/compact` (Pi built-in)    | Replaced by blackhole                         | Pi handles                                       | Pi handles                                                 |
-| `/blackhole`                | Optional                                      | **Required** to flush + compact                  | Optional, but works                                        |
-| Use case                    | "Install and forget"                          | "I want to control when context gets compressed" | "Let Pi handle it, but I want `/blackhole` when I need it" |
+|                             | Auto (default)                                                         | Manual (`compaction: "manual"`)                  | Off (`compaction: "off"`)                                  |
+| --------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
+| Workers run?                | Yes                                                                    | Yes                                              | Yes (unless `memory: false`)                               |
+| Observations go to          | Conversation markers (invisible in TUI)                                | Per-session disk buffers                         | Conversation markers                                       |
+| Auto-compact on `agent_end` | Yes — fires at the auto-compaction threshold (preset curve by default) | No                                               | No (Pi handles it)                                         |
+| `/compact` (Pi built-in)    | Replaced by blackhole                                                  | Pi handles                                       | Pi handles                                                 |
+| `/blackhole`                | Optional                                                               | **Required** to flush + compact                  | Optional, but works                                        |
+| Use case                    | "Install and forget"                                                   | "I want to control when context gets compressed" | "Let Pi handle it, but I want `/blackhole` when I need it" |
 
 Manual mode is the maintainer's daily driver: workers still run, but observations accumulate in `<sessionId>-pending.json` files instead of cluttering the conversation. `/blackhole` flushes the buffer, runs algorithmic compaction, and injects durable reflections in one shot.
 

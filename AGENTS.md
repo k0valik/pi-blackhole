@@ -8,7 +8,7 @@ Pi extension package: algorithmic compaction (pi-vcc) + observational memory (pi
 pnpm test          # vitest run (all tests, ~89 files, no network)
 pnpm typecheck     # tsc --noEmit (src/**/*.ts + index.ts only)
 pnpm lint          # eslint .
-pnpm format:check  # prettier --check .
+pnpm format:check  # oxfmt --check .
 pnpm build         # tsup bundle → dist/ (gitignored; pi-entry.js loads dist/ fast or falls back to index.ts)
 pnpm check         # typecheck + lint
 ```
@@ -16,7 +16,7 @@ pnpm check         # typecheck + lint
 - CI order: `build` → `typecheck` → `lint` → `test` → `format:check` (.github/workflows/ci.yml).
 - pre-commit: lint-staged (now in `package.json:lint-staged`) + typecheck. pre-push: typecheck + test (skipped for docs-only pushes).
 - pnpm only (`packageManager: pnpm@11.2.2`). TypeScript pinned to 6.0.3 for @typescript-eslint v8 compat — never bump TS alone.
-- `prettier` config and `lint-staged` live in `package.json` (no separate `.prettierrc.json` / `.lintstagedrc.json`); `.prettierignore` stays at root.
+- `oxfmt` config and `lint-staged` live in `package.json` (no separate `.oxfmtrc.json` / `.lintstagedrc.json`); `.oxfmtignore` stays at root.
 - Prepare script (`scripts/prepare.mjs`) builds dist via tsup on install; must never break consumer installs.
 
 ## Testing quirks
@@ -52,3 +52,14 @@ pnpm check         # typecheck + lint
 - Runtime clone for local testing: `~/.pi/agent/git/github.com/k0valik/pi-blackhole/` — sync changes there and `/reload` Pi.
 - `debug: true` → pre-compaction snapshot at `/tmp/pi-blackhole-debug.json`; `debugLog: true` → JSONL at `~/.pi/agent/pi-blackhole/debug.ndjson`.
 - Config lives at `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`; cooldowns at `pi-blackhole-cooldown.json`. `PI_BLACKHOLE_PASSIVE=true` disables compaction + memory entirely.
+
+## Testing
+
+- **T1. Prove the test fails without the fix.** Run the test against the code before the fix or guard exists, confirm it fails, then confirm it passes after. A console log showing which branch executed is a useful sanity check while writing the test, but red before green is the actual proof. If a test can't fail, it isn't testing anything.
+- **T2. Arm every precondition the branch needs.** If the code path depends on prior state (a flag, a prior call, session data), set that state explicitly in the test. Don't assume execution reaches the new guard by default, check what runs before it.
+- **T3. Cover every branch, not just the happy path.** Each conditional (if/else, fallback, empty vs populated input) needs its own test case. A theme-present case and a theme-absent case are two tests, not one.
+- **T4. Assert the specific thing that would break, not a generic proxy.** A broad negative check, like asserting a substring is absent from the whole output, passes even when an unrelated change happens to introduce that same substring elsewhere. Assert against a stable, unique token or the actual structure.
+- **T5. One behavior per test case.** If one assertion in a block throws, every assertion after it silently stops running and its coverage disappears from the failure report. Split sequential checks into separate test cases.
+- **T6. Clean up in a finally block or an after-hook, never inline after assertions.** If an assertion throws before cleanup runs, tmp files, mocks, or state leak into the next test run.
+- **T7. Don't bypass type or null safety checks to make a test compile.** Non-null assertions, unsafe casts, and untyped escapes (`any` or equivalent) silence the same runtime uncertainty the code under test is supposed to handle. Type the value the way production does and narrow it explicitly.
+- **T8. Match mocks to real output shape.** If the real dependency wraps, escapes, or transforms its return value, the mock has to do the same. A stripped-down mock can make a test pass by exercising a code path that never runs in production.

@@ -44,6 +44,16 @@ export default async (pi: ExtensionAPI) => {
     captureRegisteredProviderStreams(ctx.modelRegistry, providerStreams);
   });
 
+  // 0.5.2 migration notice: nudge pinned-threshold users toward the
+  // context-window preset curve (see src/changelog/migration-notice.ts).
+  // TODO(0.5.3): remove together with the module + tests.
+  pi.on("session_start", (_event: unknown, ctx: any) => {
+    void import("./src/changelog/migration-notice.js").then(({ maybeNotifyThresholdMigration }) => {
+      omRuntime.ensureConfig(ctx.cwd, (msg: string) => ctx.ui?.notify?.(msg, "warning"));
+      maybeNotifyThresholdMigration(ctx, omRuntime.config);
+    });
+  });
+
   scaffoldSettings();
 
   const omRuntime = new Runtime();

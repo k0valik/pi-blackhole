@@ -62,6 +62,16 @@ export interface OmModelConfig {
   contextWindow?: number;
 }
 
+/**
+ * One anchor of a preset threshold curve (spec §7): at `window`, compact at
+ * `ratio` of the window. Structurally identical to model-budget's PresetAnchor
+ * — defined here so the config layer needs no import from om/.
+ */
+export interface PresetAnchorDef {
+  window: number;
+  ratio: number;
+}
+
 export interface UnifiedConfig {
   /** @deprecated Use compactionEngine instead. */
   overrideDefaultCompaction?: boolean;
@@ -116,8 +126,51 @@ export interface UnifiedConfig {
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
   reflectAfterTokens: number;
-  /** Token threshold for proactive auto-compaction. */
-  compactAfterTokens: number;
+  /** Token threshold for proactive auto-compaction.
+   *
+   * When set (explicitly, in the config file or via env), this fixed token
+   * count always wins over the window-derived knobs and the preset curve
+   * below. Optional; 0/absent is treated as unset, and a file-level 81000 is
+   * legacy scaffold residue (never a deliberate pin) that both loaders drop —
+   * see normalizeThresholdKnobs. Unset means a window-derived knob, or the
+   * selected preset curve, governs. */
+  compactAfterTokens?: number;
+  /**
+   * Context-window-derived auto-compaction threshold (issue #60): when set,
+   * the effective threshold is `floor(contextWindow × compactAfterRatio)` for
+   * the active session model's window, so compaction tracks the model instead
+   * of a fixed token count. The fixed default is NOT applied when this (or
+   * compactReserveTokens) is set and compactAfterTokens is absent.
+   * Precedence when multiple knobs are set:
+   *   compactAfterTokens (explicit) > compactAfterRatio > compactReserveTokens > preset.
+   * Optional; unset by default. Must be in (0, 1].
+   */
+  compactAfterRatio?: number;
+  /**
+   * Alternative window-derived threshold: keep this many tokens of headroom
+   * free — threshold = `contextWindow − compactReserveTokens` (clamped ≥ 1).
+   * Same precedence rules and defaults as compactAfterRatio.
+   * Optional; unset by default. Must be a positive integer.
+   */
+  compactReserveTokens?: number;
+  /**
+   * Preset-curve selection knob (window-scaled threshold curve, spec
+   * work_docs/proposal-ratio-presets-by-context-window.md): names which preset
+   * in the effective preset table applies. Effective presets = the built-in
+   * definitions (model-budget BUILTIN_PRESETS) overlaid by any user
+   * `compactAfterPresets` definitions in this file. An unknown name warns and
+   * falls back to the built-in "default" curve. Default "default" — a preset
+   * applies out of the box when no numeric knob is configured.
+   */
+  compactAfterPreset?: string;
+  /**
+   * User-editable preset definitions: name → ordered (window, ratio) anchors
+   * (0 < ratio ≤ 1). Same-name entries override the built-in preset; new names
+   * extend the table. Hand-edited JSON only — deliberately NOT a DEFAULTS/
+   * modal key so vendored ConfigManager.save() carries it verbatim instead of
+   * diffing/normalizing it (spec §4.2). Optional; unset by default.
+   */
+  compactAfterPresets?: Record<string, PresetAnchorDef[]>;
   /** Observation pool token pressure for full fold. */
   observationsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
@@ -207,7 +260,21 @@ export const DEFAULTS: UnifiedConfig = {
 
   observeAfterTokens: 15_000,
   reflectAfterTokens: 25_000,
-  compactAfterTokens: 81_000,
+  // The legacy fixed default (81000) is gone: the built-in "default" preset
+  // curve governs when no numeric knob is configured (spec D3). An explicit
+  // file/env compactAfterTokens still wins when present; a file-level 81000 is
+  // scaffold residue from earlier versions and is always dropped (env-set 81000
+  // stays explicit) — see normalizeThresholdKnobs.
+  compactAfterTokens: undefined,
+  // Window-derived knobs (issue #60) + preset-selection knob. Present here (as
+  // defaults) so ConfigManager.save()'s diff-over-defaults can persist modal
+  // edits — absence from DEFAULTS would silently drop a field edit. 0 is
+  // treated as unset by normalizeThresholdKnobs. compactAfterPresets (the preset
+  // DEFINITIONS) is deliberately NOT a DEFAULTS key — it is hand-edited JSON
+  // that save() must carry verbatim (spec §4.2).
+  compactAfterRatio: undefined,
+  compactReserveTokens: undefined,
+  compactAfterPreset: "default",
   observationsPoolMaxTokens: 20_000,
   fullFoldAlways: true,
   observationsPoolTargetTokens: 10_000,
@@ -222,6 +289,41 @@ export const DEFAULTS: UnifiedConfig = {
   memory: true,
   debugLog: false,
 };
+
+/**
+ * Legacy scaffold default (pre-curve): scaffoldConfig() and the settings modal
+ * used to materialize `compactAfterTokens: 81000` into config files even for
+ * users who never chose it. Treated as default-posture residue by
+ * normalizeThresholdKnobs (used by both the file loader and the modal
+ * validate) — the value 81000 reads as "the old default" and yields to the
+ * default preset curve / derived knobs. An env-set 81000 stays explicit.
+ * Flat-81k behavior is reproducible with any other explicit fixed value
+ * (spec §10).
+ */
+const LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS = 81_000;
+
+/**
+ * Shared validity predicates for the auto-compaction threshold knobs.
+ *
+ * Single source of truth used by the file loader (`parseConfig`), the
+ * settings-modal `validate`, and the trigger resolver
+ * (`compactThresholdTokens`): all three agree that `0` means "not set" and
+ * that out-of-range values behave like absent keys (fall through to the next
+ * precedence tier) instead of acting as live thresholds. A literal `81000` is
+ * intentionally VALID here — dropping that scaffold residue is the loader's
+ * job (env-set 81000 stays explicit); the resolver must not second-guess it.
+ */
+export function isFixedTokenThreshold(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
+export function isWindowRatio(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 && v <= 1;
+}
+
+export function isReserveTokens(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
 
@@ -300,6 +402,94 @@ function parseModelArray(v: unknown): OmModelConfig[] | undefined {
   return parsed.length > 0 ? parsed : undefined;
 }
 
+function parsePresetAnchor(v: unknown): PresetAnchorDef | undefined {
+  if (!isRecord(v)) return undefined;
+  const window = positiveInt(v.window);
+  const ratio = v.ratio;
+  if (window === undefined) return undefined;
+  if (typeof ratio !== "number" || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    return undefined;
+  }
+  return { window, ratio };
+}
+
+/**
+ * Parse a user `compactAfterPresets` dictionary (hand-edited JSON). Per preset:
+ * keep only valid anchors (window int > 0, ratio in (0, 1]), sort ascending by
+ * window (duplicate windows keep the last), drop the whole preset with a warn
+ * when nothing valid remains. Returns undefined when no valid preset remains.
+ */
+function parsePresetDefinitions(v: unknown): Record<string, PresetAnchorDef[]> | undefined {
+  if (!isRecord(v)) return undefined;
+  const out: Record<string, PresetAnchorDef[]> = {};
+  for (const [name, body] of Object.entries(v)) {
+    if (name.length === 0) continue;
+    if (!Array.isArray(body)) {
+      console.warn(`blackhole: compactAfterPresets["${name}"] is not an array; dropping preset`);
+      continue;
+    }
+    const anchors = body
+      .map(parsePresetAnchor)
+      .filter((a): a is PresetAnchorDef => a !== undefined);
+    if (anchors.length === 0) {
+      console.warn(
+        `blackhole: compactAfterPresets["${name}"] has no valid anchors; dropping preset`,
+      );
+      continue;
+    }
+    anchors.sort((a, b) => a.window - b.window);
+    const deduped: PresetAnchorDef[] = [];
+    for (const a of anchors) {
+      if (deduped.length > 0 && deduped[deduped.length - 1].window === a.window) {
+        deduped[deduped.length - 1] = a; // keep the last
+      } else {
+        deduped.push(a);
+      }
+    }
+    out[name] = deduped;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Scrub the auto-compaction threshold knobs on a parsed-config record
+ * IN PLACE (deletes anything that must behave as unset).
+ *
+ * Shared by the file loader (`parseConfig`) and the settings-modal
+ * `validate`, so both loaders agree on every key: `0` means "not set",
+ * out-of-range values fall through to the next precedence tier, the legacy
+ * `81000` scaffold residue is dropped (env overrides re-apply afterwards on
+ * both paths, so an env-set 81000 stays explicit), an empty preset name
+ * falls back to the built-in default on merge, and preset definitions are
+ * validated/sorted/deduped exactly once. Idempotent — safe to run twice.
+ */
+export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
+  const tokens = rec.compactAfterTokens;
+  if (!isFixedTokenThreshold(tokens) || tokens === LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS) {
+    delete rec.compactAfterTokens;
+  }
+  if (!isWindowRatio(rec.compactAfterRatio)) {
+    delete rec.compactAfterRatio;
+  }
+  if (!isReserveTokens(rec.compactReserveTokens)) {
+    delete rec.compactReserveTokens;
+  }
+  const preset = rec.compactAfterPreset;
+  if (typeof preset !== "string" || preset.length === 0) {
+    delete rec.compactAfterPreset;
+  }
+  const presets = parsePresetDefinitions(rec.compactAfterPresets);
+  if (presets === undefined) {
+    delete rec.compactAfterPresets;
+  } else {
+    rec.compactAfterPresets = presets;
+  }
+  const idle = rec.providerIdleTimeoutMs;
+  if (!(typeof idle === "number" && Number.isInteger(idle) && idle >= 0)) {
+    delete rec.providerIdleTimeoutMs;
+  }
+}
+
 function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   const c: Partial<UnifiedConfig> = {};
 
@@ -310,6 +500,21 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
   if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
+
+  // Threshold knobs (compactAfterTokens / Ratio / Reserve / Preset /
+  // Presets / providerIdleTimeoutMs) — copied bluntly, then scrubbed by the
+  // shared normalizeThresholdKnobs: 0/absent behaves as unset, out-of-range
+  // values are dropped, legacy 81000 residue is dropped, and preset
+  // definitions are validated + sorted. Same scrubber the modal validate
+  // uses, so both loaders agree on every key.
+  const THRESHOLD_BLUNT_KEYS = [
+    "compactAfterTokens",
+    "compactAfterRatio",
+    "compactReserveTokens",
+    "compactAfterPreset",
+    "compactAfterPresets",
+    "providerIdleTimeoutMs",
+  ] as const;
 
   // Provider-aware skip list (entries: provider or "provider:api")
   if (Array.isArray(raw.skipForProviders)) {
@@ -338,7 +543,6 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   const numKeys = [
     "observeAfterTokens",
     "reflectAfterTokens",
-    "compactAfterTokens",
     "retainedToolOutputMaxTokens",
     "observationsPoolMaxTokens",
     "observationsPoolTargetTokens",
@@ -368,6 +572,10 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   ) {
     c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
   }
+  for (const k of THRESHOLD_BLUNT_KEYS) {
+    if (raw[k] !== undefined) (c as Record<string, unknown>)[k] = raw[k];
+  }
+  normalizeThresholdKnobs(c as unknown as Record<string, unknown>);
   for (const k of numKeys) {
     // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
     // everything else must be > 0.
@@ -584,9 +792,16 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   const withEnv = applyEnvOverrides(
     merged,
     DECLARATIVE_ENV_OVERRIDES,
+    // SAFETY: DEFAULTS is a flat object literal (UnifiedConfig); its runtime
+    // shape is exactly the Record<string, unknown> applyEnvOverrides expects.
     DEFAULTS as unknown as Record<string, unknown>,
   );
 
+  // Legacy-81000 note: file residue never reaches this point — parseConfig
+  // already ran it through normalizeThresholdKnobs, which drops a file-level
+  // 81000 unconditionally (it always meant "default posture", never a true
+  // pin). Env overrides applied above re-assert an env-set 81000 afterwards,
+  // so an explicit PI_BLACKHOLE_COMPACT_AFTER_TOKENS=81000 still pins.
   return withEnv;
 }
 

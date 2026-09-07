@@ -84,7 +84,8 @@ describe("New config keys — defaults", () => {
     const config = loadUnifiedConfig(testDir);
 
     expect(config.memory).toBe(true);
-    expect(config.compactAfterTokens).toBe(81_000);
+    expect(config.compactAfterTokens).toBeUndefined(); // legacy fixed default removed
+    expect(config.compactAfterPreset).toBe("default"); // preset curve governs out of the box
     // Old keys are optional and absent from DEFAULTS
     expect(config.overrideDefaultCompaction).toBeUndefined();
   });
@@ -224,7 +225,8 @@ describe("Old → new key migration", () => {
 
     // Existing unrelated keys should be untouched
     expect(config.memory).toBe(true);
-    expect(config.compactAfterTokens).toBe(81_000);
+    expect(config.compactAfterTokens).toBeUndefined();
+    expect(config.compactAfterPreset).toBe("default");
   });
 
   it("T8: migration runs once — old keys deleted from parsed result", async () => {
@@ -352,28 +354,33 @@ describe("saveUnifiedConfig — atomic write", () => {
     expect(config.memory).toBe(false); // preserved
   });
 
-  it("does not crash on read-only filesystem (returns false)", async () => {
-    const { saveUnifiedConfig } = await import("../src/core/unified-config.js");
-    // Make the config dir read-only so write fails
-    const dir = join(testDir, "pi-blackhole");
-    mkdirSync(dir, { recursive: true });
-    // Set permissions to read+execute only (no write)
-    try {
-      chmodSync(dir, 0o555);
-    } catch {
-      /* skip on Windows */
-    }
+  // Root bypasses write permission bits (chmod 0o555 still writable), so the
+  // read-only-failure expectation cannot hold — skip under root.
+  it.skipIf(typeof process.getuid === "function" && process.getuid() === 0)(
+    "does not crash on read-only filesystem (returns false)",
+    async () => {
+      const { saveUnifiedConfig } = await import("../src/core/unified-config.js");
+      // Make the config dir read-only so write fails
+      const dir = join(testDir, "pi-blackhole");
+      mkdirSync(dir, { recursive: true });
+      // Set permissions to read+execute only (no write)
+      try {
+        chmodSync(dir, 0o555);
+      } catch {
+        /* skip on Windows */
+      }
 
-    const result = saveUnifiedConfig({ compaction: "manual" });
-    expect(result).toBe(false);
+      const result = saveUnifiedConfig({ compaction: "manual" });
+      expect(result).toBe(false);
 
-    // Restore permissions so afterEach cleanup works
-    try {
-      chmodSync(dir, 0o755);
-    } catch {
-      /* skip on Windows */
-    }
-  });
+      // Restore permissions so afterEach cleanup works
+      try {
+        chmodSync(dir, 0o755);
+      } catch {
+        /* skip on Windows */
+      }
+    },
+  );
 });
 
 // ── Tests: scaffoldConfig for NixOS safety ────────────────────────────────

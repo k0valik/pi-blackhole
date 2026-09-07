@@ -53,6 +53,8 @@ interface RunReflectorArgs {
   maxTurns?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
+  /** Model registry for streamSimple resolution (custom providers, OAuth). */
+  modelRegistry?: any;
 }
 
 const RecordReflectionsSchema = Type.Object({
@@ -192,7 +194,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
 
   const loop = args.agentLoop ?? agentLoop;
   // ── Bridge stream function ──
-  const bridgeStreamFn = createBridgeStreamFn(streamSimple);
+  const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
   const streamFn = args.streamFn ?? bridgeStreamFn;
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;

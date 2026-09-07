@@ -89,7 +89,8 @@ describe("lazy worker imports", () => {
     const { runConsolidationPipeline } = await import("../src/om/consolidation.js");
     const f = fixture();
     f.runtime.resolveModel = vi.fn(async () => ({ ok: false, reason: "no model" }));
-    await runConsolidationPipeline(f.pi, f.runtime, f.ctx);
+    const generation = f.runtime.captureGeneration("test-session");
+    await runConsolidationPipeline(f.pi, f.runtime, f.ctx, generation);
     expect(imports).toEqual([]);
   });
 
@@ -98,7 +99,8 @@ describe("lazy worker imports", () => {
     const f = fixture();
     f.runtime.config.reflectAfterTokens = 1_000_000;
     runObserver.mockRejectedValueOnce(new Error("temporary provider failure"));
-    await runConsolidationPipeline(f.pi, f.runtime, f.ctx);
+    const generation = f.runtime.captureGeneration("test-session");
+    await runConsolidationPipeline(f.pi, f.runtime, f.ctx, generation);
     expect(imports).toEqual(["observer"]);
     expect(runObserver).toHaveBeenCalledTimes(2);
     expect(f.runtime.recordRetryableError).toHaveBeenCalledOnce();
@@ -113,24 +115,28 @@ describe("lazy worker imports", () => {
       observations: [
         {
           id: "aaaaaaaaaaaa",
-          content: "Keep the established project convention.",
-          timestamp: "2026-09-01 12:00",
-          relevance: "high",
+          content: "test observation",
+          timestamp: "2025-01-01T00:00:00.000Z",
+          relevance: "medium",
           sourceEntryIds: ["m1"],
-          tokenCount: 10,
+          supportingObservationIds: ["aaaaaaaaaaaa"],
+          tokenCount: 6,
         },
       ],
     });
+    // Reflector must return reflections for the dropper to receive them
     runReflector.mockResolvedValue([
       {
         id: "bbbbbbbbbbbb",
-        content: "The convention is settled.",
-        supportingObservationIds: ["aaaaaaaaaaaa"],
-        tokenCount: 6,
+        content: "test reflection",
+        timestamp: "2025-01-01T00:00:00.000Z",
+        observationIds: ["aaaaaaaaaaaa"],
+        tokenCount: 8,
       },
     ]);
     runDropper.mockResolvedValue(["aaaaaaaaaaaa"]);
-    await runConsolidationPipeline(f.pi, f.runtime, f.ctx);
+    const generation = f.runtime.captureGeneration("test-session");
+    await runConsolidationPipeline(f.pi, f.runtime, f.ctx, generation);
     expect(imports).toEqual(["observer", "reflector", "dropper"]);
     expect(
       f.entries.filter((entry) => entry.type === "custom").map((entry) => entry.customType),

@@ -13,10 +13,10 @@ import { type Config, type ConfiguredModel, DEFAULTS, loadConfig } from "./confi
 import type { CompactionStats } from "../hooks/before-compact.js";
 import {
   isCooldownActive,
-  getCooldownEntry,
   recordCooldown,
   expireCooldowns,
   modelKey,
+  sanitizeCooldownReason,
 } from "./cooldown.js";
 import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
@@ -38,6 +38,13 @@ export type ResolveResult =
 type NotifyLevel = "warning" | "info" | "error";
 type Notify = (message: string, type?: NotifyLevel) => void;
 export type ConsolidationPhase = "observer" | "reflector" | "dropper";
+
+/** Captures the extension/session generation that owns a unit of deferred work. */
+export interface RuntimeGeneration {
+  readonly generation: number;
+  readonly sessionIdentity: string | undefined;
+  readonly signal: AbortSignal;
+}
 
 export type CursorState = "initial" | "recorded" | "empty" | "error" | "skipped" | "not_due";
 
@@ -193,6 +200,98 @@ export class Runtime {
   /** Info-notification gate: only the first info-level notification per turn/phase is emitted. */
   hasEmittedInfoThisTurn = false;
 
+  // ── Session generation lifecycle (PR #58: stale-runtime append protection) ──
+  private generation = 0;
+  private sessionIdentity: string | undefined;
+  private disposed = false;
+  private lifecycleController = new AbortController();
+  private compactionTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * Called on session_start. Increments the generation counter and aborts the
+   * lifecycle signal when the session identity changes.  Cancels any pending
+   * deferred compaction timer.  The old extension's deferred work is thereby
+   * invalidated.
+   */
+  startSession(sessionIdentity: string | undefined): void {
+    if (this.disposed) return;
+    if (this.sessionIdentity !== undefined && this.sessionIdentity !== sessionIdentity) {
+      this.lifecycleController.abort();
+      this.lifecycleController = new AbortController();
+      this.generation += 1;
+      this.clearCompactionTimer();
+      this.compactInFlight = false;
+    }
+    this.sessionIdentity = sessionIdentity;
+  }
+
+  /**
+   * Captures the current generation for use in deferred work.
+   * The returned RuntimeGeneration carries a generation number,
+   * session identity, and an AbortSignal that fires on session change.
+   */
+  captureGeneration(sessionIdentity: string | undefined): RuntimeGeneration {
+    return {
+      generation: this.generation,
+      sessionIdentity,
+      signal: this.lifecycleController.signal,
+    };
+  }
+
+  /**
+   * Checks whether a captured generation is still active.
+   * Returns false when the runtime is disposed, the signal is aborted,
+   * the generation counter has advanced, or the session identity changed.
+   *
+   * When `startSession` was never called (`this.sessionIdentity` is undefined),
+   * the identity check is skipped — this allows tests and direct pipeline
+   * calls to work without explicitly calling `startSession` first.
+   */
+  isGenerationActive(captured: RuntimeGeneration): boolean {
+    return (
+      !this.disposed &&
+      !captured.signal.aborted &&
+      captured.generation === this.generation &&
+      (this.sessionIdentity === undefined || captured.sessionIdentity === this.sessionIdentity)
+    );
+  }
+
+  /**
+   * Stores the compaction timer handle so dispose() can cancel it.
+   */
+  setCompactionTimer(timer: ReturnType<typeof setTimeout>): void {
+    if (this.disposed) {
+      clearTimeout(timer);
+      return;
+    }
+    this.compactionTimer = timer;
+  }
+
+  /**
+   * Clears the stored compaction timer.  If `timer` is provided and differs
+   * from the stored timer, this is a no-op (defensive: prevents clearing a
+   * timer that was already replaced by a newer one).
+   */
+  clearCompactionTimer(timer?: ReturnType<typeof setTimeout>): void {
+    if (timer !== undefined && this.compactionTimer !== timer) return;
+    if (this.compactionTimer !== undefined) clearTimeout(this.compactionTimer);
+    this.compactionTimer = undefined;
+  }
+
+  /**
+   * Called on session_shutdown.  Aborts the lifecycle signal, increments
+   * the generation counter, and clears the compaction timer.  All deferred
+   * work is thereby invalidated.
+   */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.generation += 1;
+    this.lifecycleController.abort();
+    this.clearCompactionTimer();
+    this.compactInFlight = false;
+  }
+
   /**
    * Emit an info-level notification if none has been emitted this turn/phase yet.
    * Returns true if emitted, false if suppressed (already emitted earlier).
@@ -268,7 +367,8 @@ export class Runtime {
    * Returns `ok: true` with the resolved model, or `ok: false` with a reason
    * if all candidates (including session model, if enabled) are exhausted or unavailable.
    */
-  async resolveModel(ctx: ResolveCtx): Promise<ResolveResult> {
+  async resolveModel(ctx: ResolveCtx, signal?: AbortSignal): Promise<ResolveResult> {
+    signal?.throwIfAborted();
     const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
     const stageName = this.consolidationPhase ?? "unknown";
 
@@ -287,12 +387,12 @@ export class Runtime {
       }
 
       if (isCooldownActive(candidate)) {
-        const entry = getCooldownEntry(candidate);
-        const reason = entry ? `: ${entry.reason}` : "";
+        // Issue #80: the cooldown reason can be an error body — keep it in
+        // the log file only, never interpolate it into the toast.
         this.tryEmitInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${stageName} skipping ${key} (cooldown${reason} — details in cooldown log)`,
+          `Observational memory: ${stageName} skipping ${key} (cooldown — details in cooldown log)`,
         );
         continue;
       }
@@ -352,6 +452,7 @@ export class Runtime {
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
+      signal?.throwIfAborted();
       let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
       const sessionProvider = (sessionModel as { provider?: string }).provider ?? "unknown";
       const isOAuth = ctx.modelRegistry.isUsingOAuth?.(sessionModel) === true;
@@ -361,7 +462,9 @@ export class Runtime {
           ctx.modelRegistry,
           sessionModel,
           sessionProvider,
+          signal,
         );
+        signal?.throwIfAborted();
       }
       if (!auth.ok || !hasAuth) {
         return {
@@ -402,14 +505,16 @@ export class Runtime {
 
   /**
    * Refresh one provider's availability snapshot when an otherwise ambient
-   * request-time credential looks stale. This mirrors Pi's own two-part auth
-   * gate while remaining bounded and harmless on older registries.
+   * request-time credential looks stale.  Bounded and rate-limited; only
+   * lifecycle cancellation is propagated to the caller.
    */
   private async recheckProviderCredential(
     registry: any,
     model: any,
     provider: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
+    signal?.throwIfAborted();
     const now = Date.now();
     const last = this.availabilityRecheckedAt.get(provider);
     if (last !== undefined && now - last < AVAILABILITY_RECHECK_REARM_MS) return false;
@@ -420,11 +525,13 @@ export class Runtime {
 
     const controller = new AbortController();
     let timedOut = false;
-    let refreshError: string | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, AVAILABILITY_RECHECK_TIMEOUT_MS);
+    const abortFromLifecycle = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abortFromLifecycle, { once: true });
+    let refreshError: string | undefined;
     try {
       await Promise.race([
         refresh.call(registry, {
@@ -442,7 +549,9 @@ export class Runtime {
       refreshError = error instanceof Error ? error.message : String(error);
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromLifecycle);
     }
+    signal?.throwIfAborted();
 
     const recovered = registry.hasConfiguredAuth?.(model) === true && !timedOut;
     debugLog("resolve.availability_recheck", {
@@ -492,11 +601,11 @@ export class Runtime {
       return;
     }
     const rawReason = error instanceof Error ? error.message : String(error || "unknown error");
-    // Strip trailing JSON body from API error messages for display cleanliness.
-    // To avoid stripping non-JSON braces like "{host}", only strip if the text
-    // after the brace pair consists solely of whitespace (i.e. JSON is at end).
-    // The full rawReason is NOT stored in the cooldown log — only this brief form.
-    const brief = rawReason.replace(/\s*\{[\s\S]*?\}\s*$/, "").trim();
+    // Issue #80: strip trailing JSON bodies AND HTML error pages (WAF blocks)
+    // down to a short `HTTP <status>` line, capped at ~200 chars, so the
+    // cooldown log never stores a full page and the skip toast stays short.
+    // recordCooldown re-sanitizes as defense-in-depth.
+    const brief = sanitizeCooldownReason(rawReason);
     recordCooldown(modelConfig, brief, stage);
   }
 
@@ -616,7 +725,7 @@ export class Runtime {
         await work();
       } catch (error) {
         errorMessage = error instanceof Error ? error.message : String(error);
-        if (hasUI && ui) {
+        if (!this.disposed && hasUI && ui) {
           try {
             ui.notify(`Observational memory: ${label} failed: ${errorMessage}`, "warning");
           } catch {
