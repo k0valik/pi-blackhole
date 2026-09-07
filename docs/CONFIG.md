@@ -24,7 +24,21 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "tailBehavior": "minimal",   // "pi-default" | "minimal"
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
-  "compactAfterTokens": 81000,    // Token threshold for auto-compaction
+  "compactAfterTokens": 0,        // Explicit fixed threshold. 0 = not set (a ratio, reserve, or preset curve governs). Never exactly 81000 (legacy residue — dropped)
+  "compactAfterRatio": 0,         // OPT-IN: compact at this fraction of the active model's context window (0 = not set)
+  "compactReserveTokens": 0,      // OPT-IN: compact when this many tokens of window headroom remain (0 = not set)
+  "compactAfterPreset": "default",// Preset-curve selection knob (default "default" — 0.90 @32k → 0.40 @1M). Governs when no numeric threshold key is set
+  "compactAfterPresets": {        // Hand-edited preset DEFINITIONS (name → window/ratio anchors) — NOT a settings-modal field
+    "default": [                  // Same-name entries override the built-in curve; shown here for reference
+      { "window": 32768, "ratio": 0.9 },
+      { "window": 131072, "ratio": 0.8 },
+      { "window": 262144, "ratio": 0.7 },
+      { "window": 1048576, "ratio": 0.4 }
+    ],
+    "early-1m": [                 // User-added name — must be selected via the knob; single anchor = constant ratio
+      { "window": 131072, "ratio": 0.6 }
+    ]
+  },
   "retainedToolOutputMaxTokens": 20000, // 0 = disabled; otherwise full historical tool-output budget
 
   // ── Observational Memory ──
@@ -67,7 +81,7 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 
 | Value | Auto-trigger | `/compact` (Pi built-in) | `/blackhole` |
 |-------|:---:|:---:|:---:|
-| `"auto"` | blackhole fires at `compactAfterTokens` threshold ✓ | blackhole handles | blackhole handles |
+| `"auto"` | blackhole fires at the auto-compaction threshold ✓ | blackhole handles | blackhole handles |
 | `"manual"` | skipped | Pi handles ✓ | blackhole handles |
 | `"off"` | skipped (Pi handles) | Pi handles ✓ | blackhole handles |
 
@@ -99,7 +113,7 @@ Replaces the old `overrideDefaultCompaction`.
 
 | `compaction` | `compactionEngine` | Auto-trigger | `/compact` | `/blackhole` |
 |:---:|:---:|---|---|---|
-| auto | blackhole | blackhole fires at `compactAfterTokens` ✓ | blackhole handles | blackhole handles |
+| auto | blackhole | blackhole fires at the auto-compaction threshold ✓ | blackhole handles | blackhole handles |
 | auto | pi-default | trigger skips (Pi decides when) | Pi handles | blackhole handles |
 | manual | (any) | skipped | Pi handles ✓ | blackhole handles |
 | off | (any) | skipped | Pi handles ✓ | blackhole handles |
@@ -148,7 +162,7 @@ minimal (last user at m5):
 
 ### `midRunCompaction`
 
-Controls the **mid-run** auto-compaction trigger. Pi's `agent_end` event only fires when a run exits — during long tool loops (agent calling tools turn after turn) the threshold would otherwise never be evaluated, and accumulated tokens could blow far past `compactAfterTokens` before compaction had any chance to run. This trigger evaluates the threshold at every `turn_end` (after each assistant message + tool executions) while the agent is still working.
+Controls the **mid-run** auto-compaction trigger. Pi's `agent_end` event only fires when a run exits — during long tool loops (agent calling tools turn after turn) the threshold would otherwise never be evaluated, and accumulated tokens could blow far past the auto-compaction threshold before compaction had any chance to run. This trigger evaluates the threshold at every `turn_end` (after each assistant message + tool executions) while the agent is still working.
 
 Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
@@ -179,11 +193,13 @@ Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
 ### `compactAfterTokens`
 
-Token threshold for auto-compaction. When `compaction: "auto"` and accumulated tokens since the last compaction exceed this threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
+Explicit fixed token threshold for auto-compaction. Optional — unset (or `0`) by default. When set to any value other than the reserved legacy `81000` (see below), it **always wins** over `compactAfterRatio`, `compactReserveTokens`, and the selected preset curve. When `compaction: "auto"` and the measured context since the last compaction reaches the effective threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
 
 | Type | Default |
 |------|---------|
-| number | 81000 |
+| number | unset (`0` = not set) |
+
+**Legacy `81000` residue (migration):** Configs scaffolded by earlier versions, or written by the settings modal before the preset-curve release, literally contain `"compactAfterTokens": 81000` — the old fixed default posture, never a deliberate user pin. The loader treats exactly `81000` as that residue and drops it, so the selected preset curve (or a window-derived knob) governs. The drop does **not** apply to a value set via the `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` env var — env overrides are always explicit. To pin a fixed threshold, set any *other* value (e.g. `80000` or `180000`); the flat-81k behavior can no longer be reproduced by writing exactly `81000`.
 
 **The interaction with Pi's threshold:** Pi has its own `keepRecentTokens` default (~20k tokens). Blackhole's threshold is independent — it's the trigger point, not the keep point. When blackhole's trigger fires, `tailBehavior` determines how much is actually kept visible.
 
@@ -198,6 +214,105 @@ This only changes the retained context sent to the provider. Session JSONL, comp
 | Type | Default | Range |
 |------|---------|-------|
 | number | 20000 | `0` (disabled) or positive integer |
+
+### `compactAfterRatio` *(context-window-aware threshold, opt-in)*
+
+Instead of a fixed token count, derive the auto-compaction threshold from the **active session model's context window**: blackhole compacts when the context reaches `floor(contextWindow × compactAfterRatio)`. The threshold is re-derived on every evaluation, so switching models mid-session (`/model`) takes effect on the next check automatically.
+
+| Type | Default |
+|------|---------|
+| number (0, 1] | unset |
+
+Examples on common windows at `0.65`:
+
+```text
+128k model → ~83k   200k model → ~130k   1M model → ~650k
+```
+
+**How the window is resolved** (see `model.contextWindow` below): per-model config override → Pi's model registry → 128k fallback. If Pi doesn't know your custom-provider model's window, set `contextWindow` on its model entry in this config so the ratio targets the real window.
+
+### `compactReserveTokens` *(context-window-aware threshold, opt-in)*
+
+Alternative derivation that keeps constant headroom: blackhole compacts when only `compactReserveTokens` of window remain — threshold `= contextWindow − compactReserveTokens` (clamped to ≥ 1).
+
+| Type | Default |
+|------|---------|
+| positive integer | unset |
+
+```text
+200k window − 32k reserve → ~168k    1M window − 32k reserve → ~968k
+```
+
+**Precedence & enabling:** when several knobs are set, the effective threshold is decided in this order: explicit `compactAfterTokens` > `compactAfterRatio` (`floor(window × ratio)`) > `compactReserveTokens` (`window − reserve`) > the selected preset curve (default: the built-in `default` preset). An explicit file/env `compactAfterTokens` always wins; the one exception is a file value of exactly `81000`, which is legacy scaffold residue and is dropped so a derived knob or the preset curve governs (see `compactAfterTokens`). Remove all derived keys to fall back to the selected preset curve.
+
+**Settings modal:** the numeric knobs appear under **Compaction** in `/blackhole settings` and are always visible — they use `0` to mean *not set*. Type a real value (e.g. `0.65`, `32768`) to engage the knob; set it back to `0` to disable. The **Compaction threshold preset** select sits alongside them and picks the curve that governs when no numeric key is set. The loader treats a file value of `0` exactly like an absent key.
+
+**Example:**
+
+```jsonc
+// Compact at ~65% of whatever model is active (128k → 83k, 200k → 130k, 1M → 650k)
+{ "compactAfterRatio": 0.65 }
+
+// Keep at least 32k tokens of headroom free, regardless of window size
+{ "compactReserveTokens": 32768 }
+
+// Explicit tokens still win when set deliberately
+{ "compactAfterTokens": 180000, "compactAfterRatio": 0.65 }
+```
+
+### `compactAfterPreset` *(preset-curve selection knob)*
+
+Names which curve in the effective preset table applies when **no numeric key** is set (`compactAfterTokens`, `compactAfterRatio`, or `compactReserveTokens`). Options = the built-in `default` curve plus any names you added in `compactAfterPresets`; the **Compaction threshold preset** select in `/blackhole settings` lists exactly those names, so the options and runtime resolution cannot disagree.
+
+| Type | Default |
+|------|---------|
+| string | `"default"` |
+
+An unknown name (typo, or a preset that was dropped for invalid data) warns once and falls back to the built-in `default` curve — resolution always returns a positive threshold, never an error.
+
+Env override: `PI_BLACKHOLE_COMPACT_AFTER_PRESET`.
+
+### `compactAfterPresets` *(preset curve definitions — hand-edited JSON only)*
+
+Defines the window → ratio anchor lists that `compactAfterPreset` selects. **Not a settings-modal field and not a defaults key**: it is hand-edited JSON that config saves carry verbatim, so the modal can never diff, normalize, or clobber it. Built-in definitions ship in code; a same-name entry in this file overrides the built-in curve, and a new name extends the table.
+
+Each preset is a name → ordered array of anchors, `{ "window": <int > 0>, "ratio": <0 < ratio ≤ 1> }`. The ratio at a window is **piecewise-linear interpolation** in window space between the surrounding anchors, and constant outside the anchor range; the effective threshold is `floor(window × ratio)` (minimum 1). A single-anchor preset degenerates to a constant ratio — effectively a global-ratio curve. Anchors are validated at parse time: `window` must be a positive integer and `ratio` in `(0, 1]`; the list is sorted ascending by `window` (a duplicate window keeps the last entry); a preset left with no valid anchors is dropped with a console warning.
+
+Direction of the built-in curve is intentional: the ratio **falls** as the window grows. Small windows fill to ~90% (cheap to send, maximum usable history); huge windows compact early (paid per-token context cost, higher-quality summaries, sharper working set).
+
+**Built-in `default` preset** (curve data is user-tunable — edit the `default` entry below to re-shape it):
+
+| window | ratio | effective threshold (`floor`) | headroom |
+| ------ | ----- | ----------------------------- | -------- |
+| 32,768 | 0.90 | 29,491 | 3,277 |
+| 131,072 | 0.80 | 104,857 | 26,215 |
+| 262,144 | 0.70 | 183,500 | 78,644 |
+| 1,048,576 | 0.40 | 419,430 | 629,146 |
+
+Worked examples: 65,536 → ~0.867 (fires ~56,798); 200,000 → ~0.747 (fires ~149,482, ≈75% full); 1,000,000 → ~0.419 (fires ~418,530); 1,048,576 and above → exactly 0.40 (constant extrapolation); below 32,768 → 0.90 (constant).
+
+**Example:**
+
+```jsonc
+{
+  "compactAfterPreset": "default", // knob: options = built-in names + names defined below
+  "compactAfterPresets": {
+    "default": [
+      // Same-name override of the built-in curve — anchor values may be tuned
+      { "window": 32768, "ratio": 0.9 },
+      { "window": 131072, "ratio": 0.8 },
+      { "window": 262144, "ratio": 0.7 },
+      { "window": 1048576, "ratio": 0.4 }
+    ],
+    "early-1m": [
+      // User-added name (must be selected via the knob) — single anchor = constant 0.6 ratio
+      { "window": 131072, "ratio": 0.6 }
+    ]
+  }
+}
+```
+
+**Migration:** out of the box (no config) the built-in `default` curve governs. A scaffolded/modal-written `"compactAfterTokens": 81000` from before this change is dropped at load (see `compactAfterTokens` above), leaving the preset curve or any configured numeric knob in charge. You only need `compactAfterPresets` when you want to tune a curve or add presets of your own.
 
 ## Observational Memory Section
 
@@ -447,6 +562,7 @@ Positive-integer fields (invalid values fall back):
 | Variable | Overrides |
 |----------|-----------|
 | `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` | `compactAfterTokens` |
+| `PI_BLACKHOLE_COMPACT_RESERVE_TOKENS` | `compactReserveTokens` |
 | `PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS` | `retainedToolOutputMaxTokens` |
 | `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS` | `observeAfterTokens` |
 | `PI_BLACKHOLE_REFLECT_AFTER_TOKENS` | `reflectAfterTokens` |
@@ -459,12 +575,19 @@ Positive-integer fields (invalid values fall back):
 | `PI_BLACKHOLE_AGENT_MAX_TURNS` | `agentMaxTurns` |
 | `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS` | `providerIdleTimeoutMs` |
 
-Float field (must be in `(0, 1]`):
+Float fields (must be in `(0, 1]`):
 
 | Variable | Overrides |
 |----------|-----------|
+| `PI_BLACKHOLE_COMPACT_AFTER_RATIO` | `compactAfterRatio` |
 | `PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD` | `dropperPressureThreshold` |
 | `PI_BLACKHOLE_DROPPER_POOL_FULLNESS_THRESHOLD` | `dropperPoolFullnessThreshold` |
+
+Preset-name field (non-empty string):
+
+| Variable | Overrides |
+|----------|-----------|
+| `PI_BLACKHOLE_COMPACT_AFTER_PRESET` | `compactAfterPreset` |
 
 ### Paths and internals
 

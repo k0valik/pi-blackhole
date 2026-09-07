@@ -344,4 +344,57 @@ describe("/blackhole-memory command", () => {
     expect(msg).toContain("[manual]");
     // Pending section and Preamble cap only show when pending data exists on disk
   });
+
+  it("status shows the context-window-derived threshold with its basis (issue #60)", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    runtime.config.compactAfterTokens = undefined; // derived mode
+    runtime.config.compactAfterRatio = 0.65;
+    runtime.config.compactReserveTokens = undefined;
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 1, reflections: 1 });
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+      model: { provider: "test", id: "test", contextWindow: 200_000 },
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("triggers at 130,000");
+    expect(msg).toContain("65% of 200,000-token window");
+  });
+
+  it("status shows the preset-curve threshold with its basis (window curve)", async () => {
+    const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
+    // No numeric knob: the built-in default preset curve governs out of the box.
+    runtime.config.compactAfterTokens = undefined;
+    runtime.config.compactAfterRatio = undefined;
+    runtime.config.compactReserveTokens = undefined;
+    registerMemoryCommand(pi as any, runtime as any);
+
+    const ui = { notify: vi.fn() };
+    const entries = buildBranch({ observations: 1, reflections: 1 });
+
+    await handlerMap.get("blackhole-memory")!([], {
+      cwd: "/tmp/test",
+      sessionManager: {
+        getBranch: vi.fn(() => entries),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+      ui,
+      // 200,000 sits between the 131,072 (0.8) and 262,144 (0.7) anchors:
+      // ratio ≈ 0.747 → fires at 149,482, displayed as 75%.
+      model: { provider: "test", id: "test", contextWindow: 200_000 },
+    });
+
+    const msg = (ui.notify as any).mock.calls[0][0] as string;
+    expect(msg).toContain("triggers at 149,482");
+    expect(msg).toContain("75% of 200,000-token window (preset: default)");
+  });
 });

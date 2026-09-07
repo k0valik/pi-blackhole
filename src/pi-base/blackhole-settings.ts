@@ -19,6 +19,7 @@ import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import { DEFAULTS, type UnifiedConfig } from "../core/unified-config.js";
+import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
@@ -107,10 +108,11 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "compactAfterTokens",
       type: "number",
-      label: "Auto-compact threshold",
-      description: "Token count that triggers auto-compaction when reached",
-      value: cfg.compactAfterTokens,
-      min: 1_000,
+      label: "Auto-compact threshold (tokens)",
+      description:
+        "Explicit fixed token threshold; wins over the window-derived knobs and the preset curve. 0 = not set (a preset curve, ratio, or reserve governs).",
+      value: cfg.compactAfterTokens ?? 0,
+      min: 0,
       max: 500_000,
       step: 1_000,
     },
@@ -124,6 +126,53 @@ export const config = new ConfigManager<UnifiedConfig>({
       min: 1_000,
       max: 200_000,
       step: 1_000,
+    },
+    // Context-window-derived knobs (issue #60) + preset curve (spec §4). Always
+    // visible: 0 means "not set" (the loader treats 0 as unset, so the selected
+    // preset curve governs). Type a value to engage the knob; set it back to 0
+    // to turn it off. The tokens field above wins whenever it holds an explicit
+    // non-zero value; ratio wins over reserve when both are set; the preset
+    // select (below) picks the curve that applies when no numeric knob is set.
+    {
+      key: "compactAfterRatio",
+      type: "number",
+      label: "Auto-compact ratio (of context window)",
+      description:
+        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob and the preset curve.",
+      value: cfg.compactAfterRatio ?? 0,
+      min: 0,
+      max: 1,
+    },
+    {
+      key: "compactReserveTokens",
+      type: "number",
+      label: "Auto-compact headroom reserve",
+      description:
+        "Alternative window-derived knob: compact when only this many tokens of headroom remain (threshold = window − reserve). 0 = not set. An explicit token threshold wins; ratio wins when both are set.",
+      value: cfg.compactReserveTokens ?? 0,
+      integer: true,
+      min: 0,
+      max: 2_000_000,
+    },
+    {
+      key: "compactAfterPreset",
+      type: "enum",
+      label: "Compaction threshold preset",
+      description:
+        "Window-scaled curve that sets the threshold when no numeric knob above is set (default: compact at 90% of a 32k window, falling to 40% at 1M). To edit the curve or add presets, hand-edit compactAfterPresets in the config file.",
+      value: cfg.compactAfterPreset ?? "default",
+      // Options = built-in preset names + any user-added names from the file
+      // (same effective-presets merge the resolver uses, so the modal list and
+      // runtime resolution cannot disagree).
+      options: Object.keys(effectivePresets(cfg)),
+      optionLabels: Object.fromEntries(
+        Object.keys(effectivePresets(cfg)).map((name) => [
+          name,
+          name === "default"
+            ? "default — falling curve (0.90 @ 32k → 0.40 @ 1M)"
+            : `${name} (custom preset)`,
+        ]),
+      ),
     },
 
     // ── Observational Memory ──
@@ -389,7 +438,6 @@ export const config = new ConfigManager<UnifiedConfig>({
     const REQUIRED_NUMERIC_KEYS: readonly (keyof UnifiedConfig)[] = [
       "observeAfterTokens",
       "reflectAfterTokens",
-      "compactAfterTokens",
       "retainedToolOutputMaxTokens",
       "observationsPoolMaxTokens",
       "observationsPoolTargetTokens",
@@ -400,6 +448,8 @@ export const config = new ConfigManager<UnifiedConfig>({
       "agentMaxTurns",
     ];
     for (const k of REQUIRED_NUMERIC_KEYS) {
+      // SAFETY: merged is a plain config object; indexing by dynamic key needs
+      // the Record view to read/write numeric fields uniformly.
       const v = (merged as unknown as Record<string, unknown>)[k];
       const minVal = k === "observerPreambleMaxTokens" ? 0 : 1;
       if (
@@ -408,6 +458,8 @@ export const config = new ConfigManager<UnifiedConfig>({
         (k === "retainedToolOutputMaxTokens" && !Number.isInteger(v)) ||
         v < minVal
       ) {
+        // SAFETY: dynamic-key write as above; DEFAULTS[k] is always a number
+        // for keys in REQUIRED_NUMERIC_KEYS.
         (merged as unknown as Record<string, unknown>)[k] = DEFAULTS[k];
       }
     }

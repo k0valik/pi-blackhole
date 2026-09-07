@@ -6,6 +6,14 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { copyTextToClipboard } from "../om/clipboard.js";
+import {
+  BUILTIN_PRESETS,
+  autoCompactThreshold,
+  effectivePresets,
+  presetRatioForWindow,
+  sessionContextWindow,
+  type CompactThresholdConfig,
+} from "../om/model-budget.js";
 import type { Runtime } from "../om/runtime.js";
 import {
   diffProjection,
@@ -38,6 +46,28 @@ function firstArg(args: unknown): string | undefined {
 
 function pct(current: number, total: number): number {
   return total > 0 ? Math.round((current / total) * 100) : 0;
+}
+
+/**
+ * Basis suffix for the auto-compaction threshold line. Empty for an explicit
+ * fixed token threshold; describes the window-derived basis otherwise
+ * (issue #60 + preset curves). The preset branch resolves the same ratio the
+ * trigger uses, so display and trigger cannot disagree.
+ */
+function compactThresholdSuffix(cfg: CompactThresholdConfig, window: number): string {
+  if (cfg.compactAfterTokens !== undefined) return ""; // explicit fixed token threshold
+  if (cfg.compactAfterRatio !== undefined) {
+    return ` · ${Math.round(cfg.compactAfterRatio * 100)}% of ${window.toLocaleString()}-token window`;
+  }
+  if (cfg.compactReserveTokens !== undefined) {
+    return ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+  }
+  // Preset curve (incl. the out-of-box default preset): describe the effective
+  // ratio at this window, resolved by the same pure functions as the trigger.
+  const name = cfg.compactAfterPreset ?? "default";
+  const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
+  const ratio = presetRatioForWindow(anchors, window);
+  return ` · ${Math.round(ratio * 100)}% of ${window.toLocaleString()}-token window (preset: ${name})`;
 }
 
 function tokenSum(items: { tokenCount: number }[]): number {
@@ -178,7 +208,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"
-            : ` (triggers at ${runtime.config.compactAfterTokens.toLocaleString()})`),
+            : ` (triggers at ${autoCompactThreshold(runtime.config, ctx.model).toLocaleString()}${compactThresholdSuffix(runtime.config, sessionContextWindow(ctx.model, runtime.config))})`),
         `Obs pool:       ~${visibleObservationTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(visibleObservationTokens, runtime.config.observationsPoolMaxTokens)}%)`,
         `Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
       ];

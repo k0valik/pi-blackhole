@@ -62,6 +62,16 @@ export interface OmModelConfig {
   contextWindow?: number;
 }
 
+/**
+ * One anchor of a preset threshold curve (spec §7): at `window`, compact at
+ * `ratio` of the window. Structurally identical to model-budget's PresetAnchor
+ * — defined here so the config layer needs no import from om/.
+ */
+export interface PresetAnchorDef {
+  window: number;
+  ratio: number;
+}
+
 export interface UnifiedConfig {
   /** @deprecated Use compactionEngine instead. */
   overrideDefaultCompaction?: boolean;
@@ -116,8 +126,51 @@ export interface UnifiedConfig {
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
   reflectAfterTokens: number;
-  /** Token threshold for proactive auto-compaction. */
-  compactAfterTokens: number;
+  /** Token threshold for proactive auto-compaction.
+   *
+   * When set (explicitly, in the config file or via env), this fixed token
+   * count always wins over the window-derived knobs and the preset curve
+   * below. Optional; 0/absent is treated as unset (the loader treats a
+   * scaffolded legacy 81000 as non-explicit residue whenever a derived knob
+   * or preset is configured — see loadUnifiedConfig). Unset means a
+   * window-derived knob, or the selected preset curve, governs. */
+  compactAfterTokens?: number;
+  /**
+   * Context-window-derived auto-compaction threshold (issue #60): when set,
+   * the effective threshold is `floor(contextWindow × compactAfterRatio)` for
+   * the active session model's window, so compaction tracks the model instead
+   * of a fixed token count. The fixed default is NOT applied when this (or
+   * compactReserveTokens) is set and compactAfterTokens is absent.
+   * Precedence when multiple knobs are set:
+   *   compactAfterTokens (explicit) > compactAfterRatio > compactReserveTokens > preset.
+   * Optional; unset by default. Must be in (0, 1].
+   */
+  compactAfterRatio?: number;
+  /**
+   * Alternative window-derived threshold: keep this many tokens of headroom
+   * free — threshold = `contextWindow − compactReserveTokens` (clamped ≥ 1).
+   * Same precedence rules and defaults as compactAfterRatio.
+   * Optional; unset by default. Must be a positive integer.
+   */
+  compactReserveTokens?: number;
+  /**
+   * Preset-curve selection knob (window-scaled threshold curve, spec
+   * work_docs/proposal-ratio-presets-by-context-window.md): names which preset
+   * in the effective preset table applies. Effective presets = the built-in
+   * definitions (model-budget BUILTIN_PRESETS) overlaid by any user
+   * `compactAfterPresets` definitions in this file. An unknown name warns and
+   * falls back to the built-in "default" curve. Default "default" — a preset
+   * applies out of the box when no numeric knob is configured.
+   */
+  compactAfterPreset?: string;
+  /**
+   * User-editable preset definitions: name → ordered (window, ratio) anchors
+   * (0 < ratio ≤ 1). Same-name entries override the built-in preset; new names
+   * extend the table. Hand-edited JSON only — deliberately NOT a DEFAULTS/
+   * modal key so vendored ConfigManager.save() carries it verbatim instead of
+   * diffing/normalizing it (spec §4.2). Optional; unset by default.
+   */
+  compactAfterPresets?: Record<string, PresetAnchorDef[]>;
   /** Observation pool token pressure for full fold. */
   observationsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
@@ -207,7 +260,21 @@ export const DEFAULTS: UnifiedConfig = {
 
   observeAfterTokens: 15_000,
   reflectAfterTokens: 25_000,
-  compactAfterTokens: 81_000,
+  // The legacy fixed default (81000) is gone: the built-in "default" preset
+  // curve governs when no numeric knob is configured (spec D3). An explicit
+  // file/env compactAfterTokens still wins when present; a scaffolded legacy
+  // 81000 is treated as residue whenever a window-derived knob or preset is
+  // configured (see loadUnifiedConfig).
+  compactAfterTokens: undefined,
+  // Window-derived knobs (issue #60) + preset-selection knob. Present here (as
+  // defaults) so ConfigManager.save()'s diff-over-defaults can persist modal
+  // edits — absence from DEFAULTS would silently drop a field edit. 0 is
+  // treated as unset by parseConfig. compactAfterPresets (the preset
+  // DEFINITIONS) is deliberately NOT a DEFAULTS key — it is hand-edited JSON
+  // that save() must carry verbatim (spec §4.2).
+  compactAfterRatio: undefined,
+  compactReserveTokens: undefined,
+  compactAfterPreset: "default",
   observationsPoolMaxTokens: 20_000,
   fullFoldAlways: true,
   observationsPoolTargetTokens: 10_000,
@@ -222,6 +289,17 @@ export const DEFAULTS: UnifiedConfig = {
   memory: true,
   debugLog: false,
 };
+
+/**
+ * Legacy scaffold default (pre-curve): scaffoldConfig() and the settings modal
+ * used to materialize `compactAfterTokens: 81000` into config files even for
+ * users who never chose it. Treated as default-posture residue by
+ * loadUnifiedConfig — the value 81000 reads as "the old default" and yields to
+ * the default preset curve / derived knobs, exactly as it always yielded to
+ * derived mode. Flat-81k behavior is reproducible with any other explicit
+ * fixed value (spec §10).
+ */
+const LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS = 81_000;
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
 
@@ -300,6 +378,55 @@ function parseModelArray(v: unknown): OmModelConfig[] | undefined {
   return parsed.length > 0 ? parsed : undefined;
 }
 
+function parsePresetAnchor(v: unknown): PresetAnchorDef | undefined {
+  if (!isRecord(v)) return undefined;
+  const window = positiveInt(v.window);
+  const ratio = v.ratio;
+  if (window === undefined) return undefined;
+  if (typeof ratio !== "number" || !Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    return undefined;
+  }
+  return { window, ratio };
+}
+
+/**
+ * Parse a user `compactAfterPresets` dictionary (hand-edited JSON). Per preset:
+ * keep only valid anchors (window int > 0, ratio in (0, 1]), sort ascending by
+ * window (duplicate windows keep the last), drop the whole preset with a warn
+ * when nothing valid remains. Returns undefined when no valid preset remains.
+ */
+function parsePresetDefinitions(v: unknown): Record<string, PresetAnchorDef[]> | undefined {
+  if (!isRecord(v)) return undefined;
+  const out: Record<string, PresetAnchorDef[]> = {};
+  for (const [name, body] of Object.entries(v)) {
+    if (name.length === 0) continue;
+    if (!Array.isArray(body)) {
+      console.warn(`blackhole: compactAfterPresets["${name}"] is not an array; dropping preset`);
+      continue;
+    }
+    const anchors = body
+      .map(parsePresetAnchor)
+      .filter((a): a is PresetAnchorDef => a !== undefined);
+    if (anchors.length === 0) {
+      console.warn(
+        `blackhole: compactAfterPresets["${name}"] has no valid anchors; dropping preset`,
+      );
+      continue;
+    }
+    anchors.sort((a, b) => a.window - b.window);
+    const deduped: PresetAnchorDef[] = [];
+    for (const a of anchors) {
+      if (deduped.length > 0 && deduped[deduped.length - 1].window === a.window) {
+        deduped[deduped.length - 1] = a; // keep the last
+      } else {
+        deduped.push(a);
+      }
+    }
+    out[name] = deduped;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   const c: Partial<UnifiedConfig> = {};
 
@@ -310,6 +437,15 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
   if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
+
+  // Preset-curve selection knob — any non-empty name (names are user data).
+  const preset = nonEmptyString(raw.compactAfterPreset);
+  if (preset) c.compactAfterPreset = preset;
+
+  // User-defined preset definitions (hand-edited JSON). Validated + sorted;
+  // invalid presets dropped with a warn.
+  const presets = parsePresetDefinitions(raw.compactAfterPresets);
+  if (presets) c.compactAfterPresets = presets;
 
   // Provider-aware skip list (entries: provider or "provider:api")
   if (Array.isArray(raw.skipForProviders)) {
@@ -340,6 +476,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "reflectAfterTokens",
     "compactAfterTokens",
     "retainedToolOutputMaxTokens",
+    "compactReserveTokens",
     "observationsPoolMaxTokens",
     "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
@@ -367,6 +504,15 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     raw.dropperPoolFullnessThreshold <= 1
   ) {
     c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
+  }
+  // compactAfterRatio: fractional, must be in (0, 1]
+  if (
+    typeof raw.compactAfterRatio === "number" &&
+    Number.isFinite(raw.compactAfterRatio) &&
+    raw.compactAfterRatio > 0 &&
+    raw.compactAfterRatio <= 1
+  ) {
+    c.compactAfterRatio = raw.compactAfterRatio;
   }
   for (const k of numKeys) {
     // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
@@ -584,8 +730,26 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   const withEnv = applyEnvOverrides(
     merged,
     DECLARATIVE_ENV_OVERRIDES,
+    // SAFETY: DEFAULTS is a flat object literal (UnifiedConfig); its runtime
+    // shape is exactly the Record<string, unknown> applyEnvOverrides expects.
     DEFAULTS as unknown as Record<string, unknown>,
   );
+
+  // Derived-threshold / default-posture cleanup. Runs AFTER applyEnvOverrides so
+  // env-driven values are visible. An env override always counts as explicit.
+  const tokenEnvVar = (DECLARATIVE_ENV_OVERRIDES.compactAfterTokens as { var: string }).var;
+  const tokensFromEnv = process.env[tokenEnvVar] !== undefined;
+  // Legacy scaffold residue (pre-curve): scaffoldConfig() and the settings modal
+  // used to write the full defaults into the file, materializing
+  // compactAfterTokens: 81000 even for users who never chose it. 81000 always
+  // meant "default posture", never a true pin (the pre-curve code dropped it
+  // whenever a derived knob was set for the same reason), so it is treated as
+  // residue here: the default preset curve (or a configured derived knob)
+  // governs instead. Env-set values are never touched. The flat-81k behavior is
+  // reproducible with any other explicit fixed value (spec §10).
+  if (withEnv.compactAfterTokens === LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS && !tokensFromEnv) {
+    delete withEnv.compactAfterTokens;
+  }
 
   return withEnv;
 }

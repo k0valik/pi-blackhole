@@ -51,7 +51,11 @@ describe("Config defaults", () => {
     expect(config.debug).toBe(false);
     expect(config.observeAfterTokens).toBe(15_000);
     expect(config.reflectAfterTokens).toBe(25_000);
-    expect(config.compactAfterTokens).toBe(81_000);
+    expect(config.compactAfterTokens).toBeUndefined(); // legacy fixed default removed
+    expect(config.compactAfterPreset).toBe("default"); // preset curve governs out of the box
+    expect(config.compactAfterRatio).toBeUndefined();
+    expect(config.compactReserveTokens).toBeUndefined();
+    expect(config.compactAfterPresets).toBeUndefined();
     expect(config.retainedToolOutputMaxTokens).toBe(20_000);
     expect(config.observationsPoolMaxTokens).toBe(20_000);
     expect(config.agentMaxTurns).toBe(16);
@@ -96,6 +100,98 @@ describe("retainedToolOutputMaxTokens", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     process.env[envKey] = "9000";
     expect(loadUnifiedConfig(testDir).retainedToolOutputMaxTokens).toBe(9_000);
+  });
+});
+
+describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
+  it('derived knobs default to undefined; preset knob defaults to "default"', async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBeUndefined();
+    expect(config.compactReserveTokens).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+    expect(config.compactAfterPreset).toBe("default");
+  });
+
+  it("compactAfterRatio opts into derived mode (default tokens dropped)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 0.65 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactReserveTokens).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("compactReserveTokens opts into derived mode (default tokens dropped)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactReserveTokens: 32_768 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactReserveTokens).toBe(32_768);
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("explicit compactAfterTokens keeps token mode even when a derived knob is set", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 180_000, compactAfterRatio: 0.65 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBe(180_000);
+    expect(config.compactAfterRatio).toBe(0.65);
+  });
+
+  it("a DEFAULT-valued compactAfterTokens in the file does not block derived mode", async () => {
+    // scaffoldConfig()/the settings modal write full defaults (81000) into the
+    // file — that must not count as an explicit choice, or derived mode could
+    // never engage for those users.
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 0.65 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBeUndefined();
+    expect(config.compactAfterRatio).toBe(0.65);
+  });
+
+  it("rejects out-of-range ratios (no derived knob; preset governs)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 1.5 }); // > 1
+    let config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+
+    writeConfig({ compactAfterRatio: 0 }); // must be > 0
+    config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+
+    writeConfig({ compactAfterRatio: "not-a-number" });
+    config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("rejects invalid compactReserveTokens (no derived knob; preset governs)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactReserveTokens: -5 });
+    let config = loadUnifiedConfig(testDir);
+    expect(config.compactReserveTokens).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+
+    writeConfig({ compactReserveTokens: 0 });
+    config = loadUnifiedConfig(testDir);
+    expect(config.compactReserveTokens).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+
+    writeConfig({ compactReserveTokens: 10.5 });
+    config = loadUnifiedConfig(testDir);
+    expect(config.compactReserveTokens).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("keeps both derived knobs when both are configured (precedence resolved later)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 0.5, compactReserveTokens: 1_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBe(0.5);
+    expect(config.compactReserveTokens).toBe(1_000);
+    expect(config.compactAfterTokens).toBeUndefined();
   });
 });
 
@@ -445,6 +541,9 @@ describe("Declarative env overrides apply at runtime", () => {
   afterEach(() => {
     // Clean up every env var this block may set.
     delete process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS;
+    delete process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO;
+    delete process.env.PI_BLACKHOLE_COMPACT_RESERVE_TOKENS;
+    delete process.env.PI_BLACKHOLE_COMPACT_AFTER_PRESET;
     delete process.env.PI_BLACKHOLE_DEBUG;
     delete process.env.PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD;
     delete process.env.PI_BLACKHOLE_OBSERVE_AFTER_TOKENS;
@@ -489,6 +588,54 @@ describe("Declarative env overrides apply at runtime", () => {
     const config = loadUnifiedConfig(testDir);
     expect(config.dropperPressureThreshold).toBe(0.7);
   });
+
+  it("env compactAfterRatio opts into derived mode", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "0.5";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBe(0.5);
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("invalid env compactAfterRatio is rejected (keeps configured state)", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "1.5";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBeUndefined();
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("env compactAfterPreset engages a preset selection", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_PRESET = "balanced";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterPreset).toBe("balanced");
+  });
+
+  it("blank env compactAfterPreset is ignored (keeps the configured name)", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_PRESET = "   ";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterPreset: "early" });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterPreset).toBe("early");
+  });
+
+  it("env compactReserveTokens opts into derived mode", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_RESERVE_TOKENS = "32768";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactReserveTokens).toBe(32_768);
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("env compactAfterTokens still wins over a file-derived ratio", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS = "180000";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 0.65 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBe(180_000);
+    expect(config.compactAfterRatio).toBe(0.65);
+  });
 });
 
 describe("Integer fields are validated as positive integers", () => {
@@ -497,12 +644,105 @@ describe("Integer fields are validated as positive integers", () => {
     writeConfig({
       observeAfterTokens: -100,
       reflectAfterTokens: 0,
-      compactAfterTokens: 81_000,
+      compactAfterTokens: 180_000,
     });
     const config = loadUnifiedConfig(testDir);
     expect(config.observeAfterTokens).toBe(15_000); // blackhole default (upstream is 10_000)
     expect(config.reflectAfterTokens).toBe(25_000); // blackhole default (upstream is 20_000)
-    expect(config.compactAfterTokens).toBe(81_000); // from config
+    expect(config.compactAfterTokens).toBe(180_000); // explicit non-legacy value survives
+  });
+});
+
+describe("compactAfterPreset / compactAfterPresets (window-curve presets)", () => {
+  it('knob defaults to the built-in "default" preset; definitions surface undefined', async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterPreset).toBe("default");
+    expect(config.compactAfterPresets).toBeUndefined();
+  });
+
+  it("parses a file preset selection knob (any non-empty name)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterPreset: "early-1m" });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterPreset).toBe("early-1m");
+  });
+
+  it("parses preset definitions, dropping invalid anchors and sorting", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({
+      compactAfterPresets: {
+        mixed: [
+          { window: 1_048_576, ratio: 0.4 },
+          { window: 32_768, ratio: 0.9 },
+          { window: 32_768, ratio: 0.8 }, // duplicate window — last wins
+          { window: 0, ratio: 0.5 }, // invalid window — dropped
+          { window: 131_072, ratio: 0 }, // invalid ratio — dropped
+          { window: 131_072, ratio: 1.2 }, // invalid ratio — dropped
+        ],
+      },
+    });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterPresets).toEqual({
+      mixed: [
+        { window: 32_768, ratio: 0.8 },
+        { window: 1_048_576, ratio: 0.4 },
+      ],
+    });
+  });
+
+  it("drops presets with no valid anchors or a non-array body (warn)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({
+      compactAfterPresets: {
+        empty: [],
+        garbage: "not-an-array",
+        bad: [{ window: 0, ratio: 0.5 }],
+        good: [{ window: 131_072, ratio: 0.7 }],
+      },
+    });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterPresets).toEqual({
+      good: [{ window: 131_072, ratio: 0.7 }],
+    });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("drops a scaffolded legacy 81000 as default-posture residue", async () => {
+    // scaffoldConfig()/the modal used to materialize the old fixed default into
+    // the file; 81000 always meant "the default", never a true pin — it now
+    // yields to the built-in preset curve (spec §10).
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 81_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBeUndefined();
+    expect(config.compactAfterPreset).toBe("default");
+  });
+
+  it("keeps an explicit non-legacy fixed token threshold", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 80_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBe(80_000);
+  });
+
+  it("scaffolded 81000 still yields to a file-derived ratio (issue #60 parity)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 0.65 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterTokens).toBeUndefined();
+  });
+
+  it("an env-set compactAfterTokens is never treated as residue", async () => {
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS = "81000";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({});
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBe(81_000);
+    delete process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS;
   });
 });
 

@@ -139,7 +139,7 @@ If user picks Off, ask separately whether they also want to disable memory (`mem
 
 > pi-blackhole has three modes for compaction (compressing old conversation to save context space):
 >
-> - **Auto** — install and forget. Compaction fires automatically when enough conversation accumulates (~80k tokens by default). The extension handles everything. Best for most people.
+> - **Auto** — install and forget. Compaction fires automatically when enough conversation accumulates. The trigger auto-scales to your model's context window (default preset curve: fires at ~90% full on a 32k model, ~80% at 128k, ~40% on a 1M-class model), so there's nothing to tune. The extension handles everything. Best for most people.
 > - **Manual** — compaction only happens when you type `/blackhole`. You control when context gets compressed. Observations still accumulate in the background automatically. Good if you want to decide the right moment to compress.
 > - **Off** — Pi handles compaction normally. pi-blackhole only activates when you explicitly use `/blackhole`. Workers still run unless you also disable memory. Useful if you mainly want the memory features without changing how compaction works.
 >
@@ -201,24 +201,24 @@ After user chooses, examine what's available and propose specific models. The ta
 
 ### Question 3: Context size
 
-**Agent context:** This determines ALL token thresholds — `compactAfterTokens`, `observeAfterTokens`, `reflectAfterTokens`, `observerChunkMaxTokens`, `observationsPoolMaxTokens`, `reflectorInputMaxTokens`, `dropperInputMaxTokens`. They all scale from `compactAfterTokens` which should be ~65% of the model's context window.
+**Agent context:** The context window matters for (1) the auto-compaction trigger and (2) optional manual sizing. Out of the box the trigger follows the built-in `default` preset curve and needs **no numeric config key**: it fires at `floor(window × ratio)` — 0.90 of a 32,768-token window, 0.80 at 131,072, 0.70 at 262,144, 0.40 at 1,048,576 (piecewise-linear between anchors; 32k → ~29,491, 128k → ~104,857). The OM worker thresholds (`observeAfterTokens`, `reflectAfterTokens`, `observerChunkMaxTokens`, `observationsPoolMaxTokens`, `reflectorInputMaxTokens`, `dropperInputMaxTokens`) are independent **fixed defaults** (below) and do NOT auto-scale with the window.
 
-The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens kept by default). Blackhole's `compactAfterTokens` is independent — it's the *trigger* point, not the *keep* point. When blackhole's trigger fires, `tailBehavior` determines what's kept visible.
+The window must be *known* for any window-derived behavior to target reality: resolution order is per-model `contextWindow` override → Pi's model registry → 128k fallback. If the user's main model is a local/custom provider Pi's registry may not know, capture the window here so the config carries a `contextWindow` override on the matching model entry — otherwise the curve/ratio resolves against 128k and may never fire on a small window.
 
-**Scaling rationale:** The ratios are designed so workers always have enough headroom. `compactAfterTokens` at 65% means there's 35% headroom for system prompts, tool definitions, and the summary itself. The observer chunk is capped at half of that so it never floods itself. The reflector/dropper budgets match `compactAfterTokens` because they need to see all accumulated observations plus summaries.
+The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens kept by default). Blackhole's auto-compaction threshold is independent — it's the *trigger* point, not the *keep* point. When blackhole's trigger fires, `tailBehavior` determines what's kept visible.
+
+**Scaling rationale (only when pinning fixed numbers):** if the user wants a fixed trigger instead of the curve, pin `compactAfterTokens` at roughly 60-70% of the model's window and scale the worker budgets from it as below — 30-40% headroom for system prompts, tool definitions, and the summary itself. The observer chunk is capped at half of that so it never floods itself; the reflector/dropper budgets match `compactAfterTokens` because they need to see all accumulated observations plus summaries.
 
 **User-facing statement:**
 
-> What's the context window of your main conversation model? This tells me when compaction should fire and how much data the workers can process per run.
+> What's the context window of your main conversation model? Blackhole's auto-compaction now sizes itself to that window out of the box (the default preset curve fires at ~90% full on a 32k window, ~80% at 128k, ~40% on 1M-class windows — as long as Pi knows the window), so nothing needs tuning. I mainly ask so I can record your model's window in the config when Pi doesn't already know it, and offer fixed thresholds sized to your model if you prefer them.
 >
-> Rule of thumb: compaction triggers at about 60-70% of your model's context window, leaving headroom for tools and system prompts.
+> Standard model classes (used only if you want fixed numeric thresholds instead of the auto curve):
+> - **Small models** (~32-64k context)
+> - **Medium models** (~128k — GPT-4o, Claude Sonnet, Gemini Pro)
+> - **Large models** (~200k+ — Claude Opus, Gemini Ultra, big local models)
 >
-> Standard presets:
-> - **Small models** (~32-64k context) — compact at ~30k tokens
-> - **Medium models** (~128k — GPT-4o, Claude Sonnet, Gemini Pro) — compact at ~80k tokens (this is the default, works for most people)
-> - **Large models** (~200k+ — Claude Opus, Gemini Ultra, big local models) — compact at ~180k tokens
->
-> Tell me your model name and its context window, or just pick a preset.
+> Tell me your model name and its context window.
 
 ### Question 4 (optional): Compaction engine behavior
 
@@ -267,7 +267,9 @@ Based on interview answers, build the config object. Write it to:
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default" — irrelevant for manual/off
   "tailBehavior": "minimal",      // "minimal" (last user msg only, default) | "pi-default" (Pi's gentler cut)
-  "compactAfterTokens": 81000,    // auto-compaction threshold, ~65% of model's context window
+  "compactAfterPreset": "default", // auto-compaction threshold curve: fires at floor(window × ratio), 0.90 @ 32k → 0.40 @ 1M. No numeric threshold key is needed out of the box
+  // Optional numeric pins instead of the curve: "compactAfterRatio": 0.65 or "compactReserveTokens": 32768,
+  // or "compactAfterTokens": <fixed value> — any explicit value except exactly 81000 (that is legacy residue and is dropped)
 
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
@@ -287,15 +289,15 @@ Based on interview answers, build the config object. Write it to:
   "reflectorFallbackModels": [ ... ],
   "dropperFallbackModels":   [ ... ],
 
-  // ── Token thresholds (scale from compactAfterTokens) ──
-  "observeAfterTokens": 15000,         // compactAfterTokens / ~5.4
-  "reflectAfterTokens": 25000,         // compactAfterTokens / ~3.2
-  "observerChunkMaxTokens": 40000,     // compactAfterTokens / ~2 — max conversation chunk sent to observer per run
+  // ── OM worker thresholds (fixed defaults — independent of the auto-compaction curve) ──
+  "observeAfterTokens": 15000,         // observer cadence (default)
+  "reflectAfterTokens": 25000,         // reflector + dropper cadence (default)
+  "observerChunkMaxTokens": 40000,     // max conversation chunk sent to observer per run
   "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
-  "observationsPoolMaxTokens": 20000,  // compactAfterTokens / ~4 — max active observation pool before dropper prunes
+  "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
   "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
-  "reflectorInputMaxTokens": 80000,    // ~compactAfterTokens
-  "dropperInputMaxTokens": 80000,      // ~compactAfterTokens
+  "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
+  "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
 }
@@ -320,13 +322,13 @@ Each model entry supports these fields:
 - It's available again on the next pipeline run (no persisted cooldown)
 - Useful for testing or when you don't want cooldown state to persist across restarts
 
-### Context size presets
+### Context size presets (for fixed numeric thresholds only)
 
-Match `compactAfterTokens` to ~65% of the user's model context window. Then scale thresholds proportionally:
+The default setup needs none of this: auto-compaction's preset curve scales the trigger with the model's window, and the worker thresholds have fixed defaults (the ~128k column below) that need no sizing. Use this table when the user wants **fixed numeric thresholds** — a pinned `compactAfterTokens` and worker budgets sized to a specific model class. Then match `compactAfterTokens` to ~65% of the model's context window and scale the rest proportionally:
 
 | Setting | ~128k model (default) | ~64k model (low) | ~200k+ model (high) |
 |---------|:---------------------:|:-----------------:|:-------------------:|
-| `compactAfterTokens` | 81000 | 30000 | 180000 |
+| `compactAfterTokens` | 80000 | 30000 | 180000 |
 | `observeAfterTokens` | 15000 | 5000 | 20000 |
 | `reflectAfterTokens` | 25000 | 10000 | 40000 |
 | `observerChunkMaxTokens` | 40000 | 15000 | 80000 |
@@ -334,7 +336,7 @@ Match `compactAfterTokens` to ~65% of the user's model context window. Then scal
 | `reflectorInputMaxTokens` | 80000 | 30000 | 160000 |
 | `dropperInputMaxTokens` | 80000 | 30000 | 160000 |
 
-Sizing formula (for non-standard context windows):
+Sizing formula (for non-standard context windows — fixed pins only):
 ```
 compactAfterTokens:        round(model_context * 0.65,     nearest_1000)
 observeAfterTokens:        round(compactAfterTokens / 5.4, nearest_1000)
@@ -346,6 +348,8 @@ dropperInputMaxTokens:     round(compactAfterTokens,       nearest_1000)
 ```
 
 The ratios are the same as the default 128k presets — scale linearly. The default presets are slightly hand-tuned from pure math for cost-efficiency (observer threshold is raised a bit, reflector similarly). For custom sizes, the formulas above are a good starting point; the user can tune from there.
+
+> **Never pin exactly 81000.** A `compactAfterTokens` of exactly 81000 is reserved: the loader treats it as legacy scaffold residue (the old flat default) and drops it, so the preset curve governs instead of your pin. For a ~128k model use e.g. 80000, or write no fixed threshold at all and let the default curve size the trigger.
 
 ### Fallback chain strategy
 
@@ -387,7 +391,6 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
 
   "observeAfterTokens": 15000,
   "reflectAfterTokens": 25000,
-  "compactAfterTokens": 81000,
   "observerChunkMaxTokens": 40000,
   "observationsPoolMaxTokens": 20000,
   "reflectorInputMaxTokens": 80000,
@@ -556,7 +559,7 @@ These are processed in `loadUnifiedConfig()` in `unified-config.ts`. The passive
 
 **Do not touch `auth.json`.** It contains API keys. Never read it, never reference it.
 
-**Do not set `compactAfterTokens` the user's model can't handle.** 65% of context window max. If the model has 32k context, `compactAfterTokens` should be ~20k, not 81k. The compaction fires, generates a summary, and keeps a tail — if the sum of summary + tail + system prompt exceeds the model's context, the model will fail or degrade.
+**Do not pin `compactAfterTokens` above what the model can handle — and never write exactly 81000.** The default preset curve auto-scales the trigger to the model's window (a 32k model fires at ~29,491 ≈ 90% full; a 1M-class window at ~0.40), so a numeric pin is only needed when the user wants a fixed threshold — then keep it well under the window, because the compaction summary + retained tail + system prompt must still fit. Two traps: (1) if Pi doesn't know the model's window (local/custom providers), the curve resolves against the 128k fallback and can fire too late (or never) on a small model — set a `contextWindow` override on the model entry; (2) exactly `81000` is reserved as legacy scaffold residue and is silently dropped, so pin a deliberate value like 80000 or 83000 instead.
 
 **Do not set model fields without `provider` and `id`.** Both are required. Setting just one — e.g. `{ "provider": "openrouter" }` without an `id` — silently ignores the entire model block. The parser checks both are non-empty strings. Same for fallback array entries: invalid entries (missing provider or id) are filtered out silently.
 
