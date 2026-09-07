@@ -32,7 +32,12 @@ import {
   type Projection,
 } from "../om/ledger/index.js";
 import { readPendingState } from "../om/pending.js";
-import { isManualMode } from "../core/unified-config.js";
+import {
+  isFixedTokenThreshold,
+  isManualMode,
+  isReserveTokens,
+  isWindowRatio,
+} from "../core/unified-config.js";
 
 function firstArg(args: unknown): string | undefined {
   if (Array.isArray(args)) return typeof args[0] === "string" ? args[0] : undefined;
@@ -55,11 +60,13 @@ function pct(current: number, total: number): number {
  * trigger uses, so display and trigger cannot disagree.
  */
 function compactThresholdSuffix(cfg: CompactThresholdConfig, window: number): string {
-  if (cfg.compactAfterTokens !== undefined) return ""; // explicit fixed token threshold
-  if (cfg.compactAfterRatio !== undefined) {
+  // Validity (not mere presence) decides the tier — mirrors compactThresholdTokens
+  // so display and trigger cannot disagree, even for unnormalized configs.
+  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return ""; // explicit fixed token threshold
+  if (isWindowRatio(cfg.compactAfterRatio)) {
     return ` · ${Math.round(cfg.compactAfterRatio * 100)}% of ${window.toLocaleString()}-token window`;
   }
-  if (cfg.compactReserveTokens !== undefined) {
+  if (isReserveTokens(cfg.compactReserveTokens)) {
     return ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
   }
   // Preset curve (incl. the out-of-box default preset): describe the effective

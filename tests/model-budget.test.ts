@@ -167,6 +167,58 @@ describe("compactThresholdTokens", () => {
     expect(compactThresholdTokens({ compactAfterPreset: "default" }, 32_768)).toBe(29_491);
     expect(compactThresholdTokens({}, 200_000)).toBe(149_482);
   });
+
+  it("compactAfterTokens 0 (modal 'not set') falls through instead of pinning 0", () => {
+    // 0 is the modal's "not set" convention — it must behave like an absent
+    // key, never as a live threshold (0 would compact on every event).
+    expect(compactThresholdTokens({ compactAfterTokens: 0 } as never, 200_000)).toBe(149_482);
+    expect(
+      compactThresholdTokens({ compactAfterTokens: 0, compactAfterRatio: 0.65 } as never, 200_000),
+    ).toBe(130_000);
+  });
+
+  it("non-integer or negative compactAfterTokens falls through", () => {
+    expect(
+      compactThresholdTokens(
+        { compactAfterTokens: 81_000.5, compactAfterRatio: 0.65 } as never,
+        200_000,
+      ),
+    ).toBe(130_000);
+    expect(compactThresholdTokens({ compactAfterTokens: -5 } as never, 200_000)).toBe(149_482);
+  });
+
+  it("the resolver still pins a literal 81000 (dropping it is the loader's job)", () => {
+    // Env-set 81000 is explicitly allowed by the spec — only the file loader
+    // treats 81000 as scaffold residue. The resolver must not second-guess it.
+    expect(compactThresholdTokens({ compactAfterTokens: 81_000 }, 200_000)).toBe(81_000);
+  });
+
+  it("compactAfterRatio 0 or outside (0, 1] falls through to the next tier", () => {
+    expect(compactThresholdTokens({ compactAfterRatio: 0 } as never, 200_000)).toBe(149_482);
+    expect(compactThresholdTokens({ compactAfterRatio: 2.5 } as never, 200_000)).toBe(149_482);
+    expect(compactThresholdTokens({ compactAfterRatio: -0.5 } as never, 200_000)).toBe(149_482);
+    expect(compactThresholdTokens({ compactAfterRatio: NaN } as never, 200_000)).toBe(149_482);
+    // …and a valid lower tier still governs when the ratio is unusable.
+    expect(
+      compactThresholdTokens(
+        { compactAfterRatio: 0, compactReserveTokens: 32_768 } as never,
+        1_000_000,
+      ),
+    ).toBe(967_232);
+    // …while a valid explicit token threshold still wins.
+    expect(
+      compactThresholdTokens(
+        { compactAfterTokens: 180_000, compactAfterRatio: 0 } as never,
+        200_000,
+      ),
+    ).toBe(180_000);
+  });
+
+  it("compactReserveTokens 0, negative, or fractional falls through to the preset", () => {
+    expect(compactThresholdTokens({ compactReserveTokens: 0 } as never, 128_000)).toBe(102_800);
+    expect(compactThresholdTokens({ compactReserveTokens: -5 } as never, 200_000)).toBe(149_482);
+    expect(compactThresholdTokens({ compactReserveTokens: 1.5 } as never, 200_000)).toBe(149_482);
+  });
 });
 
 describe("presetRatioForWindow", () => {
@@ -281,8 +333,14 @@ describe("compactThresholdTokens — preset curves", () => {
 
 describe("sessionContextWindow", () => {
   it("honors a base-model config override when provider+id match", () => {
-    const config = { model: { provider: "openrouter", id: "big:free", contextWindow: 64_000 } };
-    const model = { provider: "openrouter", id: "big:free", contextWindow: 200_000 };
+    const config = {
+      model: { provider: "openrouter", id: "big:free", contextWindow: 64_000 },
+    };
+    const model = {
+      provider: "openrouter",
+      id: "big:free",
+      contextWindow: 200_000,
+    };
     expect(sessionContextWindow(model as any, config as any)).toBe(64_000);
   });
 
@@ -290,24 +348,46 @@ describe("sessionContextWindow", () => {
     const config = {
       reflectorFallbackModels: [{ provider: "openrouter", id: "big:free", contextWindow: 32_000 }],
     };
-    const model = { provider: "openrouter", id: "big:free", contextWindow: 200_000 };
+    const model = {
+      provider: "openrouter",
+      id: "big:free",
+      contextWindow: 200_000,
+    };
     expect(sessionContextWindow(model as any, config as any)).toBe(32_000);
   });
 
   it("uses the model registry window when no override matches", () => {
-    const config = { model: { provider: "openrouter", id: "other:free", contextWindow: 64_000 } };
-    const model = { provider: "openrouter", id: "big:free", contextWindow: 200_000 };
+    const config = {
+      model: {
+        provider: "openrouter",
+        id: "other:free",
+        contextWindow: 64_000,
+      },
+    };
+    const model = {
+      provider: "openrouter",
+      id: "big:free",
+      contextWindow: 200_000,
+    };
     expect(sessionContextWindow(model as any, config as any)).toBe(200_000);
   });
 
   it("falls back to 128000 when the model has no window and no override", () => {
-    const config = { model: { provider: "openrouter", id: "other:free", contextWindow: 64_000 } };
+    const config = {
+      model: {
+        provider: "openrouter",
+        id: "other:free",
+        contextWindow: 64_000,
+      },
+    };
     const model = { provider: "openrouter", id: "big:free" };
     expect(sessionContextWindow(model as any, config as any)).toBe(128_000);
   });
 
   it("falls back to 128000 when there is no session model", () => {
-    const config = { model: { provider: "openrouter", id: "big:free", contextWindow: 64_000 } };
+    const config = {
+      model: { provider: "openrouter", id: "big:free", contextWindow: 64_000 },
+    };
     expect(sessionContextWindow(undefined, config as any)).toBe(128_000);
   });
 });

@@ -147,10 +147,11 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
     const cfgDir = join(testDir, "pi-blackhole-save");
     mkdirSync(cfgDir, { recursive: true });
 
-    const cfg = { ...DEFAULTS, compactAfterRatio: 0.65, compactReserveTokens: 32_768 } as Record<
-      string,
-      unknown
-    >;
+    const cfg = {
+      ...DEFAULTS,
+      compactAfterRatio: 0.65,
+      compactReserveTokens: 32_768,
+    } as Record<string, unknown>;
     config.save(cfg as never, "global", undefined, cfgDir);
 
     const written = JSON.parse(
@@ -185,7 +186,9 @@ describe("preset-curve select + hand-edited preset definitions (window curve)", 
     expect(select.value).toBe("default");
 
     // A user-added preset name joins the options (same merge the resolver uses).
-    base.compactAfterPresets = { "early-1m": [{ window: 131_072, ratio: 0.6 }] };
+    base.compactAfterPresets = {
+      "early-1m": [{ window: 131_072, ratio: 0.6 }],
+    };
     const fields2 = config.opts.fields(base as never);
     const select2 = fields2.find((f: { key: string }) => f.key === "compactAfterPreset");
     expect(select2.options).toEqual(["default", "early-1m"]);
@@ -254,5 +257,152 @@ describe("preset-curve select + hand-edited preset definitions (window curve)", 
     const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     expect(written.compactAfterPresets).toEqual(v2);
     expect(written.compactAfterRatio).toBe(0.5);
+  });
+});
+
+describe("modal validate normalizes threshold knobs like the file loader", () => {
+  async function validate(raw: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const fn = config.opts.validate as (r: Record<string, unknown>) => Record<string, unknown>;
+    return fn(raw);
+  }
+
+  it("treats 0 numeric knobs as unset (never a live threshold)", async () => {
+    const out = await validate({
+      compactAfterTokens: 0,
+      compactAfterRatio: 0,
+      compactReserveTokens: 0,
+    });
+    expect(out.compactAfterTokens).toBeUndefined();
+    expect(out.compactAfterRatio).toBeUndefined();
+    expect(out.compactReserveTokens).toBeUndefined();
+  });
+
+  it("drops the legacy 81000 scaffold residue", async () => {
+    expect((await validate({ compactAfterTokens: 81_000 })).compactAfterTokens).toBeUndefined();
+  });
+
+  it("drops out-of-range ratios", async () => {
+    for (const ratio of [0, -0.5, 2.5, Number.NaN]) {
+      expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBeUndefined();
+    }
+  });
+
+  it("drops non-integer or negative token knobs", async () => {
+    expect((await validate({ compactAfterTokens: 81_000.5 })).compactAfterTokens).toBeUndefined();
+    expect((await validate({ compactAfterTokens: -5 })).compactAfterTokens).toBeUndefined();
+    expect((await validate({ compactReserveTokens: 1.5 })).compactReserveTokens).toBeUndefined();
+    expect((await validate({ compactReserveTokens: -5 })).compactReserveTokens).toBeUndefined();
+  });
+
+  it("keeps explicitly set valid knobs", async () => {
+    const out = await validate({
+      compactAfterTokens: 180_000,
+      compactAfterRatio: 0.65,
+      compactReserveTokens: 32_768,
+    });
+    expect(out.compactAfterTokens).toBe(180_000);
+    expect(out.compactAfterRatio).toBe(0.65);
+    expect(out.compactReserveTokens).toBe(32_768);
+  });
+
+  it("falls back to the default preset for an empty preset name", async () => {
+    expect((await validate({ compactAfterPreset: "" })).compactAfterPreset).toBe("default");
+    expect((await validate({ compactAfterPreset: "custom" })).compactAfterPreset).toBe("custom");
+  });
+
+  it("drops preset definitions with no valid anchors", async () => {
+    const out = await validate({
+      compactAfterPresets: { broken: [{ window: -1, ratio: 5 }] },
+    });
+    expect(out.compactAfterPresets).toBeUndefined();
+  });
+
+  it("sorts and dedupes preset anchors like the file loader", async () => {
+    const out = await validate({
+      compactAfterPresets: {
+        custom: [
+          { window: 262_144, ratio: 0.7 },
+          { window: 32_768, ratio: 0.9 },
+          { window: 32_768, ratio: 0.85 },
+        ],
+      },
+    });
+    expect(out.compactAfterPresets).toEqual({
+      custom: [
+        { window: 32_768, ratio: 0.85 },
+        { window: 262_144, ratio: 0.7 },
+      ],
+    });
+  });
+
+  it("drops invalid providerIdleTimeoutMs but keeps 0 (disabled)", async () => {
+    expect((await validate({ providerIdleTimeoutMs: -1 })).providerIdleTimeoutMs).toBeUndefined();
+    expect(
+      (await validate({ providerIdleTimeoutMs: "fast" })).providerIdleTimeoutMs,
+    ).toBeUndefined();
+    expect((await validate({ providerIdleTimeoutMs: 0 })).providerIdleTimeoutMs).toBe(0);
+    expect((await validate({ providerIdleTimeoutMs: 30_000 })).providerIdleTimeoutMs).toBe(30_000);
+  });
+});
+
+describe("modal save preserves hand-edited configs (models, unknown keys, presets)", () => {
+  it("validate→save round-trip keeps models/unknown keys, cleans only residue", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { writeFileSync, readFileSync, mkdirSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    const cfgDir = join(testDir, "handedited-roundtrip");
+    mkdirSync(cfgDir, { recursive: true });
+    const file = join(cfgDir, "pi-blackhole-config.json");
+    const model = { provider: "openrouter", id: "x/y", contextWindow: 32_768 };
+    writeFileSync(
+      file,
+      JSON.stringify(
+        {
+          model,
+          observerFallbackModels: [model],
+          customHandKey: { foo: 1 },
+          compactAfterTokens: 81_000,
+          compactAfterRatio: 0,
+          compactAfterPresets: {
+            mine: [
+              { window: 262_144, ratio: 0.7 },
+              { window: 32_768, ratio: 0.9 },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    // Real modal flow: layer values → user edits one field → validate → save.
+    const layer = config.layerValues("global", undefined, cfgDir) as Record<string, unknown>;
+    const validate = config.opts.validate as (
+      r: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    const updated = validate({ ...layer, memory: false });
+    config.save(updated as never, "global", undefined, cfgDir);
+
+    const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    // Hand-edited models, fallbacks, and unknown keys survive byte-for-byte.
+    expect(written.model).toEqual(model);
+    expect(written.observerFallbackModels).toEqual([model]);
+    expect(written.customHandKey).toEqual({ foo: 1 });
+    // The user's edit landed.
+    expect(written.memory).toBe(false);
+    // Residue is cleaned (semantics-preserving: 0/81000 ≡ absent on both loaders).
+    expect("compactAfterTokens" in written).toBe(false);
+    expect("compactAfterRatio" in written).toBe(false);
+    // Valid presets survive byte-for-byte (save() carries unknown-key
+    // definitions verbatim — it never reformats hand edits; the runtime
+    // normalizes its in-memory copy instead, so unsorted file order is fine).
+    expect(written.compactAfterPresets).toEqual({
+      mine: [
+        { window: 262_144, ratio: 0.7 },
+        { window: 32_768, ratio: 0.9 },
+      ],
+    });
   });
 });

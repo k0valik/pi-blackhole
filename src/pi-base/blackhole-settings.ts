@@ -18,7 +18,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
-import { DEFAULTS, type UnifiedConfig } from "../core/unified-config.js";
+import { DEFAULTS, normalizeThresholdKnobs, type UnifiedConfig } from "../core/unified-config.js";
 import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
@@ -430,6 +430,15 @@ export const config = new ConfigManager<UnifiedConfig>({
         );
       }
     }
+
+    // ── Threshold knobs: same scrubber the file loader uses ──
+    // 0 means "not set", out-of-range values are dropped, legacy 81000
+    // residue is dropped, and preset definitions are validated + sorted —
+    // so the modal path agrees with loadUnifiedConfig on every key.
+    // (Runs before the merge so an emptied preset name falls back to the
+    // DEFAULTS "default", and dropped knobs stay absent. Env overrides
+    // re-apply afterwards, so env-set values stay explicit.)
+    normalizeThresholdKnobs(parsed as unknown as Record<string, unknown>);
 
     // ── Merge with defaults ──
     const merged = { ...DEFAULTS, ...parsed } as UnifiedConfig;

@@ -1,5 +1,10 @@
 import type { Model } from "@earendil-works/pi-ai";
-import type { OmModelConfig } from "../core/unified-config.js";
+import {
+  isFixedTokenThreshold,
+  isReserveTokens,
+  isWindowRatio,
+  type OmModelConfig,
+} from "../core/unified-config.js";
 
 export const AGENT_LOOP_MAX_TOKENS = 32_000;
 
@@ -70,10 +75,11 @@ const warnedPresetNames = new Set<string>();
 /**
  * Resolve the effective auto-compaction threshold.
  *
- * Precedence:
- *  1. Explicit `compactAfterTokens` (always wins when set)
- *  2. `compactAfterRatio` → max(1, floor(window × ratio))
- *  3. `compactReserveTokens` → max(1, window − reserve)
+ * Precedence (each tier applies only when its value is valid — 0 means
+ * "not set" and invalid values fall through to the next tier):
+ *  1. Explicit `compactAfterTokens` (positive integer; always wins when valid)
+ *  2. `compactAfterRatio` (in (0, 1]) → max(1, floor(window × ratio))
+ *  3. `compactReserveTokens` (positive integer) → max(1, window − reserve)
  *  4. Selected preset curve (`compactAfterPreset`, defaulting to "default") →
  *     max(1, floor(window × ratio₍window₎)) over the effective anchors
  *
@@ -83,11 +89,14 @@ const warnedPresetNames = new Set<string>();
  * would invert the trigger gate and compact on every event).
  */
 export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindow: number): number {
-  if (cfg.compactAfterTokens !== undefined) return cfg.compactAfterTokens;
-  if (cfg.compactAfterRatio !== undefined) {
+  // Validity (not mere presence) decides: 0 means "not set" and out-of-range
+  // values fall through to the next tier — see isFixedTokenThreshold et al.
+  // A literal 81000 still pins here; dropping that residue is the loader's job.
+  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return cfg.compactAfterTokens;
+  if (isWindowRatio(cfg.compactAfterRatio)) {
     return Math.max(1, Math.floor(contextWindow * cfg.compactAfterRatio));
   }
-  if (cfg.compactReserveTokens !== undefined) {
+  if (isReserveTokens(cfg.compactReserveTokens)) {
     return Math.max(1, contextWindow - cfg.compactReserveTokens);
   }
   const name = cfg.compactAfterPreset ?? "default";

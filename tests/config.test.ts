@@ -767,3 +767,105 @@ describe("saveUnifiedConfig", () => {
     expect(config.debug).toBe(false);
   });
 });
+
+describe("loader parity: file bytes → same effective threshold on both loaders", () => {
+  // The runtime hot paths use loadUnifiedConfig, but a settings-modal save
+  // repopulates runtime.config through the ConfigManager path
+  // (config.loadWithWarnings). Both must resolve the same threshold for the
+  // same file, or behavior flaps between a modal save and the next restart.
+  const mgrDir = join(testDir, "mgr-parity");
+  const envKeys = [
+    "PI_BLACKHOLE_COMPACT_AFTER_TOKENS",
+    "PI_BLACKHOLE_COMPACT_AFTER_RATIO",
+    "PI_BLACKHOLE_COMPACT_RESERVE_TOKENS",
+    "PI_BLACKHOLE_COMPACT_AFTER_PRESET",
+  ];
+
+  async function thresholdsForFile(data: Record<string, unknown>): Promise<{
+    viaFileLoader: number;
+    viaModalLoader: number;
+  }> {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { autoCompactThreshold } = await import("../src/om/model-budget.js");
+    writeConfig(data);
+    mkdirSync(mgrDir, { recursive: true });
+    writeFileSync(join(mgrDir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
+    // undefined model → 128k fallback window on both paths.
+    return {
+      viaFileLoader: autoCompactThreshold(loadUnifiedConfig(testDir), undefined),
+      viaModalLoader: autoCompactThreshold(
+        config.loadWithWarnings(undefined, mgrDir).config as never,
+        undefined,
+      ),
+    };
+  }
+
+  beforeEach(() => {
+    for (const k of envKeys) delete process.env[k];
+  });
+
+  afterEach(() => {
+    for (const k of envKeys) delete process.env[k];
+  });
+
+  it("empty file resolves to the default preset curve on both loaders", async () => {
+    const t = await thresholdsForFile({});
+    expect(t.viaFileLoader).toBe(102_800);
+    expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+
+  it("zeroed knobs (modal 'not set') resolve to the preset curve on both loaders", async () => {
+    const t = await thresholdsForFile({
+      compactAfterTokens: 0,
+      compactAfterRatio: 0,
+      compactReserveTokens: 0,
+    });
+    expect(t.viaFileLoader).toBe(102_800);
+    expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+
+  it("legacy 81000 residue resolves to the preset curve on both loaders", async () => {
+    const t = await thresholdsForFile({ compactAfterTokens: 81_000 });
+    expect(t.viaFileLoader).toBe(102_800);
+    expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+
+  it("out-of-range ratio resolves to the preset curve on both loaders", async () => {
+    const t = await thresholdsForFile({ compactAfterRatio: 2.5 });
+    expect(t.viaFileLoader).toBe(102_800);
+    expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+
+  it("valid knobs resolve identically on both loaders", async () => {
+    expect((await thresholdsForFile({ compactAfterTokens: 180_000 })).viaModalLoader).toBe(180_000);
+    const ratio = await thresholdsForFile({ compactAfterRatio: 0.65 });
+    expect(ratio.viaFileLoader).toBe(83_200);
+    expect(ratio.viaModalLoader).toBe(ratio.viaFileLoader);
+    const reserve = await thresholdsForFile({ compactReserveTokens: 32_768 });
+    expect(reserve.viaFileLoader).toBe(95_232);
+    expect(reserve.viaModalLoader).toBe(reserve.viaFileLoader);
+  });
+
+  it("invalid preset definitions fall back to the built-in curve on both loaders", async () => {
+    const t = await thresholdsForFile({
+      compactAfterPresets: { broken: [{ window: -1, ratio: 5 }] },
+    });
+    expect(t.viaFileLoader).toBe(102_800);
+    expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+
+  it("unsorted hand-edited anchors resolve identically on both loaders", async () => {
+    const t = await thresholdsForFile({
+      compactAfterPreset: "custom",
+      compactAfterPresets: {
+        custom: [
+          { window: 262_144, ratio: 0.7 },
+          { window: 32_768, ratio: 0.9 },
+        ],
+      },
+    });
+    expect(t.viaFileLoader).toBe(104_571);
+    expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+});
