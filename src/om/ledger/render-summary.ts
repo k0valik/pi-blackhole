@@ -36,13 +36,15 @@ export function scoreObservation(obs: Observation, index: number, total: number)
   return base + recency;
 }
 
-/** Select observations up to a token budget, keeping all high-relevance items
- *  unconditionally and filling the remaining budget with the best-scoring
- *  medium and low observations (relevance-tiered + recency).
+/** Select observations up to a token budget, keeping high-relevance items
+ *  first and filling the remaining budget with the best-scoring medium and
+ *  low observations (relevance-tiered + recency).
  *
- *  Reflections are never trimmed — they are inherently rare and always stay.
- *  Observations stay in the branch either way; this only caps what is rendered
- *  in the compaction summary output. */
+ *  The returned lines never exceed the budget: when high/critical items
+ *  alone exceed it, the newest are kept within budget and the rest are
+ *  dropped from the output. (Reflections are capped separately in
+ *  buildCompactionProjection.) Observations stay in the branch either way;
+ *  this only caps what is rendered in the compaction summary output. */
 export function selectPriorObservations(
   observations: Observation[],
   maxTokens: number,
@@ -56,13 +58,32 @@ export function selectPriorObservations(
     (item) => item.obs.relevance !== "high" && item.obs.relevance !== "critical",
   );
 
-  // High always kept — consume budget first
   let budget = maxTokens;
   const selected = new Set<{ obs: Observation; originalIndex: number }>();
-  for (const item of high) {
-    const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
-    selected.add(item);
-    budget -= lineTokens;
+  if (high.length > 0 && budget > 0) {
+    const highTokens = high.reduce((total, item) => total + observationRenderedTokens(item.obs), 0);
+    if (highTokens <= budget) {
+      // High fits — keep all of it, consume budget first (previous behavior).
+      for (const item of high) {
+        selected.add(item);
+        budget -= observationRenderedTokens(item.obs);
+      }
+    } else {
+      // High alone exceeds the budget — keep newest-first within budget.
+      // A single item larger than the whole budget ends the selection so the
+      // output never exceeds the cap.
+      const newestFirst = [...high].sort((a, b) => b.originalIndex - a.originalIndex);
+      for (const item of newestFirst) {
+        const lineTokens = observationRenderedTokens(item.obs);
+        if (budget - lineTokens < 0) break;
+        selected.add(item);
+        budget -= lineTokens;
+      }
+      // Restore original chronological order before returning
+      return Array.from(selected)
+        .sort((a, b) => a.originalIndex - b.originalIndex)
+        .map((item) => item.obs);
+    }
   }
 
   // Score medium + low and select best within remaining budget
@@ -73,7 +94,7 @@ export function selectPriorObservations(
     }));
     scored.sort((a, b) => b.score - a.score); // highest score first
     for (const { item } of scored) {
-      const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
+      const lineTokens = observationRenderedTokens(item.obs);
       if (budget - lineTokens < 0) break;
       selected.add(item);
       budget -= lineTokens;
@@ -86,8 +107,20 @@ export function selectPriorObservations(
     .map((item) => item.obs);
 }
 
+/** Token estimate for one rendered observation line (chars/4). This is the
+ *  measure the pool cap budgets against, so the gate and the fitting step
+ *  stay on the same scale. */
+export function observationRenderedTokens(observation: Observation): number {
+  return Math.ceil(observationToSummaryLine(observation).length / 4);
+}
+
 export function reflectionToSummaryLine(reflection: Reflection): string {
   return `[${reflection.id}] ${reflection.content}`;
+}
+
+/** Token estimate for one rendered reflection line (chars/4). */
+export function reflectionRenderedTokens(reflection: Reflection): number {
+  return Math.ceil(reflectionToSummaryLine(reflection).length / 4);
 }
 
 export function renderSummary(reflections: Reflection[], observations: Observation[]): string {

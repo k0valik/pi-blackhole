@@ -490,3 +490,107 @@ describe("buildCompactionProjection — fullFoldAlways", () => {
     expect(result.reflections).toHaveLength(0);
   });
 });
+
+describe("buildCompactionProjection observation cap gate (#69)", () => {
+  const tinyId = (i: number): string => i.toString(16).padStart(12, "0");
+
+  it("applies the cap when rendered lines exceed the budget even if content tokens do not", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    // Content sums to 19,000 (under budget) but rendered lines add id/timestamp/
+    // relevance overhead, pushing the real output over 20,000.
+    const observations = Array.from({ length: 500 }, (_, i) =>
+      makeObservation(tinyId(i + 1), {
+        content: "z".repeat(150),
+        relevance: "low" as const,
+        tokenCount: Math.ceil(150 / 4),
+      }),
+    );
+    const entries: Entry[] = [src("pad"), recordEntry("rec", observations, "pad")];
+    const result = buildCompactionProjection(entries, "pad", {
+      observationsPoolMaxTokens: 20_000,
+      fullFoldAlways: true,
+    });
+    expect(result.observations.length).toBeLessThan(500);
+  });
+
+  it("keeps the capped observation output within the budget", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const { observationToSummaryLine } = await import("../src/om/ledger/render-summary.js");
+    const observations = Array.from({ length: 500 }, (_, i) =>
+      makeObservation(tinyId(i + 1), {
+        content: "z".repeat(150),
+        relevance: "low" as const,
+        tokenCount: Math.ceil(150 / 4),
+      }),
+    );
+    const entries: Entry[] = [src("pad"), recordEntry("rec", observations, "pad")];
+    const result = buildCompactionProjection(entries, "pad", {
+      observationsPoolMaxTokens: 20_000,
+      fullFoldAlways: true,
+    });
+    const rendered = result.observations.reduce(
+      (total, o) => total + Math.ceil(observationToSummaryLine(o).length / 4),
+      0,
+    );
+    expect(rendered).toBeLessThanOrEqual(20_000);
+  });
+});
+
+describe("buildCompactionProjection reflection cap (#69)", () => {
+  const bigReflections = (count: number): Reflection[] =>
+    Array.from({ length: count }, (_, i) => {
+      const id = (i + 1).toString(16).padStart(12, "0");
+      return makeReflection(id, { content: "r".repeat(400) });
+    });
+
+  const reflectEntries = (reflections: Reflection[]): Entry[] => [
+    src("pad"),
+    reflectEntry("rec", reflections, "pad"),
+  ];
+
+  it("caps reflections newest-first to reflectionsPoolMaxTokens", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    // Each reflection renders to ~104 tokens; budget 350 fits the newest three.
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 350,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections.map((r) => r.id)).toEqual(reflections.slice(-3).map((r) => r.id));
+  });
+
+  it("leaves reflections uncapped when reflectionsPoolMaxTokens is unset", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections).toHaveLength(10);
+  });
+
+  it("leaves reflections uncapped when reflectionsPoolMaxTokens is 0", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 0,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections).toHaveLength(10);
+  });
+
+  it("stores capped reflections in details matching the projection", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 350,
+      fullFoldAlways: true,
+    });
+    expect(result.details.reflections.map((r) => r.id)).toEqual(
+      result.reflections.map((r) => r.id),
+    );
+  });
+});

@@ -368,6 +368,14 @@ Hard ceiling for the active observation pool. The dropper prunes when this ceili
 |------|---------|
 | number | 20000 |
 
+### `reflectionsPoolMaxTokens`
+
+Cap for rendered reflection lines in the compaction output (newest-first keep). Without it reflections accumulate without bound across compactions. `0` disables the cap.
+
+| Type | Default |
+|------|---------|
+| number | 8000 |
+
 ### `observationsPoolTargetTokens`
 
 Target token budget the dropper aims for after pruning. **Currently a no-op** in the pool algorithm. If unset or `>= observationsPoolMaxTokens`, the loader silently resets it to `floor(observationsPoolMaxTokens / 2)`.
@@ -568,6 +576,7 @@ Positive-integer fields (invalid values fall back):
 | `PI_BLACKHOLE_REFLECT_AFTER_TOKENS` | `reflectAfterTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS` | `observationsPoolMaxTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS` | `observationsPoolTargetTokens` |
+| `PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS` | `reflectionsPoolMaxTokens` |
 | `PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS` | `reflectorInputMaxTokens` |
 | `PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS` | `dropperInputMaxTokens` |
 | `PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS` | `observerChunkMaxTokens` |

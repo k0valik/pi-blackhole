@@ -173,6 +173,10 @@ export interface UnifiedConfig {
   compactAfterPresets?: Record<string, PresetAnchorDef[]>;
   /** Observation pool token pressure for full fold. */
   observationsPoolMaxTokens: number;
+  /** Cap for rendered reflection lines in the compaction output (newest-first
+   *  keep). Reflections otherwise accumulate without bound across compactions.
+   *  0 disables the cap. Default 8000. */
+  reflectionsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
    *  survive the first compaction in a fresh session. Default true. */
   fullFoldAlways: boolean;
@@ -276,6 +280,7 @@ export const DEFAULTS: UnifiedConfig = {
   compactReserveTokens: undefined,
   compactAfterPreset: "default",
   observationsPoolMaxTokens: 20_000,
+  reflectionsPoolMaxTokens: 8_000,
   fullFoldAlways: true,
   observationsPoolTargetTokens: 10_000,
   reflectorInputMaxTokens: 80_000,
@@ -545,6 +550,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "reflectAfterTokens",
     "retainedToolOutputMaxTokens",
     "observationsPoolMaxTokens",
+    "reflectionsPoolMaxTokens",
     "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
     "dropperInputMaxTokens",
@@ -582,7 +588,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     const validator =
       k === "observerPreambleMaxTokens" ||
       k === "providerIdleTimeoutMs" ||
-      k === "retainedToolOutputMaxTokens" // 0 = disabled (opt-in)
+      k === "retainedToolOutputMaxTokens" || // 0 = disabled (opt-in)
+      k === "reflectionsPoolMaxTokens" // 0 = uncapped
         ? nonNegativeInt
         : positiveInt;
     const v = validator(raw[k]);

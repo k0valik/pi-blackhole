@@ -65,6 +65,41 @@ describe("reflectionToSummaryLine", () => {
   });
 });
 
+describe("selectPriorObservations", () => {
+  const bigHigh = (id: string): Observation =>
+    makeObservation(id, {
+      content: "x".repeat(8000),
+      relevance: "high" as const,
+    });
+
+  it("keeps all high observations and fills the rest when high fits the budget", async () => {
+    const { selectPriorObservations } = await import("../src/om/ledger/render-summary.js");
+    const obs = [bigHigh("high00000001"), bigHigh("high00000002")];
+    const selected = selectPriorObservations(obs, 20_000);
+    expect(selected.map((o) => o.id)).toEqual(["high00000001", "high00000002"]);
+  });
+
+  it("trims high observations newest-first when they alone exceed the budget (#69)", async () => {
+    const { selectPriorObservations } = await import("../src/om/ledger/render-summary.js");
+    const obs = [bigHigh("high00000001"), bigHigh("high00000002"), bigHigh("high00000003")];
+    // Each line renders to ~2010 tokens; budget 5000 fits the newest two.
+    const selected = selectPriorObservations(obs, 5_000);
+    expect(selected.map((o) => o.id)).toEqual(["high00000002", "high00000003"]);
+  });
+
+  it("never renders more than the budget when every observation is critical (#69)", async () => {
+    const { selectPriorObservations, observationToSummaryLine } =
+      await import("../src/om/ledger/render-summary.js");
+    const obs = [bigHigh("high00000001"), bigHigh("high00000002"), bigHigh("high00000003")];
+    const selected = selectPriorObservations(obs, 5_000);
+    const rendered = selected.reduce(
+      (total, o) => total + Math.ceil(observationToSummaryLine(o).length / 4),
+      0,
+    );
+    expect(rendered).toBeLessThanOrEqual(5_000);
+  });
+});
+
 describe("renderSummary", () => {
   it("returns basic recall footer when both lists are empty", async () => {
     const { renderSummary } = await import("../src/om/ledger/render-summary.js");

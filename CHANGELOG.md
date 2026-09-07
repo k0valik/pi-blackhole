@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Append-mode compaction floor: context stops shrinking after compaction.** In append mode the auto-rebase governor could never fire once the post-compaction floor approached half the context window (fixed `0.5 × window` threshold against a projection that already contains the trailing block), and the trailing OM block exceeded its budget through two cap leaks. The governor threshold is now floor-aware (`floor(window × 0.5 − trailing)`), with a thrash guard that skips auto-rebase when the aggregate summary would not shrink the chain, and the usage-unavailable fallback projection now includes the measured kept tail. High/critical observations no longer bypass the pool budget (newest-first keep when they alone exceed it), the observation cap gate measures rendered lines instead of content-only `tokenCount`, and reflections are capped newest-first by the new `reflectionsPoolMaxTokens` key (default 8000, `0` disables; env `PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS`). ([#69](https://github.com/k0valik/pi-blackhole/issues/69))
+
 ---
 
 ## [0.5.2] - 2026-09-07

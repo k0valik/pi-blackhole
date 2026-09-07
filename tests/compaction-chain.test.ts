@@ -541,7 +541,7 @@ describe("append compaction chain", () => {
     expect(tokens).toBe(Math.ceil(expectedChars / 4));
   });
 
-  it("auto-rebases instead of appending when the projected chain exceeds half the window", () => {
+  it("auto-rebases when the projected chain exceeds half the window minus trailing (#69)", () => {
     const s1 = build({ aggregateSummary: "x".repeat(600) });
     const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
     const chain = collectActiveSegments([cs1]);
@@ -550,10 +550,12 @@ describe("append compaction chain", () => {
     const fresh = "[Goal]\nnext delta";
     const trailing = "recall\n\ncurrent OM";
     const projected = estimateChainTokens(chain.segments, fresh, trailing);
-    // Window where the projection sits exactly at half → appending is allowed.
-    const tightWindow = Math.ceil(projected / MAX_CHAIN_WINDOW_RATIO);
+    const trailingTokens = Math.ceil(trailing.length / 4);
+    // Window where the projection sits exactly at the adjusted threshold
+    // (half window minus trailing) → appending is allowed.
+    const tightWindow = (projected + trailingTokens) * 2;
 
-    // One token below → the projection passes half the window → fold instead.
+    // Two tokens below → the projection passes the adjusted threshold → fold.
     const rebased = build({
       branchEntries: [cs1],
       freshSummary: fresh,
@@ -561,7 +563,7 @@ describe("append compaction chain", () => {
       trailingSummary: trailing,
       currentCoverage: coverage("m3", "m4", "tail", 2),
       previousSummaryUsed: true,
-      contextWindowTokens: tightWindow - 1,
+      contextWindowTokens: tightWindow - 2,
     });
 
     expect(rebased.chainStart).toBe(true);
@@ -700,3 +702,87 @@ describe("append compaction chain", () => {
 });
 
 const rebuilt = (details: ReturnType<typeof buildAppendOnlyDetails>) => details.segment.coverage;
+
+describe("floor-aware auto-rebase governor (#69)", () => {
+  it("rebases when the trailing block pushes the floor over the adjusted threshold", () => {
+    const s1 = build({ aggregateSummary: "x".repeat(600) });
+    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
+    const fresh = "[Goal]\nnext delta";
+    // ~300 trailing tokens against a 1000-token window: the old fixed half-window
+    // rule (threshold 500) would still append, the floor-aware rule must rebase.
+    const trailing = "t".repeat(1200);
+    const rebased = build({
+      branchEntries: [cs1],
+      freshSummary: fresh,
+      aggregateSummary: "[Goal]\nfolded state",
+      trailingSummary: trailing,
+      currentCoverage: coverage("m3", "m4", "tail", 2),
+      previousSummaryUsed: true,
+      contextWindowTokens: 1000,
+    });
+    expect(rebased.chainStart).toBe(true);
+    expect(rebased.segment.sequence).toBe(1);
+  });
+
+  it("skips auto-rebase when the aggregate would not shrink the projection", () => {
+    const s1 = build({ aggregateSummary: "x".repeat(600) });
+    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
+    const trailing = "t".repeat(1200);
+    const appended = build({
+      branchEntries: [cs1],
+      freshSummary: "[Goal]\nnext delta",
+      // Aggregate is larger than the existing chain: rebasing would grow the
+      // context, so the thrash guard keeps appending.
+      aggregateSummary: "y".repeat(4000),
+      trailingSummary: trailing,
+      currentCoverage: coverage("m3", "m4", "tail", 2),
+      previousSummaryUsed: true,
+      contextWindowTokens: 800,
+    });
+    expect(appended.chainStart).toBe(false);
+    expect(appended.segment.sequence).toBe(2);
+  });
+
+  it("still rebases on manual request even when the aggregate would not shrink", () => {
+    const s1 = build({ aggregateSummary: "x".repeat(600) });
+    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
+    const rebased = build({
+      branchEntries: [cs1],
+      manualRebase: true,
+      freshSummary: "[Goal]\nnext delta",
+      aggregateSummary: "y".repeat(4000),
+      trailingSummary: "t".repeat(1200),
+      currentCoverage: coverage("m3", "m4", "tail", 2),
+      previousSummaryUsed: true,
+      contextWindowTokens: 800,
+    });
+    expect(rebased.chainStart).toBe(true);
+    expect(rebased.segment.sequence).toBe(1);
+  });
+
+  it("adds the kept tail to the fallback projection", async () => {
+    const { projectChainTokens } = await import("../src/core/compaction-chain.js");
+    const { estimateEntryTokens } = await import("../src/om/tokens.js");
+    const { estimateChainTokens: estimate } = await import("../src/core/compaction-chain.js");
+    const s1 = build({ aggregateSummary: "x".repeat(600) });
+    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
+    const chain = collectActiveSegments([cs1]);
+    expect(chain.ok).toBe(true);
+    if (!chain.ok) return;
+    const fresh = "[Goal]\nnext delta";
+    const trailing = "recall\n\ncurrent OM";
+    const tailMessage = { role: "user", content: "k".repeat(4000) };
+    const branch = [
+      cs1,
+      { id: "c1", type: "message", message: { role: "user", content: "covered one" } },
+      { id: "c2", type: "message", message: { role: "user", content: "covered two" } },
+      { id: "tail", type: "message", message: tailMessage },
+    ];
+    const cov = coverage("c1", "c2", "tail", 2);
+    const projected = projectChainTokens(chain.segments, fresh, trailing, branch, cov);
+    const expected =
+      estimate(chain.segments, fresh, trailing) +
+      estimateEntryTokens({ type: "message", message: tailMessage });
+    expect(projected).toBe(expected);
+  });
+});

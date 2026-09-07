@@ -296,6 +296,7 @@ Based on interview answers, build the config object. Write it to:
   "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
   "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
   "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
+  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
@@ -393,6 +394,7 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
   "reflectAfterTokens": 25000,
   "observerChunkMaxTokens": 40000,
   "observationsPoolMaxTokens": 20000,
+  "reflectionsPoolMaxTokens": 8000,
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000
 }

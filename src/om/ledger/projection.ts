@@ -4,7 +4,11 @@
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/projection.ts)
  * Unmodified.
  */
-import { selectPriorObservations } from "./render-summary.js";
+import {
+  observationRenderedTokens,
+  reflectionRenderedTokens,
+  selectPriorObservations,
+} from "./render-summary.js";
 import {
   OM_FOLDED,
   isMemoryDetails,
@@ -30,6 +34,8 @@ export type ProjectionDiff = {
 
 export type CompactionProjectionConfig = {
   observationsPoolMaxTokens: number;
+  /** Cap for rendered reflection lines; unset or 0 leaves reflections uncapped. */
+  reflectionsPoolMaxTokens?: number;
   fullFoldAlways?: boolean;
 };
 
@@ -239,10 +245,16 @@ export function buildCompactionProjection(
   // Cap observations to budget using relevance-tiered + recency scoring.
   // Even if the dropper determined some old observations are worth keeping,
   // this safety valve ensures the compaction output never exceeds the pool
-  // token budget. Observations survive in the branch regardless.
+  // token budget. Observations survive in the branch regardless. The gate
+  // measures rendered lines (not content-only tokenCount) so it fires on the
+  // same scale the cap budgets against.
+  const renderedObservationTokens = projection.observations.reduce(
+    (total, observation) => total + observationRenderedTokens(observation),
+    0,
+  );
   if (
     config.observationsPoolMaxTokens > 0 &&
-    observationTokens >= config.observationsPoolMaxTokens
+    renderedObservationTokens >= config.observationsPoolMaxTokens
   ) {
     projection = {
       observations: selectPriorObservations(
@@ -250,6 +262,26 @@ export function buildCompactionProjection(
         config.observationsPoolMaxTokens,
       ),
       reflections: projection.reflections,
+    };
+  }
+
+  // Cap reflections newest-first within their own budget. Reflections are
+  // chronological here, so iterate from the end and restore order after.
+  const reflectionsBudget = config.reflectionsPoolMaxTokens ?? 0;
+  if (reflectionsBudget > 0 && projection.reflections.length > 0) {
+    const kept: Reflection[] = [];
+    let remaining = reflectionsBudget;
+    for (let index = projection.reflections.length - 1; index >= 0; index -= 1) {
+      const reflection = projection.reflections[index];
+      if (reflection === undefined) continue;
+      const lineTokens = reflectionRenderedTokens(reflection);
+      if (remaining - lineTokens < 0) break;
+      kept.push(reflection);
+      remaining -= lineTokens;
+    }
+    projection = {
+      observations: projection.observations,
+      reflections: kept.reverse(),
     };
   }
 

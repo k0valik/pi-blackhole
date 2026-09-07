@@ -128,6 +128,13 @@ const FIELDS: FieldDef[] = [
     helpText: "Max tokens in observation pool before dropper prunes (fold pressure)",
   },
   {
+    key: "reflectionsPoolMaxTokens",
+    label: "Reflection pool max",
+    type: "number",
+    section: "Observational Memory",
+    helpText: "Max rendered reflection tokens in compaction output, newest first (0 = uncapped)",
+  },
+  {
     key: "observationsPoolTargetTokens",
     label: "Observation pool target",
     type: "number",

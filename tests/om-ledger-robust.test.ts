@@ -195,17 +195,32 @@ describe("om-ledger-robust", () => {
       expect(res.observations.length).toBeLessThan(2);
     });
 
-    it("selectPriorObservations keeps high relevance regardless of budget if possible", () => {
+    it("selectPriorObservations keeps high relevance when it fits the budget", () => {
       const o1 = obs(1, "t1");
       o1.relevance = "high";
       const o2 = obs(2, "t2");
       o2.relevance = "low";
       const entries = [obsEntry("e1", [o1, o2])];
+      // Each rendered line costs ~12 tokens: the high item fits in 20 and
+      // consumes the budget first, leaving no room for the low item.
       const res = buildCompactionProjection(entries, "e1", {
-        observationsPoolMaxTokens: 10,
+        observationsPoolMaxTokens: 20,
       });
       expect(res.observations).toHaveLength(1);
       expect(res.observations[0].id).toBe(id(1));
+    });
+
+    it("selectPriorObservations trims high relevance that alone exceeds the budget (#69)", () => {
+      const o1 = obs(1, "t1");
+      o1.relevance = "high";
+      const o2 = obs(2, "t2");
+      o2.relevance = "low";
+      const entries = [obsEntry("e1", [o1, o2])];
+      // One rendered line already costs ~12 tokens: nothing fits in 10.
+      const res = buildCompactionProjection(entries, "e1", {
+        observationsPoolMaxTokens: 10,
+      });
+      expect(res.observations).toHaveLength(0);
     });
 
     it("returns all reflections regardless of fullFold", () => {

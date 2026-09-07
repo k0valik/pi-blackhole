@@ -63,14 +63,16 @@ export function estimateChainTokens(
 const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
 
 /**
- * Project the next provider-visible chain size for the growth governor.
+ * Project the post-compaction context size for the growth governor.
  *
  * Anchors on the latest trusted provider usage when a valid assistant
  * response exists after the newest chain entry: its measured context already
  * contains every active segment plus system/tool/trailing overhead, so only
  * the covered range leaving context and the fresh segment entering it are
- * chars/4-estimated. Falls back to the plain estimate whenever no usable
- * usage baseline exists or the data is inconsistent.
+ * chars/4-estimated. Falls back to the plain estimate plus the measured kept
+ * tail whenever no usable usage baseline exists or the data is inconsistent.
+ * The fallback cannot see system/tool overhead, so it errs below the anchored
+ * path on high-overhead sessions.
  */
 export function projectChainTokens(
   segments: ActiveSegment[],
@@ -100,8 +102,6 @@ export function projectChainTokens(
       break;
     }
   }
-  if (usageTokens === undefined) return fallback;
-
   let firstIndex = -1;
   let lastIndex = -1;
   for (let index = latestIndex + 1; index < branchEntries.length; index += 1) {
@@ -120,9 +120,24 @@ export function projectChainTokens(
     const { type, message, summary } = entry;
     coveredTokens += estimateEntryTokens({ type, message, summary });
   }
-  const projected = usageTokens - coveredTokens + Math.ceil(freshSummary.length / 4);
-  if (!Number.isFinite(projected) || projected < 0) return fallback;
-  return projected;
+  if (usageTokens !== undefined) {
+    const anchored = usageTokens - coveredTokens + Math.ceil(freshSummary.length / 4);
+    if (Number.isFinite(anchored) && anchored >= 0) return anchored;
+  }
+
+  // No usable usage baseline: estimate plus the kept tail staying in context
+  // (entries after the covered range). System/tool overhead stays invisible
+  // on this path.
+  let tailTokens = 0;
+  for (let index = lastIndex + 1; index < branchEntries.length; index += 1) {
+    const entry = branchEntries[index];
+    if (!entry || typeof entry.type !== "string" || !SOURCE_ENTRY_TYPES.has(entry.type)) {
+      continue;
+    }
+    const { type, message, summary } = entry;
+    tailTokens += estimateEntryTokens({ type, message, summary });
+  }
+  return fallback + tailTokens;
 }
 
 export const findLatestCompactionEntry = (
@@ -318,8 +333,21 @@ export function buildAppendOnlyDetails(
     throw new Error(`append chain is invalid: ${chain.reason}`);
   }
 
+  // Floor-aware threshold: the trailing block rides every compaction output,
+  // so the chain must fit in the window share left after it. Without this the
+  // governor dead-zones once the post-compaction floor itself approaches half
+  // the window (#69).
+  const trailingTokens = Math.ceil(input.trailingSummary.length / 4);
+  const chainTokens = chain.ok
+    ? Math.ceil(chain.segments.reduce((total, item) => total + item.segment.summary.length, 0) / 4)
+    : 0;
+  // Thrash guard: rebasing only shrinks the context when the aggregate is
+  // smaller than the chain it replaces. Otherwise every compaction would
+  // rebase for no gain (e.g. trailing alone already exceeds the budget).
+  const rebaseWouldShrink = Math.ceil(input.aggregateSummary.trim().length / 4) < chainTokens;
   const chainOvergrown =
     chain.ok &&
+    rebaseWouldShrink &&
     input.contextWindowTokens !== undefined &&
     projectChainTokens(
       chain.segments,
@@ -327,7 +355,7 @@ export function buildAppendOnlyDetails(
       input.trailingSummary,
       input.branchEntries,
       input.currentCoverage,
-    ) > Math.floor(input.contextWindowTokens * MAX_CHAIN_WINDOW_RATIO);
+    ) > Math.floor(input.contextWindowTokens * MAX_CHAIN_WINDOW_RATIO - trailingTokens);
 
   const mustRebase = input.manualRebase || !chain.ok || chainOvergrown;
   let segment: PiVccSegment;
