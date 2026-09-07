@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- **Context-window-aware auto-compaction threshold (opt-in).** ([#60](https://github.com/k0valik/pi-blackhole/issues/60)) New `compactAfterRatio` and `compactReserveTokens` config keys let auto-compaction derive its trigger threshold from the **active model's context window** instead of the fixed `compactAfterTokens` default: `ratio` compacts at `floor(window × ratio)` (e.g. 0.65 → ~83k @128k, ~130k @200k, ~650k @1M), `reserve` compacts when only `window − reserve` tokens of headroom remain. The threshold is re-derived on every evaluation, so mid-session `/model` switches take effect on the next check automatically. Precedence: explicit (non-default) `compactAfterTokens` > `compactAfterRatio` > `compactReserveTokens`; when a derived knob is set and `compactAfterTokens` is unset or at its 81000 default, the default is dropped so the derived knob governs (a scaffolded/modal-written default no longer blocks derived mode). Window resolution honors the per-model `contextWindow` override, then Pi's model registry, then a 128k fallback. Env overrides: `PI_BLACKHOLE_COMPACT_AFTER_RATIO`, `PI_BLACKHOLE_COMPACT_RESERVE_TOKENS`. `/blackhole-memory` status shows the effective threshold and its basis; the settings modal exposes both knobs under Compaction (0 = not set).
+
 ---
 
 ## [0.5.1] - 2026-09-06
