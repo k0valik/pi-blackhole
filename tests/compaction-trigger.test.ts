@@ -1104,10 +1104,10 @@ describe("Context-window-derived threshold (issue #60)", () => {
     expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the fixed-default behavior when no derived knob is set", async () => {
-    // No derived knob → the fixed token default (81k) applies unchanged even
-    // when a session model window is present, so a 75-token branch must NOT
-    // auto-compact on a tiny-window model.
+  it("an explicit fixed token threshold applies regardless of window", async () => {
+    // A literal explicit compactAfterTokens (here 81k, the legacy flat value)
+    // wins over any window-derived surface at the resolution level, so a
+    // 75-token branch must NOT auto-compact on a tiny-window model.
     const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
     const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]);
     handler(agentEnd(), ctx);

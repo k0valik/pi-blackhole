@@ -1,12 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { OmModelConfig } from "../core/unified-config.js";
-import { DEFAULTS } from "../core/unified-config.js";
-
-/** Fixed-token auto-compaction default when no threshold knob is configured. */
-export const DEFAULT_COMPACT_AFTER_TOKENS: number =
-  // SAFETY: the fixed default is always present in DEFAULTS (81000); the
-  // interface field is optional only because derived mode deletes it.
-  DEFAULTS.compactAfterTokens as number;
 
 export const AGENT_LOOP_MAX_TOKENS = 32_000;
 
@@ -71,6 +64,9 @@ export function presetRatioForWindow(anchors: PresetAnchor[], window: number): n
   return last.ratio;
 }
 
+/** Names already warned about (unknown preset fallback) — warn once per process. */
+const warnedPresetNames = new Set<string>();
+
 /**
  * Resolve the effective auto-compaction threshold.
  *
@@ -78,19 +74,13 @@ export function presetRatioForWindow(anchors: PresetAnchor[], window: number): n
  *  1. Explicit `compactAfterTokens` (always wins when set)
  *  2. `compactAfterRatio` → max(1, floor(window × ratio))
  *  3. `compactReserveTokens` → max(1, window − reserve)
- *  4. Named preset curve (knob `compactAfterPreset`, defaulting to "default")
- *     → max(1, floor(window × ratio₍window₎)) over the effective anchors
- *  5. Fixed legacy default (81000) when no knob and no preset surface is set
- *     (removed in the config-surface flip — the built-in "default" curve then
- *     becomes the no-knob behavior)
+ *  4. Selected preset curve (`compactAfterPreset`, defaulting to "default") →
+ *     max(1, floor(window × ratio₍window₎)) over the effective anchors
  *
- * Numeric knobs are only ever set without the injected fixed default in derived
- * mode — the loader drops the fixed default when a derived knob or preset is
- * configured without explicit tokens — so a config straight from
- * loadUnifiedConfig resolves the same way as this function's own fallback.
- *
- * Always returns a positive integer ≥ 1 — never undefined (an undefined
- * threshold would invert the trigger gate and compact on every event).
+ * A config straight from loadUnifiedConfig always carries `compactAfterPreset`
+ * (DEFAULTS "default"), so the built-in curve is the no-knob behavior. Always
+ * returns a positive integer ≥ 1 — never undefined (an undefined threshold
+ * would invert the trigger gate and compact on every event).
  */
 export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindow: number): number {
   if (cfg.compactAfterTokens !== undefined) return cfg.compactAfterTokens;
@@ -100,12 +90,21 @@ export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindo
   if (cfg.compactReserveTokens !== undefined) {
     return Math.max(1, contextWindow - cfg.compactReserveTokens);
   }
-  if (cfg.compactAfterPreset !== undefined || cfg.compactAfterPresets !== undefined) {
-    const name = cfg.compactAfterPreset ?? "default";
-    const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
-    return Math.max(1, Math.floor(contextWindow * presetRatioForWindow(anchors, contextWindow)));
+  const name = cfg.compactAfterPreset ?? "default";
+  const anchors = effectivePresets(cfg)[name];
+  if (anchors === undefined) {
+    if (!warnedPresetNames.has(name)) {
+      warnedPresetNames.add(name);
+      console.warn(
+        `blackhole: unknown compaction preset "${name}" — falling back to the built-in \"default\" curve`,
+      );
+    }
+    return Math.max(
+      1,
+      Math.floor(contextWindow * presetRatioForWindow(BUILTIN_PRESETS.default, contextWindow)),
+    );
   }
-  return DEFAULT_COMPACT_AFTER_TOKENS;
+  return Math.max(1, Math.floor(contextWindow * presetRatioForWindow(anchors, contextWindow)));
 }
 
 /**

@@ -160,9 +160,12 @@ describe("compactThresholdTokens", () => {
     ).toBe(100_000);
   });
 
-  it("falls back to the 81000 legacy default when no knob is set", () => {
-    expect(compactThresholdTokens({}, 200_000)).toBe(81_000);
-    expect(compactThresholdTokens({}, 32_000)).toBe(81_000);
+  it("no knob → the built-in default preset governs (no fixed 81000)", () => {
+    // The loader always injects compactAfterPreset:"default", so a bare {}
+    // resolves identically to the default preset curve.
+    expect(compactThresholdTokens({ compactAfterPreset: "default" }, 200_000)).toBe(149_482);
+    expect(compactThresholdTokens({ compactAfterPreset: "default" }, 32_768)).toBe(29_491);
+    expect(compactThresholdTokens({}, 200_000)).toBe(149_482);
   });
 });
 

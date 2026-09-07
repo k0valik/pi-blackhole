@@ -25,11 +25,6 @@ const CONFIG_FILENAME = "pi-blackhole-config.json";
 
 export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
 
-// SAFETY: the fixed token default (81000) is always present in DEFAULTS — the
-// interface field is optional only because derived mode (ratio/reserve) deletes
-// it from the merged config.
-const DEFAULT_COMPACT_AFTER_TOKENS = DEFAULTS.compactAfterTokens as number;
-
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
 export const config = new ConfigManager<UnifiedConfig>({
@@ -114,9 +109,9 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "number",
       label: "Auto-compact threshold (tokens)",
       description:
-        "Explicit fixed token threshold. When set to a non-default value it overrides the context-window knobs below; at its default it is treated as unset so a ratio/reserve can govern.",
-      value: cfg.compactAfterTokens ?? DEFAULT_COMPACT_AFTER_TOKENS,
-      min: 1_000,
+        "Explicit fixed token threshold; wins over the window-derived knobs and the preset curve. 0 = not set (a preset curve, ratio, or reserve governs).",
+      value: cfg.compactAfterTokens ?? 0,
+      min: 0,
       max: 500_000,
       step: 1_000,
     },
@@ -131,17 +126,18 @@ export const config = new ConfigManager<UnifiedConfig>({
       max: 200_000,
       step: 1_000,
     },
-    // Context-window-derived knobs (issue #60). Always visible: 0 means
-    // "not set" (the loader treats 0 as unset, so the fixed token threshold
-    // governs). Type a value to engage window-derived mode; set it back to 0
-    // to turn it off again. The tokens field above wins whenever it holds an
-    // explicit non-default value; ratio wins over reserve when both are set.
+    // Context-window-derived knobs (issue #60) + preset curve (spec §4). Always
+    // visible: 0 means "not set" (the loader treats 0 as unset, so the selected
+    // preset curve governs). Type a value to engage the knob; set it back to 0
+    // to turn it off. The tokens field above wins whenever it holds an explicit
+    // non-zero value; ratio wins over reserve when both are set; the preset
+    // select (below) picks the curve that applies when no numeric knob is set.
     {
       key: "compactAfterRatio",
       type: "number",
       label: "Auto-compact ratio (of context window)",
       description:
-        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob.",
+        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob and the preset curve.",
       value: cfg.compactAfterRatio ?? 0,
       min: 0,
       max: 1,
@@ -421,7 +417,6 @@ export const config = new ConfigManager<UnifiedConfig>({
     const REQUIRED_NUMERIC_KEYS: readonly (keyof UnifiedConfig)[] = [
       "observeAfterTokens",
       "reflectAfterTokens",
-      "compactAfterTokens",
       "retainedToolOutputMaxTokens",
       "observationsPoolMaxTokens",
       "observationsPoolTargetTokens",

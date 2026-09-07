@@ -112,6 +112,16 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
       return Number.isInteger(n) && n > 0 ? n : undefined;
     },
   },
+  // Non-empty string — preset-curve selection knob (spec §4). Names are user
+  // data; an unknown name warns at resolution and falls back to the built-in
+  // "default" curve.
+  compactAfterPreset: {
+    var: "PI_BLACKHOLE_COMPACT_AFTER_PRESET",
+    parse: (raw: string) => {
+      const trimmed = raw.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    },
+  },
   retainedToolOutputMaxTokens: "PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS",
   observeAfterTokens: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
   reflectAfterTokens: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
