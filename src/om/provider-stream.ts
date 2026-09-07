@@ -18,6 +18,20 @@ interface ProviderRegistry {
 }
 
 /**
+ * Duck-typed subset of Pi's extension ModelRegistry that the bridge needs.
+ *
+ * `streamSimple` is the host-composed path (Pi #8964). Until that lands on the
+ * facade, `getRegisteredProviderConfig` still exposes each `registerProvider`
+ * `streamSimple` handler, keyed by the extension provider id — match on
+ * `config.api === model.api`.
+ */
+export interface ModelRegistry {
+  streamSimple?: Function;
+  getRegisteredProviderIds?: () => readonly string[];
+  getRegisteredProviderConfig?: (providerId: string) => RegisteredProviderConfig | undefined;
+}
+
+/**
  * Key custom streams by `${provider}\u0000${api}` — NOT by `api` alone.
  *
  * Several extensions can register different providers that share one wire API
@@ -123,17 +137,48 @@ export function createProviderFetch(timeoutMs?: number): typeof fetch | undefine
   };
 }
 
-export function createBridgeStreamFn(streamSimple: any) {
+export function createBridgeStreamFn(
+  streamSimple: any,
+  modelRegistry?: ModelRegistry | null,
+): (model: any, ctx: any, opts: any) => any {
   const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
   return (model: any, ctx: any, opts: any) => {
+    // 1. Check modelRegistry.streamSimple (host-composed facade, Pi #8964)
+    if (modelRegistry && typeof (modelRegistry as any).streamSimple === "function") {
+      return (modelRegistry as any).streamSimple(model, ctx, opts);
+    }
+
+    // 2. Iterate getRegisteredProviderConfig to find matching model.api
+    if (
+      modelRegistry &&
+      typeof (modelRegistry as any).getRegisteredProviderIds === "function" &&
+      typeof (modelRegistry as any).getRegisteredProviderConfig === "function"
+    ) {
+      try {
+        for (const providerId of (modelRegistry as any).getRegisteredProviderIds()) {
+          const config = (modelRegistry as any).getRegisteredProviderConfig(providerId);
+          if (config?.api === model.api && typeof config.streamSimple === "function") {
+            return config.streamSimple(model, ctx, opts);
+          }
+        }
+      } catch {
+        // Incomplete host/test doubles — fall through to global map
+      }
+    }
+
+    // 3. Fall back to global Symbol.for map (existing captureRegisteredProviderStreams)
     const providerStreams: Map<string, Function> | undefined = (globalThis as any)[
       PROVIDER_STREAMS_KEY
     ];
-    if (!providerStreams) return streamSimple(model, ctx, opts);
-    const customFn =
-      model?.provider && model?.api
-        ? providerStreams.get(providerStreamKey(model.provider, model.api))
-        : undefined;
-    return customFn ? customFn(model, ctx, opts) : streamSimple(model, ctx, opts);
+    if (providerStreams) {
+      const customFn =
+        model?.provider && model?.api
+          ? providerStreams.get(providerStreamKey(model.provider, model.api))
+          : undefined;
+      if (customFn) return customFn(model, ctx, opts);
+    }
+
+    // 4. Final fallback to compat
+    return streamSimple(model, ctx, opts);
   };
 }

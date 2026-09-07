@@ -46,6 +46,8 @@ interface RunObserverArgs {
   maxTurns?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
+  /** Model registry for streamSimple resolution (custom providers, OAuth). */
+  modelRegistry?: any;
 }
 
 const RelevanceSchema = Type.Union([
@@ -263,7 +265,8 @@ ${conversation}`;
   // Consolidation agents run via jiti (moduleCache: false) which creates a separate
   // pi-ai instance whose apiProviderRegistry lacks custom providers registered by
   // other extensions (e.g., claude-bridge). The bridge looks up streamSimple functions
-  const bridgeStreamFn = createBridgeStreamFn(streamSimple);
+  // via modelRegistry (host-composed facade → registered provider config → global map).
+  const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
   const streamFn = args.streamFn ?? bridgeStreamFn;
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;

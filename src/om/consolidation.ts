@@ -811,6 +811,7 @@ async function runObserverStage(
         thinkingLevel: stageThinkingLevel(runtime, "observer", stageModelForThinking),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
         signal: generation.signal,
+        modelRegistry: ctx.modelRegistry,
       });
       if (!runtime.isGenerationActive(generation)) return "abort";
 
@@ -1101,6 +1102,7 @@ async function runReflectorStage(
         thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForThinking),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
         signal: generation.signal,
+        modelRegistry: ctx.modelRegistry,
       });
       if (!runtime.isGenerationActive(generation))
         return { outcome: "abort", sameRunReflections: [] };
@@ -1350,6 +1352,7 @@ async function runDropperStage(
         thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
         signal: generation.signal,
+        modelRegistry: ctx.modelRegistry,
       });
       if (!runtime.isGenerationActive(generation)) return "abort";
       const latestReflectionCoverageId = isManualMode(runtime.config)
