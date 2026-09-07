@@ -589,10 +589,28 @@ describe("Consolidation trigger — guards with new config keys", () => {
       }),
     };
     const launchConsolidationTask = vi.fn();
+    let mockGeneration = 0;
+    const mockController = new AbortController();
     const runtime = {
       ensureConfig: vi.fn(),
       resetInfoGate: vi.fn(),
       tryEmitInfo: vi.fn(),
+      captureGeneration: vi.fn((identity: string | undefined) => ({
+        generation: mockGeneration,
+        sessionIdentity: identity,
+        signal: mockController.signal,
+      })),
+      isGenerationActive: vi.fn(
+        (gen: { generation: number; sessionIdentity: string | undefined; signal: AbortSignal }) =>
+          gen.generation === mockGeneration && !gen.signal.aborted,
+      ),
+      startSession: vi.fn((identity: string | undefined) => {
+        mockSessionIdentity = identity;
+      }),
+      dispose: vi.fn(() => {
+        mockGeneration += 1;
+        mockController.abort();
+      }),
       config: {
         memory: true,
         observeAfterTokens: 1, // always due
