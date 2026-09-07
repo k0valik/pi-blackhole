@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Changed
+
+- **Ledger `entryIndexById` map is cached per entry-ID list** instead of being rebuilt on every call, removing a full-branch O(n) rebuild from the per-turn consolidation and compaction trigger paths. Includes a canary test documenting why upstream OM PR #57's zero-chunk observer backoff (fix 3) is unnecessary in our architecture ([upstream OM `#57`](https://github.com/elpapi42/pi-observational-memory/pull/57)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+
+### Fixed
+
+- **Compact-all compactions no longer silently drop every OM observation and reflection.** pi-core's compact-all sentinel (`firstKeptEntryId === ""`) resolved the projection boundary to index −1, producing an empty OM summary on single-prompt and no-user-message sessions; the OM fold now covers the whole branch up to the tip. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+- **Consolidation is cancelled across session reloads.** Reloading or replacing a session during active consolidation could append late observer/reflector output through the stale extension instance while reflection work was lost instead of retried. Observer/reflector/dropper stages, model resolution, and deferred compaction are now guarded by a runtime generation + AbortSignal on `session_start`/`session_shutdown`, and a fresh runtime retries the work without accepting stale output ([upstream OM `#58`](https://github.com/elpapi42/pi-observational-memory/pull/58)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+- **OM workers resolve `streamSimple` through the model registry for custom providers.** Observer/reflector/dropper were hard-wired to the pi-ai compat `streamSimple`, which cannot dispatch `pi.registerProvider` streams (cursor-sdk, CLIProxyAPI, …), so custom-provider-only setups crashed after a successful turn. Resolution chain: `modelRegistry.streamSimple` (Pi [`#8964`](https://github.com/earendil-works/pi/issues/8964)) → `getRegisteredProviderConfig()` matching `model.provider`, then `model.api` → global `Symbol.for` map → compat fallback. Custom-provider-only setups can now leave `observational-memory.model` unset ([upstream OM `#60`](https://github.com/elpapi42/pi-observational-memory/pull/60), [`#30`](https://github.com/elpapi42/pi-observational-memory/issues/30)). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
+
 ---
 
 ## [0.5.1] - 2026-09-06
