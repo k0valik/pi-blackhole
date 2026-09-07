@@ -8,7 +8,7 @@ Pi extension package: algorithmic compaction (pi-vcc) + observational memory (pi
 pnpm test          # vitest run (all tests, ~89 files, no network)
 pnpm typecheck     # tsc --noEmit (src/**/*.ts + index.ts only)
 pnpm lint          # eslint .
-pnpm format:check  # prettier --check .
+pnpm format:check  # oxfmt --check .
 pnpm build         # tsup bundle → dist/ (gitignored; pi-entry.js loads dist/ fast or falls back to index.ts)
 pnpm check         # typecheck + lint
 ```
@@ -16,7 +16,7 @@ pnpm check         # typecheck + lint
 - CI order: `build` → `typecheck` → `lint` → `test` → `format:check` (.github/workflows/ci.yml).
 - pre-commit: lint-staged (now in `package.json:lint-staged`) + typecheck. pre-push: typecheck + test (skipped for docs-only pushes).
 - pnpm only (`packageManager: pnpm@11.2.2`). TypeScript pinned to 6.0.3 for @typescript-eslint v8 compat — never bump TS alone.
-- `prettier` config and `lint-staged` live in `package.json` (no separate `.prettierrc.json` / `.lintstagedrc.json`); `.prettierignore` stays at root.
+- `oxfmt` config and `lint-staged` live in `package.json` (no separate `.oxfmtrc.json` / `.lintstagedrc.json`); `.oxfmtignore` stays at root.
 - Prepare script (`scripts/prepare.mjs`) builds dist via tsup on install; must never break consumer installs.
 
 ## Testing quirks
