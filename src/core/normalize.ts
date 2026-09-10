@@ -17,7 +17,7 @@ interface LocalBashMessage {
   exitCode: number | undefined;
 }
 
-const normalizeOne = (msg: Message, msgIndex: number): NormalizedBlock[] => {
+const normalizeOne = (msg: Message, msgIndex: number | undefined): NormalizedBlock[] => {
   if (msg.role === "user") {
     const blocks: NormalizedBlock[] = [];
     const text = sanitize(textOf(msg.content));
@@ -103,5 +103,15 @@ const normalizeOne = (msg: Message, msgIndex: number): NormalizedBlock[] => {
   return [];
 };
 
-export const normalize = (messages: Message[]): NormalizedBlock[] =>
-  messages.flatMap((msg, i) => normalizeOne(msg, i));
+/**
+ * Normalize messages to blocks. `sourceIndices`, when provided, supplies the
+ * session-global `#N` index per input position (see src/core/global-indices.ts).
+ * A missing entry yields `sourceIndex: undefined`, which downstream renderers
+ * display as no ref — never a window-relative number. Omitted entirely, the
+ * legacy positional behavior is preserved.
+ */
+export const normalize = (
+  messages: Message[],
+  sourceIndices?: Array<number | undefined>,
+): NormalizedBlock[] =>
+  messages.flatMap((msg, i) => normalizeOne(msg, sourceIndices ? sourceIndices[i] : i));

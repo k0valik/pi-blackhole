@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "fs";
 import type { Message } from "@earendil-works/pi-ai";
 import { renderMessage, type RenderedEntry } from "./render-entries";
+import { isCountedMessageEntry } from "./global-indices.js";
 
 export interface LoadedMessages {
   rendered: RenderedEntry[];
@@ -113,8 +114,9 @@ export const loadAllMessages = (
 
   let messageIndex = 0;
   for (const e of entries) {
-    const isMessage = e.type === "message" && e.message;
-    if (!isMessage) continue;
+    // Counting rule shared with src/core/global-indices.ts — both index spaces
+    // must agree by construction.
+    if (!isCountedMessageEntry(e)) continue;
 
     const allowed = !allowedEntryIds || allowedEntryIds.has(e.id);
     if (allowed) {
