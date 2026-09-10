@@ -10,9 +10,12 @@ import { convertToLlm } from "@earendil-works/pi-coding-agent";
 
 import {
   compactInlineAtTurnBoundary,
+  getCapturedCompactionSettings,
+  getPrepareCompactionStatus,
   InlineCompactionUnavailableError,
   installHostInlineCompactionAdapter,
   installInlineCompactionAdapter,
+  isCompactionEligible,
   parseHostFramePaths,
 } from "../src/om/inline-compaction.js";
 import { createPiAgentSessionHarness } from "./fixtures/pi-agent-session.js";
@@ -829,5 +832,149 @@ describe("Blackhole inline compaction adapter", () => {
       supported: true,
     });
     expect(SessionClass.prototype._bindExtensionCore).toBe(patchedBind);
+  });
+
+  it("captures compaction settings from the session settingsManager", () => {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({ sessionClass: SessionClass as never });
+    const session = new SessionClass();
+    (session as any).settingsManager = {
+      getCompactionSettings: () => ({
+        enabled: true,
+        reserveTokens: 2048,
+        keepRecentTokens: 5000,
+      }),
+    };
+    session._bindExtensionCore({});
+
+    const settings = getCapturedCompactionSettings(session.sessionManager);
+    expect(settings).toEqual({
+      enabled: true,
+      reserveTokens: 2048,
+      keepRecentTokens: 5000,
+    });
+  });
+
+  it("returns false from isCompactionEligible when prepareCompaction yields undefined (ineligible)", () => {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+      prepareCompaction: () => undefined,
+    });
+    const session = new SessionClass();
+    (session as any).settingsManager = {
+      getCompactionSettings: () => ({
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: 20000,
+      }),
+    };
+    session._bindExtensionCore({});
+
+    expect(isCompactionEligible(session.sessionManager, [])).toBe(false);
+  });
+
+  it("returns true from isCompactionEligible when prepareCompaction returns a preparation (eligible)", () => {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+      prepareCompaction: () => ({ firstKeptEntryId: "entry-1" }),
+    });
+    const session = new SessionClass();
+    (session as any).settingsManager = {
+      getCompactionSettings: () => ({
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: 20000,
+      }),
+    };
+    session._bindExtensionCore({});
+
+    expect(isCompactionEligible(session.sessionManager, [])).toBe(true);
+  });
+
+  it("fails open (returns true) from isCompactionEligible when prepareCompaction throws", () => {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+      prepareCompaction: () => {
+        throw new Error("unexpected error");
+      },
+    });
+    const session = new SessionClass();
+    (session as any).settingsManager = {
+      getCompactionSettings: () => ({
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: 20000,
+      }),
+    };
+    session._bindExtensionCore({});
+
+    expect(isCompactionEligible(session.sessionManager, [])).toBe(true);
+  });
+
+  it("fails open (returns true) from isCompactionEligible when prepareCompaction is unavailable", () => {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+      prepareCompaction: undefined,
+    });
+    const session = new SessionClass();
+    (session as any).settingsManager = {
+      getCompactionSettings: () => ({
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: 20000,
+      }),
+    };
+    session._bindExtensionCore({});
+
+    expect(isCompactionEligible(session.sessionManager, [])).toBe(true);
+  });
+
+  it("fails open (returns true) from isCompactionEligible when settings are unavailable (session not captured)", () => {
+    installInlineCompactionAdapter({
+      prepareCompaction: () => undefined,
+    });
+    const uncapturedSessionManager = { buildSessionContext: () => ({ messages: [] }) };
+    expect(isCompactionEligible(uncapturedSessionManager, [])).toBe(true);
+  });
+
+  it("fails open (returns true) from isCompactionEligible when settingsManager getter throws", () => {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+      prepareCompaction: () => undefined,
+    });
+    const session = new SessionClass();
+    (session as any).settingsManager = {
+      getCompactionSettings: () => {
+        throw new Error("corrupt settings");
+      },
+    };
+    session._bindExtensionCore({});
+
+    expect(isCompactionEligible(session.sessionManager, [])).toBe(true);
+  });
+
+  it("resolves prepareCompaction from the host package root via installHostInlineCompactionAdapter", async () => {
+    const cliPath = join(
+      process.cwd(),
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+      "dist",
+      "bundle",
+      "cli.js",
+    );
+    const status = await installHostInlineCompactionAdapter({
+      entrypoint: cliPath,
+      stack: "",
+    });
+    expect(status.supported).toBe(true);
+    const prepareStatus = getPrepareCompactionStatus();
+    expect(prepareStatus.resolved).toBe(true);
+    expect(prepareStatus.source).toContain("compaction");
   });
 });

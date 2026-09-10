@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Skip ineligible proactive auto-compaction before core `prepareCompaction` failure.** When provider context reaches the auto-compaction threshold (e.g. via large system prompts, tool definitions, or memory projections) but available session entries after the latest boundary remain below Pi's configured `keepRecentTokens` budget (default 20,000), `prepareCompaction()` returns `undefined`, which previously caused Pi's `AgentSession.compact()` to throw `"Nothing to compact (session too small)"` before extension hooks ran. Settled (`agent_end`) and mid-run (`turn_end` in resume and pause modes) auto-compaction now evaluate session eligibility using Pi's `prepareCompaction` and the captured `AgentSession`'s effective compaction settings, suppressing premature trigger notices, inline failure backoff loops, and unhandled compaction errors while cleanly resuming once session history grows past the keep budget.
+
 ---
 
 ## [0.5.3] - 2026-09-10
