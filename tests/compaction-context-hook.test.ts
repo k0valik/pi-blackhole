@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildAppendOnlyDetails } from "../src/core/compaction-chain.js";
 import { registerCompactionContextHook } from "../src/hooks/compaction-context.js";
 
-const details = buildAppendOnlyDetails({
+const { details } = buildAppendOnlyDetails({
   branchEntries: [],
   manualRebase: false,
   freshSummary: "[Goal]\nfirst",

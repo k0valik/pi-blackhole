@@ -40,6 +40,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
     ]
   },
   "retainedToolOutputMaxTokens": 20000, // 0 = disabled; otherwise full historical tool-output budget
+  "recallResponseMaxChars": 48000,      // recall response cap; 0 = unbounded; derived per-entry/line shares
 
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
@@ -47,7 +48,8 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
   "observeAfterTokens": 15000,    // Token threshold for observer runs
   "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
-  "observationsPoolMaxTokens": 20000, // Observation pool token ceiling
+  "observationsPoolMaxTokens": 20000, // Full-fold pressure + rendered observation-line cap
+  "reflectionsPoolMaxTokens": 8000, // Rendered reflection-line cap
   "observationsPoolTargetTokens": 10000, // Target after dropper prune (no-op)
   "reflectorInputMaxTokens": 80000, // Reflector prompt token cap
   "dropperInputMaxTokens": 80000,  // Dropper prompt token cap
@@ -215,6 +217,23 @@ This only changes the retained context sent to the provider. Session JSONL, comp
 |------|---------|-------|
 | number | 20000 | `0` (disabled) or positive integer |
 
+### `recallResponseMaxChars`
+
+Set to `0` to disable the budget entirely (opt-out). Default 48000 characters (~12k tokens).
+
+Bounding cap on any single `recall` tool / `/blackhole-recall` response. A huge stored message (long tool-result line, big expanded entry, giant observation body) must never flood the agent's context. Per-entry and per-line allocations are derived internally from this one knob:
+
+- Search snippet lines capped (~1000 chars) with the match kept visible.
+- Expanded entries share the budget, each with a continuation marker to `#N:text:full` / `#N:path:full`.
+- Related observation/reflection bodies capped (~1200 chars); full content reachable via the 12-hex memory id.
+- Total budget enforced entry-aware (trailing entries dropped before the header, footer names the omitted count + continuation).
+
+Session JSONL and the complete stored content are never modified — only what a single recall response renders is bounded, and the full payload stays reachable via paged drill-downs (`#N:text:offset:limit` / `#N:path:offset:limit`).
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | 48000 | `0` (unbounded) or positive integer |
+
 ### `compactAfterRatio` *(context-window-aware threshold, opt-in)*
 
 Instead of a fixed token count, derive the auto-compaction threshold from the **active session model's context window**: blackhole compacts when the context reaches `floor(contextWindow × compactAfterRatio)`. The threshold is re-derived on every evaluation, so switching models mid-session (`/model`) takes effect on the next check automatically.
@@ -362,11 +381,21 @@ Token thresholds that control when the OM pipeline runs. Unchanged from the prev
 
 ### `observationsPoolMaxTokens`
 
-Hard ceiling for the active observation pool. The dropper prunes when this ceiling is reached.
+Stored observation-token pressure threshold for full-fold maintenance, plus a hard cap on estimated rendered observation lines in compaction output. IDs, timestamps, relevance labels and newline separators count. High/critical observations are preferred newest-first, then medium/low by relevance and recency. Oversized records are skipped; selected records stay whole and return to source order. Source history is not deleted.
 
 | Type | Default |
 |------|---------|
 | number | 20000 |
+
+### `reflectionsPoolMaxTokens`
+
+Hard cap on estimated rendered reflection lines in compaction output. Selects newest whole records that fit, then restores source order. IDs and newline separators count. Non-negative finite integer; `0` disables the cap. Invalid file values use the default. This does not limit worker prompts or raw/view lookups, and omitted source records remain available through `recall`.
+
+| Type | Default |
+|------|---------|
+| non-negative integer | 8000 |
+
+Both output budgets use the project's chars/4 estimate, not an exact provider tokenizer. Section headings, recall note and footer add tokens outside these line budgets; total trailing memory is not exactly 28,000 tokens. Compact-all retains eligible bounded memory and applies recorded drops.
 
 ### `observationsPoolTargetTokens`
 
@@ -557,17 +586,19 @@ Boolean fields:
 | `PI_BLACKHOLE_SESSION_FALLBACK` | `sessionFallback` |
 | `PI_BLACKHOLE_FULL_FOLD_ALWAYS` | `fullFoldAlways` |
 
-Positive-integer fields (invalid values fall back):
+Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accepts `0` to disable its cap):
 
 | Variable | Overrides |
 |----------|-----------|
 | `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` | `compactAfterTokens` |
 | `PI_BLACKHOLE_COMPACT_RESERVE_TOKENS` | `compactReserveTokens` |
 | `PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS` | `retainedToolOutputMaxTokens` |
+| `PI_BLACKHOLE_RECALL_RESPONSE_MAX_CHARS` | `recallResponseMaxChars` |
 | `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS` | `observeAfterTokens` |
 | `PI_BLACKHOLE_REFLECT_AFTER_TOKENS` | `reflectAfterTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS` | `observationsPoolMaxTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS` | `observationsPoolTargetTokens` |
+| `PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS` | `reflectionsPoolMaxTokens` |
 | `PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS` | `reflectorInputMaxTokens` |
 | `PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS` | `dropperInputMaxTokens` |
 | `PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS` | `observerChunkMaxTokens` |
@@ -683,7 +714,10 @@ Controls how auto-compaction summaries are stored and presented to the model. On
 - Auto-compactions append a new segment to the chain; earlier segments stay visible to the model.
 - Explicit `/blackhole` rebases the active chain into one clean segment and starts a new chain.
 - Legacy v1 summaries (from before this feature) enter through one marked rebase.
-- When the projected chain passes half of the model's context window, the next auto-compaction folds it back into one segment.
+- At an existing compaction, ordinary rebase requires pressure **and** useful saving. Pressure means rendered append chain (including incoming segment and host wrappers) exceeds `floor(W / 8)`, or estimated full context exceeds `floor(W / 2)`. Saving must reach `max(1, min(24000, floor(24000 * W / 272000)))`. At a 272k window: 34k chain pressure, 136k context pressure, 24k minimum saving.
+- Both candidates contain the same current memory and kept tail. Full totals use a compatible trusted usage baseline minus reconstructed visible baseline plus reconstructed candidate content. Missing or inconsistent evidence leaves totals **unknown**, with chain-only policy still available. Without a supplied finite positive window, use 34k/24k chain policy and no invented capacity threshold.
+- Explicit `/blackhole` forces rebase after normal guards. `/compact` does not. Overflow recovery, or known append total above `W - reserveTokens`, chooses the smaller candidate without a 24k minimum. Estimates do not prove overflow recovery; Pi retains retry/error control.
+- This governor never requests compaction. Upstream threshold presets and explicit user cadence (including 168,000) are unchanged. No extra model call, price model, or timer.
 - A new `context` hook projects segments before each model call and **fails closed to the fallback** on any malformed state.
 - Falls back to rewrite surgery once per session when append mode encounters unsupported state.
 

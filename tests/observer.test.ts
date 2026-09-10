@@ -47,6 +47,7 @@ describe("runObserver", () => {
     priorObservations: [],
     chunk: "[Source entry id: entry-a]\nUser asked for a memory update.",
     allowedSourceEntryIds: ["entry-a"],
+    sourceEntryTimestamps: { "entry-a": "2026-05-02 10:30" },
   };
 
   it("passes the isolated provider fetch through agent-loop config", async () => {
@@ -79,20 +80,40 @@ describe("runObserver", () => {
     expect(systemPrompt).toContain("zero observations");
     expect(systemPrompt).toContain("The dropper will drop these first");
     expect(systemPrompt).toContain("highest-resistance, load-bearing observations");
+    expect(systemPrompt).toContain("Grounding rules");
+    expect(systemPrompt).toContain("What NOT to emit");
+    expect(systemPrompt).toContain("Dedup rule");
+    // Timestamps are derived in code; the prompt must not ask the model to type them.
+    expect(systemPrompt).not.toContain('YYYY-MM-DD HH:MM" (local time');
+    expect(systemPrompt).not.toContain("current local time");
     expect(systemPrompt).not.toContain("will NEVER be dropped");
     expect(systemPrompt).not.toContain("pruner");
   });
 
-  it("records V3 observations with source ids and code-computed tokenCount", async () => {
+  it("omits the current-time line from the user prompt", async () => {
+    let prompts: any[] = [];
+    const loop = fakeAgentLoop((seen, _context) => {
+      prompts = seen;
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    const userText = prompts[0]?.content?.[0]?.text ?? "";
+    expect(userText).not.toContain("Current local time:");
+    expect(userText).toContain("CURRENT REFLECTIONS:");
+  });
+
+  it("derives timestamps programmatically from cited source entries, not tool args", async () => {
     const content = "User asked for a memory update.";
     const loop = fakeAgentLoop(async (_prompts, context) => {
       await context.tools[0].execute("tool-1", {
         observations: [
           {
-            timestamp: "2026-05-02 10:30",
             content,
             relevance: "high",
             sourceEntryIds: ["entry-a"],
+            // LLM-reported timestamps must be ignored entirely
+            timestamp: "1999-01-01 00:00",
           },
         ],
       });
@@ -112,12 +133,71 @@ describe("runObserver", () => {
     expect(observations?.[0].id).toMatch(/^[a-f0-9]{12}$/);
   });
 
+  it("uses the latest supporting source entry as the observation timestamp", async () => {
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", {
+        observations: [
+          {
+            content: "Fact spanning two entries",
+            relevance: "medium",
+            sourceEntryIds: ["entry-a", "entry-b"],
+          },
+        ],
+      });
+    });
+
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: loop,
+      allowedSourceEntryIds: ["entry-a", "entry-b"],
+      sourceEntryTimestamps: { "entry-a": "2026-05-02 10:30", "entry-b": "2026-05-02 10:45" },
+    });
+
+    expect(result.observations?.[0]?.timestamp).toBe("2026-05-02 10:45");
+  });
+
+  it("falls back to current local time when cited entries carry no usable timestamps", async () => {
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", {
+        observations: [
+          {
+            content: "Fact with unknown-time evidence",
+            relevance: "low",
+            sourceEntryIds: ["entry-a"],
+          },
+        ],
+      });
+    });
+
+    const before = new Date();
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: loop,
+      sourceEntryTimestamps: { "entry-a": "????-??-?? ??:??" },
+    });
+    const after = new Date();
+
+    const ts = result.observations?.[0]?.timestamp;
+    expect(ts).toMatch(new RegExp(OBSERVATION_TIMESTAMP_PATTERN));
+    const parsed = new Date(ts!);
+    expect(parsed.getTime()).not.toBeNaN();
+    expect(parsed.getTime()).toBeGreaterThanOrEqual(
+      new Date(
+        before.getFullYear(),
+        before.getMonth(),
+        before.getDate(),
+        before.getHours(),
+        before.getMinutes(),
+      ).getTime() - 60_000,
+    );
+    expect(parsed.getTime()).toBeLessThanOrEqual(after.getTime() + 60_000);
+  });
+
   it("rejects invented source ids and returns no observations", async () => {
     const loop = fakeAgentLoop(async (_prompts, context) => {
       await context.tools[0].execute("tool-1", {
         observations: [
           {
-            timestamp: "2026-05-02 10:30",
             content: "Bad source",
             relevance: "medium",
             sourceEntryIds: ["missing"],
@@ -135,13 +215,11 @@ describe("runObserver", () => {
       await context.tools[0].execute("tool-1", {
         observations: [
           {
-            timestamp: "2026-05-02 10:30",
             content: "Same content",
             relevance: "medium",
             sourceEntryIds: ["entry-a"],
           },
           {
-            timestamp: "2026-05-02 10:31",
             content: "Same content",
             relevance: "high",
             sourceEntryIds: ["entry-a"],

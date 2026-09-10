@@ -103,7 +103,7 @@ describe("append rebase surgery", () => {
     // Grow a valid three-segment automatic chain.
     let branchEntries: any[] = [];
     const checkpoint = (text: string) => {
-      const details = buildAppendOnlyDetails({
+      const { details } = buildAppendOnlyDetails({
         branchEntries,
         manualRebase: false,
         freshSummary: freshSummary(text),
@@ -154,7 +154,7 @@ describe("append rebase surgery", () => {
     }
     const aggregate = stripRecallNotes(stripOMContent(accumulated)).trim();
 
-    const rebase = buildAppendOnlyDetails({
+    const { details: rebase } = buildAppendOnlyDetails({
       branchEntries,
       manualRebase: true,
       freshSummary: "",

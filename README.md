@@ -31,13 +31,13 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.2](CHANGELOG.md)**
+> **Latest release: [0.5.3](CHANGELOG.md)**
 >
-> - **⚠️ Auto-compaction now scales to your model's context window** — the no-knob default no longer fires at a flat 81,000 tokens: a built-in **`default` preset curve** derives the trigger as `floor(window × ratio)` — 0.90 @ 32,768, 0.80 @ 131,072, 0.70 @ 262,144, 0.40 @ 1,048,576 (piecewise-linear between anchors). Small local windows fill near-full (cheap to resend); 1M-class windows compact early. **Behavior change on upgrade:** a config file containing the literal scaffold value `"compactAfterTokens": 81000` is auto-migrated (treated as residue, never a deliberate pin) so the curve governs — any _other_ explicit value still pins a flat threshold. Prefer a different shape? `compactAfterPreset`, `compactAfterRatio`, and `compactReserveTokens` live under **Compaction** in `/blackhole settings`; thresholds re-derive on every check, so mid-session `/model` switches apply automatically. ([#79](https://github.com/k0valik/pi-blackhole/pull/79))
-> - **Observational memory now works with custom providers** — observer/reflector/dropper resolve their streams through the model registry (`pi.registerProvider` providers like cursor-sdk, CLIProxyAPI, …) instead of the built-in compat path. Custom-provider-only setups no longer crash after a turn, and `observational-memory.model` can stay unset — no second built-in provider required. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
-> - **Reload-safe memory pipeline** — reloading, forking, or switching a session mid-consolidation now cancels the in-flight observer/reflector/dropper work cleanly instead of appending through the stale session; the fresh session retries the work without losing reflections. ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
-> - **Compact-all compactions keep your memory** — fixed a silent drop of _all_ observations and reflections when compaction fires on a single-prompt or no-user-message session (the compact-all sentinel resolved to an empty fold). ([#74](https://github.com/k0valik/pi-blackhole/pull/74))
-> - **Faster session startup** — the host inline-compaction adapter now prefers Pi's already-loaded bundled runtime chunk over the slow barrel import: adapter setup drops from ~506ms to ~16ms, saving ~490ms per session start.
+> - **Recall responses are now budget-bounded** — one knob (`recallResponseMaxChars`, default 48k chars ≈ 12k tokens) caps search snippets, expansions, and related observations; clipped content stays reachable via the new `#N:text` drill-down and `page:N` continuation. `/blackhole-recall` itself stays uncapped (human TUI output). ([#83](https://github.com/k0valik/pi-blackhole/issues/83))
+> - **Compaction summaries now speak recall's index space** — `(#N)` refs are session-global, so they resolve to the right operation after compactions and branches instead of pointing at unrelated history. ([#82](https://github.com/k0valik/pi-blackhole/issues/82))
+> - **Memory that curates for a future session** — rebuilt observer/reflector/dropper prompts (survival test, grounding rules, noise exclusions) plus observation timestamps derived from cited evidence instead of model-typed dates.
+> - **Large sessions no longer crash recall** — session files stream in 64 KiB chunks past V8's string limit (adapted from upstream pi-vcc [#26](https://github.com/sting8k/pi-vcc/pull/26)).
+> - **Filenames aren't regex anymore** — natural-language queries mentioning a file (`let me check what observer.ts does`) now match literally instead of returning zero hits.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
@@ -78,18 +78,21 @@ All commands work regardless of `compaction` mode — only _when_ auto-compactio
 
 The agent gets one unified `recall` tool that handles every form of historical lookup. Searches read the raw session file directly, bypassing compaction.
 
-| Input           | What it does                                                                                                                                                      |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[12-char hex]` | Recover source evidence for a specific observation or reflection ID from the session ledger.                                                                      |
-| `#N`            | Expand a session entry by index (show full content, not truncated).                                                                                               |
-| `#N:path`       | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows the next 30; `#42:auth.ts:full` shows everything). |
-| Free text       | BM25-ranked search across transcript and/or file content. Rare terms weighted higher.                                                                             |
-| `mode:file`     | Search only write/edit file content.                                                                                                                              |
-| `mode:touched`  | Aggregate all files written/edited across the session, grouped by path.                                                                                           |
-| Regex           | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`).                                                                                                             |
-| `scope:all`     | Search across all session lineages (default: active lineage only).                                                                                                |
+| Input           | What it does                                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `[12-char hex]` | Recover source evidence for a specific observation or reflection ID from the session ledger.                                                                                         |
+| `#N`            | Expand a session entry by index (show full content, bounded by the response budget).                                                                                                 |
+| `#N:path`       | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows the next 30; `#42:auth.ts:full` shows everything).                    |
+| `#N:text`       | Drill-down into a message body (user/assistant/tool/bash text) with the same paging (`#42:text`, `#42:text:30`, `#42:text:full`) — the continuation path for budget-clipped entries. |
+| Free text       | BM25-ranked search across transcript and/or file content. Rare terms weighted higher.                                                                                                |
+| `mode:file`     | Search only write/edit file content.                                                                                                                                                 |
+| `mode:touched`  | Aggregate all files written/edited across the session, grouped by path.                                                                                                              |
+| Regex           | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`).                                                                                                                                |
+| `scope:all`     | Search across all session lineages (default: active lineage only).                                                                                                                   |
 
 When the agent expands a session entry (`#N`), related observations and reflections from the session ledger are automatically shown alongside the expanded content — so the agent gets the raw transcript _and_ the durable fact layer in one call.
+
+Every recall response is capped at `recallResponseMaxChars` (default 48,000 ≈ 12k tokens). Search snippet lines, expanded entries, and related observation bodies are clipped to keep a single huge stored message from flooding the context; a truncation marker names the omitted entries and how to continue (`#N:text` / `#N:path` / `page:N`).
 
 The `/blackhole-recall` command exposes the same engine to the user. Results are shown as a collapsible message and auto-fed to the agent as context.
 

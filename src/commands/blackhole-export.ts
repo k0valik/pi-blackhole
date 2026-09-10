@@ -131,7 +131,7 @@ export const registerBlackholeExportCommand = (pi: ExtensionAPI) => {
         `Project memory exported to ${outPath}`,
         "",
         `- sessions scanned: ${stats.sessionsConsidered} (${stats.filesWithMarkers} with memory entries)`,
-        `- observations: ${stats.observationsTotal} → ${stats.observationsRendered} rendered (${stats.duplicatesCollapsed} duplicates collapsed, ${stats.observationsFiltered} below viability gate)`,
+        `- observations: ${stats.observationsTotal} → ${stats.observationsRendered} rendered (${stats.duplicatesCollapsed} duplicates collapsed, ${stats.observationsFiltered} below viability gate${stats.suppressedByReflections > 0 ? `, ${stats.suppressedByReflections} covered by reflections` : ""})`,
         stats.topicGroups > 0
           ? `- ${stats.topicGroups} topic groups identified; each observation shows its **topic badge**`
           : null,

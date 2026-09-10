@@ -1,4 +1,9 @@
 import { describe, it, expect } from "vitest";
+import {
+  observationToSummaryLine,
+  selectPriorObservations,
+} from "../src/om/ledger/render-summary.js";
+import { estimateStringTokens } from "../src/om/tokens.js";
 import { foldLedger } from "../src/om/ledger/fold.js";
 import {
   buildCompactionProjection,
@@ -195,17 +200,32 @@ describe("om-ledger-robust", () => {
       expect(res.observations.length).toBeLessThan(2);
     });
 
-    it("selectPriorObservations keeps high relevance regardless of budget if possible", () => {
+    it("selectPriorObservations keeps high relevance when it fits the budget", () => {
       const o1 = obs(1, "t1");
       o1.relevance = "high";
       const o2 = obs(2, "t2");
       o2.relevance = "low";
       const entries = [obsEntry("e1", [o1, o2])];
+      // Each rendered line costs ~12 tokens: the high item fits in 20 and
+      // consumes the budget first, leaving no room for the low item.
       const res = buildCompactionProjection(entries, "e1", {
-        observationsPoolMaxTokens: 10,
+        observationsPoolMaxTokens: 20,
       });
       expect(res.observations).toHaveLength(1);
       expect(res.observations[0].id).toBe(id(1));
+    });
+
+    it("selectPriorObservations trims high relevance that alone exceeds the budget (#69)", () => {
+      const o1 = obs(1, "t1");
+      o1.relevance = "high";
+      const o2 = obs(2, "t2");
+      o2.relevance = "low";
+      const entries = [obsEntry("e1", [o1, o2])];
+      // One rendered line already costs ~12 tokens: nothing fits in 10.
+      const res = buildCompactionProjection(entries, "e1", {
+        observationsPoolMaxTokens: 10,
+      });
+      expect(res.observations).toHaveLength(0);
     });
 
     it("returns all reflections regardless of fullFold", () => {
@@ -427,5 +447,31 @@ describe("om-ledger-robust", () => {
       });
       expect(res.fullFold).toBe(false);
     });
+  });
+});
+
+describe("rendered observation budgets", () => {
+  it("charges separators, skips oversized records, and restores source order", () => {
+    const items = [obs(1, "x"), obs(2, "x"), obs(3, "x".repeat(2000))];
+    for (const item of items) item.relevance = "high";
+    items[2].relevance = "critical";
+    // Pad each complete line to a multiple of four: newline costs an extra token.
+    for (const item of items)
+      item.content += "x".repeat((4 - (observationToSummaryLine(item).length % 4)) % 4);
+    const budget = 2 * estimateStringTokens(observationToSummaryLine(items[0]));
+    expect(selectPriorObservations(items, budget)).toEqual([items[1]]);
+    const selected = selectPriorObservations(items, budget + 1);
+    expect(selected).toEqual(items.slice(0, 2));
+    expect(estimateStringTokens(selected.map(observationToSummaryLine).join("\n"))).toBe(
+      budget + 1,
+    );
+  });
+
+  it("prefers medium over newer low, newest within each tier, ignoring stored counts", () => {
+    const items = [obs(1, "x", 0), obs(2, "x", 0), obs(3, "x", 0)];
+    items[2].relevance = "low";
+    const budget = estimateStringTokens(observationToSummaryLine(items[1]));
+    expect(selectPriorObservations(items, budget)).toEqual([items[1]]);
+    expect(items).toHaveLength(3);
   });
 });

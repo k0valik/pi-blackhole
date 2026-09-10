@@ -123,9 +123,17 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
     },
   },
   retainedToolOutputMaxTokens: "PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS",
+  recallResponseMaxChars: "PI_BLACKHOLE_RECALL_RESPONSE_MAX_CHARS",
   observeAfterTokens: "PI_BLACKHOLE_OBSERVE_AFTER_TOKENS",
   reflectAfterTokens: "PI_BLACKHOLE_REFLECT_AFTER_TOKENS",
   observationsPoolMaxTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS",
+  reflectionsPoolMaxTokens: {
+    var: "PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS",
+    parse: (raw: string) => {
+      const n = Number(raw);
+      return Number.isInteger(n) && n >= 0 ? n : undefined;
+    },
+  },
   observationsPoolTargetTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS",
   reflectorInputMaxTokens: "PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS",
   dropperInputMaxTokens: "PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS",

@@ -102,6 +102,51 @@ describe("searchEntries", () => {
     expect(r).toHaveLength(2);
   });
 
+  it("natural sentence mentioning a filename reaches BM25 instead of whole-query regex", () => {
+    const fileEntries: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "Reading observer.ts" },
+      { index: 1, role: "user", summary: "unrelated chatter" },
+    ];
+    const fileMsgs: Message[] = [
+      { role: "assistant", content: [{ type: "text", text: "Reading observer.ts" }] } as any,
+      { role: "user", content: "unrelated chatter" } as any,
+    ];
+    const r = searchEntries(fileEntries, fileMsgs, "let me check what observer.ts does");
+    expect(r).toHaveLength(1);
+    expect(r[0].index).toBe(0);
+    expect(r[0].snippet).toContain("observer.ts");
+  });
+
+  it("dot in a search term matches literally, not as a wildcard", () => {
+    const dotEntries: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "Reading observer.ts" },
+      { index: 1, role: "assistant", summary: "Reading observerXts" },
+    ];
+    const dotMsgs: Message[] = [
+      { role: "assistant", content: [{ type: "text", text: "Reading observer.ts" }] } as any,
+      { role: "assistant", content: [{ type: "text", text: "Reading observerXts" }] } as any,
+    ];
+    const r = searchEntries(dotEntries, dotMsgs, "observer.ts");
+    expect(r).toHaveLength(1);
+    expect(r[0].index).toBe(0);
+  });
+
+  it("mixes literal and regex terms within one query", () => {
+    const mixedEntries: RenderedEntry[] = [
+      { index: 0, role: "assistant", summary: "Reading observer.ts" },
+      { index: 1, role: "assistant", summary: "handling logout flow" },
+      { index: 2, role: "user", summary: "unrelated chatter" },
+    ];
+    const mixedMsgs: Message[] = [
+      { role: "assistant", content: [{ type: "text", text: "Reading observer.ts" }] } as any,
+      { role: "assistant", content: [{ type: "text", text: "handling logout flow" }] } as any,
+      { role: "user", content: "unrelated chatter" } as any,
+    ];
+    // "observer.ts" matches literally, "login|logout" stays a pattern.
+    const r = searchEntries(mixedEntries, mixedMsgs, "observer.ts login|logout");
+    expect(r.map((h) => h.index).sort()).toEqual([0, 1]);
+  });
+
   // ── natural language queries (OR logic + ranking) ──
 
   it("natural language query uses OR logic", () => {

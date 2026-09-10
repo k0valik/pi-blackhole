@@ -65,20 +65,38 @@ const safeRegex = (pattern: string): RegExp => {
   }
 };
 
-/** Detect if the query looks like a single regex pattern (contains regex metacharacters). */
-const looksLikeRegex = (query: string): boolean => /[|*+?{}()[\]\\^$.]/.test(query);
+/** Match a single search term literally (all metacharacters escaped). */
+const literalRegex = (term: string): RegExp => new RegExp(escapeRegex(term), "i");
 
-/** Build a regex for snippet highlighting — matches first available term. */
+/**
+ * Operator characters that signal regex intent in a single term. A bare dot
+ * is deliberately excluded: filenames ("observer.ts") and versions ("v1.0")
+ * are prose, not patterns. `$`/`^` stay: anchoring an otherwise-plain term is
+ * still useful, and prose rarely leads/trails with them.
+ */
+const REGEX_TERM_HINT = /[|*+?{}()[\]\\^$]/;
+
+/**
+ * Compile one query term: operator-bearing terms stay regex patterns
+ * (invalid ones fall back to an escaped literal via safeRegex), plain terms —
+ * including dotted filenames — match literally, so "observer.ts" never
+ * matches "observerXts". Never throws.
+ */
+const compileTerm = (term: string): RegExp =>
+  REGEX_TERM_HINT.test(term) ? safeRegex(term) : literalRegex(term);
+
+/** A query term paired with its matcher (compiled once per search). */
+interface CompiledTerm {
+  term: string;
+  pattern: RegExp;
+}
+
+const compileTerms = (terms: string[]): CompiledTerm[] =>
+  terms.map((term) => ({ term, pattern: compileTerm(term) }));
+
+/** Build a matcher over per-term patterns — matches first available term. */
 const snippetRegex = (terms: string[]): RegExp => {
-  const alts = terms.map((t) => {
-    try {
-      // Validate that it's a valid regex
-      new RegExp(t, "i");
-      return t;
-    } catch {
-      return escapeRegex(t);
-    }
-  });
+  const alts = terms.map((t) => compileTerm(t).source);
   return new RegExp(alts.join("|"), "i");
 };
 
@@ -182,10 +200,10 @@ const filterStopwords = (terms: string[]): string[] => {
 };
 
 /** Count how many distinct terms match the haystack. */
-const countMatches = (hay: string, terms: string[]): number => {
+const countMatches = (hay: string, compiled: CompiledTerm[]): number => {
   let count = 0;
-  for (const t of terms) {
-    if (safeRegex(t).test(hay)) count++;
+  for (const c of compiled) {
+    if (c.pattern.test(hay)) count++;
   }
   return count;
 };
@@ -208,16 +226,16 @@ interface BM25Context {
 }
 
 /** Precompute IDF and avgDl across all docs. */
-const buildBM25Context = (docs: string[], terms: string[]): BM25Context => {
+const buildBM25Context = (docs: string[], compiled: CompiledTerm[]): BM25Context => {
   const n = docs.length;
   const df = new Map<string, number>();
   let totalLen = 0;
 
   for (const doc of docs) {
     totalLen += doc.split(/\s+/).length;
-    for (const t of terms) {
-      if (safeRegex(t).test(doc)) {
-        df.set(t, (df.get(t) ?? 0) + 1);
+    for (const c of compiled) {
+      if (c.pattern.test(doc)) {
+        df.set(c.term, (df.get(c.term) ?? 0) + 1);
       }
     }
   }
@@ -226,15 +244,15 @@ const buildBM25Context = (docs: string[], terms: string[]): BM25Context => {
 };
 
 /** BM25+ score for a single doc against query terms. */
-const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
+const bm25Score = (doc: string, compiled: CompiledTerm[], ctx: BM25Context): number => {
   const dl = doc.split(/\s+/).length;
   let score = 0;
 
-  for (const t of terms) {
-    const tf = termFreq(doc, safeRegex(t));
+  for (const c of compiled) {
+    const tf = termFreq(doc, c.pattern);
     if (tf === 0) continue;
 
-    const docFreq = ctx.df.get(t) ?? 0;
+    const docFreq = ctx.df.get(c.term) ?? 0;
     // IDF: log((N - df + 0.5) / (df + 0.5) + 1)
     const idf = Math.log((ctx.n - docFreq + 0.5) / (docFreq + 0.5) + 1);
     // TF saturation with length normalization + BM25+ delta floor
@@ -244,6 +262,36 @@ const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
   }
 
   return score;
+};
+
+/**
+ * Maximum characters of a single line kept in a search snippet. A long line
+ * (e.g. a dumped tool result) is clipped so one match cannot blow the recall
+ * response; the match itself stays visible via a match-centered window.
+ */
+const SNIPPET_LINE_MAX = 1000;
+
+/**
+ * Clip a single snippet line to SNIPPET_LINE_MAX.
+ * When `regex` is provided (the matched context line), the window is centered
+ * on the match so the hit stays visible even deep in a long line; otherwise
+ * (plain context lines) the start is kept.
+ */
+const clipSnippetLine = (line: string, regex?: RegExp): string => {
+  if (line.length <= SNIPPET_LINE_MAX) return line;
+  let trimmed = line.slice(0, SNIPPET_LINE_MAX);
+  let prefix = "";
+  if (regex) {
+    const match = regex.exec(line);
+    if (match) {
+      const radius = Math.max(0, Math.floor((SNIPPET_LINE_MAX - match[0].length) / 2));
+      const start = Math.max(0, match.index - radius);
+      const end = Math.min(line.length, match.index + match[0].length + radius);
+      prefix = start > 0 ? "… " : "";
+      trimmed = line.slice(start, end);
+    }
+  }
+  return `${prefix}${trimmed} … [truncated]`;
 };
 
 /** Line-based snippet: ±contextLines around first regex match. */
@@ -264,7 +312,11 @@ const lineSnippet = (text: string, regex: RegExp, contextLines = 2): string | un
 
   const parts: string[] = [];
   if (start > 0) parts.push(`...(${start} lines above)`);
-  parts.push(...slice);
+  // Cap each line so a single 50KB output cannot flood the response;
+  // clip the matched line around the hit so the match stays visible.
+  parts.push(
+    ...slice.map((line, i) => clipSnippetLine(line, i === matchIdx - start ? regex : undefined)),
+  );
   if (end < lines.length) parts.push(`...(${lines.length - end} lines below)`);
   return parts.join("\n");
 };
@@ -355,9 +407,9 @@ function computeFileMatches(msg: Message | undefined, query: string): FileMatch[
   const rawQuery = query.trim();
   const hasQuery = rawQuery.length > 0;
   if (!hasQuery) return getFileIndicators(msg as Message);
-  const regex = looksLikeRegex(rawQuery)
-    ? safeRegex(rawQuery)
-    : snippetRegex(rawQuery.split(/\s+/));
+  // Per-term matchers: operator-bearing terms stay patterns, plain terms
+  // (including dotted filenames) match literally.
+  const regex = snippetRegex(rawQuery.split(/\s+/));
   const fileMatches: FileMatch[] = [];
 
   for (const part of msg.content) {
@@ -452,30 +504,14 @@ export const searchEntriesDetailed = (
 
   const rawQuery = query.trim();
 
-  // If query looks like a single regex pattern (contains metacharacters),
-  // treat the whole thing as one pattern — don't split into terms
-  if (looksLikeRegex(rawQuery)) {
-    const regex = safeRegex(rawQuery);
-    const hits: SearchHit[] = [];
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
-      const msg = messages[i];
-      const text = msg ? fullText(msg, mode) : e.summary;
-      const filePart = e.files?.join(" ") ?? "";
-      const hay = `${e.role} ${text} ${filePart}`;
-      if (regex.test(hay)) {
-        const snip = lineSnippet(text, regex);
-        const fileMatches = computeFileMatches(msg, rawQuery);
-        const extra = fileMatches.length > 0 ? { fileMatches } : {};
-        hits.push({ ...e, snippet: snip, matchCount: 1, ...extra });
-      }
-    }
-    return capHits(hits, cap);
-  }
-
-  // Natural language / multi-word query: BM25 scoring
+  // Every query is split into terms first: operator-bearing terms
+  // ("login|auth", "Read.*auth") stay regex patterns, plain terms —
+  // including dotted filenames ("observer.ts") — match literally. A natural
+  // sentence mentioning a file therefore reaches BM25 ranking instead of
+  // being compiled as one (never-matching) whole-query pattern.
   const rawTerms = rawQuery.split(/\s+/);
   const terms = filterStopwords(rawTerms);
+  const compiled = compileTerms(terms);
   const snipRe = snippetRegex(terms);
 
   // Build all docs for BM25 context (cache fullText to avoid recomputing)
@@ -490,15 +526,15 @@ export const searchEntriesDetailed = (
     docs.push(`${e.role} ${text} ${filePart}`);
   }
 
-  const ctx = buildBM25Context(docs, terms);
+  const ctx = buildBM25Context(docs, compiled);
 
   const scored: Array<{ hit: SearchHit; score: number }> = [];
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const hay = docs[i];
-    const mc = countMatches(hay, terms);
+    const mc = countMatches(hay, compiled);
     if (mc === 0) continue;
-    const score = bm25Score(hay, terms, ctx);
+    const score = bm25Score(hay, compiled, ctx);
     const text = fullTextCache[i];
     const snip = lineSnippet(text, snipRe);
     const fileMatches = computeFileMatches(messages[i], rawQuery);
@@ -509,9 +545,9 @@ export const searchEntriesDetailed = (
     });
   }
 
-  // Sort by BM25 score desc
+  // Sort by BM25 score desc (term coverage flows through matchCount + score)
   scored.sort((a, b) => b.score - a.score);
-  const effectiveTermCount = new Set(terms.map((term) => term.toLowerCase())).size;
+  const effectiveTermCount = new Set(compiled.map((c) => c.term.toLowerCase())).size;
   const floored = effectiveTermCount >= 2 ? applyRelativeFloor(scored, relativeFloor) : scored;
   return capHits(
     floored.map((s) => s.hit),

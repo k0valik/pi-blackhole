@@ -82,7 +82,6 @@ const OM_TYPES = {
   drops: "om.observations.dropped",
 };
 const SOURCE_TYPES = new Set(["message", "custom_message", "branch_summary"]);
-const CONSOLE_ROW_CAP = 70;
 
 // Trim simulation parameters for the observer's serialized input (see plan
 // doc appendix; the provider usage numbers that drive the counters are NOT
@@ -971,7 +970,7 @@ function writeSummary(primary, secondary, outPath) {
   const fmtN = (v) => (v === undefined ? "n/a" : v.toLocaleString());
 
   const surface = (run, title) => {
-    const { th, stages, agg, cal, obsSim } = run;
+    const { stages, agg, cal, obsSim } = run;
     const lines = [];
     lines.push(`## ${title}`);
     lines.push("");
@@ -1042,9 +1041,9 @@ function writeSummary(primary, secondary, outPath) {
     `- Sessions: ${primary.sessions.length} unique (realpath-deduped) under \`~/.pi/agent/sessions\``,
   );
   md.push(`- Command: \`node scripts/analyze-token-estimation.mjs --summary ${outPath}\``);
-  md.push("- Full plan: \`work_docs/issue-usage-based-token-counting.md\`");
+  md.push("- Full plan: `work_docs/issue-usage-based-token-counting.md`");
   md.push(
-    "- Raw per-window reports (gitignored, regenerate with the script): \`tmp/token-estimation-report.md\` (author config), \`tmp/token-estimation-report-defaults.md\` (code defaults)",
+    "- Raw per-window reports (gitignored, regenerate with the script): `tmp/token-estimation-report.md` (author config), `tmp/token-estimation-report-defaults.md` (code defaults)",
   );
   md.push("");
   md.push(

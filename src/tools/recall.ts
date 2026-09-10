@@ -8,10 +8,16 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
+import { clip } from "../core/content";
 import { searchEntriesDetailed, getFileIndicators, getTouchedFiles } from "../core/search-entries";
 import type { RenderedEntry } from "../core/render-entries";
 import type { SearchHit } from "../core/search-entries";
-import { formatRecallOutput, formatTouchedOutput } from "../core/format-recall";
+import { formatRecallEntry, formatTouchedOutput } from "../core/format-recall";
+import {
+  capRecallBlocks,
+  expandAllocation,
+  DEFAULT_RECALL_RESPONSE_MAX_CHARS,
+} from "../core/recall-budget";
 import { getActiveLineageEntryIds } from "../core/lineage";
 import { normalizeRecallScope, normalizeRecallMode } from "../core/recall-scope";
 import { parseDrillDown, expandEntryFile } from "../core/drill-down.js";
@@ -23,6 +29,7 @@ import {
   formatRelatedObservations,
   buildIndexMap,
   formatEntryIndexAnnotation,
+  clipBody,
 } from "../om/reverse-recall.js";
 
 // ── Pi-vcc recall logic ──────────────────────────────────────────────────
@@ -32,6 +39,20 @@ const PAGE_SIZE = 5;
 
 export const invalidExpandIndices = (requested: number[], available: Set<number>): number[] =>
   requested.filter((i) => !Number.isInteger(i) || !available.has(i));
+
+/**
+ * Clip a fully-rendered expanded entry to its per-entry budget share. Adds a
+ * continuation marker pointing at #N:text (message body) / #N:path (file
+ * content) drill-downs, which page the stored payload in full.
+ */
+export const clipExpandedEntry = (e: RenderedEntry, alloc: number): RenderedEntry => {
+  if (alloc <= 0 || e.summary.length <= alloc) return e;
+  const body = clip(e.summary, alloc);
+  return {
+    ...e,
+    summary: `${body}\n… [entry #${e.index} truncated — use recall #${e.index}:text:full for the full body, #${e.index}:path:full for tool file content]`,
+  };
+};
 
 /**
  * Merge expanded (full-content) entries into search results.
@@ -73,6 +94,7 @@ async function vccRecall(
     mode?: string;
   },
   ctx: any,
+  maxChars = DEFAULT_RECALL_RESPONSE_MAX_CHARS,
 ) {
   const sessionFile = ctx.sessionManager.getSessionFile();
   if (!sessionFile) {
@@ -90,7 +112,7 @@ async function vccRecall(
   if (mode === "touched") {
     const { rendered, rawMessages } = loadAllMessages(sessionFile, false, lineageEntryIds);
     const touched = getTouchedFiles(rawMessages, rendered);
-    const text = formatTouchedOutput(touched, params.page);
+    const text = formatTouchedOutput(touched, params.page, undefined, maxChars);
     return { content: [{ type: "text" as const, text }], details: undefined };
   }
 
@@ -119,12 +141,23 @@ async function vccRecall(
       .map((i) => byIndex.get(i))
       .filter((m): m is NonNullable<typeof m> => Boolean(m));
 
+    // Per-entry budget share: 12 huge entries each get ~budget/12 (never
+    // verbatim unbounded); each carries a continuation marker to the
+    // full payload via #N:text / #N:path drill-down.
+    if (expandedFullEntries.length > 0 && maxChars > 0) {
+      const alloc = expandAllocation(expandedFullEntries.length, maxChars);
+      expandedFullEntries = expandedFullEntries.map((e) => clipExpandedEntry(e, alloc));
+    }
+
     // Expand-only path (no query): return expanded entries immediately
     if (!params.query) {
-      let output =
-        (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(expandedFullEntries);
+      const entriesHeader =
+        (scope === "all" ? "Scope: all\n\n" : "") +
+        `Session history (${expandedFullEntries.length} entries):`;
+      const entryBlocks = expandedFullEntries.map((e) => formatRecallEntry(e as SearchHit));
 
       // Coupling: look up related OM observations
+      let obsBlock: string[] = [];
       const expandedIds = expandedFullEntries.map((e) => e.id).filter(Boolean);
       if (expandedIds.length > 0) {
         try {
@@ -132,15 +165,23 @@ async function vccRecall(
           const obs = findObservationsForEntryIds(branchEntries, expandedIds);
           const refs = findReflectionsForEntryIds(branchEntries, expandedIds);
           if (obs.length > 0 || refs.length > 0) {
-            output += "\n\n" + formatRelatedObservations(obs, refs);
+            obsBlock = [formatRelatedObservations(obs, refs)];
           }
         } catch {
           /* branch may not be available */
         }
       }
 
+      const capped = capRecallBlocks({
+        header: entriesHeader,
+        entryBlocks,
+        tailBlocks: obsBlock,
+        budget: maxChars,
+        continuation: "Use expand:[N] individually, or #N:text / #N:path to page a specific entry",
+      });
+
       return {
-        content: [{ type: "text" as const, text: output }],
+        content: [{ type: "text" as const, text: capped.text }],
         details: undefined,
       };
     }
@@ -194,6 +235,17 @@ async function vccRecall(
     }
     const start = (page - 1) * PAGE_SIZE;
     const pageResults: SearchHit[] = allResults.slice(start, start + PAGE_SIZE);
+    if (pageResults.length === 0) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `No matches for "${params.query}" in session history.`,
+          },
+        ],
+        details: undefined,
+      };
+    }
     const scopeSuffix = scope === "all" ? " (scope: all)" : "";
     const matchCount = allResults.length - appendedExpandCount;
     const header =
@@ -205,21 +257,36 @@ async function vccRecall(
         ? `\n--- Use page:${page + 1}${scope === "all" ? " with scope:'all'" : ""} for more results ---`
         : "";
 
-    let output = formatRecallOutput(pageResults, params.query, header) + footer;
+    let output: string;
+    {
+      const pageHeader = `${header} for "${params.query}":`;
+      const entryBlocks = pageResults.map((e) => formatRecallEntry(e, params.query));
+      const footerBlock = footer ? [footer.replace(/^\n--- /, "--- ").trim()] : [];
 
-    // Coupling: augment search results with related observations
-    const pageResultIds = pageResults.map((r) => r.id).filter(Boolean);
-    if (pageResultIds.length > 0) {
-      try {
-        const branchEntries = ctx.sessionManager.getBranch() as Entry[];
-        const obs = findObservationsForEntryIds(branchEntries, pageResultIds);
-        const refs = findReflectionsForEntryIds(branchEntries, pageResultIds);
-        if (obs.length > 0 || refs.length > 0) {
-          output += "\n\n" + formatRelatedObservations(obs, refs);
+      // Coupling: augment search results with related observations
+      let obsBlock: string[] = [];
+      const pageResultIds = pageResults.map((r) => r.id).filter(Boolean);
+      if (pageResultIds.length > 0) {
+        try {
+          const branchEntries = ctx.sessionManager.getBranch() as Entry[];
+          const obs = findObservationsForEntryIds(branchEntries, pageResultIds);
+          const refs = findReflectionsForEntryIds(branchEntries, pageResultIds);
+          if (obs.length > 0 || refs.length > 0) {
+            obsBlock = [formatRelatedObservations(obs, refs)];
+          }
+        } catch {
+          /* branch may not be available */
         }
-      } catch {
-        /* branch may not be available */
       }
+
+      const capped = capRecallBlocks({
+        header: pageHeader,
+        entryBlocks,
+        tailBlocks: footerBlock.concat(obsBlock),
+        budget: maxChars,
+        continuation: page < totalPages ? `Use page:${page + 1} for more results` : "",
+      });
+      output = capped.text;
     }
 
     return {
@@ -229,10 +296,17 @@ async function vccRecall(
   }
 
   // No query: show recent entries (expand already merged above)
-  const output =
-    (scope === "all" ? "Scope: all\n\n" : "") + formatRecallOutput(allResults, params.query);
+  const recentHeader =
+    (scope === "all" ? "Scope: all\n\n" : "") + `Session history (${allResults.length} entries):`;
+  const recentBlocks = allResults.map((e) => formatRecallEntry(e));
+  const cappedRecent = capRecallBlocks({
+    header: recentHeader,
+    entryBlocks: recentBlocks,
+    budget: maxChars,
+    continuation: "Refine the query or use expand:[N] for specific entries",
+  });
   return {
-    content: [{ type: "text" as const, text: output }],
+    content: [{ type: "text" as const, text: cappedRecent.text }],
     details: undefined,
   };
 }
@@ -242,7 +316,7 @@ async function vccRecall(
 const MEMORY_ID_PATTERN = /^[a-f0-9]{12}$/;
 const VCC_ENTRY_PATTERN = /^#(\d+)$/;
 
-async function omRecall(memoryId: string, ctx: any) {
+async function omRecall(memoryId: string, ctx: any, maxChars = DEFAULT_RECALL_RESPONSE_MAX_CHARS) {
   if (!MEMORY_ID_PATTERN.test(memoryId)) {
     return {
       content: [
@@ -267,21 +341,26 @@ async function omRecall(memoryId: string, ctx: any) {
       details: undefined,
     };
   }
-  const lines: string[] = [];
-  if (result.collision) lines.push(`ID ${result.memoryId} matched multiple items.`);
+
+  const header: string[] = [];
+  if (result.collision) header.push(`ID ${result.memoryId} matched multiple items.`);
+
+  const entryBlocks: string[] = [];
   for (const ref of result.reflections) {
-    lines.push(`[${ref.reflection.id}] ${ref.reflection.content}`);
+    entryBlocks.push(
+      `[${ref.reflection.id}] ${clipBody(ref.reflection.content, ref.reflection.id)}`,
+    );
   }
   for (const obs of result.observations) {
     const dropped = obs.status === "dropped" ? " [dropped]" : "";
-    lines.push(
-      `[${obs.observation.id}]${dropped} ${obs.observation.timestamp} [${obs.observation.relevance}] ${obs.observation.content}`,
+    entryBlocks.push(
+      `[${obs.observation.id}]${dropped} ${obs.observation.timestamp} [${obs.observation.relevance}] ${clipBody(obs.observation.content, obs.observation.id)}`,
     );
   }
+
+  let sourcesBlock = "";
   if (result.sourceEntries.length > 0) {
-    lines.push("");
-    lines.push("Sources:");
-    // Cross-format nav: annotate source entries with #N indices
+    const src: string[] = ["Sources:"];
     try {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (sessionFile) {
@@ -291,37 +370,65 @@ async function omRecall(memoryId: string, ctx: any) {
           result.observations.flatMap((o) => o.sourceEntryIds),
           idToIndex,
         );
-        if (indexAnnotation) lines.push(indexAnnotation);
+        if (indexAnnotation) src.push(indexAnnotation);
       }
     } catch {
       /* ignore errors from index mapping */
     }
-    lines.push(renderRecallSourceEntries(result.sourceEntries));
+    src.push(renderRecallSourceEntries(result.sourceEntries));
+    sourcesBlock = src.join("\n\n");
   }
-  const text = lines.join("\n") || `Memory ${memoryId} found, but no evidence rendered.`;
-  return { content: [{ type: "text" as const, text }], details: undefined };
+
+  if (entryBlocks.length === 0 && !sourcesBlock && header.length === 0) {
+    return {
+      content: [
+        { type: "text" as const, text: `Memory ${memoryId} found, but no evidence rendered.` },
+      ],
+      details: undefined,
+    };
+  }
+
+  const capped = capRecallBlocks({
+    header: header.join(" "),
+    entryBlocks,
+    tailBlocks: sourcesBlock ? [sourcesBlock] : undefined,
+    budget: maxChars,
+    continuation: "Full bodies stay stored — page the underlying entries via the #N source indices",
+  });
+
+  return { content: [{ type: "text" as const, text: capped.text }], details: undefined };
 }
 
 // ── Unified recall tool ──────────────────────────────────────────────────
 
-export function registerRecallTool(pi: ExtensionAPI): void {
+export function registerRecallTool(
+  pi: ExtensionAPI,
+  omRuntime?: { config?: { recallResponseMaxChars?: number } },
+): void {
+  // Resolved per call (not once at registration): omRuntime.config is a live
+  // reference reloaded from disk (Runtime.reloadConfig), so a settings-UI edit
+  // applies without /reload. A registration-time snapshot would go stale.
+  const resolveMaxChars = () =>
+    omRuntime?.config?.recallResponseMaxChars ?? DEFAULT_RECALL_RESPONSE_MAX_CHARS;
+
   pi.registerTool({
     name: "recall",
     label: "Recall",
     description:
       "Search session history and earlier lines omitted, file write/edit content by text/regex. " +
-      "Expand entries (#N), drill-down file content (#N:path) with paging, or aggregate touched files (mode:touched).",
+      "Expand entries (#N), drill-down file content (#N:path) or message text (#N:text) with paging, or aggregate touched files (mode:touched). " +
+      "Responses are capped at a character budget; #N:text / #N:path page the full stored payload.",
     promptSnippet:
-      "Search session history + file write/edit content by text/regex. #N expand, #N:path drill-down with optional :offset:limit or :full, mode:file/touched.",
+      "Search session history + file write/edit content by text/regex. #N expand, #N:path / #N:text drill-down with optional :offset:limit or :full, mode:file/touched.",
     promptGuidelines: [
-      "Use recall — literal text/regex search across session history and file write/edit content. #N expands an entry; #N:path with optional :offset:limit or :full drills down into file content; 12-char hex ids recover observation/reflection sources. mode:file for file-content-only, mode:touched for aggregated files-by-path. scope:'all' to search the full session. If no results, try fewer terms or a regex pattern.",
+      "Use recall — literal text/regex search across session history and file write/edit content. #N expands an entry; #N:path with optional :offset:limit or :full drills down into file content; #N:text pages a message body; 12-char hex ids recover observation/reflection sources. mode:file for file-content-only, mode:touched for aggregated files-by-path. scope:'all' to search the full session. If no results, try fewer terms or a regex pattern.",
       "Use recall — when a drill-down path matches multiple files, options are listed. Narrow with a more specific path substring. Only full-file writes are indexed for text search (edit diffs are not).",
     ],
     parameters: Type.Object({
       query: Type.Optional(
         Type.String({
           description:
-            "Text/regex search; #N expands entry; #N:path drills file (#N:file auto-selects); #N:path:full all lines; #N:path:offset:limit range; 12-char hex for observations. Only full-file writes indexed.",
+            "Text/regex search; #N expands entry; #N:path drills file (#N:file auto-selects); #N:text pages a message body; #N:path:full all lines; #N:path:offset:limit range; 12-char hex for observations. Only full-file writes indexed.",
         }),
       ),
       expand: Type.Optional(
@@ -348,6 +455,7 @@ export function registerRecallTool(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const maxChars = resolveMaxChars();
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         return {
@@ -401,14 +509,14 @@ export function registerRecallTool(pi: ExtensionAPI): void {
         const match = q.match(VCC_ENTRY_PATTERN);
         const index = match ? parseInt(match[1], 10) : NaN;
         if (!Number.isNaN(index)) {
-          return vccRecall({ query: "", expand: [index] }, ctx);
+          return vccRecall({ query: "", expand: [index] }, ctx, maxChars);
         }
       }
       if (q && MEMORY_ID_PATTERN.test(q)) {
-        return omRecall(q, ctx);
+        return omRecall(q, ctx, maxChars);
       }
       // Default: pi-vcc search
-      return vccRecall(params, ctx);
+      return vccRecall(params, ctx, maxChars);
     },
   });
 }

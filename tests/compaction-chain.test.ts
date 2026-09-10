@@ -4,8 +4,8 @@ import {
   buildAppendOnlyDetails,
   collectActiveSegments,
   coverageForMessages,
-  estimateChainTokens,
-  MAX_CHAIN_WINDOW_RATIO,
+  decideChainRebase,
+  type ChainProjection,
   projectAppendOnlyContext,
 } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
@@ -39,7 +39,7 @@ const build = (overrides: Record<string, unknown> = {}) =>
     sections: ["Goal"],
     previousSummaryUsed: false,
     ...overrides,
-  });
+  }).details;
 
 describe("append compaction chain", () => {
   it("maps selected entry ids to real session entry ids without object identity", () => {
@@ -523,180 +523,366 @@ describe("append compaction chain", () => {
     expect(details.segment.coverage.rebasedFromCompactionId).toBeUndefined();
     expect(details.segment.summary).toContain("legacySummary=true");
   });
+});
 
-  it("estimates chain size from segment summaries plus incoming content", () => {
-    const s1 = build({ aggregateSummary: "x".repeat(400) });
-    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
-    const chain = collectActiveSegments([cs1]);
-    expect(chain.ok).toBe(true);
-    if (!chain.ok) return;
+const rebuilt = (details: ReturnType<typeof buildAppendOnlyDetails>["details"]) =>
+  details.segment.coverage;
 
-    const tokens = estimateChainTokens(chain.segments, "y".repeat(200), "z".repeat(80));
-    const expectedChars =
-      chain.segments.reduce((total, item) => {
-        return total + item.segment.summary.length;
-      }, 0) +
-      200 +
-      80;
-    expect(tokens).toBe(Math.ceil(expectedChars / 4));
+const projection = (
+  appendChain: number,
+  saving: number,
+  appendTotal?: number,
+): ChainProjection => ({
+  appendChain,
+  rebaseChain: appendChain - saving,
+  saving,
+  trailingTokens: 0,
+  appendTotal,
+  rebaseTotal: appendTotal === undefined ? undefined : appendTotal - saving,
+  method: appendTotal === undefined ? "chain-only" : "usage-residual",
+});
+
+describe("useful-saving policy", () => {
+  it.each([
+    [34000, 24000, 136000, false],
+    [34001, 24000, 136000, true],
+    [34000, 24000, 136001, true],
+    [38000, 23999, 119000, false],
+    [38000, 24000, 119000, true],
+    [40000, 4000, 119000, false],
+    [40000, 0, 150000, false],
+    [40000, -100, 150000, false],
+  ])("chain=%i saving=%i total=%i rebase=%s", (chain, saving, total, rebase) => {
+    const result = decideChainRebase(projection(chain, saving, total), {
+      manualRebase: false,
+      contextWindowTokens: 272000,
+    });
+    expect(result.rebase).toBe(rebase);
+    expect(result.minimumSaving).toBe(24000);
   });
 
-  it("auto-rebases instead of appending when the projected chain exceeds half the window", () => {
-    const s1 = build({ aggregateSummary: "x".repeat(600) });
-    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
-    const chain = collectActiveSegments([cs1]);
-    expect(chain.ok).toBe(true);
-    if (!chain.ok) return;
-    const fresh = "[Goal]\nnext delta";
-    const trailing = "recall\n\ncurrent OM";
-    const projected = estimateChainTokens(chain.segments, fresh, trailing);
-    // Window where the projection sits exactly at half → appending is allowed.
-    const tightWindow = Math.ceil(projected / MAX_CHAIN_WINDOW_RATIO);
-
-    // One token below → the projection passes half the window → fold instead.
-    const rebased = build({
-      branchEntries: [cs1],
-      freshSummary: fresh,
-      aggregateSummary: "[Goal]\nfolded state",
-      trailingSummary: trailing,
-      currentCoverage: coverage("m3", "m4", "tail", 2),
-      previousSummaryUsed: true,
-      contextWindowTokens: tightWindow - 1,
+  it("scales down, caps saving for large windows, and labels missing window chain-only", () => {
+    expect(
+      decideChainRebase(projection(17001, 12000), {
+        manualRebase: false,
+        contextWindowTokens: 136000,
+      }),
+    ).toMatchObject({
+      rebase: true,
+      chainThreshold: 17000,
+      minimumSaving: 12000,
     });
-
-    expect(rebased.chainStart).toBe(true);
-    expect(rebased.segment.sequence).toBe(1);
-    expect(rebased.segment.summary).toContain("folded state");
-
-    // Exactly at the boundary → still appends.
-    const appended = build({
-      branchEntries: [cs1],
-      freshSummary: fresh,
-      aggregateSummary: "[Goal]\nfolded state",
-      trailingSummary: trailing,
-      currentCoverage: coverage("m3", "m4", "tail", 2),
-      previousSummaryUsed: true,
-      contextWindowTokens: tightWindow,
-    });
-    expect(appended.chainStart).toBe(false);
-    expect(appended.segment.sequence).toBe(2);
+    expect(
+      decideChainRebase(projection(100000, 24000), {
+        manualRebase: false,
+        contextWindowTokens: 544000,
+      }).minimumSaving,
+    ).toBe(24000);
+    expect(
+      decideChainRebase(projection(1, 1), {
+        manualRebase: false,
+        contextWindowTokens: 1,
+      }).minimumSaving,
+    ).toBe(1);
+    for (const window of [undefined, NaN, Infinity, 0, -1]) {
+      expect(
+        decideChainRebase(projection(38000, 24000), {
+          manualRebase: false,
+          contextWindowTokens: window,
+        }),
+      ).toMatchObject({
+        rebase: true,
+        contextThreshold: undefined,
+        chainThreshold: 34000,
+        method: "chain-only",
+        appendTotal: undefined,
+      });
+    }
   });
 
-  it("anchors the growth governor on real provider usage newer than the chain", () => {
-    const s1 = build({ aggregateSummary: "x".repeat(600) });
-    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
-    const chain = collectActiveSegments([cs1]);
-    expect(chain.ok).toBe(true);
-    if (!chain.ok) return;
-    const fresh = "[Goal]\nnext delta";
-    const trailing = "recall\n\ncurrent OM";
-    // A window where the chars/4 estimate stays under half the window.
-    const estimateWindow =
-      Math.ceil(estimateChainTokens(chain.segments, fresh, trailing) / MAX_CHAIN_WINDOW_RATIO) + 50;
-
-    const usageEntry = {
-      id: "u1",
-      type: "message",
-      timestamp: 20,
-      message: {
-        role: "assistant",
-        content: [],
-        stopReason: "stop",
-        usage: { totalTokens: 5_000 },
-      },
-    };
-    const coveredTail = [
-      {
-        id: "m3",
-        type: "message",
-        timestamp: 30,
-        message: { role: "user", content: "abcd" },
-      },
-      {
-        id: "m4",
-        type: "message",
-        timestamp: 40,
-        message: { role: "user", content: "efgh" },
-      },
-    ];
-
-    // No trusted usage → chars/4 estimate → appends.
-    const appended = build({
-      branchEntries: [cs1, ...coveredTail],
-      freshSummary: fresh,
-      aggregateSummary: "[Goal]\nfolded state",
-      trailingSummary: trailing,
-      currentCoverage: coverage("m3", "m4", "tail", 2),
-      previousSummaryUsed: true,
-      contextWindowTokens: estimateWindow,
-    });
-    expect(appended.chainStart).toBe(false);
-    expect(appended.segment.sequence).toBe(2);
-
-    // Real usage far above the estimate → the projection crosses half → fold.
-    const rebased = build({
-      branchEntries: [cs1, usageEntry, ...coveredTail],
-      freshSummary: fresh,
-      aggregateSummary: "[Goal]\nfolded state",
-      trailingSummary: trailing,
-      currentCoverage: coverage("m3", "m4", "tail", 2),
-      previousSummaryUsed: true,
-      contextWindowTokens: estimateWindow,
-    });
-    expect(rebased.chainStart).toBe(true);
-    expect(rebased.segment.sequence).toBe(1);
-  });
-
-  it("falls back to the estimate when the usage-anchored projection is inconsistent", () => {
-    const s1 = build({ aggregateSummary: "x".repeat(600) });
-    const cs1 = compactionEntry("cs1", "fallback s1", s1, 10);
-    const chain = collectActiveSegments([cs1]);
-    expect(chain.ok).toBe(true);
-    if (!chain.ok) return;
-    const fresh = "[Goal]\nnext delta";
-    const trailing = "recall\n\ncurrent OM";
-    const estimateWindow =
-      Math.ceil(estimateChainTokens(chain.segments, fresh, trailing) / MAX_CHAIN_WINDOW_RATIO) + 50;
-
-    const tinyUsage = {
-      id: "u1",
-      type: "message",
-      timestamp: 20,
-      message: {
-        role: "assistant",
-        content: [],
-        stopReason: "stop",
-        usage: { totalTokens: 5 },
-      },
-    };
-    const heavyTail = [
-      {
-        id: "m3",
-        type: "message",
-        timestamp: 30,
-        message: { role: "user", content: "y".repeat(4000) },
-      },
-      {
-        id: "m4",
-        type: "message",
-        timestamp: 40,
-        message: { role: "user", content: "z".repeat(4000) },
-      },
-    ];
-
-    // usage(5) − covered(~2000) is negative → fall back to the chars/4 path.
-    const appended = build({
-      branchEntries: [cs1, tinyUsage, ...heavyTail],
-      freshSummary: fresh,
-      aggregateSummary: "[Goal]\nfolded state",
-      trailingSummary: trailing,
-      currentCoverage: coverage("m3", "m4", "tail", 2),
-      previousSummaryUsed: true,
-      contextWindowTokens: estimateWindow,
-    });
-    expect(appended.chainStart).toBe(false);
-    expect(appended.segment.sequence).toBe(2);
+  it("manual overrides saving; recovery chooses smaller, not minimum saving", () => {
+    expect(decideChainRebase(projection(40000, -1), { manualRebase: true }).rebase).toBe(true);
+    for (const saving of [4000, 0, -1]) {
+      expect(
+        decideChainRebase(projection(40000, saving), {
+          manualRebase: false,
+          overflow: true,
+        }).rebase,
+      ).toBe(saving > 0);
+      expect(
+        decideChainRebase(projection(40000, saving, 270001), {
+          manualRebase: false,
+          contextWindowTokens: 272000,
+          reserveTokens: 2000,
+        }).rebase,
+      ).toBe(saving > 0);
+    }
+    expect(
+      decideChainRebase(projection(40000, 4000, 270000), {
+        manualRebase: false,
+        contextWindowTokens: 272000,
+        reserveTokens: 2000,
+      }).rebase,
+    ).toBe(false);
+    expect(
+      decideChainRebase(projection(40000, 4000, 280000), {
+        manualRebase: false,
+        contextWindowTokens: 272000,
+        reserveTokens: 2000,
+      }),
+    ).toMatchObject({ rebase: true, insufficientRecovery: true });
   });
 });
 
-const rebuilt = (details: ReturnType<typeof buildAppendOnlyDetails>) => details.segment.coverage;
+const linked = (entries: any[]) =>
+  entries.map((entry, i) => ({
+    ...entry,
+    parentId: entries[i - 1]?.id ?? null,
+  }));
+const user = (id: string, content: string) => ({
+  id,
+  type: "message",
+  timestamp: 1,
+  message: { role: "user", content, timestamp: 1 },
+});
+const assistantUsage = (total: number) => ({
+  id: "usage",
+  type: "message",
+  timestamp: 2,
+  message: {
+    role: "assistant",
+    content: [{ type: "text", text: "baseline output" }],
+    provider: "test",
+    model: "test",
+    stopReason: "stop",
+    usage: { totalTokens: total },
+    timestamp: 2,
+  },
+});
+
+// Root-first branch with an old kept tail BEFORE its compaction, and new entries AFTER usage.
+const accountingInput = () => {
+  const first = build({
+    aggregateSummary: "x".repeat(148000),
+    trailingSummary: "old memory",
+    currentCoverage: coverage("m1", "m2", "old-tail", 2),
+  });
+  const branchEntries = linked([
+    user("m1", "already covered"),
+    user("m2", "already covered too"),
+    user("old-tail", "o".repeat(4000)),
+    {
+      ...compactionEntry("c1", "complete fallback", first, 10),
+      firstKeptEntryId: "old-tail",
+    },
+    assistantUsage(100000),
+    user("new", "new since baseline"),
+    user("kept", "current kept tail"),
+  ]);
+  return {
+    branchEntries,
+    manualRebase: false,
+    freshSummary: "y".repeat(4000),
+    aggregateSummary: "z".repeat(40000),
+    trailingSummary: "current memory",
+    currentCoverage: coverage("old-tail", "new", "kept", 3),
+    tokensBefore: 168000,
+    sections: [],
+    previousSummaryUsed: true,
+    model: { provider: "test", id: "test" },
+    contextWindowTokens: 272000,
+  };
+};
+
+describe("comparable provider contexts", () => {
+  it("rebases ~38k below half-window when saving is useful; wrapper and residual arithmetic match rendered context", async () => {
+    const { buildSessionContext, estimateTokens } = await import("@earendil-works/pi-coding-agent");
+    const input = accountingInput();
+    const original = structuredClone(input.branchEntries);
+    const result = buildAppendOnlyDetails(input);
+    const decision = result.decision;
+    expect(decision).toMatchObject({
+      method: "usage-residual",
+      rebase: true,
+      reason: "pressure-useful-saving",
+    });
+    expect(decision.appendChain).toBeGreaterThan(38000);
+    expect(decision.appendTotal).toBeLessThan(136000);
+    expect(decision.saving).toBeGreaterThan(24000);
+    expect(decision.appendTotal! - decision.rebaseTotal!).toBe(decision.saving);
+    const tokens = (branch: any[]) =>
+      convertToLlm(projectAppendOnlyContext(buildSessionContext(branch).messages, branch)).reduce(
+        (sum, message) => sum + estimateTokens(message),
+        0,
+      );
+    const baseline = input.branchEntries.slice(0, 5);
+    const candidate = linked([
+      ...input.branchEntries,
+      {
+        ...compactionEntry("c2", "fallback 2", result.details, 20),
+        firstKeptEntryId: "kept",
+      },
+    ]);
+    expect(decision.rebaseTotal).toBe(100000 - tokens(baseline) + tokens(candidate));
+    const provider = JSON.stringify(
+      convertToLlm(projectAppendOnlyContext(buildSessionContext(candidate).messages, candidate)),
+    );
+    expect(provider).not.toContain("o".repeat(4000));
+    expect(provider).not.toContain("old memory");
+    expect(provider.split("current memory")).toHaveLength(2);
+    expect(decision.rebaseChain).toBeGreaterThan(
+      Math.ceil(result.details.segment.summary.length / 4),
+    );
+    expect(input.branchEntries).toEqual(original);
+  });
+
+  it("common memory, kept tail, and fixed residual move totals equally; no extra charge for covered new entries", () => {
+    const input = accountingInput();
+    const base = buildAppendOnlyDetails(input).decision;
+    const changedMemory = buildAppendOnlyDetails({
+      ...input,
+      trailingSummary: input.trailingSummary + "x".repeat(4000),
+    }).decision;
+    const tail = structuredClone(input);
+    tail.branchEntries.at(-1)!.message.content += "x".repeat(4000);
+    const changedTail = buildAppendOnlyDetails(tail).decision;
+    const fixed = structuredClone(input);
+    fixed.branchEntries[4].message.usage.totalTokens += 1000;
+    const changedFixed = buildAppendOnlyDetails(fixed).decision;
+    for (const changed of [changedMemory, changedTail, changedFixed]) {
+      expect(changed.appendTotal! - base.appendTotal!).toBe(1000);
+      expect(changed.rebaseTotal! - base.rebaseTotal!).toBe(1000);
+      expect(changed.saving).toBe(base.saving);
+    }
+    const covered = structuredClone(input);
+    covered.branchEntries[5].message.content += "x".repeat(4000);
+    expect(buildAppendOnlyDetails(covered).decision).toEqual(base);
+    const oldTail = structuredClone(input);
+    oldTail.branchEntries[2].message.content += "x".repeat(4000);
+    oldTail.branchEntries[4].message.usage.totalTokens += 1000;
+    expect(buildAppendOnlyDetails(oldTail).decision).toEqual(base);
+    expect(buildAppendOnlyDetails(structuredClone(input)).decision).toEqual(base);
+  });
+
+  it.each([
+    "error",
+    "aborted",
+    "zero",
+    "nonfinite",
+    "stale",
+    "model",
+    "branch",
+    "boundary",
+    "coverage",
+    "residual",
+  ])("unknown totals for %s evidence", (kind) => {
+    const input = accountingInput();
+    if (kind === "error" || kind === "aborted") input.branchEntries[4].message.stopReason = kind;
+    if (kind === "zero") input.branchEntries[4].message.usage.totalTokens = 0;
+    if (kind === "nonfinite") input.branchEntries[4].message.usage.totalTokens = Infinity;
+    if (kind === "stale") {
+      input.branchEntries.splice(2, 0, input.branchEntries.splice(4, 1)[0]);
+      input.branchEntries = linked(input.branchEntries);
+    }
+    if (kind === "model") input.model.id = "other";
+    if (kind === "branch") input.branchEntries[4].parentId = "other-branch";
+    if (kind === "boundary") input.branchEntries[3].firstKeptEntryId = "missing";
+    if (kind === "coverage") input.currentCoverage.firstCoveredEntryId = "missing";
+    if (kind === "residual") input.branchEntries[4].message.usage.totalTokens = 1;
+    const result = buildAppendOnlyDetails(input).decision;
+    expect(result.method).toBe("chain-only");
+    expect(result.estimateReason).toBeTruthy();
+    expect(result.appendTotal).toBeUndefined();
+    expect(result.rebaseTotal).toBeUndefined();
+    expect(result.saving).toBeGreaterThan(24000);
+  });
+});
+
+describe("retained output accounting after upstream integration", () => {
+  it("persists the same output projection in append and rebase candidates", () => {
+    const input = accountingInput();
+    const retainedToolOutputProjection = {
+      version: 1 as const,
+      retainedTokens: 0,
+      omittedTokens: 1000,
+      pendingCount: 0,
+      omissions: [{ entryId: "kept", marker: "recall #7" }],
+    };
+    for (const manualRebase of [false, true]) {
+      const result = buildAppendOnlyDetails({
+        ...input,
+        aggregateSummary: "z".repeat(160000),
+        manualRebase,
+        retainedToolOutputProjection,
+      });
+      expect(result.details.chainStart).toBe(manualRebase);
+      expect(result.details.retainedToolOutputProjection).toEqual(retainedToolOutputProjection);
+    }
+  });
+
+  it("charges actual persisted output omissions in baseline and both candidates", async () => {
+    const { buildSessionContext, estimateTokens } = await import("@earendil-works/pi-coding-agent");
+    const { applyRetainedToolOutputProjection } = await import("../src/core/tool-output-budget.js");
+    const input = accountingInput();
+    const output = (text: string) => ({
+      role: "bashExecution",
+      command: "cat result",
+      output: text,
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 1,
+    });
+    const oldProjection = {
+      version: 1 as const,
+      retainedTokens: 0,
+      omittedTokens: 1000,
+      pendingCount: 0,
+      omissions: [{ entryId: "old-tail", marker: "OLD OUTPUT OMITTED" }],
+    };
+    const newProjection = {
+      version: 1 as const,
+      retainedTokens: 0,
+      omittedTokens: 2000,
+      pendingCount: 0,
+      omissions: [{ entryId: "kept", marker: "NEW OUTPUT OMITTED" }],
+    };
+    const branchEntries = input.branchEntries.map((entry) => {
+      if (entry.id === "old-tail") return { ...entry, message: output("o".repeat(4000)) };
+      if (entry.id === "kept") return { ...entry, message: output("k".repeat(8000)) };
+      if (entry.id === "c1")
+        return {
+          ...entry,
+          details: { ...entry.details, retainedToolOutputProjection: oldProjection },
+        };
+      return entry;
+    });
+    const original = structuredClone(branchEntries);
+    const result = buildAppendOnlyDetails({
+      ...input,
+      branchEntries,
+      retainedToolOutputProjection: newProjection,
+    });
+    const baseline = branchEntries.slice(0, 5);
+    const candidate = linked([
+      ...branchEntries,
+      {
+        ...compactionEntry("c2", "fallback 2", result.details, 20),
+        firstKeptEntryId: "kept",
+      },
+    ]);
+    const tokens = (branch: typeof branchEntries, projection: typeof oldProjection) => {
+      const messages = projectAppendOnlyContext(buildSessionContext(branch).messages, branch);
+      return convertToLlm(applyRetainedToolOutputProjection(messages, branch, projection)).reduce(
+        (total, message) => total + estimateTokens(message),
+        0,
+      );
+    };
+    expect(result.decision.method).toBe("usage-residual");
+    expect(result.decision.rebaseTotal).toBe(
+      100000 - tokens(baseline, oldProjection) + tokens(candidate, newProjection),
+    );
+    expect(result.decision.appendTotal - result.decision.rebaseTotal).toBe(result.decision.saving);
+    expect(branchEntries).toEqual(original);
+  });
+});

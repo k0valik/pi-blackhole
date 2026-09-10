@@ -490,3 +490,221 @@ describe("buildCompactionProjection — fullFoldAlways", () => {
     expect(result.reflections).toHaveLength(0);
   });
 });
+
+describe("buildCompactionProjection observation cap gate (#69)", () => {
+  const tinyId = (i: number): string => i.toString(16).padStart(12, "0");
+
+  it("applies the cap when rendered lines exceed the budget even if content tokens do not", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    // Content sums to 19,000 (under budget) but rendered lines add id/timestamp/
+    // relevance overhead, pushing the real output over 20,000.
+    const observations = Array.from({ length: 500 }, (_, i) =>
+      makeObservation(tinyId(i + 1), {
+        content: "z".repeat(150),
+        relevance: "low" as const,
+        tokenCount: Math.ceil(150 / 4),
+      }),
+    );
+    const entries: Entry[] = [src("pad"), recordEntry("rec", observations, "pad")];
+    const result = buildCompactionProjection(entries, "pad", {
+      observationsPoolMaxTokens: 20_000,
+      fullFoldAlways: true,
+    });
+    expect(result.observations.length).toBeLessThan(500);
+  });
+
+  it("keeps the capped observation output within the budget", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const { observationToSummaryLine } = await import("../src/om/ledger/render-summary.js");
+    const observations = Array.from({ length: 500 }, (_, i) =>
+      makeObservation(tinyId(i + 1), {
+        content: "z".repeat(150),
+        relevance: "low" as const,
+        tokenCount: Math.ceil(150 / 4),
+      }),
+    );
+    const entries: Entry[] = [src("pad"), recordEntry("rec", observations, "pad")];
+    const result = buildCompactionProjection(entries, "pad", {
+      observationsPoolMaxTokens: 20_000,
+      fullFoldAlways: true,
+    });
+    const rendered = result.observations.reduce(
+      (total, o) => total + Math.ceil(observationToSummaryLine(o).length / 4),
+      0,
+    );
+    expect(rendered).toBeLessThanOrEqual(20_000);
+  });
+});
+
+describe("buildCompactionProjection reflection cap (#69)", () => {
+  const bigReflections = (count: number): Reflection[] =>
+    Array.from({ length: count }, (_, i) => {
+      const id = (i + 1).toString(16).padStart(12, "0");
+      return makeReflection(id, { content: "r".repeat(400) });
+    });
+
+  const reflectEntries = (reflections: Reflection[]): Entry[] => [
+    src("pad"),
+    reflectEntry("rec", reflections, "pad"),
+  ];
+
+  it("caps reflections newest-first to reflectionsPoolMaxTokens", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    // Each reflection renders to ~104 tokens; budget 350 fits the newest three.
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 350,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections.map((r) => r.id)).toEqual(reflections.slice(-3).map((r) => r.id));
+  });
+
+  it("leaves reflections uncapped when reflectionsPoolMaxTokens is unset", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections).toHaveLength(10);
+  });
+
+  it("leaves reflections uncapped when reflectionsPoolMaxTokens is 0", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 0,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections).toHaveLength(10);
+  });
+
+  it("stores capped reflections in details matching the projection", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const reflections = bigReflections(10);
+    const result = buildCompactionProjection(reflectEntries(reflections), "pad", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 350,
+      fullFoldAlways: true,
+    });
+    expect(result.details.reflections.map((r) => r.id)).toEqual(
+      result.reflections.map((r) => r.id),
+    );
+  });
+});
+
+describe("bounded compaction snapshots", () => {
+  it.each([100, 0])(
+    "caps rendered output on normal/full-fold paths (stored tokens %i)",
+    async (stored) => {
+      const { buildCompactionProjection, fullProjection, visibleProjection } =
+        await import("../src/om/ledger/projection.js");
+      const { observationToSummaryLine, reflectionToSummaryLine } =
+        await import("../src/om/ledger/render-summary.js");
+      const { estimateStringTokens } = await import("../src/om/tokens.js");
+      const observations = Array.from({ length: 180 }, (_, i) =>
+        makeObservation(i.toString(16).padStart(12, "0"), {
+          content: "x".repeat(420),
+          tokenCount: stored,
+          relevance: "high",
+        }),
+      );
+      const refs = [
+        makeReflection("aaaaaaaaaaaa", { content: "x".repeat(20000) }),
+        makeReflection("bbbbbbbbbbbb", { content: "y".repeat(20000) }),
+      ];
+      const entries = [
+        src("kept"),
+        recordEntry("o", observations, "kept"),
+        reflectEntry("r", refs, "kept"),
+      ];
+      const before = structuredClone(entries);
+      const budget = stored ? 20000 : 1000;
+      const result = buildCompactionProjection(entries, "kept", {
+        observationsPoolMaxTokens: budget,
+        reflectionsPoolMaxTokens: 8000,
+        fullFoldAlways: true,
+      });
+      expect(result.fullFold).toBe(false);
+      expect(
+        estimateStringTokens(observations.map(observationToSummaryLine).join("\n")),
+      ).toBeGreaterThan(20000);
+      expect(
+        estimateStringTokens(result.observations.map(observationToSummaryLine).join("\n")),
+      ).toBeLessThanOrEqual(budget);
+      expect(
+        estimateStringTokens(result.reflections.map(reflectionToSummaryLine).join("\n")),
+      ).toBeLessThanOrEqual(8000);
+      expect(result.reflections).toEqual([refs[1]]);
+      expect(result.details.observations).toEqual(result.observations);
+      expect(result.details.reflections).toEqual(result.reflections);
+      const full = buildCompactionProjection(entries, "kept", {
+        observationsPoolMaxTokens: 100,
+        reflectionsPoolMaxTokens: 8000,
+        fullFoldAlways: true,
+      });
+      expect(full.fullFold).toBe(stored > 0);
+      expect(
+        estimateStringTokens(full.observations.map(observationToSummaryLine).join("\n")),
+      ).toBeLessThanOrEqual(100);
+      expect(full.reflections).toEqual([refs[1]]);
+      expect(fullProjection(entries).observations).toEqual(observations);
+      // No implicit reflection cap for explicit view lookups.
+      const checkpoint = compactionEntry("c", "kept", {
+        ...result.details,
+        fullFold: true,
+      });
+      expect(visibleProjection([...entries, checkpoint], "kept").reflections).toEqual(refs);
+      expect(entries).toEqual(before);
+    },
+  );
+
+  it.each([false, true])(
+    "compact-all retains eligible memory and drops, fullFoldAlways=%s",
+    async (fullFoldAlways) => {
+      const { buildCompactionProjection, latestFullFoldBoundaryId } =
+        await import("../src/om/ledger/projection.js");
+      const obs = makeObservation("aaaaaaaaaaaa");
+      const dropped = makeObservation("bbbbbbbbbbbb");
+      const ref = makeReflection("cccccccccccc");
+      const entries = [
+        src("old"),
+        recordEntry("o", [obs, dropped], "old"),
+        reflectEntry("r", [ref], "old"),
+        makeEntry("drop", "custom", {
+          customType: "om.observations.dropped",
+          data: { observationIds: [dropped.id], coversUpToId: "old" },
+        }),
+      ];
+      const config = {
+        observationsPoolMaxTokens: 20000,
+        reflectionsPoolMaxTokens: 8000,
+        fullFoldAlways,
+      };
+      const initial = buildCompactionProjection(entries, "", config);
+      expect(initial.observations).toEqual([obs]);
+      expect(initial.reflections).toEqual([ref]);
+      const checkpoint = compactionEntry("checkpoint", "", {
+        ...initial.details,
+        fullFold: true,
+      });
+      const laterRef = makeReflection("dddddddddddd");
+      const later = [...entries, checkpoint, src("new"), reflectEntry("r2", [laterRef], "new")];
+      expect(latestFullFoldBoundaryId(later)).toBe("checkpoint");
+      expect(buildCompactionProjection(later, "new", config).reflections).toEqual([ref]);
+      expect(buildCompactionProjection(later, "", config).reflections).toEqual([ref, laterRef]);
+      const unknown = buildCompactionProjection(entries, "missing", config);
+      expect(unknown.observations).toEqual([]);
+      expect(unknown.reflections).toEqual([]);
+      const fullFold = buildCompactionProjection(entries, "", {
+        ...config,
+        observationsPoolMaxTokens: 50,
+      });
+      expect(fullFold.fullFold).toBe(true);
+      expect(fullFold.observations).toEqual([obs]);
+      expect(fullFold.reflections).toEqual([ref]);
+    },
+  );
+});

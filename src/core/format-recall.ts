@@ -1,4 +1,5 @@
 import type { SearchHit, FileMatch, TouchedFile } from "./search-entries";
+import { capRecallBlocks } from "./recall-budget";
 
 // ── Path shortening ───────────────────────────────────────────────────────
 
@@ -47,13 +48,27 @@ function formatFileMatch(fm: FileMatch, index: number, isQuery: boolean): string
 
 const TOUCHED_PAGE_SIZE = 5;
 
+export const formatTouchedFile = (tf: TouchedFile): string => {
+  const displayPath = shortPath(tf.path);
+  const indices = tf.entries.map((e) => `#${e.index} (${e.toolName})`).join(", ");
+  return `  ${displayPath}    ${indices}`;
+};
+
+/** Footer hint used when more touched files exist on later pages. */
+export const touchedPageFooter = (currentPage: number, totalPages: number): string =>
+  currentPage < totalPages ? `Use page:${currentPage + 1} for more results` : "";
+
 /**
  * Format aggregated "files touched" output.
+ *
+ * When `budget > 0`, per-file lines are capped entry-aware (trailing files
+ * dropped first, header kept) with a continuation hint.
  */
 export function formatTouchedOutput(
   touched: TouchedFile[],
   page?: number,
   pageSize?: number,
+  budget?: number,
 ): string {
   if (touched.length === 0) {
     return "No file operations found in session history.";
@@ -70,20 +85,51 @@ export function formatTouchedOutput(
       ? `Page ${currentPage}/${totalPages} (${touched.length} total files)`
       : `${touched.length} files touched`;
 
-  const lines = pageFiles.map((tf) => {
-    const displayPath = shortPath(tf.path);
-    const indices = tf.entries.map((e) => `#${e.index} (${e.toolName})`).join(", ");
-    return `  ${displayPath}    ${indices}`;
-  });
+  const footer = touchedPageFooter(currentPage, totalPages);
 
-  let result = `${header}:\n\n${lines.join("\n")}`;
-
-  if (currentPage < totalPages) {
-    result += `\n\n--- Use page:${currentPage + 1} for more results ---`;
+  if (budget !== undefined && budget > 0) {
+    const capped = capRecallBlocks({
+      header: `${header}:`,
+      entryBlocks: pageFiles.map(formatTouchedFile),
+      tailBlocks: footer ? [`--- ${footer} ---`] : undefined,
+      budget,
+    });
+    return capped.text;
   }
 
+  const lines = pageFiles.map(formatTouchedFile);
+  let result = `${header}:\n\n${lines.join("\n")}`;
+  if (footer) result += `\n\n--- ${footer} ---`;
   return result;
 }
+
+export const formatRecallEntry = (e: SearchHit, query?: string): string => {
+  const body = query && e.snippet ? e.snippet : e.summary;
+  let line = `#${e.index} [${e.role}]`;
+
+  // Entry text on next line if it's long or has fileMatches
+  if (e.fileMatches?.length) {
+    line += `\n  ${body}`;
+    // Only show top 3 file matches
+    const isQuery = Boolean(query);
+    const topFileMatches = e.fileMatches.slice(0, 3);
+    for (const fm of topFileMatches) {
+      line += `\n${formatFileMatch(fm, e.index, isQuery)}`;
+    }
+    if (e.fileMatches.length > 3) {
+      line += `\n  ...(${e.fileMatches.length - 3} more file matches)`;
+    }
+  } else if (e.files?.length) {
+    // Fallback: entries without fileMatches (e.g. expand-only path) still have
+    // the legacy .files array from renderMessage — show it in old format.
+    const fileSuffix = ` files:[${e.files.join(", ")}]`;
+    line += `${fileSuffix} ${body}`;
+  } else {
+    line += ` ${body}`;
+  }
+
+  return line;
+};
 
 export const formatRecallOutput = (
   entries: SearchHit[],
@@ -102,33 +148,7 @@ export const formatRecallOutput = (
       ? `Found ${entries.length} matches for "${query}":`
       : `Session history (${entries.length} entries):`;
 
-  const lines = entries.map((e) => {
-    const body = query && e.snippet ? e.snippet : e.summary;
-    let line = `#${e.index} [${e.role}]`;
-
-    // Entry text on next line if it's long or has fileMatches
-    if (e.fileMatches?.length) {
-      line += `\n  ${body}`;
-      // Only show top 3 file matches
-      const isQuery = Boolean(query);
-      const topFileMatches = e.fileMatches.slice(0, 3);
-      for (const fm of topFileMatches) {
-        line += `\n${formatFileMatch(fm, e.index, isQuery)}`;
-      }
-      if (e.fileMatches.length > 3) {
-        line += `\n  ...(${e.fileMatches.length - 3} more file matches)`;
-      }
-    } else if (e.files?.length) {
-      // Fallback: entries without fileMatches (e.g. expand-only path) still have
-      // the legacy .files array from renderMessage — show it in old format.
-      const fileSuffix = ` files:[${e.files.join(", ")}]`;
-      line += `${fileSuffix} ${body}`;
-    } else {
-      line += ` ${body}`;
-    }
-
-    return line;
-  });
+  const lines = entries.map((e) => formatRecallEntry(e, query));
 
   return `${header}\n\n${lines.join("\n\n")}`;
 };

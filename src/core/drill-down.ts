@@ -12,7 +12,7 @@
  * - Inline queries like "check #42:auth.ts" are NOT drill-down — the ^ anchor
  *   requires the entire query to be the drill-down pattern.
  */
-import { isContentBearing } from "./content.js";
+import { isContentBearing, textOf } from "./content.js";
 import { extractPath } from "./tool-args.js";
 import { loadAllMessages } from "./load-messages.js";
 
@@ -156,6 +156,86 @@ Tool: ${tc.name}
 ${body}`;
 }
 
+/**
+ * Raw message body text for #N:text drill-down: user/assistant/toolResult
+ * text plus bashExecution command+output. Empty when the entry carries no
+ * text of its own (e.g. a bare toolCall with no text parts).
+ */
+function messageBodyText(msg: Record<string, unknown>): string {
+  // bashExecution carries command+output instead of content.
+  if (msg.role === "bashExecution") {
+    return `$ ${String(msg.command ?? "")}\n${String(msg.output ?? "")}`;
+  }
+  return textOf(msg.content as never);
+}
+
+// ── Message-text drill-down (#N:text) ─────────────────────────────────────
+
+/**
+ * Format a message body (not tool-call file content) for #N:text drill-down,
+ * with the same preview / window / full semantics as formatToolCallContent.
+ *
+ * Covers user/assistant/toolResult text plus bashExecution command+output,
+ * so an expanded entry that was clipped by the response budget can still be
+ * read completely via #N:text:offset:limit / #N:text:full.
+ */
+function formatMessageText(
+  msg: Record<string, unknown>,
+  entryIndex: number,
+  options?: { full?: boolean; offset?: number; limit?: number },
+): string {
+  const body = messageBodyText(msg);
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return `Entry #${entryIndex} has no message text.`;
+  }
+
+  const full = options?.full ?? false;
+  const offset = options?.offset;
+  const limit = options?.limit;
+  const allLines = body.split("\n");
+  const totalLines = allLines.length;
+  const previewLimit = 30;
+  const MAX_FULL_BYTES = 50 * 1024;
+
+  if (full) {
+    if (Buffer.byteLength(body, "utf8") > MAX_FULL_BYTES) {
+      const truncated = body.slice(0, MAX_FULL_BYTES);
+      return `Entry #${entryIndex} message text:\n\n${truncated}\n\n... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — entry exceeds 50KB display limit. Use #${entryIndex}:text:${previewLimit} for next page.)`;
+    }
+    return `Entry #${entryIndex} message text:\n\n${body}`;
+  }
+
+  if (offset !== undefined) {
+    const startLine = Math.max(0, offset);
+    const maxLines = limit ?? 30;
+    const endLine = Math.min(startLine + maxLines, totalLines);
+    const visible = allLines.slice(startLine, endLine);
+    const displayStart = startLine + 1;
+
+    if (visible.length === 0) {
+      return `Offset ${startLine} is beyond message length ${totalLines}. Use #${entryIndex}:text for the first ${previewLimit} lines.`;
+    }
+
+    let result = `Entry #${entryIndex} message text — lines ${displayStart}-${endLine} (of ${totalLines}):\n\n`;
+    result += visible.join("\n");
+
+    if (endLine < totalLines) {
+      result += `\n\n--- Use #${entryIndex}:text:${endLine} or #${entryIndex}:text:${endLine}:${maxLines} for next ${maxLines} lines, #${entryIndex}:text:full for complete ---`;
+    } else if (offset > 0) {
+      result += `\n\n(End of message)`;
+    }
+    return result;
+  }
+
+  if (totalLines > previewLimit) {
+    const preview = allLines.slice(0, previewLimit).join("\n");
+    return `Entry #${entryIndex} message text:\n\n${preview}\n\n...(${totalLines - previewLimit} more lines — use #${entryIndex}:text:full for complete content, or #${entryIndex}:text:${previewLimit} for next ${previewLimit} lines)`;
+  }
+
+  return `Entry #${entryIndex} message text:\n\n${body}`;
+}
+
 // ── Parse drill-down query ────────────────────────────────────────────────
 
 /**
@@ -231,7 +311,8 @@ export function parseDrillDown(query: string): {
  *
  * @param sessionFile - Path to the JSONL session file
  * @param entryIndex - The message index (#N)
- * @param pathPattern - File path substring to match (or "file" keyword)
+ * @param pathPattern - File path substring to match, or the "file" / "text"
+ *   keywords ("text" renders the entry's own message body)
  * @param full - If true, return complete content without truncation
  * @param offset - Line offset (0-indexed) for windowed content
  * @param limit - Max lines to show (default 30 for windowed, ignored if full=true)
@@ -254,6 +335,36 @@ export function expandEntryFile(
   const msg = rawMessages[entryIndex];
   const content = msg.content as unknown[];
   const calls = findContentBearingCalls(content);
+  const matched = calls.filter((tc) => tc.path.includes(pathPattern));
+
+  // Special case: #42:text — message body text. Mirrors #42:file but renders
+  // the entry's own text (user/assistant/toolResult/bash), letting a
+  // budget-clipped expanded entry be paged in full.
+  // "text" is also a substring of real file paths (context.txt, ...), so when
+  // the entry has message text it wins and matching file ops are named in a
+  // note (still reachable via a more-specific path or #N:file); when it has no
+  // message text, legacy file-substring matching applies unchanged.
+  if (pathPattern === "text") {
+    if (messageBodyText(msg as unknown as Record<string, unknown>).trim()) {
+      let out = formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
+        full,
+        offset,
+        limit,
+      });
+      if (matched.length > 0) {
+        out += `\n\n--- Note: entry #${entryIndex} also has ${matched.length} file operation(s) matching "text" — use #${entryIndex}:<more-specific-path> or #${entryIndex}:file for file content ---`;
+      }
+      return out;
+    }
+    if (matched.length === 0) {
+      return formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
+        full,
+        offset,
+        limit,
+      });
+    }
+    // No message text but files match "text": fall through to file matching.
+  }
 
   // Special case: #42:file keyword
   if (pathPattern === "file") {
@@ -271,8 +382,6 @@ export function expandEntryFile(
     const items = calls.map((tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`);
     return `Entry #${entryIndex} has ${calls.length} file operations:\n${items.join("\n")}\n\nUse #${entryIndex}:path to drill into a specific file.`;
   }
-
-  const matched = calls.filter((tc) => tc.path.includes(pathPattern));
 
   if (matched.length === 0) {
     return `No file content found in entry #${entryIndex} for "${pathPattern}".`;

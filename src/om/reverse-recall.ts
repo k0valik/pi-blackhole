@@ -6,6 +6,25 @@
  */
 import { indexLedger, type Entry } from "./ledger/recall.js";
 import { type RenderedEntry } from "../core/render-entries.js";
+import { clip } from "../core/content.js";
+
+// ── Response budget ───────────────────────────────────────────────────────
+
+/**
+ * Maximum characters of one related-observation/reflection body rendered into a
+ * recall response. One huge stored observation must not flood the context; the
+ * full body stays reachable via its 12-hex memory id.
+ */
+const OBSERVATION_BODY_MAX = 1200;
+
+/**
+ * Cap a stored observation/reflection body for display; full content stays
+ * reachable via its 12-hex memory id (recall <id>).
+ */
+export const clipBody = (content: string, memoryId: string): string => {
+  if (content.length <= OBSERVATION_BODY_MAX) return content;
+  return `${clip(content, OBSERVATION_BODY_MAX)} … [${memoryId} truncated]`;
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -90,7 +109,7 @@ export function formatRelatedObservations(
       const entryRefs =
         obs.matchedEntryIds.length > 0 ? ` (${obs.matchedEntryIds.join(", ")})` : "";
       parts.push(
-        `  [${obs.memoryId}]${dropped} ${obs.timestamp} [${obs.relevance}] ${obs.content}${entryRefs}`,
+        `  [${obs.memoryId}]${dropped} ${obs.timestamp} [${obs.relevance}] ${clipBody(obs.content, obs.memoryId)}${entryRefs}`,
       );
     }
   }
@@ -99,7 +118,7 @@ export function formatRelatedObservations(
     if (parts.length > 0) parts.push("");
     parts.push("Related reflections:");
     for (const ref of reflections) {
-      parts.push(`  [${ref.memoryId}] ${ref.content}`);
+      parts.push(`  [${ref.memoryId}] ${clipBody(ref.content, ref.memoryId)}`);
     }
   }
 

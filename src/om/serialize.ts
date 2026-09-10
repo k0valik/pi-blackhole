@@ -168,6 +168,10 @@ export function serializeBranchEntries(entries: RenderableEntry[]): string {
 export type SourceAddressedSerialization = {
   text: string;
   sourceEntryIds: string[];
+  /** Entry id -> local "YYYY-MM-DD HH:MM" display timestamp, matching the inline time
+   *  rendered for that entry in `text`. Lets callers timestamp derived records
+   *  programmatically instead of trusting LLM-reported times. */
+  sourceEntryTimestamps: Record<string, string>;
 };
 
 function isSourceRenderableEntry(entry: RenderableEntry): boolean {
@@ -176,19 +180,29 @@ function isSourceRenderableEntry(entry: RenderableEntry): boolean {
   );
 }
 
+function sourceEntryTimestamp(entry: RenderableEntry): string {
+  const msg = entry.message as Message | undefined;
+  if (entry.type === "message" && msg && typeof msg === "object") {
+    return formatTimestamp(msg.timestamp);
+  }
+  return formatTimestamp(entry.timestamp);
+}
+
 export function serializeSourceAddressedBranchEntries(
   entries: RenderableEntry[],
 ): SourceAddressedSerialization {
   const blocks: string[] = [];
   const sourceEntryIds: string[] = [];
+  const sourceEntryTimestamps: Record<string, string> = {};
   for (const entry of entries) {
     if (!entry.id || !isSourceRenderableEntry(entry)) continue;
     const rendered = serializeBranchEntries([entry]);
     if (!rendered.trim()) continue;
     sourceEntryIds.push(entry.id);
+    sourceEntryTimestamps[entry.id] = sourceEntryTimestamp(entry);
     blocks.push(`[Source entry id: ${entry.id}]\n${rendered}`);
   }
-  return { text: blocks.join("\n\n"), sourceEntryIds };
+  return { text: blocks.join("\n\n"), sourceEntryIds, sourceEntryTimestamps };
 }
 
 function renderRecallMessage(entry: RenderableEntry): string | null {

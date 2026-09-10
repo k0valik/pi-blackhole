@@ -267,6 +267,8 @@ Based on interview answers, build the config object. Write it to:
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default" — irrelevant for manual/off
   "tailBehavior": "minimal",      // "minimal" (last user msg only, default) | "pi-default" (Pi's gentler cut)
+  "retainedToolOutputMaxTokens": 20000, // 0 = disabled
+  "recallResponseMaxChars": 48000,      // recall response cap in chars (~12k tokens); 0 = unbounded
   "compactAfterPreset": "default", // auto-compaction threshold curve: fires at floor(window × ratio), 0.90 @ 32k → 0.40 @ 1M. No numeric threshold key is needed out of the box
   // Optional numeric pins instead of the curve: "compactAfterRatio": 0.65 or "compactReserveTokens": 32768,
   // or "compactAfterTokens": <fixed value> — any explicit value except exactly 81000 (that is legacy residue and is dropped)
@@ -296,6 +298,7 @@ Based on interview answers, build the config object. Write it to:
   "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
   "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
   "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
+  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
@@ -393,6 +396,7 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
   "reflectAfterTokens": 25000,
   "observerChunkMaxTokens": 40000,
   "observationsPoolMaxTokens": 20000,
+  "reflectionsPoolMaxTokens": 8000,
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000
 }

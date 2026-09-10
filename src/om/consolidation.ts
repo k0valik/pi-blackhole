@@ -689,7 +689,11 @@ async function runObserverStage(
   const coversUpToId = chunkEntries.at(-1)?.id;
   if (!coversUpToId) return "continue";
 
-  const { text: chunk, sourceEntryIds } = serializeSourceAddressedBranchEntries(chunkEntries);
+  const {
+    text: chunk,
+    sourceEntryIds,
+    sourceEntryTimestamps,
+  } = serializeSourceAddressedBranchEntries(chunkEntries);
   if (!chunk.trim() || sourceEntryIds.length === 0) return "continue";
   const chunkTokens = Math.ceil(chunk.length / 4);
 
@@ -807,6 +811,7 @@ async function runObserverStage(
         priorObservations,
         chunk,
         allowedSourceEntryIds: sourceEntryIds,
+        sourceEntryTimestamps,
         maxTurns: runtime.config.agentMaxTurns,
         thinkingLevel: stageThinkingLevel(runtime, "observer", stageModelForThinking),
         providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,

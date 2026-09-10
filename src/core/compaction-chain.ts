@@ -1,10 +1,24 @@
 import type { PiVccCompactionDetailsV2, PiVccSegment, PiVccSegmentCoverage } from "../details.js";
 import { isPiVccCompactionDetailsV2 } from "../details.js";
-import type { RetainedToolOutputProjection } from "./tool-output-budget.js";
-import { estimateEntryTokens, getUsageTokens } from "../om/tokens.js";
+import {
+  applyRetainedToolOutputProjection,
+  isRetainedToolOutputProjection,
+  type RetainedToolOutputProjection,
+} from "./tool-output-budget.js";
+import {
+  buildSessionContext,
+  convertToLlm,
+  estimateTokens,
+  type SessionEntry,
+} from "@earendil-works/pi-coding-agent";
+import { getUsageTokens } from "../om/tokens.js";
 
 export interface SessionEntryLike {
   id?: string;
+  parentId?: string | null;
+  firstKeptEntryId?: string;
+  provider?: string;
+  modelId?: string;
   type?: string;
   timestamp?: string | number;
   message?: unknown;
@@ -42,87 +56,248 @@ export interface BuildAppendOnlyDetailsInput {
   sections: string[];
   previousSummaryUsed: boolean;
   retainedToolOutputProjection?: RetainedToolOutputProjection;
-  /** Session model context window; when set, an overgrown chain auto-rebases. */
+  /** Supplied effective model window, never an inferred fallback capacity. */
   contextWindowTokens?: number;
+  model?: { provider: string; id: string };
+  reserveTokens?: number;
+  overflow?: boolean;
 }
 
-/** Auto-rebase once the projected injected chain passes this fraction of the window. */
-export const MAX_CHAIN_WINDOW_RATIO = 0.5;
-
-/** chars/4 estimate of the provider-visible chain plus the incoming segment content. */
-export function estimateChainTokens(
-  segments: ActiveSegment[],
-  freshSummary: string,
-  trailingSummary: string,
-): number {
-  const chars = segments.reduce((total, item) => total + item.segment.summary.length, 0);
-  return Math.ceil((chars + freshSummary.length + trailingSummary.length) / 4);
+export interface ChainProjection {
+  appendChain: number;
+  rebaseChain: number;
+  trailingTokens: number;
+  saving: number;
+  appendTotal?: number;
+  rebaseTotal?: number;
+  method: "usage-residual" | "chain-only";
+  estimateReason?: string;
 }
 
-/** Source entry types counted toward context size (mirrors ledger progress). */
-const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
+export interface ChainDecision extends ChainProjection {
+  rebase: boolean;
+  reason: string;
+  chainThreshold: number;
+  contextThreshold?: number;
+  minimumSaving: number;
+  capacity?: number;
+  insufficientRecovery: boolean;
+}
 
-/**
- * Project the next provider-visible chain size for the growth governor.
- *
- * Anchors on the latest trusted provider usage when a valid assistant
- * response exists after the newest chain entry: its measured context already
- * contains every active segment plus system/tool/trailing overhead, so only
- * the covered range leaving context and the fresh segment entering it are
- * chars/4-estimated. Falls back to the plain estimate whenever no usable
- * usage baseline exists or the data is inconsistent.
- */
+/** Estimate actual provider-visible content, including host summary wrappers. */
+const visibleTokens = (messages: any[]): number =>
+  convertToLlm(messages).reduce((total, message) => total + estimateTokens(message), 0);
+
 export function projectChainTokens(
-  segments: ActiveSegment[],
-  freshSummary: string,
-  trailingSummary: string,
-  branchEntries: SessionEntryLike[],
-  coverage: Pick<PiVccSegmentCoverage, "firstCoveredEntryId" | "lastCoveredEntryId">,
-): number {
-  const fallback = estimateChainTokens(segments, freshSummary, trailingSummary);
-  const latestEntry = segments[segments.length - 1]?.entry;
-  if (!latestEntry || segments.length === 0) return fallback;
+  input: BuildAppendOnlyDetailsInput,
+  append: PiVccCompactionDetailsV2,
+  rebase: PiVccCompactionDetailsV2,
+): ChainProjection {
+  const entries = input.branchEntries;
+  // Synthetic checkpoint is local only. Both candidates use the same current cut.
+  let id = "blackhole-candidate";
+  while (entries.some((entry) => entry.id === id)) id += "-";
+  const candidateBranch = (details: PiVccCompactionDetailsV2): SessionEntryLike[] => [
+    ...entries,
+    {
+      id,
+      parentId: entries.at(-1)?.id ?? null,
+      type: "compaction",
+      timestamp: 0,
+      firstKeptEntryId: input.currentCoverage.firstKeptEntryId,
+      summary: "blackhole candidate fallback",
+      tokensBefore: input.tokensBefore,
+      details,
+    },
+  ];
+  const projected = (details: PiVccCompactionDetailsV2) =>
+    projectAppendOnlyContext(
+      [{ role: "compactionSummary", summary: "blackhole candidate fallback" }],
+      candidateBranch(details),
+    );
+  const appendMessages = projected(append);
+  const rebaseMessages = projected(rebase);
+  const appendChain = visibleTokens(
+    appendMessages.filter((message) => message.role === "compactionSummary"),
+  );
+  const rebaseChain = visibleTokens(
+    rebaseMessages.filter((message) => message.role === "compactionSummary"),
+  );
+  const result: ChainProjection = {
+    appendChain,
+    rebaseChain,
+    saving: appendChain - rebaseChain,
+    trailingTokens: visibleTokens(appendMessages.filter((message) => message.role === "custom")),
+    method: "chain-only",
+  };
+  const unknown = (estimateReason: string): ChainProjection => ({
+    ...result,
+    estimateReason,
+  });
+  const latest = findLatestCompactionEntry(entries);
+  if (!latest) return unknown("no-prior-compaction");
+  if (!input.model?.provider || !input.model.id) return unknown("missing-model-identity");
 
-  let latestIndex = -1;
-  for (let index = branchEntries.length - 1; index >= 0; index -= 1) {
-    if (branchEntries[index] === latestEntry) {
-      latestIndex = index;
+  const indexes = new Map<string, number>();
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!;
+    if (!entry.id || indexes.has(entry.id) || entry.parentId !== (entries[i - 1]?.id ?? null)) {
+      return unknown("incomplete-branch");
+    }
+    indexes.set(entry.id, i);
+    if (
+      entry.type === "compaction" &&
+      (typeof entry.summary !== "string" ||
+        typeof entry.firstKeptEntryId !== "string" ||
+        (entry.firstKeptEntryId !== "" && (indexes.get(entry.firstKeptEntryId) ?? i) >= i))
+    ) {
+      return unknown("missing-compaction-boundary");
+    }
+  }
+  const coverage = input.currentCoverage;
+  const first = indexes.get(coverage.firstCoveredEntryId);
+  const last = indexes.get(coverage.lastCoveredEntryId);
+  const kept =
+    coverage.firstKeptEntryId === "" ? entries.length : indexes.get(coverage.firstKeptEntryId);
+  if (
+    first === undefined ||
+    last === undefined ||
+    kept === undefined ||
+    last < first ||
+    kept <= last ||
+    entries[first]?.type !== "message" ||
+    entries[last]?.type !== "message" ||
+    entries.slice(first, last + 1).filter((entry) => entry.type === "message").length !==
+      coverage.sourceMessageCount
+  ) {
+    return unknown("missing-current-coverage");
+  }
+  const latestIndex = indexes.get(latest.id!)!;
+  let baselineIndex = -1;
+  let usage: number | undefined;
+  for (let i = entries.length - 1; i > latestIndex; i--) {
+    usage = getUsageTokens(entries[i]?.message);
+    if (usage !== undefined) {
+      baselineIndex = i;
       break;
     }
   }
-  if (latestIndex < 0) return fallback;
-
-  let usageTokens: number | undefined;
-  for (let index = branchEntries.length - 1; index > latestIndex; index -= 1) {
-    const candidate = getUsageTokens(branchEntries[index]?.message);
-    if (candidate !== undefined) {
-      usageTokens = candidate;
-      break;
+  if (baselineIndex < 0 || usage === undefined) return unknown("no-trusted-usage-after-compaction");
+  const baselineMessage = entries[baselineIndex]!.message as {
+    provider?: string;
+    model?: string;
+  };
+  if (
+    baselineMessage.provider !== input.model.provider ||
+    baselineMessage.model !== input.model.id
+  ) {
+    return unknown("incompatible-model");
+  }
+  // A model switch after the baseline makes its fixed overhead untrustworthy.
+  for (const entry of entries.slice(baselineIndex + 1)) {
+    if (
+      entry.type === "model_change" &&
+      (entry.provider !== input.model.provider || entry.modelId !== input.model.id)
+    ) {
+      return unknown("incompatible-model");
     }
   }
-  if (usageTokens === undefined) return fallback;
-
-  let firstIndex = -1;
-  let lastIndex = -1;
-  for (let index = latestIndex + 1; index < branchEntries.length; index += 1) {
-    const id = branchEntries[index]?.id;
-    if (id === coverage.firstCoveredEntryId) firstIndex = index;
-    if (id === coverage.lastCoveredEntryId) lastIndex = index;
-  }
-  if (firstIndex < 0 || lastIndex < firstIndex) return fallback;
-
-  let coveredTokens = 0;
-  for (let index = firstIndex; index <= lastIndex; index += 1) {
-    const entry = branchEntries[index];
-    if (!entry || typeof entry.type !== "string" || !SOURCE_ENTRY_TYPES.has(entry.type)) {
-      continue;
+  const contextTokens = (branch: SessionEntryLike[]) => {
+    const messages = buildSessionContext(branch as SessionEntry[]).messages;
+    let projected = projectAppendOnlyContext(messages, branch);
+    const latest = findLatestCompactionEntry(branch);
+    if (isPiVccCompactionDetailsV2(latest?.details) && projected === messages) {
+      return visibleTokens(messages);
     }
-    const { type, message, summary } = entry;
-    coveredTokens += estimateEntryTokens({ type, message, summary });
+    const persisted = (latest?.details as { retainedToolOutputProjection?: unknown } | undefined)
+      ?.retainedToolOutputProjection;
+    if (isRetainedToolOutputProjection(persisted)) {
+      projected = applyRetainedToolOutputProjection(projected, branch, persisted);
+    }
+    return visibleTokens(projected);
+  };
+  try {
+    // Usage already includes baseline assistant output. Include it here exactly once.
+    const residual = usage - contextTokens(entries.slice(0, baselineIndex + 1));
+    if (!Number.isFinite(residual) || residual < 0) return unknown("invalid-fixed-residual");
+    const appendTotal = residual + contextTokens(candidateBranch(append));
+    const rebaseTotal = residual + contextTokens(candidateBranch(rebase));
+    if (!Number.isFinite(appendTotal) || !Number.isFinite(rebaseTotal))
+      return unknown("invalid-candidate-total");
+    return { ...result, appendTotal, rebaseTotal, method: "usage-residual" };
+  } catch {
+    return unknown("context-reconstruction-failed");
   }
-  const projected = usageTokens - coveredTokens + Math.ceil(freshSummary.length / 4);
-  if (!Number.isFinite(projected) || projected < 0) return fallback;
-  return projected;
+}
+
+/** Internal first-trial policy; never schedules a compaction or changes cadence. */
+export function decideChainRebase(
+  projection: ChainProjection,
+  input: Pick<
+    BuildAppendOnlyDetailsInput,
+    "manualRebase" | "contextWindowTokens" | "reserveTokens" | "overflow"
+  >,
+): ChainDecision {
+  const supplied = input.contextWindowTokens;
+  const window =
+    supplied !== undefined && Number.isFinite(supplied) && supplied > 0 ? supplied : undefined;
+  const chainThreshold = window === undefined ? 34000 : Math.floor(window / 8);
+  const contextThreshold = window === undefined ? undefined : Math.floor(window / 2);
+  const minimumSaving =
+    window === undefined
+      ? 24000
+      : Math.max(1, Math.min(24000, Math.floor((24000 * window) / 272000)));
+  const capacity =
+    window !== undefined &&
+    input.reserveTokens !== undefined &&
+    Number.isFinite(input.reserveTokens) &&
+    input.reserveTokens >= 0
+      ? window - input.reserveTokens
+      : undefined;
+  const capacityPressure =
+    capacity !== undefined &&
+    projection.appendTotal !== undefined &&
+    projection.appendTotal > capacity;
+  const pressure =
+    projection.appendChain > chainThreshold ||
+    (contextThreshold !== undefined &&
+      projection.appendTotal !== undefined &&
+      projection.appendTotal > contextThreshold);
+  let rebase = false;
+  let reason: string;
+  if (input.manualRebase) {
+    rebase = true;
+    reason = "manual-rebase";
+  } else if (input.overflow || capacityPressure) {
+    rebase = projection.saving > 0;
+    reason = rebase
+      ? input.overflow
+        ? "overflow-smaller-rebase"
+        : "capacity-smaller-rebase"
+      : "ineffective-reduction";
+  } else if (pressure && projection.saving >= minimumSaving) {
+    rebase = true;
+    reason = "pressure-useful-saving";
+  } else {
+    reason =
+      projection.saving <= 0
+        ? "ineffective-reduction"
+        : pressure
+          ? "insufficient-saving"
+          : "below-pressure";
+  }
+  const selectedTotal = rebase ? projection.rebaseTotal : projection.appendTotal;
+  return {
+    ...projection,
+    rebase,
+    reason,
+    chainThreshold,
+    contextThreshold,
+    minimumSaving,
+    capacity,
+    insufficientRecovery:
+      capacity !== undefined && selectedTotal !== undefined && selectedTotal > capacity,
+  };
 }
 
 export const findLatestCompactionEntry = (
@@ -290,9 +465,10 @@ const createSegment = (
  * and a legacy checkpoint create one new chain-start segment. A malformed version-2
  * chain throws so the caller keeps the complete rewrite-compatible fallback.
  */
-export function buildAppendOnlyDetails(
-  input: BuildAppendOnlyDetailsInput,
-): PiVccCompactionDetailsV2 {
+export function buildAppendOnlyDetails(input: BuildAppendOnlyDetailsInput): {
+  details: PiVccCompactionDetailsV2;
+  decision: ChainDecision;
+} {
   const chain = collectActiveSegments(input.branchEntries);
   const latestCompaction = findLatestCompactionEntry(input.branchEntries);
 
@@ -318,50 +494,15 @@ export function buildAppendOnlyDetails(
     throw new Error(`append chain is invalid: ${chain.reason}`);
   }
 
-  const chainOvergrown =
-    chain.ok &&
-    input.contextWindowTokens !== undefined &&
-    projectChainTokens(
-      chain.segments,
-      input.freshSummary,
-      input.trailingSummary,
-      input.branchEntries,
-      input.currentCoverage,
-    ) > Math.floor(input.contextWindowTokens * MAX_CHAIN_WINDOW_RATIO);
-
-  const mustRebase = input.manualRebase || !chain.ok || chainOvergrown;
-  let segment: PiVccSegment;
-  let chainStart: boolean;
-
-  if (mustRebase) {
-    const activeSegments = chain.ok ? chain.segments : [];
-    // A summary inherited from off-chain state (fork/branch switch, or a legacy
-    // compaction outside the version-2 chain) must brand the new chain start,
-    // even when no on-branch compaction entry exists to reference by id.
-    const inheritedOffChain = !chain.ok && input.previousSummaryUsed;
-    const legacyCompactionId =
-      inheritedOffChain && latestCompaction?.id ? latestCompaction.id : undefined;
-    const coverage = mergeRebaseCoverage(
-      activeSegments,
-      input.currentCoverage,
-      legacyCompactionId,
-      inheritedOffChain,
-    );
-    segment = createSegment(1, input.aggregateSummary, coverage, input.tokensBefore);
-    chainStart = true;
-  } else {
-    const last = chain.segments[chain.segments.length - 1];
-    if (!last) throw new Error("append chain has no active segment");
-    segment = createSegment(
-      last.segment.sequence + 1,
-      input.freshSummary,
-      input.currentCoverage,
-      input.tokensBefore,
-    );
-    chainStart = false;
-  }
-
-  return {
+  const activeSegments = chain.ok ? chain.segments : [];
+  const inheritedOffChain = !chain.ok && input.previousSummaryUsed;
+  const aggregateCoverage = mergeRebaseCoverage(
+    activeSegments,
+    input.currentCoverage,
+    inheritedOffChain ? latestCompaction?.id : undefined,
+    inheritedOffChain,
+  );
+  const detailsFor = (segment: PiVccSegment, chainStart: boolean): PiVccCompactionDetailsV2 => ({
     compactor: "blackhole",
     version: 2,
     summaryMode: "append",
@@ -374,7 +515,31 @@ export function buildAppendOnlyDetails(
     ...(input.retainedToolOutputProjection
       ? { retainedToolOutputProjection: input.retainedToolOutputProjection }
       : {}),
-  };
+  });
+  const rebase = detailsFor(
+    createSegment(1, input.aggregateSummary, aggregateCoverage, input.tokensBefore),
+    true,
+  );
+  const append = chain.ok
+    ? detailsFor(
+        createSegment(
+          activeSegments.at(-1)!.segment.sequence + 1,
+          input.manualRebase && !input.freshSummary.trim()
+            ? input.aggregateSummary
+            : input.freshSummary,
+          input.currentCoverage,
+          input.tokensBefore,
+        ),
+        false,
+      )
+    : rebase;
+  const projection = projectChainTokens(input, append, rebase);
+  const decision = decideChainRebase(projection, input);
+  if (!chain.ok) {
+    decision.rebase = true;
+    decision.reason = inheritedOffChain ? "legacy-chain-start" : "first-chain-start";
+  }
+  return { details: decision.rebase ? rebase : append, decision };
 }
 
 const timestampOf = (entry: SessionEntryLike, fallback: number): number => {

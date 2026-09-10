@@ -2,9 +2,10 @@
  * Summary rendering — formats observations/reflections for compaction output.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/render-summary.ts)
- * Unmodified.
+ * Modified: separator-aware whole-record output caps.
  */
 import type { Observation, Reflection } from "./types.js";
+import { estimateStringTokens } from "../tokens.js";
 
 const OM_INSTRUCTIONS_FULL = `Bracketed ids in reflections and observations connect to their source session entries. These are condensed memories from earlier in this session.
 When entries conflict, the most recent observation reflects the latest known state.
@@ -36,58 +37,54 @@ export function scoreObservation(obs: Observation, index: number, total: number)
   return base + recency;
 }
 
-/** Select observations up to a token budget, keeping all high-relevance items
- *  unconditionally and filling the remaining budget with the best-scoring
- *  medium and low observations (relevance-tiered + recency).
+/** Select observations up to a token budget, keeping high-relevance items
+ *  first and filling the remaining budget with the best-scoring medium and
+ *  low observations (relevance-tiered + recency).
  *
- *  Reflections are never trimmed — they are inherently rare and always stay.
+ *  The budget is a hard cap: when high/critical items alone exceed it, the
+ *  newest are kept and the oldest are sacrificed (sessions can accumulate
+ *  hundreds of high-relevance observations, which previously pushed the
+ *  rendered pool far past the budget).
+ *
  *  Observations stay in the branch either way; this only caps what is rendered
  *  in the compaction summary output. */
 export function selectPriorObservations(
   observations: Observation[],
   maxTokens: number,
 ): Observation[] {
-  // Track original indices so we can restore chronological order after scoring
-  const indexed = observations.map((obs, i) => ({ obs, originalIndex: i }));
-  const high = indexed.filter(
-    (item) => item.obs.relevance === "high" || item.obs.relevance === "critical",
-  );
-  const rest = indexed.filter(
-    (item) => item.obs.relevance !== "high" && item.obs.relevance !== "critical",
-  );
-
-  // High always kept — consume budget first
-  let budget = maxTokens;
-  const selected = new Set<{ obs: Observation; originalIndex: number }>();
-  for (const item of high) {
-    const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
-    selected.add(item);
-    budget -= lineTokens;
+  const ranked = observations.map((obs, index) => ({
+    obs,
+    index,
+    score: scoreObservation(obs, index, observations.length),
+  }));
+  ranked.sort((a, b) => b.score - a.score);
+  const selected: typeof ranked = [];
+  let rendered = "";
+  for (const item of ranked) {
+    const next = rendered + (selected.length ? "\n" : "") + observationToSummaryLine(item.obs);
+    if (estimateStringTokens(next) > maxTokens) continue;
+    selected.push(item);
+    rendered = next;
   }
-
-  // Score medium + low and select best within remaining budget
-  if (rest.length > 0 && budget > 0) {
-    const scored = rest.map((item, i) => ({
-      item,
-      score: scoreObservation(item.obs, i, rest.length),
-    }));
-    scored.sort((a, b) => b.score - a.score); // highest score first
-    for (const { item } of scored) {
-      const lineTokens = Math.ceil(observationToSummaryLine(item.obs).length / 4);
-      if (budget - lineTokens < 0) break;
-      selected.add(item);
-      budget -= lineTokens;
-    }
-  }
-
-  // Restore original chronological order before returning
-  return Array.from(selected)
-    .sort((a, b) => a.originalIndex - b.originalIndex)
-    .map((item) => item.obs);
+  return selected.sort((a, b) => a.index - b.index).map((item) => item.obs);
 }
 
 export function reflectionToSummaryLine(reflection: Reflection): string {
   return `[${reflection.id}] ${reflection.content}`;
+}
+
+/** Bound compaction output only; worker reflection prompts stay unchanged. */
+export function selectPriorReflections(reflections: Reflection[], maxTokens: number): Reflection[] {
+  const selected: Reflection[] = [];
+  let rendered = "";
+  for (let i = reflections.length - 1; i >= 0; i--) {
+    const reflection = reflections[i]!;
+    const next = rendered + (selected.length ? "\n" : "") + reflectionToSummaryLine(reflection);
+    if (estimateStringTokens(next) > maxTokens) continue;
+    selected.push(reflection);
+    rendered = next;
+  }
+  return selected.reverse();
 }
 
 export function renderSummary(reflections: Reflection[], observations: Observation[]): string {

@@ -212,4 +212,57 @@ describe("/blackhole-recall command", () => {
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0].content).toContain("Page 2/2");
   });
+
+  it("guides instead of 'no matches' when the page is out of range", async () => {
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
+    registerVccRecallCommand(pi as any);
+
+    const msgs: Array<{ role: string; content: string }> = [];
+    for (let i = 0; i < 8; i++) {
+      msgs.push({ role: "user", content: `needle item ${i}` });
+    }
+    const sessionFile = createSessionFile(msgs);
+
+    const ctx: any = {
+      sessionManager: {
+        getSessionFile: vi.fn(() => sessionFile),
+        getBranch: vi.fn(() => msgs.map((_, i) => ({ id: `m${i}` }))),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+    };
+
+    await handlerMap.get("blackhole-recall")!("needle page:5", ctx);
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].content).toContain("outside the available range 1-2");
+    expect(sentMessages[0].content).toContain(
+      "Use /blackhole-recall needle page:N with N between 1 and 2, or refine your query.",
+    );
+    expect(sentMessages[0].content).not.toContain("No matches");
+  });
+
+  it("names both the visible and real total when the hard cap truncates", async () => {
+    const { pi, handlerMap, sentMessages, createSessionFile } = createMockEnvironment();
+    registerVccRecallCommand(pi as any);
+
+    const msgs: Array<{ role: string; content: string }> = [];
+    for (let i = 0; i < 60; i++) {
+      msgs.push({ role: "user", content: `needle item ${i}` });
+    }
+    const sessionFile = createSessionFile(msgs);
+
+    const ctx: any = {
+      sessionManager: {
+        getSessionFile: vi.fn(() => sessionFile),
+        getBranch: vi.fn(() => msgs.map((_, i) => ({ id: `m${i}` }))),
+        getSessionId: vi.fn(() => "test-session"),
+      },
+    };
+
+    await handlerMap.get("blackhole-recall")!("needle", ctx);
+
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0].content).toContain("showing 50 of 60 matches");
+    expect(sentMessages[0].content).not.toContain("capped at");
+  });
 });

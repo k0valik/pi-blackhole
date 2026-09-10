@@ -122,6 +122,12 @@ export interface UnifiedConfig {
    *  0 = disabled (opt-out). */
   retainedToolOutputMaxTokens: number;
 
+  /** Maximum characters of a single recall tool response.
+   *  Bounds search pages, expanded entries, and related observations so a huge
+   *  stored message cannot flood the context. Per-entry and per-line share a
+   *  derived slice of this budget; 0 = unbounded (opt-out). */
+  recallResponseMaxChars: number;
+
   /** Token threshold for observer runs. */
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
@@ -171,8 +177,12 @@ export interface UnifiedConfig {
    * diffing/normalizing it (spec §4.2). Optional; unset by default.
    */
   compactAfterPresets?: Record<string, PresetAnchorDef[]>;
-  /** Observation pool token pressure for full fold. */
+  /** Full-fold pressure and max estimated rendered observation-line tokens. */
   observationsPoolMaxTokens: number;
+  /** Cap for rendered reflection lines in the compaction output (newest-first
+   *  keep). Reflections otherwise accumulate without bound across compactions.
+   *  0 disables the cap. Default 8000. */
+  reflectionsPoolMaxTokens: number;
   /** Treat every compaction as a full-fold boundary so early reflections/drops
    *  survive the first compaction in a fresh session. Default true. */
   fullFoldAlways: boolean;
@@ -256,6 +266,7 @@ export const DEFAULTS: UnifiedConfig = {
   skipForProviders: [],
   tailBehavior: "minimal",
   retainedToolOutputMaxTokens: 20_000,
+  recallResponseMaxChars: 48_000,
   midRunCompaction: "off",
 
   observeAfterTokens: 15_000,
@@ -276,6 +287,7 @@ export const DEFAULTS: UnifiedConfig = {
   compactReserveTokens: undefined,
   compactAfterPreset: "default",
   observationsPoolMaxTokens: 20_000,
+  reflectionsPoolMaxTokens: 8_000,
   fullFoldAlways: true,
   observationsPoolTargetTokens: 10_000,
   reflectorInputMaxTokens: 80_000,
@@ -544,7 +556,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "observeAfterTokens",
     "reflectAfterTokens",
     "retainedToolOutputMaxTokens",
+    "recallResponseMaxChars",
     "observationsPoolMaxTokens",
+    "reflectionsPoolMaxTokens",
     "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
     "dropperInputMaxTokens",
@@ -582,7 +596,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     const validator =
       k === "observerPreambleMaxTokens" ||
       k === "providerIdleTimeoutMs" ||
-      k === "retainedToolOutputMaxTokens" // 0 = disabled (opt-in)
+      k === "retainedToolOutputMaxTokens" || // 0 = disabled (opt-in)
+      k === "recallResponseMaxChars" || // 0 = unbounded (opt-out)
+      k === "reflectionsPoolMaxTokens" // 0 = uncapped
         ? nonNegativeInt
         : positiveInt;
     const v = validator(raw[k]);

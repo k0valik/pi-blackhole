@@ -3,7 +3,7 @@
 /**
  * Pre-commit hook — format and lint staged files only.
  * Mirrors pi-utils/scripts/pre-commit.mjs
- * 1. pnpm exec lint-staged  → oxfmt + eslint --fix on staged files
+ * 1. pnpm exec lint-staged  → oxfmt + oxlint --fix on staged files
  * 2. Re-stage anything that was modified
  */
 

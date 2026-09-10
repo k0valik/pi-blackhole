@@ -15,6 +15,12 @@ export interface CompileInput {
   messages: Message[];
   previousSummary?: string;
   fileOps?: FileOps;
+  /**
+   * Session-global `#N` index per message position (see
+   * src/core/global-indices.ts). Parallel to `messages`; a missing entry
+   * renders as no ref (fail-closed). Omitted entirely → legacy positional.
+   */
+  sourceIndices?: Array<number | undefined>;
 }
 
 const HEADER_NAMES = [
@@ -161,14 +167,18 @@ const mergePrevious = (prev: string, fresh: string): string => {
   return parts.join(SEPARATOR);
 };
 
-const compileFresh = (input: Pick<CompileInput, "messages" | "fileOps">): string => {
-  const blocks = filterNoise(normalize(input.messages));
+const compileFresh = (
+  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices">,
+): string => {
+  const blocks = filterNoise(normalize(input.messages, input.sourceIndices));
   const data = buildSections({ blocks });
   return formatSummary(data);
 };
 
 /** Build one fresh immutable VCC segment. It never reads an older summary. */
-export const compileSegment = (input: Pick<CompileInput, "messages" | "fileOps">): string => {
+export const compileSegment = (
+  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices">,
+): string => {
   const fresh = compileFresh(input);
   return fresh ? wrapLongLines(fresh) : "";
 };

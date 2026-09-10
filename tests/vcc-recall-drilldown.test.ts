@@ -566,3 +566,69 @@ describe("expandEntryFile with offset/limit", () => {
     }
   });
 });
+
+describe("expandEntryFile #N:text disambiguation", () => {
+  const writeSession = (message: Record<string, unknown>) => {
+    const dir = mkdtempSync(join(tmpdir(), "drilldown-text-"));
+    const file = join(dir, "session.jsonl");
+    writeFileSync(file, JSON.stringify({ type: "message", id: "m1", message }) + "\n", "utf8");
+    return { dir, file };
+  };
+
+  it('prefers message text but names file ops matching "text"', async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const { dir, file } = writeSession({
+      role: "assistant",
+      content: [
+        { type: "text", text: "hello world" },
+        {
+          type: "toolCall",
+          id: "tc1",
+          name: "write",
+          arguments: { path: "context.txt", content: "file body\n" },
+        },
+      ],
+    });
+    try {
+      const result = expandEntryFile(file, 0, "text");
+      expect(result).toContain("hello world");
+      expect(result).toContain('also has 1 file operation(s) matching "text"');
+      expect(result).toContain("#0:file");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to legacy file matching when the entry has no message text", async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const { dir, file } = writeSession({
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "tc1",
+          name: "write",
+          arguments: { path: "context.txt", content: "file body\n" },
+        },
+      ],
+    });
+    try {
+      const result = expandEntryFile(file, 0, "text");
+      expect(result).toContain("file body");
+      expect(result).not.toContain("has no message text");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports no message text when the entry has neither text nor files", async () => {
+    const { expandEntryFile } = await import("../src/core/drill-down.js");
+    const { dir, file } = writeSession({ role: "assistant", content: [] });
+    try {
+      const result = expandEntryFile(file, 0, "text");
+      expect(result).toContain("has no message text");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
