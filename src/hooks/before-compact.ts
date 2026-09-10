@@ -24,7 +24,7 @@ import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js"
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
 import { effectiveContextWindow } from "../om/model-budget.js";
-import { configFileNeedsMigration } from "../core/unified-config.js";
+import { DEFAULTS, configFileNeedsMigration } from "../core/unified-config.js";
 import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
@@ -632,7 +632,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     if (omRuntime.config.memory !== false) {
       const projection = buildCompactionProjection(branchEntries as any[], firstKeptEntryId, {
         observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens,
-        reflectionsPoolMaxTokens: omRuntime.config.reflectionsPoolMaxTokens,
+        reflectionsPoolMaxTokens:
+          omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
         fullFoldAlways: omRuntime.config.fullFoldAlways,
       });
       omContent = renderSummary(projection.reflections, projection.observations);
@@ -689,7 +690,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
           .filter((part) => part.length > 0)
           .join("\n\n");
         try {
-          details = buildAppendOnlyDetails({
+          const result = buildAppendOnlyDetails({
             branchEntries: branchEntries as any[],
             manualRebase: isPiVcc,
             freshSummary: freshSegmentSummary,
@@ -700,8 +701,27 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
             sections: legacyDetails.sections,
             previousSummaryUsed: legacyDetails.previousSummaryUsed,
             retainedToolOutputProjection,
-            contextWindowTokens: ctx.model ? effectiveContextWindow(ctx.model) : undefined,
+            model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
+            contextWindowTokens:
+              ctx.model && Number.isFinite(ctx.model.contextWindow) && ctx.model.contextWindow > 0
+                ? effectiveContextWindow(ctx.model)
+                : undefined,
+            reserveTokens: preparation.settings?.reserveTokens,
+            overflow: event.reason === "overflow",
           });
+          details = result.details;
+          trace("before_compact.append_decision", {
+            ...result.decision,
+            observationBudget: omRuntime.config.observationsPoolMaxTokens,
+            reflectionBudget:
+              omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
+          });
+          if (result.decision.insufficientRecovery) {
+            ctx.ui?.notify?.(
+              "blackhole: estimated context still exceeds available capacity after compaction; Pi overflow retry/error handling remains in control",
+              "warning",
+            );
+          }
         } catch (error) {
           warnAppendFallback(
             `invalid-chain: ${error instanceof Error ? error.message : String(error)}`,

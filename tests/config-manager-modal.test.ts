@@ -406,3 +406,67 @@ describe("modal save preserves hand-edited configs (models, unknown keys, preset
     });
   });
 });
+
+it("reflection row is keyboard-editable and readable at narrow/normal/wide widths", async () => {
+  const { openBlackholeSettings } = await import("../src/pi-base/blackhole-settings.js");
+  const { createSettingsModalBody } = await import("../src/pi-base/settings/body.js");
+  const { initTheme } = await import("@earendil-works/pi-coding-agent");
+  const { visibleWidth } = await import("@earendil-works/pi-tui");
+  initTheme("dark", false);
+  capturedParams.length = 0;
+  const ctx = {
+    cwd: testDir,
+    ui: { notify: vi.fn() },
+    modelRegistry: { getAvailable: () => [] },
+  } as any;
+  await openBlackholeSettings(ctx);
+  const params = capturedParams[0] as any;
+  const fields = params.buildFields(params.layerValues("global"));
+  const index = fields.findIndex((field: any) => field.key === "reflectionsPoolMaxTokens");
+  expect(index).toBe(
+    fields.findIndex((field: any) => field.key === "observationsPoolMaxTokens") + 1,
+  );
+  const changes = vi.fn();
+  const tui = {
+    terminal: { rows: 40, columns: 80 },
+    requestRender: vi.fn(),
+  } as any;
+  const body = createSettingsModalBody(
+    { title: "Blackhole", fields, enableSearch: true, onChange: changes },
+    {
+      ctx,
+      tui,
+      theme: {
+        fg: (_color: string, text: string) => text,
+        bg: (_color: string, text: string) => text,
+        inverse: (text: string) => text,
+        bold: (text: string) => text,
+        italic: (text: string) => text,
+        getFgAnsi: () => "",
+        getBgAnsi: () => "",
+      } as any,
+      close: vi.fn(),
+    },
+  );
+  body.render(80);
+  for (let i = 0; i < index; i++) body.handleInput?.("\x1b[B");
+  const snapshots: string[] = [];
+  for (const width of [40, 80, 120, 40]) {
+    tui.terminal.columns = width;
+    const lines = body.render(width);
+    const text = lines.join("\n");
+    expect(text).toContain("Reflection output max");
+    expect(text).toContain("8000");
+    expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    snapshots.push(`WIDTH ${width}\n${text}`);
+  }
+  // Existing search reduces the list so the full wrapped description is readable.
+  for (const char of "Reflection output") body.handleInput?.(char);
+  const filtered = body.render(40).join("\n");
+  expect(filtered).toContain("recall");
+  snapshots.push(`FILTERED WIDTH 40\n${filtered}`);
+  body.handleInput?.("\x1b[C");
+  expect(changes).toHaveBeenCalledWith("reflectionsPoolMaxTokens", 9000, expect.anything());
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync("/tmp/blackhole-floor-ui.txt", snapshots.join("\n\n"));
+});

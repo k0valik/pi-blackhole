@@ -109,6 +109,7 @@
   "_comment_compactAfterPresets": "Hand-edited preset definitions only - never a settings-modal field, and config saves carry them verbatim. Same-name entries override the built-in curve; new names extend the table and appear in the modal's preset select. 'early-1m' is an example user preset (single anchor = constant ratio).",
   "retainedToolOutputMaxTokens": 20000,
   "observationsPoolMaxTokens": 20000,
+  "reflectionsPoolMaxTokens": 8000,
   "observationsPoolTargetTokens": 10000,
   "reflectorInputMaxTokens": 80000,
   "dropperInputMaxTokens": 80000,
@@ -131,6 +132,8 @@
     "  tailBehavior (pi-default|minimal) — how much stays visible",
     "  midRunCompaction (resume|pause|off) — threshold check during tool loops",
     "  retainedToolOutputMaxTokens — newest-first historical tool-output text budget; older text remains available through recall",
+    "  observationsPoolMaxTokens / reflectionsPoolMaxTokens — rendered-line caps including IDs and separators; headings/footer extra; source history retained",
+    "  append rebase — pressure plus useful saving at existing compactions; cadence unchanged",
     "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
     "  dropperPressureThreshold (0-1, default 0.70) — pressure relief valve: fraction of reflectorInputMaxTokens where dropper fires even without new data",
     "  providerIdleTimeoutMs (ms, 0=disabled, unset=inherit pi default) — body-idle timeout for background provider streams",
@@ -145,6 +148,7 @@
     "  PI_BLACKHOLE_COMPACTION_ENGINE → override compactionEngine setting",
     "  PI_BLACKHOLE_COMPACTION_SUMMARY_MODE → override compactionSummaryMode setting",
     "  PI_BLACKHOLE_COMPACT_AFTER_PRESET → override the compaction preset curve selection",
-    "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget"
+    "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget",
+    "  PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS → override reflection output budget"
   ]
 }

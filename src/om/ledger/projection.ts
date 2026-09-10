@@ -2,13 +2,9 @@
  * Compaction projection — builds projection slices for compaction events.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/projection.ts)
- * Unmodified.
+ * Modified: nested snapshots, bounded output, and compact-all coverage.
  */
-import {
-  observationRenderedTokens,
-  reflectionRenderedTokens,
-  selectPriorObservations,
-} from "./render-summary.js";
+import { selectPriorObservations, selectPriorReflections } from "./render-summary.js";
 import {
   OM_FOLDED,
   isMemoryDetails,
@@ -34,7 +30,6 @@ export type ProjectionDiff = {
 
 export type CompactionProjectionConfig = {
   observationsPoolMaxTokens: number;
-  /** Cap for rendered reflection lines; unset or 0 leaves reflections uncapped. */
   reflectionsPoolMaxTokens?: number;
   fullFoldAlways?: boolean;
 };
@@ -204,8 +199,9 @@ export function latestFullFoldBoundaryId(entries: Entry[]): string | undefined {
     const details = unwrapMemoryDetails(entry);
     if (!details) continue;
     if (!details.fullFold) continue;
-    if (!entry.firstKeptEntryId) continue;
-    if (!indexes.has(entry.firstKeptEntryId)) continue;
+    // Compact-all covered the branch at this checkpoint, not today's tip.
+    if (entry.firstKeptEntryId === "") return entry.id;
+    if (!entry.firstKeptEntryId || !indexes.has(entry.firstKeptEntryId)) continue;
     return entry.firstKeptEntryId;
   }
   return undefined;
@@ -216,22 +212,18 @@ export function buildCompactionProjection(
   firstKeptEntryId: string,
   config: CompactionProjectionConfig,
 ): CompactionProjection {
-  // firstKeptEntryId === "" is the compact-all sentinel: pi-core keeps 0 raw
-  // entries, so the OM fold must cover the whole branch (tip). Without this
-  // special case, entryBoundary("") resolves to index -1 and every recorded
-  // observation/reflection is silently dropped from the compaction summary
-  // (#313).
   const compactAll = firstKeptEntryId === "";
+  const outputBoundary = compactAll ? tipBoundary() : entryBoundary(firstKeptEntryId);
   const fullFoldBoundaryId = latestFullFoldBoundaryId(entries);
   const maintenanceBoundary = compactAll
     ? tipBoundary()
     : fullFoldBoundaryId
       ? entryBoundary(fullFoldBoundaryId)
       : config.fullFoldAlways
-        ? entryBoundary(firstKeptEntryId)
+        ? outputBoundary
         : noneBoundary();
   const normalProjection = foldProjection(entries, {
-    observationsBoundary: compactAll ? tipBoundary() : entryBoundary(firstKeptEntryId),
+    observationsBoundary: outputBoundary,
     reflectionsBoundary: maintenanceBoundary,
     dropsBoundary: maintenanceBoundary,
   });
@@ -242,20 +234,9 @@ export function buildCompactionProjection(
   const fullFold = observationTokens >= config.observationsPoolMaxTokens;
   let projection = fullFold ? fullProjection(entries, firstKeptEntryId) : normalProjection;
 
-  // Cap observations to budget using relevance-tiered + recency scoring.
-  // Even if the dropper determined some old observations are worth keeping,
-  // this safety valve ensures the compaction output never exceeds the pool
-  // token budget. Observations survive in the branch regardless. The gate
-  // measures rendered lines (not content-only tokenCount) so it fires on the
-  // same scale the cap budgets against.
-  const renderedObservationTokens = projection.observations.reduce(
-    (total, observation) => total + observationRenderedTokens(observation),
-    0,
-  );
-  if (
-    config.observationsPoolMaxTokens > 0 &&
-    renderedObservationTokens >= config.observationsPoolMaxTokens
-  ) {
+  // Output limits are independent of stored-token full-fold maintenance.
+  // Source records stay in the branch; raw/view callers can omit finite caps.
+  if (config.observationsPoolMaxTokens > 0 && Number.isFinite(config.observationsPoolMaxTokens)) {
     projection = {
       observations: selectPriorObservations(
         projection.observations,
@@ -265,23 +246,14 @@ export function buildCompactionProjection(
     };
   }
 
-  // Cap reflections newest-first within their own budget. Reflections are
-  // chronological here, so iterate from the end and restore order after.
-  const reflectionsBudget = config.reflectionsPoolMaxTokens ?? 0;
-  if (reflectionsBudget > 0 && projection.reflections.length > 0) {
-    const kept: Reflection[] = [];
-    let remaining = reflectionsBudget;
-    for (let index = projection.reflections.length - 1; index >= 0; index -= 1) {
-      const reflection = projection.reflections[index];
-      if (reflection === undefined) continue;
-      const lineTokens = reflectionRenderedTokens(reflection);
-      if (remaining - lineTokens < 0) break;
-      kept.push(reflection);
-      remaining -= lineTokens;
-    }
+  if (
+    config.reflectionsPoolMaxTokens !== undefined &&
+    config.reflectionsPoolMaxTokens > 0 &&
+    Number.isFinite(config.reflectionsPoolMaxTokens)
+  ) {
     projection = {
-      observations: projection.observations,
-      reflections: kept.reverse(),
+      ...projection,
+      reflections: selectPriorReflections(projection.reflections, config.reflectionsPoolMaxTokens),
     };
   }
 

@@ -219,9 +219,21 @@ export const config = new ConfigManager<UnifiedConfig>({
       key: "observationsPoolMaxTokens",
       type: "number",
       label: "Observation pool max",
-      description: "Max tokens in observation pool before dropper prunes (fold pressure)",
+      description:
+        "Full-fold pressure and max estimated rendered observation-line tokens in compaction output",
       value: cfg.observationsPoolMaxTokens,
       min: 1_000,
+      max: 200_000,
+      step: 1_000,
+    },
+    {
+      key: "reflectionsPoolMaxTokens",
+      type: "number",
+      label: "Reflection output max",
+      description:
+        "Max estimated rendered reflection-line tokens in compaction output. 0 disables the cap. Full source records remain available through recall.",
+      value: cfg.reflectionsPoolMaxTokens,
+      min: 0,
       max: 200_000,
       step: 1_000,
     },
@@ -449,6 +461,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       "reflectAfterTokens",
       "retainedToolOutputMaxTokens",
       "observationsPoolMaxTokens",
+      "reflectionsPoolMaxTokens",
       "observationsPoolTargetTokens",
       "reflectorInputMaxTokens",
       "dropperInputMaxTokens",
@@ -460,11 +473,12 @@ export const config = new ConfigManager<UnifiedConfig>({
       // SAFETY: merged is a plain config object; indexing by dynamic key needs
       // the Record view to read/write numeric fields uniformly.
       const v = (merged as unknown as Record<string, unknown>)[k];
-      const minVal = k === "observerPreambleMaxTokens" ? 0 : 1;
+      const minVal = k === "observerPreambleMaxTokens" || k === "reflectionsPoolMaxTokens" ? 0 : 1;
       if (
         typeof v !== "number" ||
         !Number.isFinite(v) ||
-        (k === "retainedToolOutputMaxTokens" && !Number.isInteger(v)) ||
+        ((k === "retainedToolOutputMaxTokens" || k === "reflectionsPoolMaxTokens") &&
+          !Number.isInteger(v)) ||
         v < minVal
       ) {
         // SAFETY: dynamic-key write as above; DEFAULTS[k] is always a number
