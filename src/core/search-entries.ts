@@ -246,6 +246,36 @@ const bm25Score = (doc: string, terms: string[], ctx: BM25Context): number => {
   return score;
 };
 
+/**
+ * Maximum characters of a single line kept in a search snippet. A long line
+ * (e.g. a dumped tool result) is clipped so one match cannot blow the recall
+ * response; the match itself stays visible via a match-centered window.
+ */
+const SNIPPET_LINE_MAX = 1000;
+
+/**
+ * Clip a single snippet line to SNIPPET_LINE_MAX.
+ * When `regex` is provided (the matched context line), the window is centered
+ * on the match so the hit stays visible even deep in a long line; otherwise
+ * (plain context lines) the start is kept.
+ */
+const clipSnippetLine = (line: string, regex?: RegExp): string => {
+  if (line.length <= SNIPPET_LINE_MAX) return line;
+  let trimmed = line.slice(0, SNIPPET_LINE_MAX);
+  let prefix = "";
+  if (regex) {
+    const match = regex.exec(line);
+    if (match) {
+      const radius = Math.max(0, Math.floor((SNIPPET_LINE_MAX - match[0].length) / 2));
+      const start = Math.max(0, match.index - radius);
+      const end = Math.min(line.length, match.index + match[0].length + radius);
+      prefix = start > 0 ? "… " : "";
+      trimmed = line.slice(start, end);
+    }
+  }
+  return `${prefix}${trimmed} … [truncated]`;
+};
+
 /** Line-based snippet: ±contextLines around first regex match. */
 const lineSnippet = (text: string, regex: RegExp, contextLines = 2): string | undefined => {
   const lines = text.split("\n");
@@ -264,7 +294,11 @@ const lineSnippet = (text: string, regex: RegExp, contextLines = 2): string | un
 
   const parts: string[] = [];
   if (start > 0) parts.push(`...(${start} lines above)`);
-  parts.push(...slice);
+  // Cap each line so a single 50KB output cannot flood the response;
+  // clip the matched line around the hit so the match stays visible.
+  parts.push(
+    ...slice.map((line, i) => clipSnippetLine(line, i === matchIdx - start ? regex : undefined)),
+  );
   if (end < lines.length) parts.push(`...(${lines.length - end} lines below)`);
   return parts.join("\n");
 };

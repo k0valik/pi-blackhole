@@ -12,7 +12,7 @@
  * - Inline queries like "check #42:auth.ts" are NOT drill-down — the ^ anchor
  *   requires the entire query to be the drill-down pattern.
  */
-import { isContentBearing } from "./content.js";
+import { isContentBearing, textOf } from "./content.js";
 import { extractPath } from "./tool-args.js";
 import { loadAllMessages } from "./load-messages.js";
 
@@ -156,6 +156,77 @@ Tool: ${tc.name}
 ${body}`;
 }
 
+// ── Message-text drill-down (#N:text) ─────────────────────────────────────
+
+/**
+ * Format a message body (not tool-call file content) for #N:text drill-down,
+ * with the same preview / window / full semantics as formatToolCallContent.
+ *
+ * Covers user/assistant/toolResult text plus bashExecution command+output,
+ * so an expanded entry that was clipped by the response budget can still be
+ * read completely via #N:text:offset:limit / #N:text:full.
+ */
+function formatMessageText(
+  msg: Record<string, unknown>,
+  entryIndex: number,
+  options?: { full?: boolean; offset?: number; limit?: number },
+): string {
+  // bashExecution carries command+output instead of content.
+  const isBash = msg.role === "bashExecution";
+  const body = isBash
+    ? `$ ${String(msg.command ?? "")}\n${String(msg.output ?? "")}`
+    : textOf(msg.content as never);
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return `Entry #${entryIndex} has no message text.`;
+  }
+
+  const full = options?.full ?? false;
+  const offset = options?.offset;
+  const limit = options?.limit;
+  const allLines = body.split("\n");
+  const totalLines = allLines.length;
+  const previewLimit = 30;
+  const MAX_FULL_BYTES = 50 * 1024;
+
+  if (full) {
+    if (Buffer.byteLength(body, "utf8") > MAX_FULL_BYTES) {
+      const truncated = body.slice(0, MAX_FULL_BYTES);
+      return `Entry #${entryIndex} message text:\n\n${truncated}\n\n... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — entry exceeds 50KB display limit. Use #${entryIndex}:text:${previewLimit} for next page.)`;
+    }
+    return `Entry #${entryIndex} message text:\n\n${body}`;
+  }
+
+  if (offset !== undefined) {
+    const startLine = Math.max(0, offset);
+    const maxLines = limit ?? 30;
+    const endLine = Math.min(startLine + maxLines, totalLines);
+    const visible = allLines.slice(startLine, endLine);
+    const displayStart = startLine + 1;
+
+    if (visible.length === 0) {
+      return `Offset ${startLine} is beyond message length ${totalLines}. Use #${entryIndex}:text for the first ${previewLimit} lines.`;
+    }
+
+    let result = `Entry #${entryIndex} message text — lines ${displayStart}-${endLine} (of ${totalLines}):\n\n`;
+    result += visible.join("\n");
+
+    if (endLine < totalLines) {
+      result += `\n\n--- Use #${entryIndex}:text:${endLine} or #${entryIndex}:text:${endLine}:${maxLines} for next ${maxLines} lines, #${entryIndex}:text:full for complete ---`;
+    } else if (offset > 0) {
+      result += `\n\n(End of message)`;
+    }
+    return result;
+  }
+
+  if (totalLines > previewLimit) {
+    const preview = allLines.slice(0, previewLimit).join("\n");
+    return `Entry #${entryIndex} message text:\n\n${preview}\n\n...(${totalLines - previewLimit} more lines — use #${entryIndex}:text:full for complete content, or #${entryIndex}:text:${previewLimit} for next ${previewLimit} lines)`;
+  }
+
+  return `Entry #${entryIndex} message text:\n\n${body}`;
+}
+
 // ── Parse drill-down query ────────────────────────────────────────────────
 
 /**
@@ -254,6 +325,17 @@ export function expandEntryFile(
   const msg = rawMessages[entryIndex];
   const content = msg.content as unknown[];
   const calls = findContentBearingCalls(content);
+
+  // Special case: #42:text — message body text. Mirrors #42:file but renders
+  // the entry's own text (user/assistant/toolResult/bash), letting a
+  // budget-clipped expanded entry be paged in full.
+  if (pathPattern === "text") {
+    return formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
+      full,
+      offset,
+      limit,
+    });
+  }
 
   // Special case: #42:file keyword
   if (pathPattern === "file") {

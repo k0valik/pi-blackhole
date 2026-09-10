@@ -74,5 +74,5 @@ export default async (pi: ExtensionAPI) => {
   registerBlackholeExportCommand(pi); // /blackhole-export [out:<path>]
 
   // Tools
-  registerRecallTool(pi); // unified recall (#N + [12char])
+  registerRecallTool(pi, omRuntime); // unified recall (#N + [12char]), budget-capped
 };
