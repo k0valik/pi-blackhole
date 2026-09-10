@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Changed
+
+- **Observation timestamps are now derived in code from the observation's cited source entries.** The observer model no longer types a `timestamp` field or receives a "current local time" fallback in its prompt: each recorded observation's timestamp is the latest supporting source entry's local time (wall-clock fallback only for entries without a usable timestamp), so the recorded time is guaranteed consistent with the cited evidence. Ledger format and downstream consumers (projections, recall, dropper, reflector) are unchanged.
+- **Consolidation agent prompts rebuilt around session continuity.** The observer now curates for a future session that has no access to the transcript: a per-candidate survival test ("would a future assistant with only this line make a better decision, avoid redoing work, or avoid violating a user constraint?"), grounding rules that forbid conversation-internal labels ("option B", "D10", "m3") and unresolved pronouns, explicit noise exclusions (workflow narration, stateless transient events, already-answered questions, session-local closure), a semantic dedup rule against reworded duplicates, narration-vs-curation few-shots, and a `high` relevance bar that single tool steps can never reach. The reflector must answer "why, not just what" for pattern/decision reflections and reject near-duplicates of existing reflections; the dropper treats paraphrase duplicates as its top drop priority. All three prompts are domain-agnostic (no coding-language or project-specific assumptions).
+
 ### Fixed
 
 - **Project-memory export de-duplication.** Reflections now share the observation fuzzy + Sørensen-Dice clustering, merged variants render as a `+N variants` count instead of sub-bullets, and observations restating a rendered reflection are suppressed (reflection wins); coverage/topic linkage tracks uncapped member ids so citations through hidden variants still count (~+1.4s export ranking on real corpora).
