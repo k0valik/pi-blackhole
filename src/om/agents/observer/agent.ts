@@ -37,6 +37,9 @@ interface RunObserverArgs {
   priorObservations: string[];
   chunk: string;
   allowedSourceEntryIds: string[];
+  /** Entry id -> local display timestamp for the chunk's source entries; used to
+   *  timestamp observations programmatically from their cited evidence. */
+  sourceEntryTimestamps?: Record<string, string>;
   signal?: AbortSignal;
   agentLoop?: typeof agentLoop;
   /** Optional custom stream function bypassing agentLoop's default streamSimple.
@@ -62,10 +65,6 @@ export const OBSERVATION_TIMESTAMP_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{
 const RecordObservationsSchema = Type.Object({
   observations: Type.Array(
     Type.Object({
-      timestamp: Type.String({
-        pattern: OBSERVATION_TIMESTAMP_PATTERN,
-        description: "Observation time in local 'YYYY-MM-DD HH:MM' format.",
-      }),
       content: Type.String({
         minLength: 1,
         description: "Single-line plain prose. No markdown, no tags, no embedded timestamp.",
@@ -85,6 +84,29 @@ const RecordObservationsSchema = Type.Object({
 });
 
 type RecordObservationsArgs = Static<typeof RecordObservationsSchema>;
+
+/**
+ * Derive an observation timestamp from its supporting source entries instead of
+ * trusting an LLM-reported time. Uses the LATEST supporting entry (the moment the
+ * cited evidence was complete); falls back to the current local time when the
+ * chunk carries no usable timestamps. Lexicographic comparison is correct for
+ * the fixed-width "YYYY-MM-DD HH:MM" format; placeholder timestamps ("????-??-??")
+ * are ignored.
+ */
+function deriveObservationTimestamp(
+  sourceEntryIds: readonly string[],
+  sourceEntryTimestamps: Record<string, string> | undefined,
+): string {
+  let latest: string | undefined;
+  if (sourceEntryTimestamps) {
+    for (const id of sourceEntryIds) {
+      const t = sourceEntryTimestamps[id];
+      if (!t || t.startsWith("?")) continue;
+      if (!latest || t > latest) latest = t;
+    }
+  }
+  return latest ?? nowTimestamp();
+}
 
 function joinOrEmpty(items: string[]): string {
   return items.length ? items.join("\n") : "(none yet)";
@@ -178,7 +200,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
         accumulated.set(id, {
           id,
           content,
-          timestamp: obs.timestamp,
+          timestamp: deriveObservationTimestamp(sourceEntryIds, args.sourceEntryTimestamps),
           relevance: obs.relevance as Relevance,
           sourceEntryIds,
           tokenCount: estimateStringTokens(content),
@@ -207,16 +229,13 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
     },
   };
 
-  const now = nowTimestamp();
-  const userText = `Current local time: ${now}
-
-CURRENT REFLECTIONS:
+  const userText = `CURRENT REFLECTIONS:
 ${joinOrEmpty(priorReflections)}
 
 CURRENT OBSERVATIONS:
 ${joinOrEmpty(priorObservations)}
 
-Compress the following new conversation chunk into observations by calling record_observations one or more times. Do not restate facts already present in current reflections or current observations. Prefer inline conversation timestamps when assigning times; fall back to the current local time above only if no message timestamp applies. Stop calling the tool and reply with a short plain-text confirmation once the chunk is fully covered.
+Compress the following new conversation chunk into observations by calling record_observations one or more times. Do not restate facts already present in current reflections or current observations. Stop calling the tool and reply with a short plain-text confirmation once the chunk is fully covered.
 
 NEW CONVERSATION CHUNK:
 ${conversation}`;
