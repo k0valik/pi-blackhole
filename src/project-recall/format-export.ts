@@ -19,6 +19,9 @@ import type { CorpusObservation, CorpusReflection, ProjectCorpus } from "./corpu
 import {
   clusterObservations,
   clusterReflections,
+  computeSimHash64,
+  normalizeContent,
+  simHashHammingDistance,
   stemToken,
   tokenizeContent,
   tokenizeSurfaceContent,
@@ -249,6 +252,7 @@ export interface ExportStats {
   observationsClustered: number;
   observationsRendered: number;
   observationsFiltered: number;
+  suppressedByReflections: number;
   duplicatesCollapsed: number;
   reflectionsTotal: number;
   droppedExcluded: number;
@@ -284,8 +288,10 @@ function clusterCoverage(
     const n = coverageIndex.get(id);
     if (n) total += n;
   };
-  absorb(cluster.rep.id);
-  for (const extra of cluster.extras) absorb(extra.id);
+  // Prefer the uncapped member-id list: extras is render-capped (and empty
+  // when variants are hidden) and omits exact duplicates of the rep.
+  const ids = cluster.allIds ?? [cluster.rep.id, ...cluster.extras.map((e) => e.id)];
+  for (const id of ids) absorb(id);
   return total;
 }
 
@@ -305,6 +311,74 @@ function passesViability(cluster: MemoryCluster<CorpusObservation>, coverage: nu
   }
   // high / critical always pass
   return true;
+}
+
+// ── Reflection-wins cross-section suppression ─────────────────
+
+/**
+ * Sørensen-Dice gate for cross-section suppression. Deliberately stricter
+ * than the clustering threshold (0.70): only genuine restatements are
+ * dropped, distinct facts sharing topic vocabulary survive.
+ */
+const SUPPRESS_SORENSEN_THRESHOLD = 0.85;
+/** SimHash Hamming gate for suppression candidates (near-dupe range). */
+const SUPPRESS_SIMHASH_HAMMING = 12;
+
+/**
+ * Drop observation clusters that restate an already-rendered reflection
+ * (reflections are authoritative and render first). Exact normalized-content
+ * matches go through an O(n+m) hash lookup; the remainder passes a
+ * conservative near-duplicate gate (SimHash prefilter → Sørensen-Dice ≥
+ * 0.85, both sides ≥ 4 tokens, no Levenshtein) so short or topically related
+ * but distinct observations survive. Bounded well under a second for real
+ * corpora — no additional async chunking needed.
+ */
+function suppressCoveredByReflections(
+  obsClusters: Array<MemoryCluster<CorpusObservation>>,
+  reflClusters: Array<MemoryCluster<CorpusReflection>>,
+): { kept: Array<MemoryCluster<CorpusObservation>>; suppressed: number } {
+  if (obsClusters.length === 0 || reflClusters.length === 0) {
+    return { kept: obsClusters, suppressed: 0 };
+  }
+  const reflKeys = new Set(reflClusters.map((c) => normalizeContent(c.rep.content)));
+  const reflSigs = reflClusters.map((c) => {
+    const norm = normalizeContent(c.rep.content);
+    const tokens = tokenizeContent(norm);
+    return { set: new Set(tokens), hash: computeSimHash64(tokens), length: norm.length };
+  });
+  const kept: Array<MemoryCluster<CorpusObservation>> = [];
+  let suppressed = 0;
+  for (const cluster of obsClusters) {
+    const norm = normalizeContent(cluster.rep.content);
+    if (reflKeys.has(norm)) {
+      suppressed++;
+      continue;
+    }
+    const tokens = tokenizeContent(norm);
+    if (tokens.length < 4) {
+      kept.push(cluster);
+      continue;
+    }
+    const hash = computeSimHash64(tokens);
+    const set = new Set(tokens);
+    let covered = false;
+    for (const sig of reflSigs) {
+      if (sig.set.size < 4) continue;
+      if (
+        Math.abs(norm.length - sig.length) >
+        (1 - SUPPRESS_SORENSEN_THRESHOLD) * Math.max(norm.length, sig.length, 1)
+      )
+        continue;
+      if (simHashHammingDistance(hash, sig.hash) > SUPPRESS_SIMHASH_HAMMING) continue;
+      if (sorensenDiceSets(set, sig.set) >= SUPPRESS_SORENSEN_THRESHOLD) {
+        covered = true;
+        break;
+      }
+    }
+    if (covered) suppressed++;
+    else kept.push(cluster);
+  }
+  return { kept, suppressed };
 }
 
 // ── Topic assignment via similarity graph ──────────────────────
@@ -755,9 +829,9 @@ function buildObservationTopicMap(
 ): Map<MemoryCluster<CorpusObservation>, string> {
   const obsIdToCluster = new Map<string, MemoryCluster<CorpusObservation>>();
   for (const cluster of obsClusters) {
-    if (cluster.rep.id) obsIdToCluster.set(cluster.rep.id, cluster);
-    for (const extra of cluster.extras) {
-      if (extra.id) obsIdToCluster.set(extra.id, cluster);
+    const ids = cluster.allIds ?? [cluster.rep.id, ...cluster.extras.map((e) => e.id)];
+    for (const id of ids) {
+      if (id) obsIdToCluster.set(id, cluster);
     }
   }
 
@@ -803,14 +877,13 @@ function emitBullets(
     if (cluster.distinctSessions > 1) parts.push(`across ${cluster.distinctSessions} sessions`);
     if (cluster.occurrences > 1 && cluster.occurrences > cluster.distinctSessions)
       parts.push(`recorded ${cluster.occurrences}×`);
+    const hidden = cluster.hiddenVariants ?? cluster.extras.length;
+    if (hidden > 0) parts.push(`+${hidden} variant${hidden === 1 ? "" : "s"}`);
     const meta = parts.length > 0 ? ` *(${parts.join(" · ")})*` : "";
 
     const topic = topicAssignments.get(cluster);
     const badge = topic ? ` **[${topic}]**` : "";
     lines.push(`-${badge} ${flatten(cluster.rep.content)}${meta}`);
-    for (const extra of cluster.extras) {
-      lines.push(`  - ${flatten(extra.content)}`);
-    }
   }
   return lines;
 }
@@ -870,15 +943,26 @@ export function buildExportMarkdown(
   const obsClusters = clusterObservations(branchAndPendingObs, {
     fuzzy: true,
     sorensen: true,
+    maxVariants: 0,
   });
-  const reflClusters = clusterReflections(branchAndPendingRefl);
-  const orphanObsClusters = clusterObservations(orphanObs);
+  const reflClusters = clusterReflections(branchAndPendingRefl, {
+    fuzzy: true,
+    sorensen: true,
+  });
+  const orphanObsClusters = clusterObservations(orphanObs, { maxVariants: 0 });
 
   const coverageIndex = buildCoverageIndex(branchAndPendingRefl);
 
   // Viability gate on branch/observation clusters
   const viable = obsClusters.filter((c) => passesViability(c, clusterCoverage(c, coverageIndex)));
   const observationsFiltered = obsClusters.length - viable.length;
+
+  // Reflection-wins cross-section suppression: reflections render first and
+  // are authoritative, so observations restating them add only line count.
+  const { kept, suppressed: suppressedByReflections } = suppressCoveredByReflections(
+    viable,
+    reflClusters,
+  );
 
   // Orphan gate: only clusters seen across ≥2 orphaned sessions
   const viableOrphans = orphanObsClusters.filter((c) => c.distinctSessions >= 2);
@@ -889,12 +973,12 @@ export function buildExportMarkdown(
   const reflTopicAssignments = assignReflectionTopics(reflClusters);
   const reflectionDerivedTopics = buildObservationTopicMap(
     reflTopicAssignments,
-    viable,
+    kept,
     branchAndPendingObs,
   );
 
   // Fallback: observation-cluster topics for unassigned observations
-  const unassignedObs = viable.filter((c) => !reflectionDerivedTopics.has(c));
+  const unassignedObs = kept.filter((c) => !reflectionDerivedTopics.has(c));
   const fallbackTopicAssignments = assignTopics(unassignedObs);
 
   // Merge: reflection-derived topics take precedence
@@ -950,8 +1034,12 @@ export function buildExportMarkdown(
         }))
         .sort((a, b) => b.score - a.score);
       const lines = scored.map(({ cluster }) => {
+        const parts: string[] = [];
         const age = relativeTime(cluster.rep.timestamp, now);
-        return `- ${flatten(cluster.rep.content)}${age ? ` *(${age})*` : ""}`;
+        if (age) parts.push(age);
+        const hidden = cluster.hiddenVariants ?? cluster.extras.length;
+        if (hidden > 0) parts.push(`+${hidden} variant${hidden === 1 ? "" : "s"}`);
+        return `- ${flatten(cluster.rep.content)}${parts.length > 0 ? ` *(${parts.join(" · ")})*` : ""}`;
       });
       sections.push([`### ${label}`, "", ...lines, ""].join("\n"));
     };
@@ -966,7 +1054,7 @@ export function buildExportMarkdown(
 
   // ── 3. Tier sections with topic badges ────────────────────
   for (const tier of TIER_ORDER) {
-    const tierClusters = viable.filter((c) => c.bestRelevance === tier);
+    const tierClusters = kept.filter((c) => c.bestRelevance === tier);
     if (tierClusters.length === 0) continue;
     const label = tier.charAt(0).toUpperCase() + tier.slice(1);
     sections.push(
@@ -989,6 +1077,11 @@ export function buildExportMarkdown(
   if (observationsFiltered > 0) {
     notes.push(
       `- ${observationsFiltered} clusters failed the viability gate (single-session, unsupported, low/medium relevance) and are excluded from the body.`,
+    );
+  }
+  if (suppressedByReflections > 0) {
+    notes.push(
+      `- ${suppressedByReflections} observation clusters restating rendered reflections are excluded from the body (reflection-wins suppression).`,
     );
   }
   if (notes.length > 0) {
@@ -1024,8 +1117,9 @@ export function buildExportMarkdown(
     filesWithMarkers: corpus.filesWithMarkers,
     observationsTotal: branchAndPendingObs.length + orphanObs.length,
     observationsClustered: obsClusters.length,
-    observationsRendered: viable.length,
+    observationsRendered: kept.length,
     observationsFiltered,
+    suppressedByReflections,
     duplicatesCollapsed: branchAndPendingObs.length - obsClusters.length,
     reflectionsTotal: corpus.reflections.length,
     droppedExcluded: corpus.droppedIds.size,
@@ -1040,7 +1134,7 @@ export function buildExportMarkdown(
     "",
     `_Generated ${new Date(now).toISOString().slice(0, 16).replace("T", " ")} UTC · ` +
       `${corpus.sessionsConsidered} sessions scanned · ` +
-      `${branchAndPendingObs.length + orphanObs.length} observations (${obsClusters.length} unique after dedup, ${viable.length} rendered${observationsFiltered > 0 ? `, ${observationsFiltered} filtered by viability gate` : ""}) · ` +
+      `${branchAndPendingObs.length + orphanObs.length} observations (${obsClusters.length} unique after dedup, ${kept.length} rendered${observationsFiltered > 0 ? `, ${observationsFiltered} filtered by viability gate` : ""}${suppressedByReflections > 0 ? `, ${suppressedByReflections} covered by reflections` : ""}) · ` +
       `${corpus.reflections.length} reflections_`,
     "",
   ].join("\n");

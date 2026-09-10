@@ -328,8 +328,9 @@ describe("/blackhole-export", () => {
     expect(md).toContain(`- ${PNPM}`);
     expect(md.match(/Use pnpm for all package installs/g)?.length).toBe(1);
     expect(md).toContain("across 2 sessions");
-    // Fuzzy near-dupe renders as rep + one capped variant (plan A.1: at most 2-3)
-    expect(md.match(/markdown file to(o)? disk/g)?.length).toBe(2);
+    // Fuzzy near-dupe collapses to one bullet with a hidden-variant count.
+    expect(md.match(/markdown file to(o)? disk/g)?.length).toBe(1);
+    expect(md).toContain("+1 variant");
 
     expect(md).not.toContain("User prefers terse answers");
     expect(md).toContain("dropper pipeline");

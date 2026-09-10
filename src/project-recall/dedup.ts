@@ -569,6 +569,16 @@ export interface MemoryCluster<T> {
   rep: T;
   /** Additional members worth rendering (fuzzy variants), capped. */
   extras: T[];
+  /**
+   * Every non-null member id in the cluster (uncapped). Coverage and topic
+   * linkage must use this — extras is render-capped and omits exact dupes.
+   */
+  allIds?: string[];
+  /**
+   * Count of distinct-text members beyond the representative (uncapped).
+   * Rendered as a "+N variants" count, never as sub-bullets.
+   */
+  hiddenVariants?: number;
   occurrences: number;
   distinctSessions: number;
   bestRelevance: Relevance;
@@ -612,152 +622,153 @@ class UnionFind {
   }
 }
 
-/**
- * Cluster observations: exact normalized grouping, then optional fuzzy merge
- * of group representatives (bigram-Jaccard prefilter → Levenshtein@0.88 with drift guard),
- * then optional Sørensen-Dice token-set merge over remaining reps
- * (SimHash prefilter → Sørensen-Dice ≥ 0.70 + Levenshtein ≥ 0.45). `maxVariants` bounds
- * how many near-identical members may appear alongside the representative in
- * rendered output.
- */
-export function clusterObservations(
-  items: CorpusObservation[],
-  opts?: { fuzzy?: boolean; sorensen?: boolean; maxVariants?: number },
-): Array<MemoryCluster<CorpusObservation>> {
-  const maxVariants = opts?.maxVariants ?? 2;
+/** Exact normalized-content group shared by observation and reflection clustering. */
+interface ClusterGroup<T> {
+  key: string;
+  members: T[];
+}
 
-  const groups = new Map<string, CorpusObservation[]>();
+function groupByNormalizedContent<T extends ClusterableItem>(items: T[]): Array<ClusterGroup<T>> {
+  const groups = new Map<string, T[]>();
   for (const item of items) {
     const key = normalizeContent(item.content);
     const group = groups.get(key);
     if (group) group.push(item);
     else groups.set(key, [item]);
   }
+  return [...groups.entries()].map(([key, members]) => ({ key, members }));
+}
 
-  interface Group {
-    key: string;
-    members: CorpusObservation[];
-  }
-  let allGroups: Group[] = [...groups.entries()].map(([key, members]) => ({
-    key,
-    members,
-  }));
+function collectMergedGroups<T>(
+  groups: Array<ClusterGroup<T>>,
+  uf: UnionFind,
+): Array<ClusterGroup<T>> {
+  const merged = new Map<number, ClusterGroup<T>>();
+  groups.forEach((g, i) => {
+    const root = uf.find(i);
+    const acc = merged.get(root);
+    if (acc) {
+      acc.members.push(...g.members);
+    } else {
+      merged.set(root, { key: g.key, members: [...g.members] });
+    }
+  });
+  return [...merged.values()];
+}
 
-  if (opts?.fuzzy && allGroups.length > 1) {
-    const uf = new UnionFind(allGroups.length);
-    const cache = new Map<string, Set<string>>();
-    // Sort so most authoritative group representatives are candidate cluster heads
-    for (let i = 0; i < allGroups.length; i++) {
-      for (let j = i + 1; j < allGroups.length; j++) {
-        const rootI = uf.find(i);
-        const rootJ = uf.find(j);
-        if (rootI === rootJ) continue;
-        const a = allGroups[i].key;
-        const b = allGroups[j].key;
-        const la = a.length;
-        const lb = b.length;
-        if (Math.abs(la - lb) > (1 - FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
-        if (bigramJaccard(a, b, cache) < FUZZY_THRESHOLD - 0.15) continue;
-        if (levenshteinSimilarity(a, b) >= FUZZY_THRESHOLD) {
-          // Drift guard: verify similarity with root representative
-          const rootKey = allGroups[rootI].key;
-          if (levenshteinSimilarity(rootKey, b) >= FUZZY_THRESHOLD - 0.08) {
-            uf.union(i, j);
-          }
+/**
+ * Fuzzy merge pass over exact groups (bigram-Jaccard prefilter →
+ * Levenshtein@0.88 with drift guard).
+ */
+function fuzzyMergeGroups<T>(groups: Array<ClusterGroup<T>>): Array<ClusterGroup<T>> {
+  const uf = new UnionFind(groups.length);
+  const cache = new Map<string, Set<string>>();
+  // Sort so most authoritative group representatives are candidate cluster heads
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const rootI = uf.find(i);
+      const rootJ = uf.find(j);
+      if (rootI === rootJ) continue;
+      const a = groups[i].key;
+      const b = groups[j].key;
+      const la = a.length;
+      const lb = b.length;
+      if (Math.abs(la - lb) > (1 - FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
+      if (bigramJaccard(a, b, cache) < FUZZY_THRESHOLD - 0.15) continue;
+      if (levenshteinSimilarity(a, b) >= FUZZY_THRESHOLD) {
+        // Drift guard: verify similarity with root representative
+        const rootKey = groups[rootI].key;
+        if (levenshteinSimilarity(rootKey, b) >= FUZZY_THRESHOLD - 0.08) {
+          uf.union(i, j);
         }
       }
     }
-    const merged = new Map<number, Group>();
-    allGroups.forEach((g, i) => {
-      const root = uf.find(i);
-      const acc = merged.get(root);
-      if (acc) {
-        acc.members.push(...g.members);
-      } else {
-        merged.set(root, { key: g.key, members: [...g.members] });
-      }
-    });
-    allGroups = [...merged.values()];
   }
+  return collectMergedGroups(groups, uf);
+}
 
-  // Pass 3: Sørensen-Dice token-set similarity merges tightly related
-  // clusters that the Levenshtein pass missed (paraphrases with word-order
-  // changes). Uses SimHash64 for O(1) candidate pruning and a floor on
-  // Levenshtein to prevent pure keyword overlap from merging distinct facts.
-  if (opts?.sorensen && allGroups.length > 1) {
-    const uf = new UnionFind(allGroups.length);
-    // Precompute reps, tokens, sets, and SimHash64 for O(n) precomputation
-    const groupReps = allGroups.map((g) => normalizeContent(pickRep(g.members).content));
-    const tokenLists = groupReps.map((s) => tokenizeContent(s));
-    const repTokens = tokenLists.map((tokens) => new Set(tokens));
-    const repHashes = tokenLists.map((tokens) => computeSimHash64(tokens));
-    for (let i = 0; i < allGroups.length; i++) {
-      for (let j = i + 1; j < allGroups.length; j++) {
-        const rootI = uf.find(i);
-        const rootJ = uf.find(j);
-        if (rootI === rootJ) continue;
-        const a = groupReps[i];
-        const b = groupReps[j];
-        const la = a.length;
-        const lb = b.length;
-        if (Math.abs(la - lb) > (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
-        // SimHash candidate filter: dissimilar token sets have Hamming distance > 26
-        if (
-          repTokens[i].size >= 4 &&
-          repTokens[j].size >= 4 &&
-          simHashHammingDistance(repHashes[i], repHashes[j]) > 26
-        ) {
-          continue;
-        }
-        if (levenshteinSimilarity(a, b) < SORENSEN_MIN_LEVENSHTEIN) continue;
-        if (sorensenDiceSets(repTokens[i], repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD) {
-          // Drift guard: check against root token set
-          const rootTokenSet = repTokens[rootI];
-          if (sorensenDiceSets(rootTokenSet, repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD - 0.1) {
-            uf.union(i, j);
-          }
+/**
+ * Sørensen-Dice token-set merge pass over exact groups. Merges tightly related
+ * clusters that the Levenshtein pass missed (paraphrases with word-order
+ * changes). Uses SimHash64 for O(1) candidate pruning and a floor on
+ * Levenshtein to prevent pure keyword overlap from merging distinct facts.
+ */
+function sorensenMergeGroups<T extends ClusterableItem>(
+  groups: Array<ClusterGroup<T>>,
+): Array<ClusterGroup<T>> {
+  const uf = new UnionFind(groups.length);
+  // Precompute reps, tokens, sets, and SimHash64 for O(n) precomputation
+  const groupReps = groups.map((g) => normalizeContent(pickRep(g.members).content));
+  const tokenLists = groupReps.map((s) => tokenizeContent(s));
+  const repTokens = tokenLists.map((tokens) => new Set(tokens));
+  const repHashes = tokenLists.map((tokens) => computeSimHash64(tokens));
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      const rootI = uf.find(i);
+      const rootJ = uf.find(j);
+      if (rootI === rootJ) continue;
+      const a = groupReps[i];
+      const b = groupReps[j];
+      const la = a.length;
+      const lb = b.length;
+      if (Math.abs(la - lb) > (1 - SORENSEN_FUZZY_THRESHOLD) * Math.max(la, lb, 1)) continue;
+      // SimHash candidate filter: dissimilar token sets have Hamming distance > 26
+      if (
+        repTokens[i].size >= 4 &&
+        repTokens[j].size >= 4 &&
+        simHashHammingDistance(repHashes[i], repHashes[j]) > 26
+      ) {
+        continue;
+      }
+      if (levenshteinSimilarity(a, b) < SORENSEN_MIN_LEVENSHTEIN) continue;
+      if (sorensenDiceSets(repTokens[i], repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD) {
+        // Drift guard: check against root token set
+        const rootTokenSet = repTokens[rootI];
+        if (sorensenDiceSets(rootTokenSet, repTokens[j]) >= SORENSEN_FUZZY_THRESHOLD - 0.1) {
+          uf.union(i, j);
         }
       }
     }
-    const merged = new Map<number, Group>();
-    allGroups.forEach((g, i) => {
-      const root = uf.find(i);
-      const acc = merged.get(root);
-      if (acc) {
-        acc.members.push(...g.members);
-      } else {
-        merged.set(root, { key: g.key, members: [...g.members] });
-      }
-    });
-    allGroups = [...merged.values()];
   }
+  return collectMergedGroups(groups, uf);
+}
 
-  const clusters: Array<MemoryCluster<CorpusObservation>> = [];
-  for (const group of allGroups) {
+function finalizeClusters<T extends ClusterableItem>(
+  groups: Array<ClusterGroup<T>>,
+  opts: {
+    maxVariants: number;
+    bestRelevanceOf: (members: T[]) => Relevance;
+    repOf: (members: T[], best: Relevance) => T;
+    idOf: (member: T) => string | null;
+    computeConsensus: boolean;
+  },
+): Array<MemoryCluster<T>> {
+  const clusters: Array<MemoryCluster<T>> = [];
+  for (const group of groups) {
     const { members } = group;
-    const bestRelevance = members.reduce<Relevance>(
-      (best, m) => (TIER_RANK[m.relevance] > TIER_RANK[best] ? m.relevance : best),
-      "low",
-    );
-    const rep =
-      members
-        .filter((m) => m.relevance === bestRelevance)
-        .reduce((best, m) => (tsValue(m.timestamp) > tsValue(best.timestamp) ? m : best)) ??
-      pickRep(members);
+    const bestRelevance = opts.bestRelevanceOf(members);
+    const rep = opts.repOf(members, bestRelevance);
     const repKey = normalizeContent(rep.content);
-    const extras = members.filter((m) => m !== rep && normalizeContent(m.content) !== repKey);
+    const variants = members.filter((m) => m !== rep && normalizeContent(m.content) !== repKey);
+    const allIds: string[] = [];
+    for (const m of members) {
+      const id = opts.idOf(m);
+      if (id) allIds.push(id);
+    }
     clusters.push({
       rep,
-      extras: extras.slice(0, maxVariants),
+      extras: variants.slice(0, opts.maxVariants),
       occurrences: members.length,
       distinctSessions: new Set(members.map((m) => m.sessionId)).size,
       bestRelevance,
       maxRelatedSimilarity: 0,
+      allIds,
+      hiddenVariants: variants.length,
     });
   }
 
   // Consensus rerank signal: max Sørensen-Dice to any other cluster.
-  if (clusters.length > 1) {
+  if (opts.computeConsensus && clusters.length > 1) {
     const repTokenSets = clusters.map((c) => new Set(tokenizeContent(c.rep.content)));
     for (let i = 0; i < clusters.length; i++) {
       let maxSim = 0;
@@ -772,28 +783,57 @@ export function clusterObservations(
   return clusters;
 }
 
-/** Reflections cluster by exact content only — they are already syntheses. */
+/**
+ * Cluster observations: exact normalized grouping, then optional fuzzy merge
+ * of group representatives (bigram-Jaccard prefilter → Levenshtein@0.88 with drift guard),
+ * then optional Sørensen-Dice token-set merge over remaining reps
+ * (SimHash prefilter → Sørensen-Dice ≥ 0.70 + Levenshtein ≥ 0.45). `maxVariants` bounds
+ * how many near-identical members are kept as hidden variants; rendered output
+ * shows only the representative plus a "+N variants" count.
+ */
+export function clusterObservations(
+  items: CorpusObservation[],
+  opts?: { fuzzy?: boolean; sorensen?: boolean; maxVariants?: number },
+): Array<MemoryCluster<CorpusObservation>> {
+  const maxVariants = opts?.maxVariants ?? 2;
+  let allGroups = groupByNormalizedContent(items);
+  if (opts?.fuzzy && allGroups.length > 1) allGroups = fuzzyMergeGroups(allGroups);
+  if (opts?.sorensen && allGroups.length > 1) allGroups = sorensenMergeGroups(allGroups);
+  return finalizeClusters(allGroups, {
+    maxVariants,
+    bestRelevanceOf: (members) =>
+      members.reduce<Relevance>(
+        (best, m) => (TIER_RANK[m.relevance] > TIER_RANK[best] ? m.relevance : best),
+        "low",
+      ),
+    repOf: (members, bestRelevance) => {
+      const tiered = members.filter((m) => m.relevance === bestRelevance);
+      return pickRep(tiered.length > 0 ? tiered : members);
+    },
+    idOf: (m) => m.id,
+    computeConsensus: true,
+  });
+}
+
+/**
+ * Cluster reflections: exact normalized grouping by default (they are already
+ * syntheses), with optional fuzzy + Sørensen passes mirroring observations.
+ * Reflection variants are never rendered as sub-bullets — the surviving
+ * representative carries a hiddenVariants count instead.
+ */
 export function clusterReflections(
   items: CorpusReflection[],
+  opts?: { fuzzy?: boolean; sorensen?: boolean; maxVariants?: number },
 ): Array<MemoryCluster<CorpusReflection>> {
-  const groups = new Map<string, CorpusReflection[]>();
-  for (const item of items) {
-    const key = normalizeContent(item.content);
-    const group = groups.get(key);
-    if (group) group.push(item);
-    else groups.set(key, [item]);
-  }
-  const clusters: Array<MemoryCluster<CorpusReflection>> = [];
-  for (const [, members] of groups) {
-    const rep = pickRep(members);
-    clusters.push({
-      rep,
-      extras: [],
-      occurrences: members.length,
-      distinctSessions: new Set(members.map((m) => m.sessionId)).size,
-      bestRelevance: "medium",
-      maxRelatedSimilarity: 0,
-    });
-  }
-  return clusters;
+  const maxVariants = opts?.maxVariants ?? 0;
+  let allGroups = groupByNormalizedContent(items);
+  if (opts?.fuzzy && allGroups.length > 1) allGroups = fuzzyMergeGroups(allGroups);
+  if (opts?.sorensen && allGroups.length > 1) allGroups = sorensenMergeGroups(allGroups);
+  return finalizeClusters(allGroups, {
+    maxVariants,
+    bestRelevanceOf: (): Relevance => "medium",
+    repOf: (members) => pickRep(members),
+    idOf: () => null,
+    computeConsensus: false,
+  });
 }
