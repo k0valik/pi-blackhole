@@ -1,7 +1,8 @@
-import { readFileSync, statSync } from "fs";
+import { statSync } from "fs";
 import type { Message } from "@earendil-works/pi-ai";
 import { renderMessage, type RenderedEntry } from "./render-entries";
 import { isCountedMessageEntry } from "./global-indices.js";
+import { scanSessionEntries } from "./session-lines.js";
 
 export interface LoadedMessages {
   rendered: RenderedEntry[];
@@ -94,29 +95,16 @@ export const loadAllMessages = (
   const cached = getCached(sessionFile, full, allowedEntryIds);
   if (cached) return cached;
 
-  const content = readFileSync(sessionFile, "utf-8");
-  const entries: any[] = [];
-  let parseErrors = 0;
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      entries.push(JSON.parse(line));
-    } catch {
-      parseErrors++;
-    }
-  }
-  if (parseErrors > 0) {
-    console.warn(`blackhole: ${parseErrors} malformed JSONL line(s) in ${sessionFile}`);
-  }
   const rendered: RenderedEntry[] = [];
   const rawMessages: Message[] = [];
   const entryIds: string[] = [];
 
   let messageIndex = 0;
-  for (const e of entries) {
-    // Counting rule shared with src/core/global-indices.ts — both index spaces
-    // must agree by construction.
-    if (!isCountedMessageEntry(e)) continue;
+  // Streamed per upstream pi-vcc #26: never materialize the whole session
+  // file as one string (V8 limit). Counting rule shared with
+  // src/core/global-indices.ts — both index spaces must agree by construction.
+  const scan = scanSessionEntries(sessionFile, (e) => {
+    if (!isCountedMessageEntry(e)) return;
 
     const allowed = !allowedEntryIds || allowedEntryIds.has(e.id);
     if (allowed) {
@@ -126,6 +114,15 @@ export const loadAllMessages = (
       entryIds.push(entryId);
     }
     messageIndex++;
+  });
+  if (scan.missing) {
+    // Pi does not create a new session's JSONL until its first persisted
+    // entry: empty current-session history, not a failure. Not cached — the
+    // file may appear at any moment.
+    return { rendered, rawMessages, entryIds };
+  }
+  if (scan.parseErrors > 0) {
+    console.warn(`blackhole: ${scan.parseErrors} malformed JSONL line(s) in ${sessionFile}`);
   }
 
   const result: LoadedMessages = { rendered, rawMessages, entryIds };

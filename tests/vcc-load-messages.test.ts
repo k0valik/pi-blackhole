@@ -109,3 +109,105 @@ describe("loadAllMessages", () => {
     }
   });
 });
+
+describe("loadAllMessages large-file hardening (upstream pi-vcc #26)", () => {
+  it("loads JSONL incrementally across read-chunk boundaries", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-vcc-load-chunked-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const largeText = `${"x".repeat(70_000)} unicode: λ`;
+      const lines = [
+        JSON.stringify({
+          type: "message",
+          id: "m1",
+          message: { role: "user", content: largeText },
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "m2",
+          message: { role: "user", content: "after boundary" },
+        }),
+      ];
+      // Deliberately omit the final newline to cover the buffered tail as well.
+      writeFileSync(file, lines.join("\n"), "utf8");
+
+      const loaded = loadAllMessages(file, true);
+      expect(loaded.rendered).toHaveLength(2);
+      expect(loaded.rendered[0].summary).toBe(largeText);
+      expect(loaded.rendered[1].summary).toBe("after boundary");
+      expect(loaded.rendered.map((e) => e.index)).toEqual([0, 1]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a not-yet-written session file as empty history instead of throwing ENOENT", () => {
+    // Fresh session: pi has not persisted any entry, so the JSONL does not exist.
+    const dir = mkdtempSync(join(tmpdir(), "pi-vcc-load-missing-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const loaded = loadAllMessages(file, false);
+      expect(loaded.rendered).toEqual([]);
+      expect(loaded.rawMessages).toEqual([]);
+      expect(loaded.entryIds).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips malformed lines without shifting later message indices", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-vcc-load-malformed-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const lines = [
+        JSON.stringify({ type: "message", id: "m1", message: { role: "user", content: "u1" } }),
+        "{not json",
+        "",
+        JSON.stringify({ type: "message", id: "m2", message: { role: "user", content: "u2" } }),
+      ];
+      writeFileSync(file, lines.join("\n") + "\n", "utf8");
+
+      const loaded = loadAllMessages(file, false);
+      expect(loaded.rendered).toHaveLength(2);
+      expect(loaded.rendered.map((e) => e.index)).toEqual([0, 1]);
+      expect(loaded.entryIds).toEqual(["m1", "m2"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("loadGlobalIndexById agreement (same index space as recall)", () => {
+  it("agrees with loadAllMessages indices on one session file", async () => {
+    const { loadGlobalIndexById } = await import("../src/core/global-indices.js");
+    const dir = mkdtempSync(join(tmpdir(), "pi-vcc-index-agree-"));
+    const file = join(dir, "session.jsonl");
+    try {
+      const lines = [
+        JSON.stringify({ type: "session", id: "s1" }),
+        JSON.stringify({ type: "message", id: "m1", message: { role: "user", content: "u1" } }),
+        JSON.stringify({ type: "compaction", id: "c1", firstKeptEntryId: "" }),
+        JSON.stringify({ type: "message", id: "m2", message: { role: "user", content: "u2" } }),
+      ];
+      writeFileSync(file, lines.join("\n") + "\n", "utf8");
+
+      const loaded = loadAllMessages(file, false);
+      const map = loadGlobalIndexById(file);
+      expect(map?.get("m1")).toBe(loaded.rendered[0].index);
+      expect(map?.get("m2")).toBe(loaded.rendered[1].index);
+      expect(map?.has("c1")).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns undefined for a not-yet-written session file", async () => {
+    const { loadGlobalIndexById } = await import("../src/core/global-indices.js");
+    const dir = mkdtempSync(join(tmpdir(), "pi-vcc-index-missing-"));
+    try {
+      expect(loadGlobalIndexById(join(dir, "session.jsonl"))).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
