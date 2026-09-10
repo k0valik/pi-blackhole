@@ -62,7 +62,7 @@ TF-Norm = (tf * (K + 1)) / (tf + K * (1 - B + B * dl / avgDl))
 Score = sum(IDF * TF-Norm for each term)
 ```
 
-Stopwords removed from query terms before scoring. If query contains regex metacharacters (`/[|*+?{}()[\]\\^$.]/`), entire query treated as regex pattern instead.
+Stopwords removed from query terms before scoring. Each term is classified individually: terms with regex operators (`/[|*+?{}()[\]\\^$]/`) stay patterns, plain terms — including dotted filenames (`observer.ts`) — match literally. A natural sentence mentioning a file therefore ranks via BM25 instead of compiling as one never-matching whole-query pattern.
 
 #### Search modes
 
