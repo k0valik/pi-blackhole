@@ -393,7 +393,7 @@ async function omRecall(memoryId: string, ctx: any, maxChars = DEFAULT_RECALL_RE
     entryBlocks,
     tailBlocks: sourcesBlock ? [sourcesBlock] : undefined,
     budget: maxChars,
-    continuation: "Ask for this memory id again to re-read it; its full content stays stored",
+    continuation: "Full bodies stay stored — page the underlying entries via the #N source indices",
   });
 
   return { content: [{ type: "text" as const, text: capped.text }], details: undefined };
@@ -405,7 +405,11 @@ export function registerRecallTool(
   pi: ExtensionAPI,
   omRuntime?: { config?: { recallResponseMaxChars?: number } },
 ): void {
-  const maxChars = omRuntime?.config?.recallResponseMaxChars ?? DEFAULT_RECALL_RESPONSE_MAX_CHARS;
+  // Resolved per call (not once at registration): omRuntime.config is a live
+  // reference reloaded from disk (Runtime.reloadConfig), so a settings-UI edit
+  // applies without /reload. A registration-time snapshot would go stale.
+  const resolveMaxChars = () =>
+    omRuntime?.config?.recallResponseMaxChars ?? DEFAULT_RECALL_RESPONSE_MAX_CHARS;
 
   pi.registerTool({
     name: "recall",
@@ -451,6 +455,7 @@ export function registerRecallTool(
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const maxChars = resolveMaxChars();
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) {
         return {

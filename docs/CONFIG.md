@@ -40,6 +40,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
     ]
   },
   "retainedToolOutputMaxTokens": 20000, // 0 = disabled; otherwise full historical tool-output budget
+  "recallResponseMaxChars": 48000,      // recall response cap; 0 = unbounded; derived per-entry/line shares
 
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
@@ -215,6 +216,23 @@ This only changes the retained context sent to the provider. Session JSONL, comp
 | Type | Default | Range |
 |------|---------|-------|
 | number | 20000 | `0` (disabled) or positive integer |
+
+### `recallResponseMaxChars`
+
+Set to `0` to disable the budget entirely (opt-out). Default 48000 characters (~12k tokens).
+
+Bounding cap on any single `recall` tool / `/blackhole-recall` response. A huge stored message (long tool-result line, big expanded entry, giant observation body) must never flood the agent's context. Per-entry and per-line allocations are derived internally from this one knob:
+
+- Search snippet lines capped (~1000 chars) with the match kept visible.
+- Expanded entries share the budget, each with a continuation marker to `#N:text:full` / `#N:path:full`.
+- Related observation/reflection bodies capped (~1200 chars); full content reachable via the 12-hex memory id.
+- Total budget enforced entry-aware (trailing entries dropped before the header, footer names the omitted count + continuation).
+
+Session JSONL and the complete stored content are never modified — only what a single recall response renders is bounded, and the full payload stays reachable via paged drill-downs (`#N:text:offset:limit` / `#N:path:offset:limit`).
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | 48000 | `0` (unbounded) or positive integer |
 
 ### `compactAfterRatio` *(context-window-aware threshold, opt-in)*
 
@@ -575,6 +593,7 @@ Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accept
 | `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` | `compactAfterTokens` |
 | `PI_BLACKHOLE_COMPACT_RESERVE_TOKENS` | `compactReserveTokens` |
 | `PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS` | `retainedToolOutputMaxTokens` |
+| `PI_BLACKHOLE_RECALL_RESPONSE_MAX_CHARS` | `recallResponseMaxChars` |
 | `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS` | `observeAfterTokens` |
 | `PI_BLACKHOLE_REFLECT_AFTER_TOKENS` | `reflectAfterTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS` | `observationsPoolMaxTokens` |

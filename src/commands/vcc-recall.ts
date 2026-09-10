@@ -3,6 +3,12 @@
  *
  * Upstream: https://github.com/sting8k/pi-vcc (src/commands/vcc-recall.ts)
  * Ported and renamed to /blackhole-recall for blackhole.
+ *
+ * NOTE: intentionally NOT covered by the recall tool response budget (issue
+ * #83, `recallResponseMaxChars`). The command renders to the TUI for the
+ * human operator, not into model context, so per-entry snippet/body clips
+ * (shared via search-entries / reverse-recall) apply but no total cap is
+ * enforced. Capping user-facing command output is a separate follow-up.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages.js";

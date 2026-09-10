@@ -161,6 +161,31 @@ describe("recall tool response budget", () => {
     }
   });
 
+  it("reads the budget live per call, so settings edits apply without reload", async () => {
+    const { dir, file } = makeSession(bigEntries);
+    try {
+      const runtime = { config: { recallResponseMaxChars: 5_000 } } as any;
+      let tool: any;
+      registerRecallTool(
+        {
+          registerTool: (t: any) => {
+            tool = t;
+          },
+        } as any,
+        runtime,
+      );
+      const small = await invoke(tool, file, { expand: [0] }, bigEntries);
+      expect(small.length).toBeLessThan(5_000);
+      expect(small).toContain("payload-0");
+      runtime.config.recallResponseMaxChars = 48_000;
+      const large = await invoke(tool, file, { expand: [0] }, bigEntries);
+      expect(large.length).toBeGreaterThan(small.length);
+      expect(large.length).toBeLessThan(48_000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("bounds a 12-entry expansion to the budget with every entry present", async () => {
     // toolResult entries at indices 0..49 (all messages preceded by none).
     // First entry is index 0 (user-less session), so expand indices 0..11.

@@ -156,6 +156,19 @@ Tool: ${tc.name}
 ${body}`;
 }
 
+/**
+ * Raw message body text for #N:text drill-down: user/assistant/toolResult
+ * text plus bashExecution command+output. Empty when the entry carries no
+ * text of its own (e.g. a bare toolCall with no text parts).
+ */
+function messageBodyText(msg: Record<string, unknown>): string {
+  // bashExecution carries command+output instead of content.
+  if (msg.role === "bashExecution") {
+    return `$ ${String(msg.command ?? "")}\n${String(msg.output ?? "")}`;
+  }
+  return textOf(msg.content as never);
+}
+
 // ── Message-text drill-down (#N:text) ─────────────────────────────────────
 
 /**
@@ -171,11 +184,7 @@ function formatMessageText(
   entryIndex: number,
   options?: { full?: boolean; offset?: number; limit?: number },
 ): string {
-  // bashExecution carries command+output instead of content.
-  const isBash = msg.role === "bashExecution";
-  const body = isBash
-    ? `$ ${String(msg.command ?? "")}\n${String(msg.output ?? "")}`
-    : textOf(msg.content as never);
+  const body = messageBodyText(msg);
   const trimmed = body.trim();
   if (!trimmed) {
     return `Entry #${entryIndex} has no message text.`;
@@ -302,7 +311,8 @@ export function parseDrillDown(query: string): {
  *
  * @param sessionFile - Path to the JSONL session file
  * @param entryIndex - The message index (#N)
- * @param pathPattern - File path substring to match (or "file" keyword)
+ * @param pathPattern - File path substring to match, or the "file" / "text"
+ *   keywords ("text" renders the entry's own message body)
  * @param full - If true, return complete content without truncation
  * @param offset - Line offset (0-indexed) for windowed content
  * @param limit - Max lines to show (default 30 for windowed, ignored if full=true)
@@ -325,16 +335,35 @@ export function expandEntryFile(
   const msg = rawMessages[entryIndex];
   const content = msg.content as unknown[];
   const calls = findContentBearingCalls(content);
+  const matched = calls.filter((tc) => tc.path.includes(pathPattern));
 
   // Special case: #42:text — message body text. Mirrors #42:file but renders
   // the entry's own text (user/assistant/toolResult/bash), letting a
   // budget-clipped expanded entry be paged in full.
+  // "text" is also a substring of real file paths (context.txt, ...), so when
+  // the entry has message text it wins and matching file ops are named in a
+  // note (still reachable via a more-specific path or #N:file); when it has no
+  // message text, legacy file-substring matching applies unchanged.
   if (pathPattern === "text") {
-    return formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
-      full,
-      offset,
-      limit,
-    });
+    if (messageBodyText(msg as unknown as Record<string, unknown>).trim()) {
+      let out = formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
+        full,
+        offset,
+        limit,
+      });
+      if (matched.length > 0) {
+        out += `\n\n--- Note: entry #${entryIndex} also has ${matched.length} file operation(s) matching "text" — use #${entryIndex}:<more-specific-path> or #${entryIndex}:file for file content ---`;
+      }
+      return out;
+    }
+    if (matched.length === 0) {
+      return formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
+        full,
+        offset,
+        limit,
+      });
+    }
+    // No message text but files match "text": fall through to file matching.
   }
 
   // Special case: #42:file keyword
@@ -353,8 +382,6 @@ export function expandEntryFile(
     const items = calls.map((tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`);
     return `Entry #${entryIndex} has ${calls.length} file operations:\n${items.join("\n")}\n\nUse #${entryIndex}:path to drill into a specific file.`;
   }
-
-  const matched = calls.filter((tc) => tc.path.includes(pathPattern));
 
   if (matched.length === 0) {
     return `No file content found in entry #${entryIndex} for "${pathPattern}".`;

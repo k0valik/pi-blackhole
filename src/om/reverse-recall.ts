@@ -23,7 +23,7 @@ const OBSERVATION_BODY_MAX = 1200;
  */
 export const clipBody = (content: string, memoryId: string): string => {
   if (content.length <= OBSERVATION_BODY_MAX) return content;
-  return `${clip(content, OBSERVATION_BODY_MAX)} … [${memoryId}]`;
+  return `${clip(content, OBSERVATION_BODY_MAX)} … [${memoryId} truncated]`;
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────

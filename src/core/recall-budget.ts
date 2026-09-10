@@ -71,6 +71,11 @@ export interface CapRecallBlocksResult {
  * drops the header — trailing entries are dropped first, then trailing
  * non-entry blocks (observations / footer), and a continuation footer is
  * appended naming how many were omitted.
+ *
+ * Note: the capping footer is appended after budgeting, so a capped response
+ * can exceed `budget` by the footer's length (~150 chars). Deliberate — the
+ * footer (with continuation refs) must survive. Assert on `capped`/markers,
+ * not on a hard length bound.
  */
 export function capRecallBlocks(input: CapRecallBlocksInput): CapRecallBlocksResult {
   const { header, entryBlocks, tailBlocks = [], budget, continuation = "" } = input;

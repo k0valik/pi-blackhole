@@ -12,21 +12,35 @@ Expands a session entry by index to show full content (not truncated). Parsed by
 
 Calls `vccRecall({ query: "", expand: [index] })`, merges expanded entries into results (appends non-overlapping, replaces overlapping). Invalid indices outside available range are reported via `invalidExpandIndices()`.
 
-### Drill-down (#N:path)
+### Drill-down (#N:path / #N:text)
 
-Explores file content from a tool call within a specific entry. Parsed by [[src/core/drill-down.ts]].
+Explores file content from a tool call within a specific entry, or a message body. Parsed by [[src/core/drill-down.ts]].
 
 Pattern: `#(\d+):(.+?)(?::(full|\d+(?::\d+)?))?$`
 
 | Syntax | Behavior |
 |--------|----------|
-| `#42:auth.ts` | Preview first 30 lines |
-| `#42:auth.ts:full` | All content (50KB cap) |
+| `#42:auth.ts` | File preview, first 30 lines |
+| `#42:auth.ts:full` | All file content (50KB cap) |
 | `#42:auth.ts:30` | Lines 31-60 (offset 30, default limit 30) |
 | `#42:auth.ts:30:20` | Lines 31-50 (offset 30, limit 20) |
 | `#42:file` | List all files, or auto-select if single |
+| `#42:text` | Message-body preview (first 30 lines) |
+| `#42:text:full` | Full message body (50KB cap) |
+| `#42:text:30` / `#42:text:30:20` | Message-body windows |
 
-Reads raw session JSONL via `loadAllMessages()`, finds content-bearing tool calls via `isContentBearing()`, matches path via `tc.path.includes(pathPattern)`. Formats edits as `--- edit N ---\noldText\n--- becomes ---\nnewText`.
+Reads raw session JSONL via `loadAllMessages()`, finds content-bearing tool calls via `isContentBearing()`, matches path via `tc.path.includes(pathPattern)`. Formats edits as `--- edit N ---\noldText\n--- becomes ---\nnewText`. The `#N:text` form covers user/assistant/toolResult text plus bashExecution command+output, so budget-clipped expanded entries can be paged in full.
+
+### Response budget
+
+Every recall response is capped at `recallResponseMaxChars` (default 48,000 characters ≈ 12k tokens, `0` = unbounded). Implemented in [[src/core/recall-budget.ts]] and threaded through [[src/tools/recall.ts]]:
+
+- **Search snippet lines** are capped (~1000 chars) with the match kept visible, so one huge tool-result line cannot flood a page.
+- **Expanded entries** share the budget (`expandAllocation()`); each carries a continuation marker to `#N:text:full` / `#N:path:full` for the full payload.
+- **Related observation/reflection bodies** are capped (~1200 chars); full content stays reachable via the 12-hex memory id.
+- **Total budget** (`capRecallBlocks()`) is enforced entry-aware: trailing entries drop before the header, and a footer names the omitted count and continuation affordance (`page:N` / `expand:[N]` / `#N:text` / `#N:path`).
+
+The knob is `recallResponseMaxChars` (env `PI_BLACKHOLE_RECALL_RESPONSE_MAX_CHARS`); per-entry and per-line shares are derived from it internally.
 
 ### OM memory ID (12-char hex)
 
@@ -83,6 +97,8 @@ OM integration is wrapped in try/catch — branch may not be available in all co
 ## /blackhole-recall command
 
 User-facing command for interactive session history search. Defined in [[src/commands/vcc-recall.ts]]. Same engine as the `recall` tool.
+
+The command renders to the TUI for the human operator, so it is intentionally not covered by the `recallResponseMaxChars` total budget (per-entry snippet/body clips still apply via the shared modules). Capping user-facing command output is a separate follow-up.
 
 ```
 /blackhole-recall auth token                        # active-lineage search, ranked

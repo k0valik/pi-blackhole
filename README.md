@@ -78,18 +78,21 @@ All commands work regardless of `compaction` mode — only _when_ auto-compactio
 
 The agent gets one unified `recall` tool that handles every form of historical lookup. Searches read the raw session file directly, bypassing compaction.
 
-| Input           | What it does                                                                                                                                                      |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[12-char hex]` | Recover source evidence for a specific observation or reflection ID from the session ledger.                                                                      |
-| `#N`            | Expand a session entry by index (show full content, not truncated).                                                                                               |
-| `#N:path`       | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows the next 30; `#42:auth.ts:full` shows everything). |
-| Free text       | BM25-ranked search across transcript and/or file content. Rare terms weighted higher.                                                                             |
-| `mode:file`     | Search only write/edit file content.                                                                                                                              |
-| `mode:touched`  | Aggregate all files written/edited across the session, grouped by path.                                                                                           |
-| Regex           | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`).                                                                                                             |
-| `scope:all`     | Search across all session lineages (default: active lineage only).                                                                                                |
+| Input           | What it does                                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `[12-char hex]` | Recover source evidence for a specific observation or reflection ID from the session ledger.                                                                                         |
+| `#N`            | Expand a session entry by index (show full content, bounded by the response budget).                                                                                                 |
+| `#N:path`       | Drill-down into file content from a tool call (e.g. `#42:auth.ts` shows first 30 lines; `#42:auth.ts:30` shows the next 30; `#42:auth.ts:full` shows everything).                    |
+| `#N:text`       | Drill-down into a message body (user/assistant/tool/bash text) with the same paging (`#42:text`, `#42:text:30`, `#42:text:full`) — the continuation path for budget-clipped entries. |
+| Free text       | BM25-ranked search across transcript and/or file content. Rare terms weighted higher.                                                                                                |
+| `mode:file`     | Search only write/edit file content.                                                                                                                                                 |
+| `mode:touched`  | Aggregate all files written/edited across the session, grouped by path.                                                                                                              |
+| Regex           | Pattern search (e.g. `fork.*pi-vcc`, `hook\|inject`).                                                                                                                                |
+| `scope:all`     | Search across all session lineages (default: active lineage only).                                                                                                                   |
 
 When the agent expands a session entry (`#N`), related observations and reflections from the session ledger are automatically shown alongside the expanded content — so the agent gets the raw transcript _and_ the durable fact layer in one call.
+
+Every recall response is capped at `recallResponseMaxChars` (default 48,000 ≈ 12k tokens). Search snippet lines, expanded entries, and related observation bodies are clipped to keep a single huge stored message from flooding the context; a truncation marker names the omitted entries and how to continue (`#N:text` / `#N:path` / `page:N`).
 
 The `/blackhole-recall` command exposes the same engine to the user. Results are shown as a collapsible message and auto-fed to the agent as context.
 
