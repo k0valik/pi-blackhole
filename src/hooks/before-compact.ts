@@ -26,6 +26,7 @@ import { debugLog } from "../om/debug-log.js";
 import { effectiveContextWindow } from "../om/model-budget.js";
 import { DEFAULTS, configFileNeedsMigration } from "../core/unified-config.js";
 import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
+import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -483,7 +484,52 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     const agentMessages = ownCut.messages;
     const agentSelectedIds = ownCut.selectedIds;
     const firstKeptEntryId = ownCut.firstKeptEntryId;
-    const messages = convertToLlm(agentMessages);
+
+    // ── Session-global indices for summary refs ──────────────────────
+    // Recall numbers messages across the whole session file (all windows,
+    // all branches); the selected window is zero-based. Map each selected
+    // entry id to its global index so emitted (#N) refs resolve via recall.
+    // Primary source is the in-memory tree (file order, synchronously
+    // persisted); the session file is the fallback. convertToLlm is
+    // elementwise (drops/replaces per message, order preserved), so align by
+    // converting singletons — never by position.
+    let globalIndexById: Map<string, number> | undefined;
+    try {
+      const all = (ctx as any)?.sessionManager?.getEntries?.();
+      if (Array.isArray(all)) globalIndexById = buildGlobalIndexById(all);
+    } catch {
+      globalIndexById = undefined;
+    }
+    if (!globalIndexById) {
+      try {
+        const sf = (ctx as any)?.sessionManager?.getSessionFile?.();
+        if (typeof sf === "string" && sf) globalIndexById = loadGlobalIndexById(sf);
+      } catch {
+        globalIndexById = undefined;
+      }
+    }
+    const convertedWithIndices: Array<{ message: any; sourceIndex: number | undefined }> = [];
+    for (let i = 0; i < agentMessages.length; i++) {
+      let converted: any[];
+      try {
+        converted = convertToLlm([agentMessages[i]]);
+      } catch {
+        continue;
+      }
+      if (converted.length === 0) continue;
+      const id = agentSelectedIds[i];
+      convertedWithIndices.push({
+        message: converted[0],
+        sourceIndex: typeof id === "string" ? globalIndexById?.get(id) : undefined,
+      });
+    }
+    const messages = convertedWithIndices.map((x) => x.message);
+    // No map at all (facades without entries/file) keeps the legacy
+    // positional behavior. A present map with a missing id yields undefined
+    // for that position, which renderers display as no ref (fail-closed).
+    // Parallel to `messages` by construction.
+    const sourceIndices =
+      globalIndexById === undefined ? undefined : convertedWithIndices.map((x) => x.sourceIndex);
 
     // Count kept messages and estimate tokens
     const keptIdx = (branchEntries as any[]).findIndex((e: any) => e.id === firstKeptEntryId);
@@ -549,10 +595,11 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       messages,
       previousSummary: preparation.previousSummary,
       fileOps,
+      sourceIndices,
     });
     const freshSegmentSummary =
       omRuntime.config.compactionSummaryMode === "append"
-        ? compileSegment({ messages, fileOps })
+        ? compileSegment({ messages, fileOps, sourceIndices })
         : "";
 
     const branchIds = branchEntries.map((e: any) => e.id);
