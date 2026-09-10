@@ -9,7 +9,7 @@
  *
  * Created for the summary/recall index-space fix; not ported from upstream.
  */
-import { readFileSync } from "fs";
+import { scanSessionEntries } from "./session-lines.js";
 
 /** Entries counted by the global `#N` index: persisted message entries. */
 export const isCountedMessageEntry = (entry: any): boolean =>
@@ -49,20 +49,11 @@ export const buildGlobalIndexById = (entries: readonly any[]): Map<string, numbe
  * file cannot be read.
  */
 export const loadGlobalIndexById = (sessionFile: string): Map<string, number> | undefined => {
-  let content: string;
-  try {
-    content = readFileSync(sessionFile, "utf-8");
-  } catch {
-    return undefined;
-  }
+  // Streamed like load-messages (upstream pi-vcc #26): no whole-file string.
   const entries: any[] = [];
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      entries.push(JSON.parse(line));
-    } catch {
-      // Corrupt lines are silently dropped by pi too.
-    }
-  }
+  const scan = scanSessionEntries(sessionFile, (entry) => {
+    entries.push(entry);
+  });
+  if (scan.missing) return undefined;
   return buildGlobalIndexById(entries);
 };
