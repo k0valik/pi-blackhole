@@ -7,6 +7,7 @@ import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
 import {
   compactInlineAtTurnBoundary,
   InlineCompactionUnavailableError,
+  isCompactionEligible,
   type InlineCompaction,
 } from "./inline-compaction.js";
 
@@ -203,6 +204,15 @@ async function handleTurnEnd(
     return;
   }
 
+  if (!isCompactionEligible(ctx.sessionManager, entries)) {
+    dbg("compaction_trigger.turn_end.skip", {
+      reason: "not_eligible",
+      tokens,
+      threshold,
+    });
+    return;
+  }
+
   const hasUI = ctx.hasUI;
   const ui = ctx.ui;
   dbg("compaction_trigger.turn_end.threshold_reached", {
@@ -392,6 +402,15 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
     return;
   }
 
+  if (!isCompactionEligible(ctx.sessionManager, entries)) {
+    dbg("compaction_trigger.skip", {
+      reason: "not_eligible",
+      tokens,
+      threshold,
+    });
+    return;
+  }
+
   // Capture ctx properties synchronously — the deferred callback below
   // may outlive the extension ctx (stale after session replacement/reload).
   const hasUI = ctx.hasUI;
@@ -518,6 +537,17 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
           ui,
           "Observational memory: compaction skipped — another compaction already ran before deferred compaction",
         );
+        return;
+      }
+
+      if (!isCompactionEligible(ctx.sessionManager, currentEntries)) {
+        runtime.compactInFlight = false;
+        runtime.autoCompactionController = null;
+        dbg("compaction_trigger.microtask.bail", {
+          reason: "not_eligible",
+          currentTokens,
+          threshold,
+        });
         return;
       }
 

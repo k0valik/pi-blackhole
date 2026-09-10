@@ -2,6 +2,7 @@ import { AgentSession, type CompactionResult } from "@earendil-works/pi-coding-a
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { debugLog } from "./debug-log.js";
 
 const REGISTRY_KEY = Symbol.for("pi-blackhole:inline-compaction-adapter:v1");
 
@@ -33,9 +34,25 @@ interface SessionManagerLike {
   buildSessionContext(): { messages: unknown[] };
 }
 
+export interface CompactionSettingsLike {
+  enabled?: boolean;
+  reserveTokens?: number;
+  keepRecentTokens?: number;
+}
+
+export type PrepareCompactionLike = (
+  pathEntries: unknown[],
+  settings: CompactionSettingsLike,
+) => unknown | undefined;
+
+interface SettingsManagerLike {
+  getCompactionSettings?(): CompactionSettingsLike;
+}
+
 interface PatchableSession {
   agent: AgentLike;
   sessionManager: SessionManagerLike;
+  settingsManager?: SettingsManagerLike;
   abort(): Promise<void>;
   compact(customInstructions?: string): Promise<CompactionResult>;
   _bindExtensionCore(runner: unknown): unknown;
@@ -79,6 +96,9 @@ interface AdapterRegistry {
   compactionInFlight: WeakSet<object>;
   hostCandidateCount?: number;
   capturedSessionCount?: number;
+  prepareCompaction?: PrepareCompactionLike;
+  prepareCompactionSource?: string;
+  prepareCompactionFailure?: string;
 }
 
 export interface InlineCompactionAdapterStatus {
@@ -88,11 +108,19 @@ export interface InlineCompactionAdapterStatus {
 
 export interface InlineCompactionInstallOptions {
   sessionClass?: PatchableSessionClass;
+  prepareCompaction?: PrepareCompactionLike;
 }
 
 export interface HostInlineCompactionInstallOptions {
   entrypoint?: string;
   stack?: string;
+  prepareCompaction?: PrepareCompactionLike;
+}
+
+export interface PrepareCompactionStatus {
+  resolved: boolean;
+  source?: string;
+  failure?: string;
 }
 
 export type InlineCompaction = (
@@ -445,6 +473,59 @@ function findBundledRuntimeModule(entrypoint: string, packageRoot: string): stri
   return undefined;
 }
 
+async function resolveHostPrepareCompaction(
+  packageRoots: Iterable<string>,
+  registry: AdapterRegistry,
+): Promise<void> {
+  if (registry.prepareCompaction && registry.prepareCompactionSource !== "injected") return;
+
+  const failureReasons: string[] = [];
+  let attemptedPaths = false;
+  for (const packageRoot of packageRoots) {
+    for (const subpath of [
+      join("dist", "core", "compaction", "index.js"),
+      join("dist", "core", "compaction", "compaction.js"),
+    ]) {
+      const fullPath = join(packageRoot, subpath);
+      if (existsSync(fullPath)) {
+        attemptedPaths = true;
+        try {
+          const compModule = (await import(pathToFileURL(fullPath).href)) as {
+            prepareCompaction?: PrepareCompactionLike;
+          };
+          if (typeof compModule.prepareCompaction === "function") {
+            registry.prepareCompaction = compModule.prepareCompaction;
+            registry.prepareCompactionSource = fullPath;
+            registry.prepareCompactionFailure = undefined;
+            debugLog("inline_compaction.prepare_compaction", {
+              resolved: true,
+              source: fullPath,
+            });
+            return;
+          }
+          failureReasons.push(`${fullPath}: prepareCompaction is not a function`);
+        } catch (error) {
+          failureReasons.push(
+            `${fullPath}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+  }
+
+  const failure =
+    failureReasons.length > 0
+      ? failureReasons.join("; ")
+      : attemptedPaths
+        ? "compaction module found but prepareCompaction was not exported"
+        : "no candidate compaction module paths found";
+  registry.prepareCompactionFailure = failure;
+  debugLog("inline_compaction.prepare_compaction", {
+    resolved: false,
+    failure,
+  });
+}
+
 export async function installHostInlineCompactionAdapter(
   options: HostInlineCompactionInstallOptions = {},
 ): Promise<InlineCompactionAdapterStatus> {
@@ -460,6 +541,15 @@ export async function installHostInlineCompactionAdapter(
     const root = findPiPackageRoot(hostPath);
     if (root) packageRoots.add(root);
   }
+
+  const registry = getRegistry();
+  if ("prepareCompaction" in options) {
+    registry.prepareCompaction = options.prepareCompaction;
+    registry.prepareCompactionSource = options.prepareCompaction ? "injected" : undefined;
+    registry.prepareCompactionFailure = undefined;
+  }
+
+  await resolveHostPrepareCompaction(packageRoots, registry);
 
   // Collect fast candidates first: per package root, pi's already-loaded
   // bundled runtime chunk (cache-hit, ~0-10ms). A root that resolves a chunk
@@ -524,6 +614,11 @@ export function installInlineCompactionAdapter(
   const sessionClass = options.sessionClass ?? (AgentSession as unknown as PatchableSessionClass);
   const prototype = sessionClass.prototype;
   const registry = getRegistry();
+  if ("prepareCompaction" in options) {
+    registry.prepareCompaction = options.prepareCompaction;
+    registry.prepareCompactionSource = options.prepareCompaction ? "injected" : undefined;
+    registry.prepareCompactionFailure = undefined;
+  }
   const existing = registry.installs.get(prototype);
   if (existing) return existing.status;
 
@@ -733,4 +828,50 @@ export async function compactInlineAtTurnBoundary(
     );
   }
   return result;
+}
+
+export function getCapturedCompactionSettings(
+  sessionManager: object,
+): CompactionSettingsLike | undefined {
+  const registry = getRegistry();
+  const record = registry.sessions.get(sessionManager);
+  if (record?.session?.settingsManager?.getCompactionSettings) {
+    return record.session.settingsManager.getCompactionSettings();
+  }
+  return undefined;
+}
+
+export function getPrepareCompactionStatus(): PrepareCompactionStatus {
+  const registry = getRegistry();
+  return {
+    resolved: typeof registry.prepareCompaction === "function",
+    source: registry.prepareCompactionSource,
+    failure: registry.prepareCompactionFailure,
+  };
+}
+
+export function isCompactionEligible(
+  sessionManager: object,
+  entries: unknown[],
+  customSettings?: CompactionSettingsLike,
+): boolean {
+  const prepare = getRegistry().prepareCompaction;
+  if (typeof prepare !== "function") {
+    // Unknown host capability: do not permanently disable compaction.
+    return true;
+  }
+
+  try {
+    const settings = customSettings ?? getCapturedCompactionSettings(sessionManager);
+    if (!settings) {
+      // Session not captured / settings unavailable: unknown host capability, do not block.
+      return true;
+    }
+
+    const prep = prepare(entries, settings);
+    return prep !== undefined;
+  } catch {
+    // Fail-open on unexpected error during settings resolution or preparation check so compaction is not blocked.
+    return true;
+  }
 }

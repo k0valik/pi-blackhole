@@ -8,6 +8,7 @@
  *   - Uses await flushAll() instead of vi.runAllTimersAsync()
  *   - Skipped "does not await observer/reflect promises" test (not applicable)
  */
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,7 +16,11 @@ import {
   registerCompactionTrigger,
   resetMidRunRetry,
 } from "../src/om/compaction-trigger.js";
-import { InlineCompactionUnavailableError } from "../src/om/inline-compaction.js";
+import {
+  InlineCompactionUnavailableError,
+  installHostInlineCompactionAdapter,
+  installInlineCompactionAdapter,
+} from "../src/om/inline-compaction.js";
 import { compactionEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
 
 /** Flush microtasks AND fire pending fake timers (setTimeout callbacks).
@@ -1114,5 +1119,298 @@ describe("Context-window-derived threshold (issue #60)", () => {
     await flushAll();
     expect(runtime.compactInFlight).toBe(false);
     expect(ctx.compact).not.toHaveBeenCalled();
+  });
+});
+
+describe("Eligibility guard (proactive auto-compaction Nothing to compact / session too small)", () => {
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    const cliPath = join(
+      process.cwd(),
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+      "dist",
+      "bundle",
+      "cli.js",
+    );
+    await installHostInlineCompactionAdapter({ entrypoint: cliPath, stack: "" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const smallIneligibleBranch: TestEntry[] = [
+    {
+      type: "message",
+      id: "small-user-1",
+      parentId: null,
+      timestamp: "2026-05-02T10:00:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "a".repeat(4000) }],
+      },
+    },
+    {
+      type: "message",
+      id: "small-assistant-2",
+      parentId: null,
+      timestamp: "2026-05-02T10:00:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "b".repeat(4000) }],
+        usage: { totalTokens: 85_000, inputTokens: 84_000, outputTokens: 1_000 },
+      },
+    },
+  ];
+
+  function makeLargeBranch(): TestEntry[] {
+    const branch: TestEntry[] = [];
+    for (let i = 0; i < 8; i++) {
+      branch.push({
+        type: "message",
+        id: `large-msg-${i}`,
+        parentId: null,
+        timestamp: "2026-05-02T10:00:00.000Z",
+        message: {
+          role: i % 2 === 0 ? "user" : "assistant",
+          content: [{ type: "text", text: "x".repeat(16_000) }],
+          ...(i === 7
+            ? { usage: { totalTokens: 85_000, inputTokens: 84_000, outputTokens: 1_000 } }
+            : {}),
+        },
+      });
+    }
+    return branch;
+  }
+
+  class TriggerTestSession {
+    settingsManager: {
+      getCompactionSettings: () => {
+        enabled: boolean;
+        reserveTokens: number;
+        keepRecentTokens: number;
+      };
+    };
+    sessionManager: {
+      buildSessionContext: () => { messages: unknown[] };
+      getBranch: () => TestEntry[];
+      getSessionId: () => string;
+    };
+    agent = { state: { messages: [] } };
+
+    constructor(
+      getBranchFn: () => TestEntry[],
+      settings: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number },
+    ) {
+      this.settingsManager = {
+        getCompactionSettings: () => ({
+          enabled: settings.enabled ?? true,
+          reserveTokens: settings.reserveTokens ?? 1000,
+          keepRecentTokens: settings.keepRecentTokens ?? 20_000,
+        }),
+      };
+      this.sessionManager = {
+        buildSessionContext: () => ({ messages: [] }),
+        getBranch: getBranchFn,
+        getSessionId: () => "test-session-settings",
+      };
+    }
+
+    async compact() {
+      await this.abort();
+      (this as any).sessionManager.appendCompaction?.();
+      this.agent.state.messages = [];
+    }
+
+    async abort() {}
+
+    _bindExtensionCore(runner: unknown) {
+      void runner;
+    }
+  }
+
+  function ctxWithSettings(
+    branchOrBranches: TestEntry[] | TestEntry[][],
+    settings: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number } = {
+      enabled: true,
+      reserveTokens: 1000,
+      keepRecentTokens: 20_000,
+    },
+    overrides: Record<string, unknown> = {},
+  ) {
+    const branches =
+      Array.isArray(branchOrBranches[0]) && "type" in (branchOrBranches[0] as any) === false
+        ? (branchOrBranches as TestEntry[][])
+        : [branchOrBranches as TestEntry[]];
+    let branchIndex = 0;
+    const getBranch = vi.fn(() => branches[Math.min(branchIndex++, branches.length - 1)]);
+
+    installInlineCompactionAdapter({ sessionClass: TriggerTestSession as never });
+    const session = new TriggerTestSession(getBranch, settings);
+    session._bindExtensionCore({});
+
+    return fakeCtx(branches, {
+      sessionManager: session.sessionManager,
+      ...overrides,
+    });
+  }
+
+  it("skips settled auto-compaction initially when provider threshold is reached but session entries are ineligible", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
+    const ctx = ctxWithSettings(smallIneligibleBranch);
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(false);
+    await flushAll();
+
+    expect(ctx.compact).not.toHaveBeenCalled();
+    const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
+    expect(
+      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached")),
+    ).toBe(false);
+  });
+
+  it("deferred recheck skips compaction when session becomes ineligible before agent settles", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
+    const largeBranch = makeLargeBranch();
+    let idle = false;
+    const branches = [largeBranch, smallIneligibleBranch];
+    const ctx = ctxWithSettings(
+      branches,
+      {
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: 20_000,
+      },
+      {
+        isIdle: vi.fn(() => idle),
+      },
+    );
+
+    handler(agentEnd(), ctx);
+    // Initial check on large branch passes and marks compactInFlight
+    expect(runtime.compactInFlight).toBe(true);
+
+    // Agent becomes idle, but now the branch has switched to smallIneligibleBranch
+    idle = true;
+    await flushAll();
+    await advanceRetryTicks(1);
+
+    expect(runtime.compactInFlight).toBe(false);
+    expect(ctx.compact).not.toHaveBeenCalled();
+  });
+
+  it("resumes auto-compaction after history grows past keepRecentTokens", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
+    const ineligibleCtx = ctxWithSettings(smallIneligibleBranch);
+
+    // Turn 1: ineligible -> skipped
+    handler(agentEnd(), ineligibleCtx);
+    await flushAll();
+    expect(ineligibleCtx.compact).not.toHaveBeenCalled();
+    expect(runtime.compactInFlight).toBe(false);
+
+    // Turn 2: history grew to largeBranch -> eligible
+    const eligibleCtx = ctxWithSettings(makeLargeBranch());
+    handler(agentEnd(), eligibleCtx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(eligibleCtx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects effective configured keepRecentTokens rather than a hardcoded 20k", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
+    // Small branch has ~2k tokens. Under keepRecentTokens: 500, it IS eligible!
+    const ctx = ctxWithSettings(smallIneligibleBranch, {
+      enabled: true,
+      reserveTokens: 500,
+      keepRecentTokens: 500,
+    });
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("mid-run mode (resume): skips inline compaction when threshold reached but session is ineligible", async () => {
+    const { turnHandler, runtime, inlineCompact } = captureHandler({
+      compactAfterTokens: 81_000,
+      midRunCompaction: "resume",
+    });
+    const ctx = ctxWithSettings(smallIneligibleBranch);
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).not.toHaveBeenCalled();
+    expect(runtime.midRunCompactionRetry.failures).toBe(0);
+    const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
+    expect(
+      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached mid-run")),
+    ).toBe(false);
+  });
+
+  it("mid-run mode (pause): skips pause compaction when threshold reached but session is ineligible", async () => {
+    const { turnHandler, runtime } = captureHandler({
+      compactAfterTokens: 81_000,
+      midRunCompaction: "pause",
+    });
+    const ctx = ctxWithSettings(smallIneligibleBranch);
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(runtime.midRunCompactionRetry.failures).toBe(0);
+    const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
+    expect(
+      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached mid-run")),
+    ).toBe(false);
+  });
+
+  it("genuine compaction errors remain visible when eligible compaction fails", async () => {
+    const { handler } = captureHandler({ compactAfterTokens: 81_000 });
+    const ctx = ctxWithSettings(makeLargeBranch(), undefined, {
+      compact: vi.fn((options: any) => {
+        options?.onError?.(new Error("API rate limit exceeded: quota 0"));
+      }),
+    });
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+    const errorNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "error");
+    expect(errorNotices.length).toBeGreaterThan(0);
+    expect(errorNotices.some((call) => String(call[0]).includes("API rate limit exceeded"))).toBe(
+      true,
+    );
+  });
+
+  it("fails open and proceeds with compaction when settings are unavailable (session not captured)", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+    // Bare mock session with no settingsManager captured
+    const ctx = fakeCtx([dueBranch]);
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails open and proceeds with compaction when prepareCompaction is unavailable", async () => {
+    installInlineCompactionAdapter({ prepareCompaction: undefined });
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
+    const ctx = ctxWithSettings(smallIneligibleBranch);
+
+    handler(agentEnd(), ctx);
+    expect(runtime.compactInFlight).toBe(true);
+    await flushAll();
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
 });
