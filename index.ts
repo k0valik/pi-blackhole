@@ -47,11 +47,22 @@ export default async (pi: ExtensionAPI) => {
   // 0.5.2 migration notice: nudge pinned-threshold users toward the
   // context-window preset curve (see src/changelog/migration-notice.ts).
   // TODO(0.5.3): remove together with the module + tests.
+  //
+  // The dynamic import defers this work to a later tick, by which time the
+  // session may already be gone (quit, /reload, /new right after startup).
+  // Pi's ctx accessors throw on a stale ctx, so the `.then()` body must be
+  // both guarded and catch-terminated — otherwise the throw escapes as an
+  // *unhandled rejection* and terminates the pi process.
   pi.on("session_start", (_event: unknown, ctx: any) => {
-    void import("./src/changelog/migration-notice.js").then(({ maybeNotifyThresholdMigration }) => {
-      omRuntime.ensureConfig(ctx.cwd, (msg: string) => ctx.ui?.notify?.(msg, "warning"));
-      maybeNotifyThresholdMigration(ctx, omRuntime.config);
-    });
+    void import("./src/changelog/migration-notice.js")
+      .then(({ maybeNotifyThresholdMigration }) => {
+        omRuntime.ensureConfig(ctx.cwd, (msg: string) => ctx.ui?.notify?.(msg, "warning"));
+        maybeNotifyThresholdMigration(ctx, omRuntime.config);
+      })
+      .catch(() => {
+        // Session replaced/disposed while the notice module was loading, or the
+        // config read failed. A migration nudge is best-effort — never fatal.
+      });
   });
 
   scaffoldSettings();
