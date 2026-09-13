@@ -349,6 +349,16 @@ export class Runtime {
     return candidates;
   }
 
+  /** Resolve the `$session` provider alias against the active session model. */
+  private materializeCandidate(
+    candidate: ConfiguredModel,
+    sessionModel: unknown,
+  ): ConfiguredModel | undefined {
+    if (candidate.provider !== "$session") return candidate;
+    const provider = (sessionModel as { provider?: string } | undefined)?.provider;
+    return provider ? { ...candidate, provider } : undefined;
+  }
+
   /**
    * Resolve a model for a consolidation stage.
    *
@@ -373,7 +383,17 @@ export class Runtime {
     const stageName = this.consolidationPhase ?? "unknown";
 
     // Try configured candidates
-    for (const candidate of candidates) {
+    for (const configuredCandidate of candidates) {
+      const candidate = this.materializeCandidate(configuredCandidate, ctx.model);
+      if (!candidate) {
+        if (ctx.hasUI && ctx.ui) {
+          ctx.ui.notify(
+            `Observational memory: ${stageName} model ${configuredCandidate.provider}/${configuredCandidate.id} requires an active session provider`,
+            "warning",
+          );
+        }
+        continue;
+      }
       const key = modelKey(candidate);
 
       // In-memory skip: model failed earlier in this stage with cooldownHours 0
@@ -572,12 +592,9 @@ export class Runtime {
     const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
     const model = resolvedModel as { provider?: string; id?: string };
     if (!model.provider || !model.id) return undefined;
-    return (
-      candidates.find((c) => c.provider === model.provider && c.id === model.id) ??
-      (this.config.model?.provider === model.provider && this.config.model?.id === model.id
-        ? this.config.model
-        : undefined)
-    );
+    return candidates
+      .map((candidate) => this.materializeCandidate(candidate, ctx.model))
+      .find((candidate) => candidate?.provider === model.provider && candidate?.id === model.id);
   }
 
   /**

@@ -171,6 +171,53 @@ describe("Runtime.resolveModel — fallback chain", () => {
       expect(result.model.id).toBe("primary-model:free");
     }
   });
+  it.each(["openai-codex", "github-copilot-2"])(
+    "resolves a $session worker model through the active %s provider",
+    async (sessionProvider) => {
+      writeConfig({ sessionFallback: false });
+      const { Runtime } = await import("../src/om/runtime.js");
+      const runtime = new Runtime();
+      runtime.ensureConfig(testDir);
+      const workerModel = makeModel("gpt-5.6-luna", sessionProvider);
+      const registry = makeRegistry([workerModel]);
+
+      const result = await runtime.resolveModel({
+        model: makeModel("gpt-5.6-sol", sessionProvider),
+        modelRegistry: registry,
+        hasUI: false,
+        stageModel: { provider: "$session", id: "gpt-5.6-luna", thinking: "low" },
+      });
+
+      expect(registry.find).toHaveBeenCalledWith(sessionProvider, "gpt-5.6-luna");
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.model).toBe(workerModel);
+    },
+  );
+
+  it("skips a $session worker model when no active session model exists", async () => {
+    writeConfig({ sessionFallback: false });
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+    const registry = makeRegistry([makeModel("gpt-5.6-luna", "openai-codex")]);
+    const notify = vi.fn();
+
+    const result = await runtime.resolveModel({
+      model: undefined,
+      modelRegistry: registry,
+      hasUI: true,
+      ui: { notify },
+      stageModel: { provider: "$session", id: "gpt-5.6-luna" },
+    });
+
+    expect(registry.find).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("requires an active session provider"),
+      "warning",
+    );
+    expect(result.ok).toBe(false);
+  });
+
   it("preserves a credential-resolved endpoint from provider auth on configured candidate", async () => {
     writeConfig({
       observerModel: {
@@ -855,6 +902,32 @@ describe("Runtime — findCandidateConfig", () => {
     });
     expect(candidate).toBeDefined();
     expect(candidate!.id).toBe("base-fallback:free");
+  });
+
+  it("materializes the session provider for cooldown tracking", async () => {
+    writeConfig({
+      observerModel: {
+        provider: "$session",
+        id: "gpt-5.6-luna",
+        cooldownHours: 5,
+      },
+    });
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    const candidate = runtime.findCandidateConfig(makeModel("gpt-5.6-luna", "openai-codex"), {
+      model: makeModel("gpt-5.6-sol", "openai-codex"),
+      modelRegistry: makeRegistry([]),
+      hasUI: false,
+      stageModel: { provider: "$session", id: "gpt-5.6-luna", cooldownHours: 5 },
+    });
+
+    expect(candidate).toEqual({
+      provider: "openai-codex",
+      id: "gpt-5.6-luna",
+      cooldownHours: 5,
+    });
   });
 
   it("returns undefined for session model", async () => {

@@ -105,7 +105,7 @@ When a worker runs, the runtime builds a candidate model list in this order:
 3. Base model (`model`) — shared across all workers
 4. Session model (the user's main conversation model) — always the last resort, never cooled down
 
-Each candidate is resolved via `modelRegistry.find(provider, id)`. If Pi doesn't know the provider/model combination, it's skipped. The runtime tries up to 10 candidates per stage before giving up (enforced by `MAX_STAGE_ATTEMPTS = 10` in `consolidation.ts`).
+Each candidate is resolved via `modelRegistry.find(provider, id)`. If a candidate uses `"provider": "$session"`, the runtime first replaces the alias with the active session model's provider while preserving the candidate's configured model ID and thinking level. This lets workers follow provider/account switches without falling back to the more expensive session model itself. If Pi doesn't know the resulting provider/model combination, it's skipped. The runtime tries up to 10 candidates per stage before giving up (enforced by `MAX_STAGE_ATTEMPTS = 10` in `consolidation.ts`).
 
 **Cooldown-aware skipping:** Before calling a candidate, the runtime checks `isCooldownActive()` (`cooldown.ts`). If the model is in cooldown, it's transparently skipped. Cooldowns are persisted to `pi-blackhole-cooldown.json` and survive Pi restarts.
 
@@ -312,7 +312,7 @@ Each model entry supports these fields:
 
 ```jsonc
 {
-  "provider": "openrouter",   // required — must be known to Pi (explicit in models.json or built-in)
+  "provider": "openrouter",   // required — Pi provider ID, or "$session" to follow the active session provider
   "id": "qwen/qwen3-next-80b-a3b-instruct:free",  // required — model ID as the provider knows it
   "thinking": "low",          // optional — "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
   "cooldownHours": 6,         // optional — hours to skip after retryable error (default 1, 0 = in-memory only, no disk writes)

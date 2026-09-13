@@ -507,11 +507,13 @@ Each model config supports the following fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | string | Provider name (required). |
+| `provider` | string | Provider name (required), or `"$session"` to use the active session model's provider. |
 | `id` | string | Model ID (required). |
 | `thinking` | enum | Thinking level: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`. Defaults to `"low"` when unset. |
 | `cooldownHours` | number | Cooldown duration in hours after a retryable error (429/5xx/timeout). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. |
 | `contextWindow` | number | Override for the model's context window. Inherits from Pi's model registry when unset. |
+
+Use `"provider": "$session"` when a worker should keep its configured model ID and thinking level but authenticate through the active session provider. The alias is resolved each time a worker selects a model, so switching the session between personal and work providers also switches the worker provider. If that provider does not expose the configured model ID, normal candidate fallback applies.
 
 **Example:**
 
@@ -526,7 +528,12 @@ Each model config supports the following fields:
   },
   "observerFallbackModels": [
     { "provider": "openai", "id": "gpt-4o", "thinking": "minimal" }
-  ]
+  ],
+  "reflectorModel": {
+    "provider": "$session",
+    "id": "gpt-5.6-luna",
+    "thinking": "low"
+  }
 }
 ```
 

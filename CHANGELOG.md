@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- **Session-relative providers for observational-memory workers.** Set an OM model's `provider` to `"$session"` to keep its configured model ID and thinking level while resolving through the active session provider. Provider changes (for example, personal versus work accounts) now carry over to workers without enabling fallback to the main session model.
+
 ---
 
 ## [0.5.3] - 2026-09-10
