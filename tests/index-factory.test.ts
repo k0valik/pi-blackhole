@@ -12,11 +12,15 @@ import { createExtensionApiDouble } from "./fixtures/pi-extension-api.js";
 
 const installMock = vi.fn();
 const registerCompactionTriggerMock = vi.fn();
+const registerPreCompactionOutputMock = vi.fn();
 
 vi.mock("../src/core/settings", () => ({ scaffoldSettings: vi.fn() }));
 vi.mock("../src/hooks/before-compact", () => ({ registerBeforeCompactHook: vi.fn() }));
 vi.mock("../src/hooks/compact-failed", () => ({ registerCompactFailedHook: vi.fn() }));
 vi.mock("../src/hooks/compaction-context", () => ({ registerCompactionContextHook: vi.fn() }));
+vi.mock("../src/hooks/cosmetic-output", () => ({
+  registerPreCompactionOutput: registerPreCompactionOutputMock,
+}));
 vi.mock("../src/commands/pi-vcc", () => ({ registerPiVccCommand: vi.fn() }));
 vi.mock("../src/commands/memory", () => ({ registerMemoryCommand: vi.fn() }));
 vi.mock("../src/commands/vcc-recall", () => ({ registerVccRecallCommand: vi.fn() }));
@@ -44,6 +48,7 @@ describe("extension factory wiring", () => {
   beforeEach(() => {
     installMock.mockReset();
     registerCompactionTriggerMock.mockReset();
+    registerPreCompactionOutputMock.mockReset();
   });
 
   it("awaits the host adapter probe and stores its status on the trigger runtime", async () => {
@@ -79,5 +84,6 @@ describe("extension factory wiring", () => {
     await run;
 
     expect(registeredStatus).toEqual(failureStatus);
+    expect(registerPreCompactionOutputMock).toHaveBeenCalledOnce();
   });
 });

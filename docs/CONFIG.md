@@ -22,6 +22,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default"
   "tailBehavior": "minimal",   // "pi-default" | "minimal"
+  "showPreCompactionMessage": true, // Display-only copy of the newest dropped assistant output (max 16 KiB)
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
   "compactAfterTokens": 0,        // Explicit fixed threshold. 0 = not set (a ratio, reserve, or preset curve governs). Never exactly 81000 (legacy residue — dropped)
@@ -160,6 +161,29 @@ minimal (last user at m5):
 
 // Use Pi's gentler cut for both auto and manual
 { "tailBehavior": "pi-default" }
+```
+
+### `showPreCompactionMessage`
+
+Default `true`. After a successful Blackhole compaction, append a display-only copy of the **newest assistant output that the cut removed from view** so the terminal keeps showing the answer you were reading.
+
+| Value | Behavior |
+|-------|----------|
+| `true` | Copy up to 16 KiB of the newest dropped assistant text into a plain `blackhole-pre-compaction-output` session entry, rendered as `[Previous output — display only]` below the retained tail and above the compaction card. |
+| `false` | No copy; the compaction card appears alone (pre-0.5.x behavior). |
+
+The copy is **cosmetic**: Pi renders the entry but never sends it to the model (`sessionEntryToContextMessages` returns nothing for plain `custom` entries), and Blackhole's own serializers only read `message`, `custom_message`, and `branch_summary` entries. It does not change `firstKeptEntryId`, the summary, or the auto-compaction threshold.
+
+When the newest dropped message is already retained by the cut (the common `minimal` case, where the last user turn and everything after it stay visible), nothing is copied — no duplicates. Compact-all with no retained tail copies the final answer instead.
+
+Things that stay out of the copy: tool output, thinking blocks, images, and exact card layout. The copy is truncated at 16 KiB with a `[Copy truncated]` marker; each eligible compaction adds one entry to the session file (a bounded disk and redraw cost, not a token cost).
+
+```jsonc
+// Default: keep the newest dropped answer visible
+{ "showPreCompactionMessage": true }
+
+// Plain compaction card only
+{ "showPreCompactionMessage": false }
 ```
 
 ### `midRunCompaction`
@@ -564,6 +588,7 @@ Boolean parsing accepts `1`, `true`, `yes`, `on` (and `0`, `false`, `no`, `off`)
 | `PI_BLACKHOLE_COMPACTION` | `compaction` (`auto` \| `manual` \| `off`) | `PI_BLACKHOLE_COMPACTION=manual` |
 | `PI_BLACKHOLE_COMPACTION_ENGINE` | `compactionEngine` (`blackhole` \| `pi-default`) | `PI_BLACKHOLE_COMPACTION_ENGINE=pi-default` |
 | `PI_BLACKHOLE_MID_RUN_COMPACTION` | `midRunCompaction` (`resume` \| `pause` \| `off`) | `PI_BLACKHOLE_MID_RUN_COMPACTION=resume` |
+| `PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE` | `showPreCompactionMessage` (`true` \| `false`) | `PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE=off` |
 | `PI_BLACKHOLE_COMPACTION_SUMMARY_MODE` | `compactionSummaryMode` (`default` \| `append`) | `PI_BLACKHOLE_COMPACTION_SUMMARY_MODE=append` |
 
 ### Passive mode (legacy)

@@ -238,6 +238,8 @@ The interaction matrix:
 
 Both `/blackhole` and auto-triggered default to `"minimal"`. Set explicitly to `"pi-default"` for a gentler cut.
 
+`showPreCompactionMessage` (default `true`) is the visual companion to the cut: after a successful blackhole compaction, blackhole appends a **display-only** copy of the newest assistant output the cut removed, so the terminal keeps showing the answer instead of jumping straight to the compaction card. It is a plain `custom` session entry — never sent to the model, never a memory source, and it leaves the cut, summary, and threshold untouched. Cap: 16 KiB, text only (no tool output, thinking, or images). Nothing is copied when the newest dropped text is already retained.
+
 **User-facing statement:**
 
 > One more thing: who should handle the actual compaction?
@@ -267,6 +269,7 @@ Based on interview answers, build the config object. Write it to:
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default" — irrelevant for manual/off
   "tailBehavior": "minimal",      // "minimal" (last user msg only, default) | "pi-default" (Pi's gentler cut)
+  "showPreCompactionMessage": true, // display-only copy of the newest dropped assistant output (16 KiB cap); never enters context or memory
   "retainedToolOutputMaxTokens": 20000, // 0 = disabled
   "recallResponseMaxChars": 48000,      // recall response cap in chars (~12k tokens); 0 = unbounded
   "compactAfterPreset": "default", // auto-compaction threshold curve: fires at floor(window × ratio), 0.90 @ 32k → 0.40 @ 1M. No numeric threshold key is needed out of the box
@@ -389,6 +392,7 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
   "compaction": "auto",
   "compactionEngine": "blackhole",
   "tailBehavior": "minimal",
+  "showPreCompactionMessage": true,
   "memory": true,
   "model": { "provider": "openrouter", "id": "google/gemma-4-31b-it:free" },
 
