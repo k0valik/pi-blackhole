@@ -168,6 +168,8 @@ Controls the **mid-run** auto-compaction trigger. Pi's `agent_end` event only fi
 
 Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
+Full mechanism, history, and debugging guide: [mid-run-compaction.md](mid-run-compaction.md).
+
 | Value | Behavior |
 |-------|----------|
 | `"resume"` *(experimental)* | Compact transparently at an awaited `turn_end`, then continue inside the **same** agent run and outer `session.prompt()` promise. No run abort and no synthetic continuation message. |

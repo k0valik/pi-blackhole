@@ -27,7 +27,7 @@ The core insight: Pi's native LLM compaction erodes detail after repeated cycles
 
 Five architectural pillars define the extension:
 
-1. **Deterministic compaction** — The [[vcc-compaction#compile pipeline]] extracts structured sections (goals, files, commits, preferences, brief transcript) using regex heuristics. No LLM, no hallucination, no API cost.
+1. **Deterministic compaction** — The [[vcc-compaction#compile pipeline]] extracts structured sections (goals, files, commits, preferences, brief transcript) using regex heuristics. No LLM, no hallucination, no API cost. Trigger paths (settled + mid-run) and their history: [[mid-run-compaction]].
 2. **Observational memory** — Three [[observational-memory#The three workers|background workers]] (Observer, Reflector, Dropper) capture timestamped observations and durable reflections in a session ledger that persists across compactions.
 3. **Unified configuration** — One JSON file (`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`) replaces two upstream configs. See [[config#Unified configuration]].
 4. **Per-worker model fallback** — Each OM worker has a primary model and ordered fallback list with persisted cooldowns. See [[observational-memory#Model resolution]].
