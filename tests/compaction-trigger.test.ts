@@ -1080,6 +1080,31 @@ describe("non-persisted session inline fallback (issue #92)", () => {
     expect(runtime.inlineCompactionWarningEmitted).toBe(false);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
+
+  it("N10: the adapter-unavailable warning does not promise the settled fallback to non-persisted sessions", async () => {
+    // agent_start path: non-persisted → no settled-fallback promise.
+    const started = captureHandler({});
+    started.runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+    const startCtx = nonPersistedCtx(belowBranch);
+    started.startHandler(undefined, startCtx);
+    const startWarn = (startCtx.ui as any).notify.mock.calls.find(
+      (call: unknown[]) => call[1] === "warning",
+    );
+    expect(startWarn[0]).toContain("non-persisted sessions will not be compacted");
+    expect(startWarn[0]).not.toContain("settled compaction fallback");
+
+    // turn_end path (resume mode): non-persisted → same.
+    const failingInline = vi.fn(async () => {
+      throw new InlineCompactionUnavailableError("pi 0.80.1 lacks inline compaction API");
+    });
+    const inlineTurn = captureHandler({ midRunCompaction: "resume" }, failingInline);
+    const turnCtx = nonPersistedCtx(dueBranch);
+    await inlineTurn.turnHandler(turnEnd(), turnCtx);
+    const turnWarn = (turnCtx.ui as any).notify.mock.calls.find(
+      (call: unknown[]) => call[1] === "warning",
+    );
+    expect(turnWarn[0]).toContain("non-persisted sessions will not be compacted");
+  });
 });
 
 describe("mid-run compaction cancellation resilience", () => {

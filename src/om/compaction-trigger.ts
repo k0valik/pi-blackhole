@@ -11,6 +11,16 @@ import {
   type InlineCompaction,
 } from "./inline-compaction.js";
 
+/** User-facing tail for the adapter-unavailable warning. The settled
+ * (agent_end) fallback is viable for persisted sessions, but doomed for
+ * non-persisted ones — their parent disposes them right after agent_end
+ * (issue #92), so the message must not promise a fallback that cannot run. */
+function adapterFallbackNote(sessionManager: { isPersisted?: () => boolean } | undefined): string {
+  return sessionManager?.isPersisted?.() === false
+    ? "; non-persisted sessions will not be compacted"
+    : "; using settled compaction fallback";
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (error && typeof error === "object" && "message" in error) {
@@ -152,7 +162,7 @@ export function registerCompactionTrigger(
       notifySafely(
         ctx?.hasUI ?? false,
         ctx?.ui,
-        `Observational memory: mid-run inline compaction unavailable: ${runtime.inlineCompactionAdapterStatus.reason}; using settled compaction fallback`,
+        `Observational memory: mid-run inline compaction unavailable: ${runtime.inlineCompactionAdapterStatus.reason}${adapterFallbackNote(ctx?.sessionManager)}`,
         "warning",
       );
     }
@@ -307,7 +317,7 @@ async function handleTurnEnd(
           notifySafely(
             hasUI,
             ui,
-            `Observational memory: ${message}; using settled compaction fallback`,
+            `Observational memory: ${message}${adapterFallbackNote(ctx.sessionManager)}`,
             "warning",
           );
         }
