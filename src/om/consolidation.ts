@@ -16,6 +16,7 @@ import { type ResolveResult, type Runtime, type RuntimeGeneration } from "./runt
 import { isRetryableError, isStaleExtensionContextError } from "./retryable-error.js";
 import { effectiveContextWindow } from "./model-budget.js";
 import { serializeSourceAddressedBranchEntries } from "./serialize.js";
+import { withOpenCodeSessionHeaders } from "./provider-stream.js";
 
 /** Fixed overhead for system prompt, tool definitions, and turn scaffold in context window pre-check. */
 const AGENT_LOOP_RESERVE = 8_000;
@@ -807,7 +808,7 @@ export async function runObserverStage(
       const result = await runObserver({
         model: resolved.model as any,
         apiKey: resolved.apiKey,
-        headers: resolved.headers,
+        headers: withOpenCodeSessionHeaders(resolved.model as any, resolved.headers, sessionId),
         env: resolved.env,
         priorReflections,
         priorObservations,
@@ -1099,7 +1100,7 @@ async function runReflectorStage(
       const reflections = await runReflector({
         model: resolved.model as any,
         apiKey: resolved.apiKey,
-        headers: resolved.headers,
+        headers: withOpenCodeSessionHeaders(resolved.model as any, resolved.headers, sessionId),
         env: resolved.env,
         reflections: newReflections,
         observations: newObservations,
@@ -1348,7 +1349,7 @@ async function runDropperStage(
       const droppedIds = await runDropper({
         model: resolved.model as any,
         apiKey: resolved.apiKey,
-        headers: resolved.headers,
+        headers: withOpenCodeSessionHeaders(resolved.model as any, resolved.headers, sessionId),
         env: resolved.env,
         reflections: reflectionsForDropper,
         observations: newObservations,

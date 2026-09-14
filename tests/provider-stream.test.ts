@@ -5,10 +5,34 @@ import {
   createBridgeStreamFn,
   createProviderFetch,
   providerStreamKey,
+  withOpenCodeSessionHeaders,
 } from "../src/om/provider-stream.js";
 
 const dispatcherSymbol = Symbol.for("undici.globalDispatcher.2");
 const originalDispatcher = (globalThis as any)[dispatcherSymbol];
+
+describe("OpenCode session headers", () => {
+  it("adds stable session headers for OpenCode providers", () => {
+    expect(
+      withOpenCodeSessionHeaders(
+        { provider: "opencode-go" },
+        { "x-existing": "keep" },
+        "session-123",
+      ),
+    ).toEqual({
+      "x-existing": "keep",
+      "x-opencode-session": "session-123",
+      "x-opencode-client": "pi",
+    });
+  });
+
+  it("does not add OpenCode headers to unrelated providers", () => {
+    const headers = { "x-existing": "keep" };
+    expect(withOpenCodeSessionHeaders({ provider: "openrouter" }, headers, "session-123")).toBe(
+      headers,
+    );
+  });
+});
 
 describe("custom provider stream bridge", () => {
   afterEach(() => {

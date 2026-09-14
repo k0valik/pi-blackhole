@@ -71,6 +71,26 @@ export function captureRegisteredProviderStreams(
 /** Pi 0.81 forwards fetch at runtime but omits it from AgentLoopConfig types. */
 export type ProviderFetchOption = { fetch?: typeof fetch };
 
+export function withOpenCodeSessionHeaders(
+  model: { provider?: string; baseUrl?: string },
+  headers: Record<string, string> | undefined,
+  sessionId: string | undefined,
+): Record<string, string> | undefined {
+  if (!sessionId) return headers;
+
+  const isOpenCode =
+    model.provider === "opencode" ||
+    model.provider === "opencode-go" ||
+    model.baseUrl?.includes("opencode.ai");
+  if (!isOpenCode) return headers;
+
+  return {
+    ...headers,
+    "x-opencode-session": sessionId,
+    "x-opencode-client": "pi",
+  };
+}
+
 /**
  * Intentionally minimal duck-type for undici's per-request dispatcher.
  *
