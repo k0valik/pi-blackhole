@@ -57,6 +57,13 @@ interface RunDropperArgs {
   providerIdleTimeoutMs?: number;
   /** Model registry for streamSimple resolution (custom providers, OAuth). */
   modelRegistry?: any;
+  /**
+   * Pi session id, forwarded through standard stream options
+   * (`SimpleStreamOptions.sessionId`). agentLoop spreads the full config into
+   * stream opts, so the bridge can derive provider-required headers (e.g.
+   * OpenCode `x-opencode-session`) without per-provider branching upstream.
+   */
+  sessionId?: string;
 }
 
 const DROP_SKIP_FULLNESS = 0.1;
@@ -354,6 +361,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     apiKey,
     headers,
     env,
+    ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],

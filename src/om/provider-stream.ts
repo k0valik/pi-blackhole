@@ -71,6 +71,101 @@ export function captureRegisteredProviderStreams(
 /** Pi 0.81 forwards fetch at runtime but omits it from AgentLoopConfig types. */
 export type ProviderFetchOption = { fetch?: typeof fetch };
 
+// ── Provider-required request headers (attribution) ────────────────────────────
+//
+// Pi's interactive path (`sdk.ts` streamFn) applies
+// `mergeProviderAttributionHeaders()` + `before_provider_headers` to every
+// provider request. OM workers call `streamSimple` directly (pi-ai compat or a
+// custom-registered stream), bypassing that pipeline — so correctness-critical
+// provider headers must be applied here, at the single choke point all three
+// consolidation stages share.
+//
+// Mirror of pi core `provider-attribution.ts#getSessionHeaders`
+// (@earendil-works/pi-coding-agent 0.85.1). A shared import is not possible —
+// the package `exports` map blocks `./dist/core/*` subpaths — so this mirrors
+// the rule instead of reusing it. Deliberately scoped to session headers
+// (correctness): pi's default attribution headers (OpenRouter referrer, Nvidia
+// billing origin, Cloudflare UA) are telemetry-only and owned by pi's sdk
+// path; duplicating them here would fork non-breaking behavior. Requests
+// succeed without them, but OpenCode Go rejects requests without a stable
+// `x-opencode-session` (400 MissingSessionID). Re-check against pi core when
+// bumping the pi dependency. Future provider rules belong in
+// `withProviderAttributionHeaders` — never at the stage call sites.
+/** Host pi core attributes OpenCode session headers to (exact match). */
+export const OPENCODE_HOST = "opencode.ai";
+
+const OPENCODE_PROVIDERS = new Set(["opencode", "opencode-go"]);
+
+/** Exact-hostname match (pi core `matchesHost` parity): rejects `evilopencode.ai.evil.com`. */
+export function matchesProviderHost(baseUrl: unknown, expectedHost: string): boolean {
+  if (typeof baseUrl !== "string" || baseUrl.length === 0) return false;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === expectedHost.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+/** True for OpenCode providers by id or by credential-resolved endpoint. */
+export function isOpenCodeModel(
+  model: { provider?: unknown; baseUrl?: unknown } | null | undefined,
+): boolean {
+  if (!model) return false;
+  if (typeof model.provider === "string" && OPENCODE_PROVIDERS.has(model.provider)) return true;
+  return matchesProviderHost(model.baseUrl, OPENCODE_HOST);
+}
+
+/** Pure OpenCode session headers, or undefined when not applicable. */
+export function getOpenCodeSessionHeaders(
+  model: { provider?: unknown; baseUrl?: unknown } | null | undefined,
+  sessionId: string | undefined,
+): Record<string, string> | undefined {
+  if (!sessionId || !isOpenCodeModel(model)) return undefined;
+  return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
+}
+
+/**
+ * Generic choke point: merge provider-required attribution headers under base
+ * headers. Add future provider rules here — never at the stage call sites.
+ * Merge order is pi-core parity (`mergeProviderAttributionHeaders` applies
+ * caller `headerSources` last): caller-supplied headers win over attribution.
+ * In practice the two never collide — auth-resolved base headers don't carry
+ * session ids — so this matches pi's wire behavior exactly.
+ */
+export function withProviderAttributionHeaders(
+  model: { provider?: unknown; baseUrl?: unknown } | null | undefined,
+  headers: Record<string, string> | undefined,
+  sessionId: string | undefined,
+): Record<string, string> | undefined {
+  const attribution = getOpenCodeSessionHeaders(model, sessionId);
+  if (!attribution) return headers;
+  return { ...attribution, ...headers };
+}
+
+/** Minimal `transformHeaders` shape (pi-ai `ModelsRequestTransforms`). */
+export type AttributionTransform = (
+  headers: Record<string, string>,
+) => Record<string, string> | Promise<Record<string, string>>;
+
+/**
+ * `transformHeaders`-compatible composer applying attribution after auth merge,
+ * then chaining the caller's transform (if any). This is the seam where pi's
+ * own `transformHeaders` concept runs — pi-ai's `applyAuth` honors it, so
+ * builtin providers get attribution at pi's layer, after auth headers.
+ * Idempotent: re-applying the same session's attribution preserves values.
+ */
+export function createAttributionTransform(
+  model: { provider?: unknown; baseUrl?: unknown } | null | undefined,
+  sessionId: string | undefined,
+  next?: AttributionTransform | null,
+): AttributionTransform {
+  return async (headers: Record<string, string>) => {
+    const attributed = withProviderAttributionHeaders(model, headers, sessionId) ?? {};
+    if (typeof next === "function") return (await next(attributed)) ?? attributed;
+    return attributed;
+  };
+}
+
 /**
  * Intentionally minimal duck-type for undici's per-request dispatcher.
  *
@@ -142,10 +237,12 @@ export function createBridgeStreamFn(
   modelRegistry?: ModelRegistry | null,
 ): (model: any, ctx: any, opts: any) => any {
   const PROVIDER_STREAMS_KEY = Symbol.for("pi-blackhole:provider-streams");
-  return (model: any, ctx: any, opts: any) => {
+  // Shared dispatch: custom streams first, compat last. `o` carries the
+  // (possibly attribution-enriched) request options for this call.
+  const dispatch = (model: any, ctx: any, o: any): any => {
     // 1. Check modelRegistry.streamSimple (host-composed facade, Pi #8964)
     if (modelRegistry && typeof (modelRegistry as any).streamSimple === "function") {
-      return (modelRegistry as any).streamSimple(model, ctx, opts);
+      return (modelRegistry as any).streamSimple(model, ctx, o);
     }
 
     // 2. Iterate getRegisteredProviderConfig: prefer the model's own provider
@@ -162,13 +259,13 @@ export function createBridgeStreamFn(
           const config = (modelRegistry as any).getRegisteredProviderConfig(providerId);
           if (!config || typeof config.streamSimple !== "function") continue;
           if (providerId === model.provider && config.api === model.api) {
-            return config.streamSimple(model, ctx, opts);
+            return config.streamSimple(model, ctx, o);
           }
           if (config.api === model.api && apiMatch === undefined) {
             apiMatch = config.streamSimple;
           }
         }
-        if (apiMatch) return apiMatch(model, ctx, opts);
+        if (apiMatch) return apiMatch(model, ctx, o);
       } catch {
         // Incomplete host/test doubles — fall through to global map
       }
@@ -183,10 +280,36 @@ export function createBridgeStreamFn(
         model?.provider && model?.api
           ? providerStreams.get(providerStreamKey(model.provider, model.api))
           : undefined;
-      if (customFn) return customFn(model, ctx, opts);
+      if (customFn) return customFn(model, ctx, o);
     }
 
     // 4. Final fallback to compat
-    return streamSimple(model, ctx, opts);
+    return streamSimple(model, ctx, o);
+  };
+  return (model: any, ctx: any, opts: any) => {
+    // Generic attribution: apply provider-required headers from the standard
+    // `sessionId` stream option (pi-ai `SimpleStreamOptions`). agentLoop spreads
+    // the full AgentLoopConfig into stream opts, so workers only need
+    // `sessionId` in their loop config — no per-provider branching here.
+    // Both layers are applied: pre-merged `headers` (for custom streams that
+    // ignore `transformHeaders`) and a composed `transformHeaders` (honored by
+    // pi-ai `applyAuth` after auth-header merge, i.e. pi's own layer).
+    const rawSessionId = (opts as { sessionId?: unknown } | null | undefined)?.sessionId;
+    const sessionId =
+      typeof rawSessionId === "string" && rawSessionId.length > 0 ? rawSessionId : undefined;
+    if (!sessionId) return dispatch(model, ctx, opts);
+    const headers = withProviderAttributionHeaders(model, opts?.headers, sessionId);
+    const incoming = (opts as { transformHeaders?: unknown } | null | undefined)?.transformHeaders;
+    const incomingTransform =
+      typeof incoming === "function" ? (incoming as AttributionTransform) : undefined;
+    // Fast path: unrelated provider, no caller transform — pass through untouched.
+    if (headers === opts?.headers && incomingTransform === undefined) {
+      return dispatch(model, ctx, opts);
+    }
+    return dispatch(model, ctx, {
+      ...opts,
+      headers,
+      transformHeaders: createAttributionTransform(model, sessionId, incomingTransform),
+    });
   };
 }

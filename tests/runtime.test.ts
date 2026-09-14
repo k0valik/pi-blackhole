@@ -936,6 +936,75 @@ describe("Runtime — recordRetryableError", () => {
   });
 });
 
+describe("Runtime — session-model deterministic cooldown", () => {
+  const missingSession = () =>
+    new Error(
+      'Reflector API error: 400: {"type":"MissingSessionID","message":"Request is missing x-opencode-session"}',
+    );
+
+  function sessionCtx(registry: ReturnType<typeof makeRegistry>, sessionModel: unknown) {
+    return { model: sessionModel, modelRegistry: registry, hasUI: false };
+  }
+
+  it("cools the session model on deterministic errors so resolveModel skips it", async () => {
+    writeConfig({});
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+    const registry = makeRegistry([]);
+    const sessionModel = makeModel("om-session", "opencode-go");
+
+    const first = await runtime.resolveModel(sessionCtx(registry, sessionModel));
+    expect(first.ok).toBe(true);
+
+    runtime.recordDeterministicError(
+      first.ok ? first.model : sessionModel,
+      missingSession(),
+      "observer",
+    );
+    expect(readCooldownFile()["opencode-go/om-session"]).toBeDefined();
+
+    const second = await runtime.resolveModel(sessionCtx(registry, sessionModel));
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toContain("cooldown");
+  });
+
+  it("leaves the session model usable after transient errors", async () => {
+    writeConfig({});
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+    const registry = makeRegistry([]);
+    const sessionModel = makeModel("om-session", "opencode-go");
+
+    // A blip on the main model must not disable OM for an hour.
+    runtime.recordDeterministicError(
+      sessionModel,
+      new Error("503 Service Unavailable"),
+      "observer",
+    );
+    expect(readCooldownFile()).toEqual({});
+
+    const result = await runtime.resolveModel(sessionCtx(registry, sessionModel));
+    expect(result.ok).toBe(true);
+  });
+
+  it("ignores malformed resolved models without throwing", async () => {
+    writeConfig({});
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    expect(() =>
+      runtime.recordDeterministicError({ provider: "opencode-go" }, missingSession(), "observer"),
+    ).not.toThrow();
+    expect(() =>
+      runtime.recordDeterministicError(null, missingSession(), "observer"),
+    ).not.toThrow();
+    expect(readCooldownFile()).toEqual({});
+  });
+});
+
 describe("Runtime — sessionFallback notification", () => {
   it("fires info notification when sessionFallback disabled and cooldown-disabled models exhausted chain", async () => {
     writeConfig({

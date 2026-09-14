@@ -18,6 +18,7 @@ import {
   modelKey,
   sanitizeCooldownReason,
 } from "./cooldown.js";
+import { isDeterministicError } from "./retryable-error.js";
 import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -460,6 +461,25 @@ export class Runtime {
         };
       }
 
+      // Deterministic-error cooldown also applies to the session model: a
+      // deterministically broken main model (e.g. missing provider-required
+      // headers) must not burn all stage attempts every cycle. Candidate
+      // models are skipped via isCooldownActive in the loop above; the session
+      // model has no candidate config, so check its persisted entry directly
+      // (recorded by recordDeterministicError). Transient errors never land
+      // here — only deterministic 4xx-class failures record session cooldowns.
+      const sessionIdentity = sessionModel as { provider?: unknown; id?: unknown };
+      if (
+        typeof sessionIdentity.provider === "string" &&
+        typeof sessionIdentity.id === "string" &&
+        isCooldownActive({ provider: sessionIdentity.provider, id: sessionIdentity.id })
+      ) {
+        return {
+          ok: false,
+          reason: `session model ${sessionIdentity.provider}/${sessionIdentity.id} in cooldown (deterministic error, will retry after window)`,
+        };
+      }
+
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
       signal?.throwIfAborted();
       let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
@@ -616,6 +636,34 @@ export class Runtime {
     // recordCooldown re-sanitizes as defense-in-depth.
     const brief = sanitizeCooldownReason(rawReason);
     recordCooldown(modelConfig, brief, stage);
+  }
+
+  /**
+   * Record a deterministic client error (4xx-class: missing provider-required
+   * headers, bad credentials, unknown model) for the RESOLVED model — including
+   * the session model, which has no candidate config and is therefore invisible
+   * to `recordRetryableError`. Without this, a deterministically broken session
+   * model retries identically on every consolidation cycle (up to
+   * MAX_STAGE_ATTEMPTS per stage) instead of cooling down and letting the
+   * pipeline settle. Transient errors are excluded: a blip on the user's main
+   * model must not disable OM for an hour (the 30s consolidation retry gate
+   * throttles those).
+   */
+  recordDeterministicError(
+    resolvedModel: unknown,
+    error: unknown,
+    stage: ConsolidationPhase,
+  ): void {
+    if (!isDeterministicError(error)) return;
+    const model = resolvedModel as { provider?: unknown; id?: unknown } | null | undefined;
+    if (typeof model?.provider !== "string" || typeof model?.id !== "string") return;
+    const rawReason = error instanceof Error ? error.message : String(error || "unknown error");
+    // recordCooldown sanitizes + defaults to a 1h window when cooldownHours is unset.
+    recordCooldown(
+      { provider: model.provider, id: model.id },
+      sanitizeCooldownReason(rawReason),
+      stage,
+    );
   }
 
   /**

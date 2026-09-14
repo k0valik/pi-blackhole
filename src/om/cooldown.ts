@@ -207,6 +207,10 @@ export function expireCooldowns(): void {
   if (changed) writeCooldownMap(map);
 }
 
-import { isRetryableError } from "./retryable-error.js";
+import {
+  isRetryableError,
+  isDeterministicError,
+  isCooldownWorthyError,
+} from "./retryable-error.js";
 
-export { isRetryableError };
+export { isRetryableError, isDeterministicError, isCooldownWorthyError };

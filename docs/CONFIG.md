@@ -514,7 +514,7 @@ Each model config supports the following fields:
 | `provider` | string | Provider name (required). |
 | `id` | string | Model ID (required). |
 | `thinking` | enum | Thinking level: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`. Defaults to `"low"` when unset. |
-| `cooldownHours` | number | Cooldown duration in hours after a retryable error (429/5xx/timeout). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. |
+| `cooldownHours` | number | Cooldown duration in hours after a cooldown-worthy error — transient (429/5xx/timeout) or deterministic 4xx (missing provider-required headers, bad credentials, unknown model). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. |
 | `contextWindow` | number | Override for the model's context window. Inherits from Pi's model registry when unset. |
 
 **Example:**
