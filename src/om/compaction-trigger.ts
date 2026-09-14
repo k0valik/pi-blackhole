@@ -11,6 +11,16 @@ import {
   type InlineCompaction,
 } from "./inline-compaction.js";
 
+/** User-facing tail for the adapter-unavailable warning. The settled
+ * (agent_end) fallback is viable for persisted sessions, but doomed for
+ * non-persisted ones — their parent disposes them right after agent_end
+ * (issue #92), so the message must not promise a fallback that cannot run. */
+function adapterFallbackNote(sessionManager: { isPersisted?: () => boolean } | undefined): string {
+  return sessionManager?.isPersisted?.() === false
+    ? "; non-persisted sessions will not be compacted"
+    : "; using settled compaction fallback";
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (error && typeof error === "object" && "message" in error) {
@@ -25,8 +35,8 @@ function isStaleExtensionContextError(error: unknown): boolean {
 }
 
 /** Cap for the per-session stale-skip warn set (bounds memory on long-lived
- * processes hosting many subagent sessions). Oldest warnings are forgotten
- * when the cap is hit, allowing a re-warn for those sessions. */
+ * processes hosting many subagent sessions). When the cap is hit the whole
+ * set is cleared, so all sessions become warn-eligible again. */
 export const STALE_SKIP_WARN_MAX_SESSIONS = 100;
 
 /** Record a scheduled auto-compaction that was skipped because the extension
@@ -51,7 +61,7 @@ export function recordStaleCtxSkip(
   const message =
     `Observational memory: auto-compaction skipped — the extension ctx went stale before the deferred ` +
     `compaction ran (in-memory sessions disposed right after agent_end lose this race); ` +
-    `see /blackhole status`;
+    `see /blackhole-memory status`;
   notifySafely(hasUI, ui, message, "warning");
   if (!hasUI) console.warn(message);
 }
@@ -139,10 +149,12 @@ export function registerCompactionTrigger(
       runtime.compactInFlight = false;
     }
 
-    // Resume mode was configured but the adapter is known-permanently
-    // unavailable — surface that once so the setting isn't silently inert.
+    // Resume mode (or the non-persisted fallback) was configured but the
+    // adapter is known-permanently unavailable — surface that once so the
+    // setting isn't silently inert.
     if (
-      runtime.config.midRunCompaction === "resume" &&
+      (runtime.config.midRunCompaction === "resume" ||
+        ctx?.sessionManager?.isPersisted?.() === false) &&
       runtime.inlineCompactionAdapterStatus?.supported === false &&
       !runtime.inlineCompactionWarningEmitted
     ) {
@@ -150,7 +162,7 @@ export function registerCompactionTrigger(
       notifySafely(
         ctx?.hasUI ?? false,
         ctx?.ui,
-        `Observational memory: mid-run compaction (resume) unavailable: ${runtime.inlineCompactionAdapterStatus.reason}; using settled compaction fallback`,
+        `Observational memory: mid-run inline compaction unavailable: ${runtime.inlineCompactionAdapterStatus.reason}${adapterFallbackNote(ctx?.sessionManager)}`,
         "warning",
       );
     }
@@ -190,7 +202,17 @@ async function handleTurnEnd(
     debugLog(ev, d, runtime.config.debugLog === true);
 
   const mode = runtime.config.midRunCompaction ?? "off";
-  if (mode === "off") {
+  // Non-persisted sessions (SessionManager.inMemory(): subagents, SDK/flow
+  // runners) are disposed by their parent right after agent_end, so the
+  // deferred agent_end compaction reliably loses that race (issue #92), and
+  // "pause"'s run-interrupting ctx.compact() has no user to hand control back
+  // to. Both resolve to the transparent inline path at the turn boundary,
+  // which does not abort the runner. Persisted sessions keep the configured
+  // semantics exactly; unsupported adapters fail closed into the
+  // inline_adapter_unsupported skip + the /blackhole-memory skip counter.
+  const nonPersisted = ctx.sessionManager.isPersisted?.() === false;
+  const inlineMode = mode === "resume" || nonPersisted;
+  if (mode === "off" && !nonPersisted) {
     dbg("compaction_trigger.turn_end.skip", { reason: "midRunCompaction_off" });
     return;
   }
@@ -231,7 +253,7 @@ async function handleTurnEnd(
     });
     return;
   }
-  if (mode === "resume" && runtime.inlineCompactionAdapterStatus?.supported === false) {
+  if (inlineMode && runtime.inlineCompactionAdapterStatus?.supported === false) {
     // The adapter already reported permanent unavailability — don't retry
     // a condition that cannot change mid-session.
     dbg("compaction_trigger.turn_end.skip", {
@@ -257,16 +279,17 @@ async function handleTurnEnd(
     tokens,
     threshold,
     mode,
+    nonPersisted,
   });
   runtime.tryEmitInfo(
     hasUI,
     ui,
-    `Observational memory: compaction threshold reached mid-run (~${tokens.toLocaleString()} tokens); compacting${mode === "resume" ? " inline" : " and pausing"}`,
+    `Observational memory: compaction threshold reached mid-run (~${tokens.toLocaleString()} tokens); compacting${inlineMode ? " inline" : " and pausing"}`,
   );
 
   runtime.compactInFlight = true;
 
-  if (mode === "resume") {
+  if (inlineMode) {
     try {
       await inlineCompact(ctx.sessionManager);
       resetMidRunRetry(runtime);
@@ -294,7 +317,7 @@ async function handleTurnEnd(
           notifySafely(
             hasUI,
             ui,
-            `Observational memory: ${message}; using settled compaction fallback`,
+            `Observational memory: ${message}${adapterFallbackNote(ctx.sessionManager)}`,
             "warning",
           );
         }

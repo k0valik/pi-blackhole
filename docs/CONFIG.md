@@ -168,11 +168,13 @@ Controls the **mid-run** auto-compaction trigger. Pi's `agent_end` event only fi
 
 Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
+Full mechanism, history, and debugging guide: [mid-run-compaction.md](mid-run-compaction.md).
+
 | Value | Behavior |
 |-------|----------|
 | `"resume"` *(experimental)* | Compact transparently at an awaited `turn_end`, then continue inside the **same** agent run and outer `session.prompt()` promise. No run abort and no synthetic continuation message. |
 | `"pause"` | Use Pi's native interrupting `ctx.compact()` at the threshold, then stop. The user continues manually. |
-| `"off"` | No mid-run evaluation; only check the threshold when the agent finishes a run (default). |
+| `"off"` | No mid-run evaluation; only check the threshold when the agent finishes a run (default). Non-persisted sessions (see below) always use the inline path instead. |
 
 `"resume"` reuses Pi's native summary, `session_before_compact`, session-entry, and context-rebuild pipeline. Blackhole's runtime adapter suppresses only the compaction method's initial internal quiesce (`abort`, plus disconnect on older Pi), then refreshes the low-level loop from the compacted `agent.state.messages` before another provider request. Completed tools stay paired, the active run signal is not aborted, background agents do not receive a false interrupt, and nested runners keep awaiting their original prompt promise.
 
@@ -180,7 +182,7 @@ Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
 
 `"pause"` is intentionally different: it calls public `ctx.compact()`, which aborts the active run by design. That abort may propagate to extensions which treat the run signal as user cancellation, so use `"resume"` for transparent/subagent workflows.
 
-**Headless sessions (subagents, flow runners).** In-memory sessions (`SessionManager.inMemory()`) are typically disposed by their parent right after `agent_end`, so the deferred `agent_end` compaction reliably loses that race and bails on a stale extension ctx — under `"off"` such sessions are effectively never compacted ([#92](https://github.com/k0valik/pi-blackhole/issues/92)). Every skipped compaction is counted and surfaced: the `/blackhole-memory` status shows `Skipped compactions (disposed ctx): N`, and each affected session warns once (UI notification, or stderr for headless runs).
+**Non-persisted sessions (subagents, SDK/flow runners).** In-memory sessions (`SessionManager.inMemory()`) are typically disposed by their parent right after `agent_end`, so the deferred `agent_end` compaction reliably loses that race and bails on a stale extension ctx ([#92](https://github.com/k0valik/pi-blackhole/issues/92)); and `"pause"`'s run-interrupting `ctx.compact()` has no user to hand control back to. Non-persisted sessions therefore resolve **all three** `midRunCompaction` values to the transparent inline path at `turn_end` — same-run continuation, no abort, runner lifecycle untouched. Persisted sessions (TUI, file-backed) keep the configured semantics exactly. Fail-closed: when the inline adapter is unsupported for the host, non-persisted sessions skip mid-run compaction entirely — surfaced once per process via the `agent_start` warning; per-turn skips are debug-logged only (they are not counted, since the skip fires every turn while over threshold and would inflate a counter denominated in scheduled compactions). Separate visibility: every *scheduled* auto-compaction skipped because the ctx went stale is counted (`Skipped compactions (disposed ctx): N` in `/blackhole-memory` status, process-wide so a parent surfaces nested-session skips) and warned once per session (UI notification, or stderr for headless runs). The `agent_end` deferral remains as a backstop for persisted sessions and for pressure that only crosses the threshold on a run's final turn.
 
 **Re-trigger safety:** after a successful compaction, accumulated tokens are counted from the fresh compaction entry. Failed or cancelled attempts are suspended until pressure drops below the threshold.
 

@@ -167,6 +167,8 @@ function fakeCtx(branches: TestEntry[][], overrides: Record<string, unknown> = {
     sessionManager: {
       getBranch,
       getSessionId: vi.fn(() => sessionId),
+      // Matches the real SessionManager surface; inMemory() sessions report false.
+      isPersisted: vi.fn(() => true),
     },
     hasUI: true,
     ui: { notify: vi.fn() },
@@ -941,6 +943,167 @@ describe("mid-run compaction trigger (turn_end)", () => {
 
     expect(runtime.compactInFlight).toBe(false);
     expect(ctx.compact).not.toHaveBeenCalled();
+  });
+});
+
+describe("non-persisted session inline fallback (issue #92)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** fakeCtx with an in-memory (non-persisted) SessionManager surface. */
+  function nonPersistedCtx(branch: TestEntry[], overrides: Record<string, unknown> = {}) {
+    const ctx = fakeCtx([branch], overrides);
+    ctx.sessionManager.isPersisted = vi.fn(() => false);
+    return ctx;
+  }
+
+  it("N1: off + non-persisted compacts inline at the threshold", async () => {
+    const { turnHandler, runtime, inlineCompact } = captureHandler({ compactAfterTokens: 3 });
+    const ctx = nonPersistedCtx(dueBranch);
+
+    const pending = turnHandler(turnEnd(), ctx);
+
+    expect(runtime.compactInFlight).toBe(true);
+    expect(inlineCompact).toHaveBeenCalledOnce();
+    expect(inlineCompact).toHaveBeenCalledWith(ctx.sessionManager);
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(ctx.isIdle).not.toHaveBeenCalled();
+
+    await pending;
+    expect(runtime.compactInFlight).toBe(false);
+  });
+
+  it("N2: off + non-persisted stays silent below the threshold", async () => {
+    const { turnHandler, runtime, inlineCompact } = captureHandler({ compactAfterTokens: 3 });
+    const ctx = nonPersistedCtx(belowBranch);
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).not.toHaveBeenCalled();
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(runtime.compactInFlight).toBe(false);
+  });
+
+  it("N3: pause + non-persisted maps to the inline path (never aborting compact)", async () => {
+    const { turnHandler, runtime, inlineCompact } = captureHandler({
+      compactAfterTokens: 3,
+      midRunCompaction: "pause",
+    });
+    const ctx = nonPersistedCtx(dueBranch);
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).toHaveBeenCalledOnce();
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(runtime.compactInFlight).toBe(false);
+  });
+
+  it("N4: off + non-persisted skips when the inline adapter is unsupported", async () => {
+    const { turnHandler, runtime, inlineCompact } = captureHandler({ compactAfterTokens: 3 });
+    runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+    const ctx = nonPersistedCtx(dueBranch);
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).not.toHaveBeenCalled();
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(runtime.compactInFlight).toBe(false);
+  });
+
+  it("N5: off + non-persisted records backoff on inline failure without notifying", async () => {
+    const inlineCompact = vi.fn(async () => {
+      throw new InlineCompactionUnavailableError("inline unavailable in test");
+    });
+    const { turnHandler, runtime } = captureHandler({ compactAfterTokens: 3 }, inlineCompact);
+    const ctx = nonPersistedCtx(dueBranch, { hasUI: false, ui: { notify: vi.fn() } });
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).toHaveBeenCalledOnce();
+    expect(runtime.compactInFlight).toBe(false);
+    expect((ctx.ui as any).notify).not.toHaveBeenCalled();
+  });
+
+  it("N6: shared gates still apply for non-persisted sessions (manual compaction)", async () => {
+    const { turnHandler, inlineCompact } = captureHandler({
+      compactAfterTokens: 3,
+      compaction: "manual",
+    });
+    const ctx = nonPersistedCtx(dueBranch);
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).not.toHaveBeenCalled();
+    expect(ctx.compact).not.toHaveBeenCalled();
+  });
+
+  it("N7: non-persisted inline success emits the info notice", async () => {
+    const { turnHandler } = captureHandler({ compactAfterTokens: 3 });
+    const ctx = nonPersistedCtx(dueBranch, { hasUI: true, ui: { notify: vi.fn() } });
+
+    await turnHandler(turnEnd(), ctx);
+
+    const infos = (ctx.ui as any).notify.mock.calls.filter((call: unknown[]) => call[1] === "info");
+    expect(infos.length).toBeGreaterThanOrEqual(1);
+    expect(infos.some((call: unknown[]) => String(call[0]).includes("compaction complete"))).toBe(
+      true,
+    );
+  });
+
+  it("N8: agent_start warns once for non-persisted sessions when the adapter is unsupported", () => {
+    const { startHandler, runtime } = captureHandler({});
+    runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+    const ctx = nonPersistedCtx(belowBranch);
+
+    startHandler(undefined, ctx);
+
+    expect(runtime.inlineCompactionWarningEmitted).toBe(true);
+    const warns = (ctx.ui as any).notify.mock.calls.filter(
+      (call: unknown[]) => call[1] === "warning",
+    );
+    expect(warns).toHaveLength(1);
+    expect(warns[0][0]).toContain("pi lacks API");
+  });
+
+  it("N9: agent_start stays silent for persisted sessions with mode off", () => {
+    const { startHandler, runtime } = captureHandler({});
+    runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+    const ctx = fakeCtx([belowBranch]);
+
+    startHandler(undefined, ctx);
+
+    expect(runtime.inlineCompactionWarningEmitted).toBe(false);
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("N10: the adapter-unavailable warning does not promise the settled fallback to non-persisted sessions", async () => {
+    // agent_start path: non-persisted → no settled-fallback promise.
+    const started = captureHandler({});
+    started.runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+    const startCtx = nonPersistedCtx(belowBranch);
+    started.startHandler(undefined, startCtx);
+    const startWarn = (startCtx.ui as any).notify.mock.calls.find(
+      (call: unknown[]) => call[1] === "warning",
+    );
+    expect(startWarn[0]).toContain("non-persisted sessions will not be compacted");
+    expect(startWarn[0]).not.toContain("settled compaction fallback");
+
+    // turn_end path (resume mode): non-persisted → same.
+    const failingInline = vi.fn(async () => {
+      throw new InlineCompactionUnavailableError("pi 0.80.1 lacks inline compaction API");
+    });
+    const inlineTurn = captureHandler({ midRunCompaction: "resume" }, failingInline);
+    const turnCtx = nonPersistedCtx(dueBranch);
+    await inlineTurn.turnHandler(turnEnd(), turnCtx);
+    const turnWarn = (turnCtx.ui as any).notify.mock.calls.find(
+      (call: unknown[]) => call[1] === "warning",
+    );
+    expect(turnWarn[0]).toContain("non-persisted sessions will not be compacted");
   });
 });
 
