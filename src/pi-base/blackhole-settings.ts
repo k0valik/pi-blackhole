@@ -106,6 +106,18 @@ export const config = new ConfigManager<UnifiedConfig>({
       },
     },
     {
+      key: "showPreCompactionMessage",
+      type: "boolean",
+      label: "Show pre-compaction output",
+      description:
+        "Display-only copy (max 16 KiB) of the newest assistant output the compaction dropped. Never enters model context or memory.",
+      value: cfg.showPreCompactionMessage,
+      valueDescriptions: {
+        on: "Shown — recent output re-rendered below the compaction card",
+        off: "Hidden — compaction card only",
+      },
+    },
+    {
       key: "compactAfterTokens",
       type: "number",
       label: "Auto-compact threshold (tokens)",

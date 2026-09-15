@@ -117,6 +117,12 @@ export interface UnifiedConfig {
    *  ONLY applies when compactionEngine: "blackhole" */
   tailBehavior: "pi-default" | "minimal";
 
+  /** Show a display-only copy of the newest assistant output that the
+   *  compaction dropped from view (`blackhole-pre-compaction-output` custom
+   *  entry). Cosmetic: the copy never enters provider context or Blackhole
+   *  memory, and the compaction cut policy is unchanged. Capped at 16 KiB. */
+  showPreCompactionMessage: boolean;
+
   /** Maximum historical tool-output text tokens retained in provider context.
    *  Newest consumed outputs are retained first; omitted outputs remain recallable.
    *  0 = disabled (opt-out). */
@@ -265,6 +271,7 @@ export const DEFAULTS: UnifiedConfig = {
 
   skipForProviders: [],
   tailBehavior: "minimal",
+  showPreCompactionMessage: true,
   retainedToolOutputMaxTokens: 20_000,
   recallResponseMaxChars: 48_000,
   midRunCompaction: "off",

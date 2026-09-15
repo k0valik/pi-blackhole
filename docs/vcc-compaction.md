@@ -228,6 +228,24 @@ Controls how much of the recent transcript stays visible after compaction. Only 
 
 See [[config#Compaction settings#Tail behavior]] for configuration details.
 
+### Pre-compaction output copy (`showPreCompactionMessage`)
+
+`tailBehavior` decides what stays in **model context**. It also decides what the terminal can still show, because Pi rebuilds the chat from the same retained entries and appends the compaction card. In `minimal` mode the last user turn and everything after it stay visible, so the answer you were reading usually survives; nothing else does.
+
+`showPreCompactionMessage` (default `true`) fills that gap with a display-only copy: after a successful Blackhole compaction, the `session_compact` handler finds the newest assistant text that the cut dropped and appends one plain `custom` entry of type `blackhole-pre-compaction-output`.
+
+| Aspect | Behavior |
+|--------|----------|
+| Storage | Plain `custom` session entry (not `custom_message`) |
+| Model context | Never included — `sessionEntryToContextMessages` returns nothing for plain custom entries |
+| Blackhole memory | Never included — OM serializers read only `message`, `custom_message`, `branch_summary` |
+| Cut policy | Unchanged — `firstKeptEntryId`, summary, and threshold are untouched |
+| Size | 16 KiB UTF-8 cap (`[Copy truncated]` marker when hit), newest dropped assistant text only |
+| Content | Text only — no tool output, thinking, or images |
+| Duplicates | Skipped when the newest dropped text is already retained; skipped when the same compaction already has a copy |
+
+Cost per eligible compaction: one `getBranch()`/`buildContextEntries()` read, a bounded copy, and one small session-file append. No extra model call and no token cost. See [[config#Compaction settings#`showPreCompactionMessage`]] for the setting.
+
 ## Orphan recovery
 
 When `lastKeptEntryId` from a previous compaction no longer exists in the branch (due to manual session editing, fork navigation, or compaction), the hook recovers:

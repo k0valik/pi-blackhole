@@ -84,6 +84,7 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   debugLog: "PI_BLACKHOLE_DEBUG_LOG",
   sessionFallback: "PI_BLACKHOLE_SESSION_FALLBACK",
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
+  showPreCompactionMessage: "PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE",
   // Positive integers
   compactAfterTokens: {
     // Parser (not the plain string form) so an UNSET var never re-injects the
