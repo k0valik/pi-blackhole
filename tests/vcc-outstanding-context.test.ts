@@ -141,3 +141,83 @@ describe("extractOutstandingContext — tool errors unchanged", () => {
     expect(r.outstandingContext.some((l) => l.includes("[bash]"))).toBe(true);
   });
 });
+
+describe("extractOutstandingContext — retry-success extinguishes errors", () => {
+  const call = (name: string, args: Record<string, unknown> = {}): NormalizedBlock => ({
+    kind: "tool_call",
+    name,
+    args,
+  });
+  const ok = (name: string, text: string): NormalizedBlock => ({
+    kind: "tool_result",
+    name,
+    text,
+    isError: false,
+  });
+  const err = (name: string, text: string): NormalizedBlock => ({
+    kind: "tool_result",
+    name,
+    text,
+    isError: true,
+  });
+
+  it("drops a bash error when the identical command later succeeds", () => {
+    const blocks: NormalizedBlock[] = [
+      call("bash", { command: "pnpm test" }),
+      err("bash", "FAIL src/a.test.ts: still failing"),
+      call("bash", { command: "pnpm test" }),
+      ok("bash", "Test Files 3 passed"),
+    ];
+    expect(buildSections({ blocks }).outstandingContext).toEqual([]);
+  });
+
+  it("keeps a bash error when only a different command later succeeds", () => {
+    const blocks: NormalizedBlock[] = [
+      call("bash", { command: "pnpm test" }),
+      err("bash", "FAIL src/a.test.ts: still failing"),
+      call("bash", { command: "git status --short" }),
+      ok("bash", ""),
+    ];
+    const r = buildSections({ blocks });
+    expect(r.outstandingContext.some((l) => l.includes("FAIL"))).toBe(true);
+  });
+
+  it("drops an edit error when the same file is later edited successfully", () => {
+    const blocks: NormalizedBlock[] = [
+      err(
+        "edit",
+        "Could not find oldText in CHANGELOG.md. The intended edit could not be applied.",
+      ),
+      ok("edit", "Successfully replaced 1 block in CHANGELOG.md."),
+    ];
+    expect(buildSections({ blocks }).outstandingContext).toEqual([]);
+  });
+
+  it("keeps an edit error when only a different file is later edited", () => {
+    const blocks: NormalizedBlock[] = [
+      err(
+        "edit",
+        "Could not find oldText in CHANGELOG.md. The intended edit could not be applied.",
+      ),
+      ok("edit", "Successfully replaced 1 block in src/other.ts."),
+    ];
+    const r = buildSections({ blocks });
+    expect(r.outstandingContext.some((l) => l.includes("CHANGELOG"))).toBe(true);
+  });
+
+  it("keeps errors with no later success", () => {
+    const blocks: NormalizedBlock[] = [err("edit", "Could not find oldText in CHANGELOG.md.")];
+    expect(buildSections({ blocks }).outstandingContext.length).toBe(1);
+  });
+
+  it("an earlier success does not extinguish a later error", () => {
+    const blocks: NormalizedBlock[] = [
+      call("bash", { command: "pnpm test" }),
+      ok("bash", "Test Files 3 passed"),
+      call("bash", { command: "pnpm test" }),
+      err("bash", "FAIL src/a.test.ts: still failing"),
+    ];
+    const r = buildSections({ blocks });
+    expect(r.outstandingContext.some((l) => l.includes("FAIL"))).toBe(true);
+  });
+});

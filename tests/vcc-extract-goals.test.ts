@@ -62,6 +62,17 @@ describe("extractGoals", () => {
     expect(goals).toContain("[Scope change]");
   });
 
+  it("scope-change marker carries the ref of its bullets", () => {
+    const blocks: NormalizedBlock[] = [
+      { kind: "user", text: "Fix login bug", sourceIndex: 3 },
+      { kind: "assistant", text: "done", sourceIndex: 4 },
+      { kind: "user", text: "Change of plan, implement password reset", sourceIndex: 9 },
+    ];
+    const goals = extractGoals(blocks);
+    expect(goals).toContain("[Scope change] (#9)");
+    expect(goals).toContain("Change of plan, implement password reset (#9)");
+  });
+
   it("keeps latest scope change only", () => {
     const blocks: NormalizedBlock[] = [
       { kind: "user", text: "Fix login bug" },

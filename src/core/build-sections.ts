@@ -12,7 +12,7 @@ import type { FileOps, NormalizedBlock } from "../types";
 import { clipSentence, firstLine, nonEmptyLines } from "./content";
 import type { SectionData } from "../sections";
 import { extractGoals } from "../extract/goals";
-import { extractFiles } from "../extract/files";
+import { extractFiles, formatFileList } from "../extract/files";
 import { collectFilesTouched } from "../extract/file-touch";
 import { extractPreferences, dedupPreferencesAgainstGoals } from "../extract/preferences";
 import { extractCommits, formatCommits } from "../extract/commits";
@@ -49,20 +49,87 @@ const CJK_BENIGN_RE = /错误(?:处理|信息|消息|码|类型|日志|堆栈)|�
 // capitals). 【/『/「 lead bracketed CJK headings like 【报错】服务启动失败.
 const SENTENCE_START_RE = /^\s*["'`*_【『「]?[A-Z`\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
 
-const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
-  const items: string[] = [];
-  const seen = new Set<string>();
+const OUTSTANDING_CLIP = 200;
 
-  for (const b of blocks) {
-    if (b.kind === "tool_result" && b.isError) {
-      const clipped = `[${b.name}] ${firstLine(b.text, 150)}`;
-      const key = clipped.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        items.push(clipped);
+/** Path-like tokens (`src/a.ts`, `/repo/b.md`) used to match an error to its retry. */
+const pathTokens = (text: string): Set<string> => {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/[A-Za-z0-9_.$/-]*[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,5}\b/g)) {
+    out.add(m[0].toLowerCase());
+  }
+  return out;
+};
+
+const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
+  const pending: { index: number; text: string }[] = [];
+  const seen = new Set<string>();
+  const push = (index: number, text: string) => {
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    pending.push({ index, text });
+  };
+
+  // An error retried successfully later in the window is resolved, not
+  // outstanding. Bash errors extinguish only when the identical command
+  // later succeeds — a different command succeeding says nothing about the
+  // failure (e.g. tests fail, then `git status` works: the failure stands).
+  // Other tools extinguish on a later success sharing a path-like token
+  // with the error text (same file fixed); with no path tokens on either
+  // side, same-tool success is enough.
+  interface ErrorEntry {
+    name: string;
+    index: number;
+    command?: string;
+    paths: Set<string>;
+    text: string;
+  }
+  const errors: ErrorEntry[] = [];
+  const successes: { name: string; index: number; command?: string; paths: Set<string> }[] = [];
+  const lastCallCommand = new Map<string, string>();
+  blocks.forEach((b, index) => {
+    if (b.kind === "tool_call") {
+      if (b.name === "bash" && typeof b.args.command === "string") {
+        lastCallCommand.set(b.name, b.args.command);
       }
-      continue;
+      return;
     }
+    if (b.kind !== "tool_result") return;
+    if (b.isError) {
+      errors.push({
+        name: b.name,
+        index,
+        command: lastCallCommand.get(b.name),
+        paths: pathTokens(b.text),
+        text: b.text,
+      });
+    } else {
+      successes.push({
+        name: b.name,
+        index,
+        command: lastCallCommand.get(b.name),
+        paths: pathTokens(b.text),
+      });
+    }
+  });
+
+  const isExtinguished = (e: ErrorEntry): boolean =>
+    successes.some((s) => {
+      if (s.name !== e.name || s.index <= e.index) return false;
+      if (e.name === "bash") return s.command !== undefined && s.command === e.command;
+      if (e.paths.size > 0 && s.paths.size > 0) {
+        return [...e.paths].some((p) => s.paths.has(p));
+      }
+      return true;
+    });
+
+  for (const e of errors) {
+    if (isExtinguished(e)) continue;
+    push(e.index, `[${e.name}] ${firstLine(e.text, OUTSTANDING_CLIP)}`);
+  }
+
+  blocks.forEach((b, index) => {
+    if (b.kind === "tool_result" && b.isError) return;
 
     if (b.kind === "assistant" || b.kind === "user") {
       for (const line of nonEmptyLines(b.text)) {
@@ -79,17 +146,19 @@ const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
         // Require sentence-like start: capital/quote, or any CJK character
         if (!SENTENCE_START_RE.test(line)) continue;
         const clipped =
-          b.kind === "user" ? `[user] ${clipSentence(line, 150)}` : clipSentence(line, 150);
-        const key = clipped.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        items.push(clipped);
-        break;
+          b.kind === "user"
+            ? `[user] ${clipSentence(line, OUTSTANDING_CLIP)}`
+            : clipSentence(line, OUTSTANDING_CLIP);
+        const before = seen.size;
+        push(index, clipped);
+        if (seen.size > before) break;
       }
     }
-  }
+  });
 
-  return items.slice(-5);
+  // Chronological (errors and prose interleaved as they occurred), keep recent.
+  pending.sort((a, z) => a.index - z.index);
+  return pending.slice(-5).map((p) => p.text);
 };
 
 const formatFileActivity = (input: BuildSectionsInput): string[] => {
@@ -103,15 +172,18 @@ const formatFileActivity = (input: BuildSectionsInput): string[] => {
     const tag = act.gitTags?.get(p);
     return tag ? ` (${tag})` : "";
   };
-  const cap = (set: Set<string>, limit: number) => {
-    const arr = [...set];
-    const render = (p: string) => `${p}${tagOf(p)}`;
-    if (arr.length <= limit) return arr.map(render).join(", ");
-    return arr.slice(0, limit).map(render).join(", ") + ` (+${arr.length - limit} more)`;
-  };
-  if (act.modified.size > 0) lines.push(`Modified: ${cap(act.modified, 10)}`);
-  if (act.created.size > 0) lines.push(`Created: ${cap(act.created, 10)}`);
-  if (act.read.size > 0) lines.push(`Read: ${cap(act.read, 10)}`);
+  // Modified/Created render as one-per-line lists (up to 20 — the touched
+  // set is the session's ground truth, worth preserving); Read stays a
+  // comma-joined bullet capped at 10.
+  const list = (set: Set<string>) => [...set].map((p) => `${p}${tagOf(p)}`);
+  if (act.modified.size > 0) lines.push(formatFileList("Modified", list(act.modified), 20));
+  if (act.created.size > 0) lines.push(formatFileList("Created", list(act.created), 20));
+  if (act.read.size > 0) {
+    const arr = list(act.read);
+    lines.push(
+      `Read: ${arr.slice(0, 10).join(", ")}${arr.length > 10 ? ` (+${arr.length - 10} more)` : ""}`,
+    );
+  }
   return lines;
 };
 

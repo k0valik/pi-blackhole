@@ -14,7 +14,7 @@ const NOISE_SHORT_RE = /^(ok|yes|no|sure|yeah|yep|go|hi|hey|thx|thanks|ok\b.*|y|
 // or meta-prompt boilerplate (command templates like `/issues` that start with "For each issue:"
 // followed by numbered "Read the issue in full..." steps).
 const NON_GOAL_RE =
-  /^\s*[\[│├└─╭╰]|```|^\s*(=[A-Z]+\(|function |const |let |var |import |export |class )|^(https?:|file:|\/[A-Za-z])|\\n|^\s*For each\b|\bin full\b[^\n]*\b(comments|issue|issues|PRs?|linked)\b/;
+  /^\s*[[│├└─╭╰]|```|^\s*(=[A-Z]+\(|function |const |let |var |import |export |class )|^(https?:|file:|\/[A-Za-z])|\\n|^\s*For each\b|\bin full\b[^\n]*\b(comments|issue|issues|PRs?|linked)\b/;
 
 // Signals that the rest of the user message is a command template (e.g. /issues),
 // in which case we should stop collecting goals at the signal line.
@@ -40,7 +40,7 @@ const isSubstantiveGoal = (text: string): boolean => {
   return true;
 };
 
-const FIRST_MSG_CLIP = 80;
+const FIRST_MSG_CLIP = 200;
 
 const indexSuffix = (sourceIndex?: number): string =>
   sourceIndex != null ? ` (#${sourceIndex})` : "";
@@ -82,7 +82,7 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
 
   // Only emit the [Scope change] marker when we actually captured bullets.
   if (latestScopeChange && latestScopeChange.length > 0) {
-    goals.push("[Scope change]");
+    goals.push("[Scope change]" + indexSuffix(latestScopeIndex));
     for (const line of latestScopeChange) {
       goals.push(line + indexSuffix(latestScopeIndex));
     }

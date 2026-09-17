@@ -11,6 +11,7 @@ import type { FileOps } from "../types";
 import { normalize } from "./normalize";
 import { filterNoise } from "./filter-noise";
 import { buildSections } from "./build-sections";
+import { formatFileList } from "../extract/files";
 import { formatSummary, capBrief, RECALL_NOTE, wrapLongLines } from "./format";
 
 export interface CompileInput {
@@ -92,6 +93,34 @@ const sectionOf = (text: string, header: string): string => {
   return (end ? after.slice(0, end) : after).trim();
 };
 
+/** Extract a header section WITHOUT rejoining continuation lines — preserves
+ *  multi-line list format for Files And Changes merge. */
+export const extractSection = (text: string, header: string): string => {
+  const openEscaped = header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const open = text.match(new RegExp(`(?:^|\\n)\\[${openEscaped}\\]`));
+  if (!open || open.index === undefined) return "";
+  // Start after the header line (skip "[Header]\n")
+  // open.index points to the start of the match (either 0 or at a \n).
+  // The header line ends at the first \n after the closing ].
+  const headerStart = open.index + (open[0].startsWith("\n") ? 1 : 0); // position of [
+  const headerEnd = text.indexOf("\n", headerStart); // \n after ]
+  const start = headerEnd >= 0 ? headerEnd + 1 : text.length;
+  const after = text.slice(start); // NO joinWrappedLines
+  const nextSection = HEADER_NAMES.filter((h) => h !== header)
+    .map((h) => {
+      const escaped = h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(?:^|\\n)\\[${escaped}\\]`);
+      const m = after.match(re);
+      if (!m) return -1;
+      return m.index! + (m[0].startsWith("\n") ? 1 : 0);
+    })
+    .filter((n) => n >= 0);
+  const nextSep = after.indexOf(SEPARATOR);
+  const candidates = [...nextSection, ...(nextSep > 0 ? [nextSep] : [])].sort((a, b) => a - b);
+  const end = candidates[0];
+  return (end ? after.slice(0, end) : after).trim();
+};
+
 /** Extract the brief transcript part (everything after ---) */
 const briefOf = (text: string): string => {
   const idx = text.indexOf(SEPARATOR);
@@ -108,7 +137,7 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
 
   // Files And Changes: merge by category (Modified/Created/Read), dedup paths
   if (header === "Files And Changes") {
-    return mergeFileLines(prev, fresh);
+    return mergeFileLines(extractSection(prev, header), extractSection(fresh, header));
   }
 
   // Session Goal, User Preferences: line-level dedup, cap
@@ -140,42 +169,73 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
 const GIT_TAG_SUFFIX_RE =
   /\s+\((?:staged|unstaged|new|renamed|deleted|conflicted|staged,unstaged)\)\s*$/;
 
-const mergeFileLines = (prev: string, fresh: string): string => {
+/**
+ * Add one header-rest or continuation line to the merged map, splitting on
+ * top-level commas — a git word tag can contain one ("a.ts
+ * (staged,unstaged)"); splitting inside the parens yields partial keys
+ * ("a.ts (staged", "unstaged)") that defeat the prev/fresh dedup and
+ * duplicate the file on re-touch. New-shape list lines hold a single
+ * (comma-terminated) path, so the split is a no-op for them — including
+ * after sectionOf rejoins the list into one line during merge.
+ */
+const addEntries = (
+  merged: Record<string, Map<string, string>>,
+  cat: string,
+  isFresh: boolean,
+  rest: string,
+): void => {
+  const text = rest.replace(/\s*\(\+\d+ more\)\s*$/, "");
+  if (!text.trim()) return;
+  const parts = text.split(/,(?![^()]*\))/);
+  for (const p of parts) {
+    const trimmed = p.trim();
+    if (!trimmed) continue;
+    const key = trimmed.replace(GIT_TAG_SUFFIX_RE, "");
+    const map = merged[cat];
+    if (!map.has(key)) {
+      // Fresh entries keep their tags; prev-only entries store the
+      // stripped key — prev tags are stale point-in-time state.
+      map.set(key, isFresh ? trimmed : key);
+    }
+  }
+};
+
+export const mergeFileLines = (prev: string, fresh: string): string => {
   const categories = ["Modified", "Created", "Read"] as const;
   // stripped path → display string; prev inserted first, fresh display wins
   const merged: Record<string, Map<string, string>> = {};
   for (const cat of categories) merged[cat] = new Map();
 
-  // Parse "- Modified: a, b (staged), c (+N more)" lines, fresh first.
+  // Parse both shapes:
+  // - new: "- Modified (12):" header, one path per continuation line
+  //   (entries carry trailing commas, so they also split correctly after
+  //   sectionOf rejoins the lines during merge)
+  // - legacy: "- Modified: a, b (staged), c (+N more)" comma-joined
   // Fresh entries are recency-ordered (most recent first) and prev entries
-  // follow in stored order, so the keep-first cap below retains the 10 most
+  // follow in stored order, so the keep-first cap below retains the most
   // recent files instead of letting stale prev entries crowd out fresh
   // touches. Fresh display (with current git tags) wins ties by insertion
   // order — prev never overwrites an already-seen key.
+  const headerRe = /^- (Modified|Created|Read)( \(\d+\))?:(.*)$/;
+  const moreRe = /^\(\+\d+ more\)$/;
   for (const text of [fresh, prev]) {
+    const isFresh = text === fresh;
+    let current: string | null = null;
     for (const line of text.split("\n")) {
-      for (const cat of categories) {
-        const prefix = `- ${cat}: `;
-        if (!line.startsWith(prefix)) continue;
-        let rest = line.slice(prefix.length);
-        // Strip "(+N more)" suffix
-        rest = rest.replace(/\s*\(\+\d+ more\)\s*$/, "");
-        // Split on top-level commas only — a git word tag can contain one
-        // ("a.ts (staged,unstaged)"). Splitting inside the parens yields
-        // partial keys ("a.ts (staged", "unstaged)") that defeat the
-        // prev/fresh dedup and duplicate the file on re-touch.
-        for (const p of rest.split(/,(?![^()]*\))/)) {
-          const trimmed = p.trim();
-          if (!trimmed) continue;
-          const key = trimmed.replace(GIT_TAG_SUFFIX_RE, "");
-          const map = merged[cat];
-          if (!map.has(key)) {
-            // Fresh entries keep their tags; prev-only entries store the
-            // stripped key — prev tags are stale point-in-time state.
-            map.set(key, text === fresh ? trimmed : key);
-          }
-        }
+      const header = line.match(headerRe);
+      if (header) {
+        current = header[1];
+        addEntries(merged, current, isFresh, header[3]);
+        continue;
       }
+      if (current === null) continue;
+      if (!line.startsWith(" ") && !line.startsWith("\t")) {
+        current = null;
+        continue;
+      }
+      const entry = line.trim();
+      if (!entry || moreRe.test(entry)) continue;
+      addEntries(merged, current, isFresh, entry);
     }
   }
 
@@ -184,16 +244,17 @@ const mergeFileLines = (prev: string, fresh: string): string => {
   // Also remove Read entries that also appear in Modified (same file read+edited)
   for (const key of merged.Modified.keys()) merged.Read.delete(key);
 
-  const cap = (map: Map<string, string>, limit: number) => {
-    const arr = [...map.values()];
-    if (arr.length <= limit) return arr.join(", ");
-    return arr.slice(0, limit).join(", ") + ` (+${arr.length - limit} more)`;
-  };
-
   const lines: string[] = [];
-  if (merged.Modified.size > 0) lines.push(`- Modified: ${cap(merged.Modified, 10)}`);
-  if (merged.Created.size > 0) lines.push(`- Created: ${cap(merged.Created, 10)}`);
-  if (merged.Read.size > 0) lines.push(`- Read: ${cap(merged.Read, 10)}`);
+  if (merged.Modified.size > 0)
+    lines.push(`- ${formatFileList("Modified", [...merged.Modified.values()], 20)}`);
+  if (merged.Created.size > 0)
+    lines.push(`- ${formatFileList("Created", [...merged.Created.values()], 20)}`);
+  if (merged.Read.size > 0) {
+    const arr = [...merged.Read.values()];
+    lines.push(
+      `- Read: ${arr.slice(0, 10).join(", ")}${arr.length > 10 ? ` (+${arr.length - 10} more)` : ""}`,
+    );
+  }
   if (lines.length === 0) return "";
   return `[Files And Changes]\n${lines.join("\n")}`;
 };
@@ -207,6 +268,12 @@ const mergeBriefTranscript = (prev: string, fresh: string): string => {
 const mergePrevious = (prev: string, fresh: string): string => {
   // Merge header sections
   const headers = HEADER_NAMES.map((header) => {
+    // Files And Changes must NOT use sectionOf — it rejoins continuation lines
+    // and destroys the multi-line list format needed for correct merge parsing.
+    // Pass full summaries; mergeFileLines extracts the section itself.
+    if (header === "Files And Changes") {
+      return mergeHeaderSection(header, prev, fresh);
+    }
     const freshSec = sectionOf(fresh, header);
     const prevSec = sectionOf(prev, header);
     return mergeHeaderSection(header, prevSec, freshSec);

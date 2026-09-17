@@ -29,34 +29,32 @@ const FILE_WRITE_TOOLS = new Set([
 const FILE_CREATE_TOOLS = new Set<string>();
 
 /**
- * Find the longest common directory prefix among absolute paths.
- * Returns "" if fewer than 2 absolute paths or no meaningful common prefix.
+ * Display form of a canonical absolute path: relative to the session cwd
+ * when inside it (`/repo/src/a.ts` → `src/a.ts`), absolute otherwise
+ * (`/tmp/up.ts` stays absolute). Forward slashes on all platforms so the
+ * summary reads the same on macOS, Linux, and Windows (drive-relative
+ * paths that escape the cwd fall back to absolute).
  */
-const longestCommonDirPrefix = (paths: string[]): string => {
-  // Normalize backslashes (Windows) to forward slashes for uniform comparison
-  const normalized = paths.map((p) => p.replace(/\\/g, "/"));
-  const abs = normalized.filter((p) => p.startsWith("/") || /^[A-Za-z]:\//.test(p));
-  if (abs.length < 2) return "";
-  const split = abs.map((p) => p.split("/"));
-  const min = Math.min(...split.map((s) => s.length));
-  let i = 0;
-  while (i < min - 1) {
-    const seg = split[0][i];
-    if (!split.every((s) => s[i] === seg)) break;
-    i++;
+const displayPath = (abs: string, cwd?: string): string => {
+  if (cwd) {
+    const rel = path.relative(cwd, abs);
+    if (rel && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) {
+      return rel.split(path.sep).join("/");
+    }
   }
-  if (i < 2) return ""; // require at least /a/b common
-  return split[0].slice(0, i).join("/") + "/";
+  return abs;
 };
 
-const trimPaths = (set: Set<string>, prefix: string): Set<string> => {
-  if (!prefix) return set;
-  const out = new Set<string>();
-  for (const p of set) {
-    out.add(p.startsWith(prefix) ? p.slice(prefix.length) : p);
-  }
-  return out;
-};
+const isOutsideCwd = (display: string): boolean =>
+  display.startsWith("/") || /^[A-Za-z]:\//.test(display);
+
+/**
+ * Rank in-cwd files before outside-cwd ones (scratch `/tmp` redirect
+ * targets, system paths). Stable within each group — recency order from
+ * the touch collector is preserved.
+ */
+const rankByCwd = (set: Set<string>): Set<string> =>
+  new Set([...set].filter((p) => !isOutsideCwd(p)).concat([...set].filter(isOutsideCwd)));
 
 /**
  * Path cleanup ported from pi-files-touched (sanitizeReference/stripLineSuffix).
@@ -200,21 +198,15 @@ export const extractFiles = (
   // A file that was modified is never interesting as "read"
   for (const p of act.modified) act.read.delete(p);
 
-  const all = [...act.read, ...act.modified, ...act.created];
-  const prefix = longestCommonDirPrefix(all);
-
-  // Annotate using the original (pre-trim) paths — the lookup needs the full
-  // absolute path; keys are the trimmed display paths. "new" is suppressed on
-  // Read-only entries — an untracked file that was only read was not created
-  // by this session's writes.
+  // Annotate using the canonical (absolute) paths — the git status lookup
+  // needs the full path; keys are the display paths.
   if (gitTags) {
     const annotations = new Map<string, string>();
     const collect = (set: Set<string>, allowNew: boolean) => {
       for (const p of set) {
         const tag = gitTags.get(toLookupPath(p, cwd));
         if (!tag || (tag === "new" && !allowNew)) continue;
-        const display = prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p;
-        annotations.set(display, tag);
+        annotations.set(displayPath(p, cwd), tag);
       }
     };
     collect(act.modified, true);
@@ -223,11 +215,26 @@ export const extractFiles = (
     if (annotations.size > 0) act.gitTags = annotations;
   }
 
-  if (prefix) {
-    act.read = trimPaths(act.read, prefix);
-    act.modified = trimPaths(act.modified, prefix);
-    act.created = trimPaths(act.created, prefix);
-  }
+  // Display relative to cwd; outside-cwd files rank last.
+  act.read = rankByCwd(new Set([...act.read].map((p) => displayPath(p, cwd))));
+  act.modified = rankByCwd(new Set([...act.modified].map((p) => displayPath(p, cwd))));
+  act.created = rankByCwd(new Set([...act.created].map((p) => displayPath(p, cwd))));
 
   return act;
+};
+
+/**
+ * Render one file category as a single section item: a `Name (n):` header
+ * followed by one path per line (indented so merge parser recognizes them
+ * as continuation lines). One entry per line (instead of a wrapped
+ * comma-joined bullet) keeps long paths scannable and never splits a path
+ * mid-word at the wrap width. Entries carry trailing commas so the list
+ * still parses after `sectionOf` rejoins continuation lines during
+ * cross-compaction merge.
+ */
+export const formatFileList = (category: string, paths: string[], limit: number): string => {
+  const shown = paths.slice(0, limit);
+  const lines = [`${category} (${paths.length}):`, ...shown.map((p) => `  ${p},`)];
+  if (paths.length > limit) lines.push(`  (+${paths.length - limit} more)`);
+  return lines.join("\n");
 };

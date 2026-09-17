@@ -339,11 +339,12 @@ describe("buildSections Files And Changes via session messages", () => {
     ];
     const r = buildSections({ blocks: [], messages, cwd: "/repo" });
     const files = r.filesAndChanges.join("\n");
-    const modifiedLine = files.split("\n").find((l) => l.startsWith("Modified:")) ?? "";
-    // modified beats read for main.ts; common prefix "/repo/" is trimmed;
-    // insertion order is recency-based, so assert membership not position
-    expect(modifiedLine).toContain("src/main.ts");
-    expect(modifiedLine).toContain("README.md");
+    // modified beats read for main.ts; paths render cwd-relative, one per
+    // line under a "Modified (n):" header. Read is absent entirely, so
+    // membership in files implies membership in Modified.
+    expect(files).toContain("Modified (2):");
+    expect(files).toContain("src/main.ts");
+    expect(files).toContain("README.md");
     expect(files).not.toContain("Read:");
     expect(files).not.toContain("bench.py");
   });
@@ -365,13 +366,14 @@ describe("buildSections Files And Changes via session messages", () => {
     });
     const files = r.filesAndChanges.join("\n");
     expect(files).toContain("Read: a.ts");
-    expect(files).toContain("Modified: b.ts");
+    expect(files).toContain("Modified (1):");
+    expect(files).toContain("b.ts");
   });
 
   it("merges relative legacy tool-arg paths with absolute collector paths (no dupes)", () => {
     // The collector resolves to absolute paths via cwd while the legacy
     // block scan sees the raw relative arg — both describe one file and must
-    // render once, trimmed to the shared prefix.
+    // render once, displayed relative to cwd.
     const a = nextId();
     const messages: Message[] = [
       assistantWith({ id: a, name: "write", args: { path: "/repo/src/main.ts" } }),
@@ -385,9 +387,8 @@ describe("buildSections Files And Changes via session messages", () => {
     const files = r.filesAndChanges.join("\n");
     const occurrences = files.split("src/main.ts").length - 1;
     expect(occurrences).toBe(1);
-    // single absolute path has no shared prefix to trim — the point is it
-    // renders once, not as both "src/main.ts" and "/repo/src/main.ts"
-    expect(files).toContain("Modified: /repo/src/main.ts");
+    expect(files).toContain("Modified (1):");
+    expect(files).not.toContain("/repo/");
   });
 });
 
@@ -398,7 +399,9 @@ describe("buildSections Files And Changes — path cleanup and recency ordering"
     const r = buildSections({
       blocks: [{ kind: "tool_call", name: "Edit", args: { file_path: '"src/quoted.ts:10-40"' } }],
     });
-    expect(r.filesAndChanges.join("\n")).toContain("Modified: src/quoted.ts");
+    const files = r.filesAndChanges.join("\n");
+    expect(files).toContain("Modified (1):");
+    expect(files).toContain("src/quoted.ts");
   });
 
   it("strips #L anchors from legacy tool-arg paths", () => {
@@ -428,14 +431,12 @@ describe("buildSections Files And Changes — path cleanup and recency ordering"
       fileOps: { readFiles: [], modifiedFiles: ["/repo/src/seed.ts"] },
       cwd: "/repo",
     });
-    const modifiedLine =
-      r.filesAndChanges
-        .join("\n")
-        .split("\n")
-        .find((l) => l.startsWith("Modified:")) ?? "";
-    const idxNew = modifiedLine.indexOf("new-touch.ts");
-    const idxOld = modifiedLine.indexOf("old-touch.ts");
-    const idxSeed = modifiedLine.indexOf("seed.ts");
+    const modifiedSection = r.filesAndChanges.join("\n");
+    // One path per line under "Modified (n):" — order in the joined string
+    // is the list order.
+    const idxNew = modifiedSection.indexOf("new-touch.ts");
+    const idxOld = modifiedSection.indexOf("old-touch.ts");
+    const idxSeed = modifiedSection.indexOf("seed.ts");
     expect(idxNew).toBeGreaterThanOrEqual(0);
     expect(idxNew).toBeLessThan(idxOld);
     expect(idxNew).toBeLessThan(idxSeed);

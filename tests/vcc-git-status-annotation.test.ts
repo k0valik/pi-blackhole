@@ -96,7 +96,7 @@ describe("extractFiles git grounding", () => {
     expect([...act.modified]).not.toContain("fresh.ts");
   });
 
-  it("annotates display paths after prefix trimming", () => {
+  it("annotates display paths after cwd-relative trimming", () => {
     const tags = new Map<string, string>([
       [abs("src/fresh.ts"), "new"],
       [abs("src/committed.ts"), "staged,unstaged"],
@@ -112,10 +112,10 @@ describe("extractFiles git grounding", () => {
       tags,
       tmp,
     );
-    // all files share <tmp>/src → trimmed to that prefix
-    expect(act.gitTags?.get("fresh.ts")).toBe("new");
-    expect(act.gitTags?.get("committed.ts")).toBe("staged,unstaged");
-    expect(act.gitTags?.get("read-only.md")).toBe("unstaged");
+    // paths render cwd-relative (src/fresh.ts), not longest-common-prefix trimmed
+    expect(act.gitTags?.get("src/fresh.ts")).toBe("new");
+    expect(act.gitTags?.get("src/committed.ts")).toBe("staged,unstaged");
+    expect(act.gitTags?.get("src/read-only.md")).toBe("unstaged");
   });
 
   it("suppresses the new tag on read-only entries", () => {
@@ -154,9 +154,11 @@ describe("[Files And Changes] git annotations", () => {
       },
     });
     const files = r.filesAndChanges.join("\n");
-    // all paths share <tmp>/src → prefix trimmed to it
-    expect(files).toContain("Modified: main.ts (staged,unstaged)");
-    expect(files).toContain("Created: new-file.ts (new)");
+    // paths render cwd-relative, one per line under counted headers
+    expect(files).toContain("Modified (1):");
+    expect(files).toContain("src/main.ts (staged,unstaged)");
+    expect(files).toContain("Created (1):");
+    expect(files).toContain("src/new-file.ts (new)");
   });
 });
 
@@ -164,27 +166,29 @@ describe("[Files And Changes] git annotations", () => {
 
 describe("compile merge keeps only fresh git annotations", () => {
   it("strips tags from the previous summary, keeps fresh ones, dedups by stripped path", () => {
-    const prev = ["[Files And Changes]", "- Modified: stale.ts (staged), both.ts (unstaged)"].join(
-      "\n",
-    );
+    // Previous summary uses cwd-relative paths (src/both.ts) so merge keys match
+    const prev = [
+      "[Files And Changes]",
+      "- Modified: src/stale.ts (staged), src/both.ts (unstaged)",
+    ].join("\n");
     const messages = [];
     void messages;
     const freshInput = {
       messages,
       previousSummary: prev,
-      fileOps: { readFiles: [], modifiedFiles: ["both.ts", "newly-staged.ts"] },
+      fileOps: { readFiles: [], modifiedFiles: ["/repo/src/both.ts", "/repo/src/newly-staged.ts"] },
       gitTags: new Map<string, string>([
-        ["/repo/both.ts", "staged"],
-        ["/repo/newly-staged.ts", "staged"],
+        ["/repo/src/both.ts", "staged"],
+        ["/repo/src/newly-staged.ts", "staged"],
       ]),
       cwd: "/repo",
     };
     const out = compile(freshInput);
     // fresh tags survive on re-touched paths; prev-only paths keep no tag
-    expect(out).toContain("both.ts (staged)");
-    expect(out).toContain("newly-staged.ts (staged)");
-    expect(out).toContain("stale.ts");
-    expect(out).not.toContain("stale.ts (staged)");
+    expect(out).toContain("src/both.ts (staged)");
+    expect(out).toContain("src/newly-staged.ts (staged)");
+    expect(out).toContain("src/stale.ts");
+    expect(out).not.toContain("src/stale.ts (staged)");
     expect(out).not.toContain("(unstaged)");
   });
 });

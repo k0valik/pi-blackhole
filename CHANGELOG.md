@@ -10,6 +10,8 @@
 
 - **`[Outstanding Context]` scans the whole fresh window** ([#105](https://github.com/k0valik/pi-blackhole/issues/105)). Replaces the last-20-blocks scan (early blockers were structurally unreportable and, being volatile, lost forever): full scan, case-insensitive dedup, most recent 5 kept. CJK failure stems (`失败`/`报错`/`错误`/`卡住`/`崩溃`) with a benign-compound guard (`错误处理`/`失败率` don't flag; residual stems still fire), CJK floor 2, `【`/`『`/`「`-led headings accepted. English profile unchanged.
 
+- **`[Files And Changes]` display and merge overhauled**: paths render cwd-relative (outside-cwd ranked last), Modified/Created as indented one-per-line lists up to 20, Read comma-joined up to 10. Cross-compaction merge parses both legacy comma-joined and new counted-list formats, preserves fresh tags, strips stale ones, dedups by stripped path. Session goal clip raised from 80→200 chars. Outstanding context clip raised 150→200. Bash errors extinguished only when the identical command later succeeds; edit/write errors when the same file later succeeds. `[Scope change]` marker now carries its bullets' `(#N)` ref. `[Commits]` lines now emit `(#N)` refs for drill-down via `recall`.
+
 ---
 
 ## [0.5.5] - 2026-09-15

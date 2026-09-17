@@ -3,6 +3,8 @@ import type { NormalizedBlock } from "../types";
 interface CommitInfo {
   hash?: string;
   message: string;
+  /** Global (#N) recall index of the invoking command — renders as the ref. */
+  sourceIndex?: number;
 }
 
 // Match short hash from git output — only as fallback after bracket/range patterns fail.
@@ -285,10 +287,10 @@ const tryExtract = (
  */
 export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
   const commits: CommitInfo[] = [];
-  const addCommit = (hash: string | undefined, message: string) => {
+  const addCommit = (hash: string | undefined, message: string, sourceIndex?: number) => {
     const key = `${hash ?? ""}::${message}`;
     if (!commits.some((c) => `${c.hash ?? ""}::${c.message}` === key)) {
-      commits.push({ hash, message });
+      commits.push({ hash, message, sourceIndex });
     }
   };
 
@@ -310,7 +312,7 @@ export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
         if (r.name !== b.name) continue;
         if (r.isError) break;
         const commit = tryExtract(cmd, r.text);
-        if (commit) addCommit(commit.hash, commit.message);
+        if (commit) addCommit(commit.hash, commit.message, b.sourceIndex);
         break;
       }
       continue;
@@ -321,7 +323,7 @@ export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
       // Nonzero exit → the commit did not happen.
       if (b.exitCode !== undefined && b.exitCode !== 0) continue;
       const commit = tryExtract(b.command, b.output);
-      if (commit) addCommit(commit.hash, commit.message);
+      if (commit) addCommit(commit.hash, commit.message, b.sourceIndex);
       continue;
     }
 
@@ -335,7 +337,7 @@ export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
       const codeBlock = b.text.match(/```\n([\s\S]*?)```/);
       const output = codeBlock ? codeBlock[1] : "";
       const commit = tryExtract(ranCmd[1], output);
-      if (commit) addCommit(commit.hash, commit.message);
+      if (commit) addCommit(commit.hash, commit.message, b.sourceIndex);
     }
   }
 
@@ -347,7 +349,8 @@ export const formatCommits = (commits: CommitInfo[], limit = 8): string[] => {
   const items = commits.slice(-limit); // keep most recent
   for (const c of items) {
     const prefix = c.hash ? `${c.hash}: ` : "";
-    lines.push(`${prefix}${c.message}`);
+    const ref = c.sourceIndex != null ? ` (#${c.sourceIndex})` : "";
+    lines.push(`${prefix}${c.message}${ref}`);
   }
   return lines;
 };

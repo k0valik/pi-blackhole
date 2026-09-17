@@ -24,6 +24,55 @@ const userRan = (cmd: string, output = ""): NormalizedBlock => ({
   text: `Ran \`${cmd}\`\n\`\`\`\n${output}\n\`\`\``,
 });
 
+describe("formatCommits — recall refs", () => {
+  const callAt = (cmd: string, sourceIndex: number): NormalizedBlock => ({
+    kind: "tool_call",
+    name: "bash",
+    args: { command: cmd },
+    sourceIndex,
+  });
+  const resultAt = (text: string, sourceIndex: number): NormalizedBlock => ({
+    kind: "tool_result",
+    name: "bash",
+    text,
+    isError: false,
+    sourceIndex,
+  });
+
+  it("emits the invoking command's (#N) ref", () => {
+    const out = extractCommits([
+      callAt(`git commit -m "fix: x"`, 41),
+      resultAt("[main 99e6a9f] fix: x", 42),
+    ]);
+    expect(formatCommits(out)).toEqual(["99e6a9f: fix: x (#41)"]);
+  });
+
+  it("emits no ref when the source index is unknown", () => {
+    const out = extractCommits([
+      toolCall(`git commit -m "fix: x"`),
+      toolResult("[main 99e6a9f] fix: x"),
+    ]);
+    expect(formatCommits(out)).toEqual(["99e6a9f: fix: x"]);
+  });
+
+  it("dedup keeps the first occurrence's ref", () => {
+    const out = extractCommits([
+      callAt(`git commit -m "fix: x"`, 41),
+      resultAt("[main 99e6a9f] fix: x", 42),
+      callAt(`git commit -m "fix: x"`, 90),
+      resultAt("[main 99e6a9f] fix: x", 91),
+    ]);
+    expect(formatCommits(out)).toEqual(["99e6a9f: fix: x (#41)"]);
+  });
+
+  it("bash execution blocks carry their own ref", () => {
+    const out = extractCommits([
+      { ...bashBlock(`git commit -m "fix: x"`, "[main 99e6a9f] fix: x"), sourceIndex: 7 },
+    ]);
+    expect(formatCommits(out)).toEqual(["99e6a9f: fix: x (#7)"]);
+  });
+});
+
 describe("extractCommits — detection (flag-order tolerance)", () => {
   it("detects git -C <dir> commit", () => {
     const out = extractCommits([

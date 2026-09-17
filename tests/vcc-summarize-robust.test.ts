@@ -323,8 +323,10 @@ describe("vcc-summarize robust merging and stripping", () => {
         fileOps: { readFiles: [], modifiedFiles: ["/repo/src/real.ts", "/repo/src/other.ts"] },
         cwd: "/repo",
       });
-      // shared /repo/src/ prefix trims to display paths
-      expect(r).toContain("Modified: real.ts, other.ts");
+      // paths render cwd-relative, one per line under a counted header
+      expect(r).toContain("Modified (2):");
+      expect(r).toContain("src/real.ts");
+      expect(r).toContain("src/other.ts");
       expect(r).not.toContain("/repo/");
       expect(r).not.toContain("hand-written prose");
     });
@@ -365,29 +367,29 @@ describe("vcc-summarize robust merging and stripping", () => {
       // defeat prev/fresh dedup — the file then appears twice and the stale
       // tag survives alongside the fresh one.
       const previousSummary =
-        "[Files And Changes]\n- Modified: main.ts (staged,unstaged), b.ts (new)\n\n---\n\n[user]\nold";
+        "[Files And Changes]\n- Modified: src/main.ts (staged,unstaged), src/b.ts (new)\n\n---\n\n[user]\nold";
       const r = compile({
         messages: [userMsg("check")],
         previousSummary,
-        // Two files sharing /repo/src/ so display trimming engages and the
-        // fresh key ("main.ts") matches the previous key.
+        // Fresh keys render cwd-relative ("src/main.ts"), matching the
+        // previous keys above.
         fileOps: { readFiles: [], modifiedFiles: ["/repo/src/main.ts", "/repo/src/other.ts"] },
         cwd: "/repo",
         gitTags: new Map([["/repo/src/main.ts", "staged"]]),
       });
       expect(r.match(/main\.ts/g)?.length).toBe(1);
-      expect(r).toContain("main.ts (staged)");
+      expect(r).toContain("src/main.ts (staged)");
       expect(r).not.toContain("unstaged)");
       // Previous-only entry survives (stale tags are stripped by design).
-      expect(r).toContain("b.ts");
+      expect(r).toContain("src/b.ts");
     });
 
     it("keeps the newest files when the merged list exceeds the cap", () => {
       // Fresh entries parse first (most recent first), prev-only entries
-      // append after — so the keep-first-10 cap retains fresh touches and
+      // append after — so the keep-first-20 cap retains fresh touches and
       // drops the oldest prev entries, not the other way around. Prev lines
-      // are stored newest-first, so old-11 is the stalest entry here.
-      const prevFiles = Array.from({ length: 12 }, (_, i) => `old-${i}.ts`);
+      // are stored newest-first, so old-23 is the stalest entry here.
+      const prevFiles = Array.from({ length: 24 }, (_, i) => `old-${i}.ts`);
       const previousSummary = `[Files And Changes]\n- Modified: ${prevFiles.join(", ")}\n\n---\n\n[user]\nold`;
       const r = compile({
         messages: [userMsg("check")],
@@ -398,9 +400,28 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(r).toContain("new-a.ts");
       expect(r).toContain("new-b.ts");
       expect(r).toContain("old-0.ts");
-      expect(r).not.toContain("old-11.ts");
+      expect(r).toContain("old-17.ts");
+      expect(r).not.toContain("old-23.ts");
       // The (+N more) suffix may wrap across lines — normalize first.
-      expect(r.replace(/\n\s*/g, " ")).toContain("(+4 more)");
+      expect(r.replace(/\n\s*/g, " ")).toContain("(+6 more)");
+    });
+
+    it("keeps both forms when upgrading from an absolute-path previous summary", () => {
+      // Display switched from absolute/longest-prefix-trimmed to
+      // cwd-relative: a previous summary written by the old format keys
+      // "/repo/src/a.ts" while fresh renders "src/a.ts". The merge cannot
+      // know they are the same file, so both appear for exactly one
+      // compaction — no data loss, and the next cycle dedupes cleanly.
+      const previousSummary =
+        "[Files And Changes]\n- Modified: /repo/src/a.ts\n\n---\n\n[user]\nold";
+      const r = compile({
+        messages: [userMsg("check")],
+        previousSummary,
+        fileOps: { readFiles: [], modifiedFiles: ["/repo/src/a.ts"] },
+        cwd: "/repo",
+      });
+      expect(r).toContain("src/a.ts");
+      expect(r).toContain("/repo/src/a.ts");
     });
   });
 });
