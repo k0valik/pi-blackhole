@@ -303,6 +303,22 @@ describe("extractCommits — flag scoping and success-line forms (#105 follow-up
     expect(out[0]?.message).toBe("fix: real subject");
   });
 
+  it("ignores an earlier command's own stdin flag and heredoc", () => {
+    // Both commands carry `-F -`. The flag-first search must not stop at the
+    // earlier command's flag: its segment does not invoke git commit, so its
+    // heredoc body must not become the message.
+    const cmd = [
+      `render -F - <<'EOF'`,
+      `not the message`,
+      `EOF`,
+      `git commit -F - <<'MSG'`,
+      `fix: real subject`,
+      `MSG`,
+    ].join("\n");
+    const out = extractCommits([toolCall(cmd), toolResult("[main 99e6a9f] fix: real subject")]);
+    expect(out[0]?.message).toBe("fix: real subject");
+  });
+
   it("ignores -m-like text inside the heredoc body", () => {
     const cmd = [
       `git commit -q -F - <<'MSG'`,

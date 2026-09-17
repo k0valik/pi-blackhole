@@ -93,6 +93,26 @@ const stripHeredocBodies = (cmd: string): string => {
 
 const SHELL_CONTROL = new Set(["&&", "||", ";", "|", "&", "\n"]);
 
+/** Does this single-segment token list invoke `git commit` (not --dry-run)? */
+const segmentInvokesCommit = (tokens: string[]): boolean => {
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== "commit") continue;
+    let gitIdx = -1;
+    for (let j = i - 1; j >= 0; j--) {
+      const t = tokens[j];
+      if (SHELL_CONTROL.has(t)) break; // different shell segment
+      if (t === "git" || t.endsWith("/git")) {
+        gitIdx = j;
+        break;
+      }
+    }
+    if (gitIdx === -1) continue;
+    if (tokens.includes("--dry-run")) continue;
+    return true;
+  }
+  return false;
+};
+
 /**
  * Token segments of actual `git commit` invocations, one per invocation.
  * Token-based: looks for a standalone `commit` token preceded by a `git`
@@ -145,20 +165,34 @@ const heredocSubject = (body: string): string | undefined => {
  * heredoc.
  *
  * Scoped to the commit's own stdin flag: an earlier command in the same bash
- * call may use its own heredoc (`cat > notes.md <<'EOF' …`), which must not
- * become the commit message. Only heredocs starting after the flag belong to
- * this commit.
+ * call may use its own heredoc (`cat > notes.md <<'EOF' …`) or even its own
+ * stdin flag, which must not donate its body as the commit message. Each
+ * `-F -`/`--file`/`--stdin` flag is accepted only when the shell segment
+ * ending at it invokes `git commit` — only heredocs starting after such a
+ * flag belong to this commit.
  */
+const STDIN_FLAG_RE = /(?:^|\s)(?:-F|--file)(?:=|\s+)-(?=\s|$)|(?:^|\s)--stdin(?:\s|$)/;
+const HEREDOC_RE =
+  /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?:\n|$)/;
+
 const extractHeredocMessage = (cmd: string): string | undefined => {
-  // `-F -` / `--file=-` / `--file -` (space- or equals-separated), or `--stdin`
-  const flag =
-    /(?:^|\s)(?:-F|--file)(?:=|\s+)-(?=\s|$)/.exec(cmd) ?? /(?:^|\s)--stdin(?:\s|$)/.exec(cmd);
-  if (!flag) return undefined;
-  const m = cmd
-    .slice(flag.index)
-    .match(/<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?:\n|$)/);
-  if (!m) return undefined;
-  return heredocSubject(m[3]);
+  for (const m of cmd.matchAll(new RegExp(STDIN_FLAG_RE.source, "g"))) {
+    const flagIdx = m.index ?? 0;
+    // Shell segment ending at this flag must invoke git commit; otherwise
+    // the flag (and its heredoc) belongs to an earlier command. Tokenizing
+    // is quote-aware, so a flag inside a quoted string can never qualify.
+    const before = stripHeredocBodies(cmd.slice(0, flagIdx));
+    const tokens = tokenizeCommand(before);
+    let segStart = 0;
+    for (let k = 0; k < tokens.length; k++) {
+      if (SHELL_CONTROL.has(tokens[k])) segStart = k + 1;
+    }
+    if (!segmentInvokesCommit(tokens.slice(segStart))) continue;
+    const hm = cmd.slice(flagIdx).match(HEREDOC_RE);
+    if (!hm) continue;
+    return heredocSubject(hm[3]);
+  }
+  return undefined;
 };
 
 /**

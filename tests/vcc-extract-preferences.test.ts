@@ -51,6 +51,16 @@ describe("extractPreferences — question gate precision", () => {
       expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
     }
   });
+
+  it("drops rhetorical why-questions in English and CJK alike", () => {
+    // "Why not use pnpm?" nudges toward pnpm, but it is phrased as a
+    // question — distinguishing rhetorical nudges from information-seeking
+    // needs semantic analysis, so both languages drop them, consistently
+    // with the English opener gate (which drops "Why …?" unconditionally).
+    for (const text of ["Why don't we use pnpm?", "为什么不用 pnpm？"]) {
+      expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
+    }
+  });
 });
 
 describe("extractPreferences — correction anchors (English)", () => {
