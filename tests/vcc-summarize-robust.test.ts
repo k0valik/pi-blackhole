@@ -381,5 +381,26 @@ describe("vcc-summarize robust merging and stripping", () => {
       // Previous-only entry survives (stale tags are stripped by design).
       expect(r).toContain("b.ts");
     });
+
+    it("keeps the newest files when the merged list exceeds the cap", () => {
+      // Fresh entries parse first (most recent first), prev-only entries
+      // append after — so the keep-first-10 cap retains fresh touches and
+      // drops the oldest prev entries, not the other way around. Prev lines
+      // are stored newest-first, so old-11 is the stalest entry here.
+      const prevFiles = Array.from({ length: 12 }, (_, i) => `old-${i}.ts`);
+      const previousSummary = `[Files And Changes]\n- Modified: ${prevFiles.join(", ")}\n\n---\n\n[user]\nold`;
+      const r = compile({
+        messages: [userMsg("check")],
+        previousSummary,
+        fileOps: { readFiles: [], modifiedFiles: ["/repo/src/new-a.ts", "/repo/src/new-b.ts"] },
+        cwd: "/repo",
+      });
+      expect(r).toContain("new-a.ts");
+      expect(r).toContain("new-b.ts");
+      expect(r).toContain("old-0.ts");
+      expect(r).not.toContain("old-11.ts");
+      // The (+N more) suffix may wrap across lines — normalize first.
+      expect(r.replace(/\n\s*/g, " ")).toContain("(+4 more)");
+    });
   });
 });

@@ -59,6 +59,67 @@ const trimPaths = (set: Set<string>, prefix: string): Set<string> => {
 };
 
 /**
+ * Path cleanup ported from pi-files-touched (sanitizeReference/stripLineSuffix).
+ * Tool args carry raw strings: surrounding quotes/brackets, trailing
+ * punctuation, and editor line suffixes (`a.ts:10`, `a.ts:10-40`, `a.ts#L10`).
+ * Without stripping, `src/a.ts:10-40` and `/repo/src/a.ts` coexist as phantom
+ * duplicates that defeat display trimming and cross-compaction dedup.
+ */
+const sanitizeReference = (raw: string): string => {
+  let value = raw.trim();
+  if (!value) return value;
+  const first = value.charCodeAt(0);
+  const last = value.charCodeAt(value.length - 1);
+  if (
+    first === 34 ||
+    first === 39 ||
+    first === 96 ||
+    first === 40 ||
+    first === 60 ||
+    first === 91 ||
+    last === 34 ||
+    last === 39 ||
+    last === 96 ||
+    last === 62 ||
+    last === 59 ||
+    last === 41 ||
+    last === 93 ||
+    last === 46 ||
+    last === 44 ||
+    last === 58 ||
+    last === 92
+  ) {
+    value = value.replace(/^["'`(<[]+/, "");
+    value = value.replace(/[>"'`,;).\]]+$/, "");
+    value = value.replace(/[.,;:]+$/, "");
+  }
+  return value;
+};
+
+const stripLineSuffix = (value: string): string => {
+  if (!value.includes("#") && !value.includes(":")) return value;
+  let result = value.replace(/#L\d+(C\d+)?$/i, "");
+  const lastSeparator = Math.max(result.lastIndexOf("/"), result.lastIndexOf("\\"));
+  const segmentStart = lastSeparator >= 0 ? lastSeparator + 1 : 0;
+  const segment = result.slice(segmentStart);
+  const colonIndex = segment.indexOf(":");
+  if (colonIndex >= 0 && /\d/.test(segment[colonIndex + 1] ?? "")) {
+    result = result.slice(0, segmentStart + colonIndex);
+    return result;
+  }
+  const lastColon = result.lastIndexOf(":");
+  if (lastColon > lastSeparator) {
+    const suffix = result.slice(lastColon + 1);
+    if (/^\d+(?::\d+)?$/.test(suffix)) {
+      result = result.slice(0, lastColon);
+    }
+  }
+  return result;
+};
+
+const stripReadSliceSuffix = (p: string): string => p.replace(/:(\d+)-(\d+)$/, "");
+
+/**
  * Merge session-touched file attribution (see file-touch.ts) into the
  * activity sets. Files whose most recent operation was a delete (or that were
  * moved away) are dropped entirely — scratch scripts created and deleted
@@ -76,12 +137,18 @@ const seedFromTouched = (act: FileActivity, touched: FilesTouchedEntry[]): void 
   }
 };
 
-const toLookupPath = (p: string, cwd?: string): string =>
-  p.replace(/\\/g, "/").startsWith("/") || /^[A-Za-z]:\//.test(p)
-    ? p.replace(/\\/g, "/")
+const toLookupPath = (p: string, cwd?: string): string => {
+  // Clean raw tool-arg strings first (quotes, trailing punctuation, editor
+  // `:line`/`:start-end`/`#L` suffixes) so they resolve to the same absolute
+  // form the file-touch collector produces.
+  const cleaned = stripLineSuffix(sanitizeReference(stripReadSliceSuffix(p)));
+  const slashed = cleaned.replace(/\\/g, "/");
+  return slashed.startsWith("/") || /^[A-Za-z]:\//.test(slashed)
+    ? slashed
     : cwd
-      ? path.resolve(cwd, p).replace(/\\/g, "/")
-      : p;
+      ? path.resolve(cwd, cleaned).replace(/\\/g, "/")
+      : cleaned;
+};
 
 export const extractFiles = (
   blocks: NormalizedBlock[],
@@ -95,13 +162,16 @@ export const extractFiles = (
   // collector produces — otherwise "src/a.ts" and "/repo/src/a.ts" coexist as
   // phantom duplicates and break longestCommonDirPrefix display trimming.
   const canon = (p: string): string => toLookupPath(p, cwd);
-  const act: FileActivity = {
-    read: new Set((fileOps?.readFiles ?? []).map(canon)),
-    modified: new Set((fileOps?.modifiedFiles ?? []).map(canon)),
-    created: new Set((fileOps?.createdFiles ?? []).map(canon)),
-  };
+  const act: FileActivity = { read: new Set(), modified: new Set(), created: new Set() };
 
+  // Seed the touch collector first: its output is recency-ordered (most
+  // recent first), so the per-category cap keeps the latest touches rather
+  // than Pi's unordered fileOps lists. fileOps entries append after — they
+  // add files the collector did not model, never reorder it.
   seedFromTouched(act, touched);
+  for (const p of fileOps?.readFiles ?? []) act.read.add(canon(p));
+  for (const p of fileOps?.modifiedFiles ?? []) act.modified.add(canon(p));
+  for (const p of fileOps?.createdFiles ?? []) act.created.add(canon(p));
 
   // Legacy name/path-args scan — fallback for tools the touch collector does
   // not model (e.g. custom extensions writing via path-like args).

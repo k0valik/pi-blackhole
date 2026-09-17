@@ -146,8 +146,13 @@ const mergeFileLines = (prev: string, fresh: string): string => {
   const merged: Record<string, Map<string, string>> = {};
   for (const cat of categories) merged[cat] = new Map();
 
-  // Parse "- Modified: a, b (staged), c (+N more)" lines from both prev and fresh
-  for (const text of [prev, fresh]) {
+  // Parse "- Modified: a, b (staged), c (+N more)" lines, fresh first.
+  // Fresh entries are recency-ordered (most recent first) and prev entries
+  // follow in stored order, so the keep-first cap below retains the 10 most
+  // recent files instead of letting stale prev entries crowd out fresh
+  // touches. Fresh display (with current git tags) wins ties by insertion
+  // order — prev never overwrites an already-seen key.
+  for (const text of [fresh, prev]) {
     for (const line of text.split("\n")) {
       for (const cat of categories) {
         const prefix = `- ${cat}: `;
@@ -165,10 +170,9 @@ const mergeFileLines = (prev: string, fresh: string): string => {
           const key = trimmed.replace(GIT_TAG_SUFFIX_RE, "");
           const map = merged[cat];
           if (!map.has(key)) {
-            map.set(key, text === prev ? key : trimmed);
-          } else if (text === fresh) {
-            // fresh re-touch of a path already listed from prev: fresh tag wins
-            map.set(key, trimmed);
+            // Fresh entries keep their tags; prev-only entries store the
+            // stripped key — prev tags are stale point-in-time state.
+            map.set(key, text === fresh ? trimmed : key);
           }
         }
       }

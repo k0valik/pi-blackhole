@@ -390,3 +390,54 @@ describe("buildSections Files And Changes via session messages", () => {
     expect(files).toContain("Modified: /repo/src/main.ts");
   });
 });
+
+describe("buildSections Files And Changes — path cleanup and recency ordering", () => {
+  it("strips quotes and :start-end suffixes from legacy tool-arg paths", () => {
+    // Raw tool args carry editor strings — without cleanup the literal
+    // `"src/quoted.ts:10-40"` becomes a phantom entry distinct from the file.
+    const r = buildSections({
+      blocks: [{ kind: "tool_call", name: "Edit", args: { file_path: '"src/quoted.ts:10-40"' } }],
+    });
+    expect(r.filesAndChanges.join("\n")).toContain("Modified: src/quoted.ts");
+  });
+
+  it("strips #L anchors from legacy tool-arg paths", () => {
+    const r = buildSections({
+      blocks: [{ kind: "tool_call", name: "read", args: { path: "src/anchor.ts#L12" } }],
+    });
+    const files = r.filesAndChanges.join("\n");
+    expect(files).toContain("Read: src/anchor.ts");
+    expect(files).not.toContain("#L");
+  });
+
+  it("orders Modified by touch recency ahead of fileOps seeds", () => {
+    // The collector output is recency-ordered (most recent first); Pi's
+    // fileOps lists are unordered. Seeding touched first keeps the latest
+    // touches at the head of the capped line.
+    const a = nextId();
+    const b = nextId();
+    const messages: Message[] = [
+      assistantWith({ id: a, name: "write", args: { path: "/repo/src/old-touch.ts" } }),
+      toolResult(a, "write", "ok", { timestamp: 1 }),
+      assistantWith({ id: b, name: "write", args: { path: "/repo/src/new-touch.ts" } }),
+      toolResult(b, "write", "ok", { timestamp: 2 }),
+    ];
+    const r = buildSections({
+      blocks: [],
+      messages,
+      fileOps: { readFiles: [], modifiedFiles: ["/repo/src/seed.ts"] },
+      cwd: "/repo",
+    });
+    const modifiedLine =
+      r.filesAndChanges
+        .join("\n")
+        .split("\n")
+        .find((l) => l.startsWith("Modified:")) ?? "";
+    const idxNew = modifiedLine.indexOf("new-touch.ts");
+    const idxOld = modifiedLine.indexOf("old-touch.ts");
+    const idxSeed = modifiedLine.indexOf("seed.ts");
+    expect(idxNew).toBeGreaterThanOrEqual(0);
+    expect(idxNew).toBeLessThan(idxOld);
+    expect(idxNew).toBeLessThan(idxSeed);
+  });
+});
