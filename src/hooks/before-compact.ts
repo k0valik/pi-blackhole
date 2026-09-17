@@ -28,6 +28,7 @@ import { DEFAULTS, configFileNeedsMigration } from "../core/unified-config.js";
 import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
 import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
 import { loadGitFileTags } from "../extract/git-status.js";
+import { collectFilesTouched } from "../extract/file-touch.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -653,6 +654,18 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     trace("before_compact.summary_generated", {
       summaryLength: summary.length,
       messageCount: agentMessages.length,
+      // Live attribution signal (#105): how many files the touch collector
+      // saw in the raw pre-conversion messages. A 0 here alongside a rich
+      // window means the in-memory toolCall block shape differs from the
+      // serialized JSONL shape the collector was built against. Runs only at
+      // compaction time, inside the debugLog-gated trace (zero cost by default).
+      filesTouchedCount: (() => {
+        try {
+          return collectFilesTouched(agentMessages, ctx.cwd ?? process.cwd()).length;
+        } catch {
+          return undefined;
+        }
+      })(),
     });
 
     let allEntries: any[] = [];

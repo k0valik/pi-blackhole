@@ -90,10 +90,15 @@ export const extractFiles = (
   gitTags?: Map<string, string>,
   cwd?: string,
 ): FileActivity => {
+  // Canonicalize seeds through cwd so relative Pi fileOps entries and legacy
+  // relative tool-arg paths resolve to the same absolute form the file-touch
+  // collector produces — otherwise "src/a.ts" and "/repo/src/a.ts" coexist as
+  // phantom duplicates and break longestCommonDirPrefix display trimming.
+  const canon = (p: string): string => toLookupPath(p, cwd);
   const act: FileActivity = {
-    read: new Set(fileOps?.readFiles ?? []),
-    modified: new Set(fileOps?.modifiedFiles ?? []),
-    created: new Set(fileOps?.createdFiles ?? []),
+    read: new Set((fileOps?.readFiles ?? []).map(canon)),
+    modified: new Set((fileOps?.modifiedFiles ?? []).map(canon)),
+    created: new Set((fileOps?.createdFiles ?? []).map(canon)),
   };
 
   seedFromTouched(act, touched);
@@ -104,10 +109,11 @@ export const extractFiles = (
     if (b.kind !== "tool_call") continue;
     const p = extractPath(b.args);
     if (!p) continue;
+    const c = canon(p);
 
-    if (FILE_READ_TOOLS.has(b.name)) act.read.add(p);
-    if (FILE_WRITE_TOOLS.has(b.name)) act.modified.add(p);
-    if (FILE_CREATE_TOOLS.has(b.name)) act.created.add(p);
+    if (FILE_READ_TOOLS.has(b.name)) act.read.add(c);
+    if (FILE_WRITE_TOOLS.has(b.name)) act.modified.add(c);
+    if (FILE_CREATE_TOOLS.has(b.name)) act.created.add(c);
   }
 
   // Git grounding: a written/edited file git reports as untracked was created

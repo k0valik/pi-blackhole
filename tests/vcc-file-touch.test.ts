@@ -367,4 +367,26 @@ describe("buildSections Files And Changes via session messages", () => {
     expect(files).toContain("Read: a.ts");
     expect(files).toContain("Modified: b.ts");
   });
+
+  it("merges relative legacy tool-arg paths with absolute collector paths (no dupes)", () => {
+    // The collector resolves to absolute paths via cwd while the legacy
+    // block scan sees the raw relative arg — both describe one file and must
+    // render once, trimmed to the shared prefix.
+    const a = nextId();
+    const messages: Message[] = [
+      assistantWith({ id: a, name: "write", args: { path: "/repo/src/main.ts" } }),
+      toolResult(a, "write", "ok", { timestamp: 1 }),
+    ];
+    const r = buildSections({
+      blocks: [{ kind: "tool_call", name: "Edit", args: { file_path: "src/main.ts" } }],
+      messages,
+      cwd: "/repo",
+    });
+    const files = r.filesAndChanges.join("\n");
+    const occurrences = files.split("src/main.ts").length - 1;
+    expect(occurrences).toBe(1);
+    // single absolute path has no shared prefix to trim — the point is it
+    // renders once, not as both "src/main.ts" and "/repo/src/main.ts"
+    expect(files).toContain("Modified: /repo/src/main.ts");
+  });
 });

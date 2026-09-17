@@ -45,12 +45,35 @@ const HEADER_NAMES = [
 
 const SEPARATOR = "\n\n---\n\n";
 
-/** Extract a named section from summary text */
+/**
+ * Join wrapped continuation lines back into their bullet item.
+ *
+ * formatSummary() wraps long lines at 120 chars with a space continuation
+ * indent; both the fresh output and stored previous summaries reach the merge
+ * below in that wrapped form. A wrapped "- Modified: a,\n  b,\n  c" bullet
+ * spans several physical lines of which only the first starts with the
+ * "- <Category>: " prefix — without rejoining, the merge silently keeps only
+ * the entries on the first line and drops the rest.
+ * Continuation lines start with spaces while bullets, headers and blank
+ * separator lines never do, so joining "\n + non-space" with a single space
+ * only ever rejoins wrapped content.
+ */
+const joinWrappedLines = (text: string): string => text.replace(/\n +(?=\S)/g, " ");
+
+/** Extract a named section from summary text.
+ *
+ * The header must start at a line boundary — inline mentions such as
+ * "`[Files And Changes]`" inside a hand-written pi-native summary must not
+ * match, otherwise the "previous section" becomes a giant blob from the
+ * mention to the end of the text and the merge drops almost everything.
+ */
 const sectionOf = (text: string, header: string): string => {
-  const tag = `[${header}]`;
-  const start = text.indexOf(tag);
-  if (start < 0) return "";
-  const after = text.slice(start);
+  // Escape the header name for regex safety
+  const openEscaped = header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const open = text.match(new RegExp(`(?:^|\\n)\\[${openEscaped}\\]`));
+  if (!open || open.index === undefined) return "";
+  const start = open.index + (open[0].startsWith("\n") ? 1 : 0);
+  const after = joinWrappedLines(text.slice(start));
   // Find next section header (must start at line boundary to avoid matching in content)
   const nextSection = HEADER_NAMES.filter((h) => h !== header)
     .map((h) => {

@@ -302,4 +302,61 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(r).toContain("substantial");
     });
   });
+
+  describe("Files And Changes merge vs wrapped / hand-written previous summaries (#105)", () => {
+    it("ignores inline [Files And Changes] mentions in a pi-native previous summary", () => {
+      // Hand-written pi-native summaries mention `[Files And Changes]` inline
+      // (backticked, mid-paragraph) without carrying a real section. The merge
+      // must not treat the text from that mention onward as the previous
+      // Files section — otherwise prose lines shaped like "- Modified: ..."
+      // bleed into [Files And Changes] as phantom entries.
+      const previousSummary = [
+        "## Goal",
+        "Fix the `[Files And Changes]` section attribution when modern tools are used.",
+        "",
+        "## Notes",
+        "- Modified: hand-written prose that is not a file entry",
+      ].join("\n");
+      const r = compile({
+        messages: [userMsg("check")],
+        previousSummary,
+        fileOps: { readFiles: [], modifiedFiles: ["/repo/src/real.ts", "/repo/src/other.ts"] },
+        cwd: "/repo",
+      });
+      // shared /repo/src/ prefix trims to display paths
+      expect(r).toContain("Modified: real.ts, other.ts");
+      expect(r).not.toContain("/repo/");
+      expect(r).not.toContain("hand-written prose");
+    });
+
+    it("keeps every fresh file when the fresh Files section wraps across lines", () => {
+      // Eight long display paths exceed the 120-char wrap width on their own,
+      // so the fresh "- Modified: ..." bullet spans several physical lines.
+      // The merge must rejoin those continuation lines instead of keeping
+      // only the entries on the first line, and must retain previous-only
+      // entries.
+      const previousSummary = "[Files And Changes]\n- Modified: prev-only.ts\n\n---\n\n[user]\nold";
+      const names = [
+        "alpha-module",
+        "beta-module",
+        "gamma-module",
+        "delta-module",
+        "epsilon-module",
+        "zeta-module",
+        "theta-module",
+        "iota-module",
+      ];
+      const files = names.map((n) => `/repo/src/${n}.ts`);
+      const r = compile({
+        messages: [userMsg("check")],
+        previousSummary,
+        fileOps: { readFiles: [], modifiedFiles: files },
+        cwd: "/repo",
+      });
+      for (const n of names) {
+        expect(r, `fresh file ${n}.ts dropped from merged output`).toContain(`${n}.ts`);
+      }
+      expect(r).toContain("prev-only.ts");
+    });
+  });
 });
