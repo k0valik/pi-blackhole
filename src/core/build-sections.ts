@@ -86,6 +86,22 @@ const formatFileActivity = (input: BuildSectionsInput): string[] => {
   // Lazy: the touch collector only runs at compaction time, never per tool call.
   const touched = input.messages ? collectFilesTouched(input.messages, input.cwd) : [];
   const act = extractFiles(input.blocks, input.fileOps, touched, input.gitTags, input.cwd);
+  try {
+    require("fs").writeFileSync(
+      "/tmp/ffa-debug.json",
+      JSON.stringify({
+        hasMessages: !!input.messages,
+        messagesLen: input.messages?.length,
+        hasFileOps: !!input.fileOps,
+        fileOps: input.fileOps,
+        touchedLen: touched.length,
+        blocks: input.blocks.length,
+        modified: [...act.modified],
+        created: [...act.created],
+        read: [...act.read],
+      }),
+    );
+  } catch {}
   // Dedup: if already Modified, drop from Created (file existed before)
   for (const p of act.modified) act.created.delete(p);
   const lines: string[] = [];

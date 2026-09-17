@@ -54,6 +54,16 @@ export const RECALL_NOTE =
   "Use `recall` to search the session history. Do not redo work already completed.";
 
 export const formatSummary = (data: SectionData): string => {
+  try {
+    require("fs").writeFileSync(
+      "/tmp/format-summary-debug.json",
+      JSON.stringify({
+        filesAndChanges: data.filesAndChanges,
+        sessionGoal: data.sessionGoal,
+        commits: data.commits,
+      }),
+    );
+  } catch {}
   const headerParts = [
     section("Session Goal", data.sessionGoal),
     section("Files And Changes", data.filesAndChanges),
