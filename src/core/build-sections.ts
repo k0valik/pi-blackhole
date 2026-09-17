@@ -33,34 +33,53 @@ export interface BuildSectionsInput {
 const BLOCKER_RE =
   /\b(fail(ed|s|ure|ing)?|broken|cannot|can't|won't work|does not work|doesn't work|still (broken|failing|wrong)|blocked|blocker|not (fixed|resolved|working)|crash(es|ed|ing)?)\b/i;
 
+// CJK failure/blocker stems — no \b (CJK has no word boundaries). Kept to
+// unambiguous failure words; conversational hedges like 不行 and 不对 are
+// excluded to avoid chit-chat matches.
+const BLOCKER_CJK_RE = /失败|报错|错误|卡住|崩溃/;
+
+// Sentence-like start: capital letter, code identifier, quote — or any CJK
+// character (CJK sentences start with a han character, not ASCII capitals).
+const SENTENCE_START_RE = /^\s*["'`*_]?[A-Z`\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+
 const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
   const items: string[] = [];
-  const tail = blocks.slice(-20);
+  const seen = new Set<string>();
 
-  for (const b of tail) {
+  for (const b of blocks) {
     if (b.kind === "tool_result" && b.isError) {
-      items.push(`[${b.name}] ${firstLine(b.text, 150)}`);
+      const clipped = `[${b.name}] ${firstLine(b.text, 150)}`;
+      const key = clipped.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        items.push(clipped);
+      }
       continue;
     }
 
     if (b.kind === "assistant" || b.kind === "user") {
       for (const line of nonEmptyLines(b.text)) {
-        if (!BLOCKER_RE.test(line)) continue;
-        if (line.length < 15) continue;
+        if (!BLOCKER_RE.test(line) && !BLOCKER_CJK_RE.test(line)) continue;
+        // CJK conveys ~2-3x the information per char — 15 is an English floor.
+        const minLength = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(line) ? 5 : 15;
+        if (line.length < minLength) continue;
         // Skip continuation fragments (sub-bullets, parentheticals, dangling clauses)
         if (/^\s*[-*+>]\s/.test(line)) continue;
         if (/^\s*\(/.test(line)) continue;
-        // Require sentence-like start: capital letter, code identifier, or quote
-        if (!/^\s*["'`*_]?[A-Z`]/.test(line)) continue;
+        // Require sentence-like start: capital/quote, or any CJK character
+        if (!SENTENCE_START_RE.test(line)) continue;
         const clipped =
           b.kind === "user" ? `[user] ${clipSentence(line, 150)}` : clipSentence(line, 150);
-        if (!items.includes(clipped)) items.push(clipped);
+        const key = clipped.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(clipped);
         break;
       }
     }
   }
 
-  return items.slice(0, 5);
+  return items.slice(-5);
 };
 
 const formatFileActivity = (input: BuildSectionsInput): string[] => {

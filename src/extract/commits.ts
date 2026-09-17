@@ -5,11 +5,15 @@ interface CommitInfo {
   message: string;
 }
 
-const COMMIT_MSG_RE =
-  /git\s+commit[^\n]*?-m\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\$?'((?:[^'\\]|\\.)*)')/;
 // Match short hash from git output — only as fallback after bracket/range patterns fail.
 // Requires 8+ hex chars to reduce false positives from random hex in tool output.
 const HASH_RE = /\b([0-9a-f]{8,12})\b/;
+
+/** git's success line: `[branch ab12cd34] subject text` */
+const OUTPUT_COMMIT_RE = /\[\S+\s+([0-9a-f]{7,12})\]\s+(.+)/;
+/** git refused to commit — not a commit artifact even though the command matched. */
+const NOTHING_TO_COMMIT_RE =
+  /nothing(?: to commit| added to commit but untracked)|no changes added to commit/;
 
 const firstLineOf = (text: string): string => {
   const line = text.split(/\\n|\n/)[0] ?? "";
@@ -17,6 +21,138 @@ const firstLineOf = (text: string): string => {
 };
 
 const cleanMessage = (msg: string): string => msg.replace(/\\"/g, '"').replace(/\\'/g, "'").trim();
+
+/**
+ * Tokenize a shell command respecting quotes and `\`-newline continuations.
+ * Quoted segments stay single tokens so `grep "git commit -m 'x'"` cannot
+ * masquerade as a git invocation.
+ */
+const tokenizeCommand = (cmd: string): string[] => {
+  const joined = cmd.replace(/\\\s*\n/g, " ");
+  const tokens: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | undefined;
+  for (let i = 0; i < joined.length; i++) {
+    const c = joined[i];
+    if (quote) {
+      if (c === quote) {
+        quote = undefined;
+        cur += c;
+      } else {
+        cur += c;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      if (cur) tokens.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  if (cur) tokens.push(cur);
+  return tokens;
+};
+
+/**
+ * Remove heredoc bodies from a command so their contents cannot leak into
+ * token-based commit detection (e.g. a `cat <<EOF` body that mentions
+ * `git commit` must not look like a git invocation). Delimiter start lines
+ * are kept; body lines between them are dropped.
+ */
+const stripHeredocBodies = (cmd: string): string => {
+  const out: string[] = [];
+  let delim: string | undefined;
+  for (const line of cmd.split("\n")) {
+    if (delim !== undefined) {
+      if (line.trim() === delim) delim = undefined;
+      continue;
+    }
+    const m = line.match(/<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (m) delim = m[2];
+    out.push(line);
+  }
+  return out.join("\n");
+};
+
+const SHELL_CONTROL = new Set(["&&", "||", ";", "|", "&"]);
+
+/**
+ * Was this command an actual `git commit` invocation?
+ * Token-based: looks for a standalone `commit` token preceded by a `git`
+ * executable token within the same shell segment, so flag order (`-c`, `-C`,
+ * `--no-pager`, …) and flag values are irrelevant, and quoted occurrences
+ * inside other commands don't match.
+ */
+const isGitCommitCommand = (cmd: string): boolean => {
+  const tokens = tokenizeCommand(stripHeredocBodies(cmd));
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] !== "commit") continue;
+    let gitIdx = -1;
+    for (let j = i - 1; j >= 0; j--) {
+      const t = tokens[j];
+      if (SHELL_CONTROL.has(t)) break; // different shell segment
+      if (t === "git" || t.endsWith("/git")) {
+        gitIdx = j;
+        break;
+      }
+    }
+    if (gitIdx === -1) continue;
+    // Reject --dry-run: flags a commit that never happened. Segment-scoped
+    // (from the git binary to the next control token) to stay precise.
+    const segEnd = tokens.findIndex((t, k) => k > gitIdx && SHELL_CONTROL.has(t));
+    const segment = tokens.slice(gitIdx, segEnd === -1 ? tokens.length : segEnd);
+    if (segment.includes("--dry-run")) continue;
+    return true;
+  }
+  return false;
+};
+
+/** Extract the subject (first non-comment, non-empty line) from a heredoc body. */
+const heredocSubject = (body: string): string | undefined => {
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) continue;
+    return line;
+  }
+  return undefined;
+};
+
+/**
+ * Extract the commit message from a `… commit … -F - <<DELIM … DELIM` heredoc
+ * in the raw command text. Returns undefined when there is no `-F -`/`--file=-`
+ * heredoc.
+ */
+const extractHeredocMessage = (cmd: string): string | undefined => {
+  // `-F -` / `--file=-` / `--file -` (space- or equals-separated), or `--stdin`
+  if (
+    !/(?:^|\s)(?:-F|--file)(?:=|\s+)-(?=\s|$)/.test(cmd) &&
+    !/(?:^|\s)--stdin(?:\s|$)/.test(cmd)
+  ) {
+    return undefined;
+  }
+  const m = cmd.match(
+    /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?:\n|$)/,
+  );
+  if (!m) return undefined;
+  return heredocSubject(m[3]);
+};
+
+/** Extract the message from a `-m`/`--message` flag, position-independent. */
+const extractDashMMessage = (cmd: string): string | undefined => {
+  const m =
+    cmd.match(/(?:^|\s)-m\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/) ??
+    cmd.match(/(?:^|\s)--message=(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/);
+  if (!m) return undefined;
+  const message = firstLineOf(cleanMessage(m[1] ?? m[2] ?? m[3] ?? ""));
+  return message || undefined;
+};
 
 /** Extract commit hash from git output text (tool_result or bash output). */
 const extractHashFromOutput = (text: string): string | undefined => {
@@ -29,13 +165,53 @@ const extractHashFromOutput = (text: string): string | undefined => {
   return undefined;
 };
 
-/** Try to extract a commit message from a git commit command string. */
-const tryExtractMessage = (cmd: string): string | undefined => {
-  if (!/\bgit\s+commit\b/.test(cmd)) return undefined;
-  const m = cmd.match(COMMIT_MSG_RE);
+/** Extract the subject from git's success line `[branch hash] subject`. */
+const extractOutputSubject = (output: string): { hash: string; subject: string } | undefined => {
+  const m = output.match(OUTPUT_COMMIT_RE);
   if (!m) return undefined;
-  const message = firstLineOf(cleanMessage(m[1] ?? m[2] ?? m[3] ?? ""));
-  return message || undefined;
+  const subject = firstLineOf(m[2]);
+  return subject ? { hash: m[1], subject } : undefined;
+};
+
+interface CommitExtraction {
+  message?: string;
+  /** Commit failed — do not record. */
+  failed?: boolean;
+}
+
+/** Try to recover the commit message from a git commit command + its output. */
+const extractFromCommitCommand = (cmd: string, output: string): CommitExtraction => {
+  if (!isGitCommitCommand(cmd)) return {};
+  if (NOTHING_TO_COMMIT_RE.test(output)) return { failed: true };
+
+  // 1. -m flag (subject)
+  const dashM = extractDashMMessage(cmd);
+  if (dashM) return { message: dashM };
+
+  // 2. -F - / --file=- heredoc body (subject)
+  const heredoc = extractHeredocMessage(cmd);
+  if (heredoc) return { message: heredoc };
+
+  // 3. git's success line in the output (covers --file=<path>, wrappers, -q gaps)
+  const fromOutput = extractOutputSubject(output);
+  if (fromOutput) return { message: fromOutput.subject };
+
+  // 4. Known hash but unrecoverable message → stable placeholder. Without a
+  //    hash (quiet/suppressed output) there is nothing recordable — drop.
+  const hash = extractHashFromOutput(output);
+  if (hash) return { message: "(message not captured)" };
+  return {};
+};
+
+/** Commit info from a command + the output of its execution, if any. */
+const tryExtract = (
+  cmd: string,
+  output: string,
+): { hash?: string; message: string } | undefined => {
+  const { message, failed } = extractFromCommitCommand(cmd, output);
+  if (failed || !message) return undefined;
+  const hash = extractHashFromOutput(output);
+  return { hash, message };
 };
 
 /**
@@ -62,40 +238,40 @@ export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
     // ── Case 1: tool_call (agent calls bash tool) ──
     if (b.kind === "tool_call" && b.name === "bash") {
       const cmd = b.args && typeof b.args.command === "string" ? b.args.command : "";
-      const message = tryExtractMessage(cmd);
-      if (!message) continue;
+      if (!isGitCommitCommand(cmd)) continue;
 
-      let hash: string | undefined;
+      // Pair the command with its result; a failed commit is not an artifact.
       for (let j = i + 1; j < Math.min(blocks.length, i + 3); j++) {
         const r = blocks[j];
         if (r.kind !== "tool_result") continue;
-        hash = extractHashFromOutput(r.text);
-        if (hash) break;
+        if (r.isError) break;
+        const commit = tryExtract(cmd, r.text);
+        if (commit) addCommit(commit.hash, commit.message);
+        break;
       }
-      addCommit(hash, message);
       continue;
     }
 
     // ── Case 2: bash execution message ──
     if (b.kind === "bash") {
-      const message = tryExtractMessage(b.command);
-      if (!message) continue;
-      const hash = extractHashFromOutput(b.output);
-      addCommit(hash, message);
+      // Nonzero exit → the commit did not happen.
+      if (b.exitCode !== undefined && b.exitCode !== 0) continue;
+      const commit = tryExtract(b.command, b.output);
+      if (commit) addCommit(commit.hash, commit.message);
       continue;
     }
 
     // ── Case 3: user message wrapping a bash execution (post-convertToLlm) ──
     if (b.kind === "user") {
-      // Detect "Ran `git commit -m "..."`" pattern in user text
+      // Detect "Ran `git commit …`" pattern in user text
       const ranCmd = b.text.match(/Ran\s+`((?:[^`\\]|\\.)*)`/);
       if (!ranCmd) continue;
-      const message = tryExtractMessage(ranCmd[1]);
-      if (!message) continue;
+      if (!isGitCommitCommand(ranCmd[1])) continue;
       // Extract output from the code block following the command
       const codeBlock = b.text.match(/```\n([\s\S]*?)```/);
-      const hash = codeBlock ? extractHashFromOutput(codeBlock[1]) : undefined;
-      addCommit(hash, message);
+      const output = codeBlock ? codeBlock[1] : "";
+      const commit = tryExtract(ranCmd[1], output);
+      if (commit) addCommit(commit.hash, commit.message);
     }
   }
 

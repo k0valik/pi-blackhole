@@ -76,7 +76,8 @@
       "upstream": "pi-vcc",
       "path": "src/core/build-sections.ts",
       "ours": "src/core/build-sections.ts",
-      "status": "UNCHANGED"
+      "status": "MODIFIED",
+      "note": "Diverged in #105 fixes (2026-09): commits.ts = token-based git-commit detection + heredoc/-F/-m message chain + output fallback (upstream still -m-only regex); preferences.ts = correction anchors (EN + CJK) + interrogative-gated question filter; build-sections.ts = full-scan outstanding context, Unicode sentence gate, CJK blocker stems. Upstream diffs to these areas are now almost certainly incompatible — review before porting."
     },
     {
       "upstream": "pi-vcc",
@@ -161,7 +162,8 @@
       "upstream": "pi-vcc",
       "path": "src/extract/commits.ts",
       "ours": "src/extract/commits.ts",
-      "status": "UNCHANGED"
+      "status": "MODIFIED",
+      "note": "Diverged in #105 fixes (2026-09): commits.ts = token-based git-commit detection + heredoc/-F/-m message chain + output fallback (upstream still -m-only regex); preferences.ts = correction anchors (EN + CJK) + interrogative-gated question filter; build-sections.ts = full-scan outstanding context, Unicode sentence gate, CJK blocker stems. Upstream diffs to these areas are now almost certainly incompatible — review before porting."
     },
     {
       "upstream": "pi-vcc",
@@ -179,7 +181,8 @@
       "upstream": "pi-vcc",
       "path": "src/extract/preferences.ts",
       "ours": "src/extract/preferences.ts",
-      "status": "UNCHANGED"
+      "status": "MODIFIED",
+      "note": "Diverged in #105 fixes (2026-09): commits.ts = token-based git-commit detection + heredoc/-F/-m message chain + output fallback (upstream still -m-only regex); preferences.ts = correction anchors (EN + CJK) + interrogative-gated question filter; build-sections.ts = full-scan outstanding context, Unicode sentence gate, CJK blocker stems. Upstream diffs to these areas are now almost certainly incompatible — review before porting."
     },
     {
       "upstream": "pi-vcc",

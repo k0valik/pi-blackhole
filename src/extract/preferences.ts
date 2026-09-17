@@ -9,7 +9,22 @@ const PREF_PATTERNS = [
   /\bnever (?:use|do|run|push|commit|write|ignore|add|set|put|remove|delete|include|deploy)\b/i,
   /\bplease (?:use|avoid|keep|make|don'?t|do not|format|write)\b/i,
   /\b(?:style|format|language|naming)\s*[:=]\s*\S/i,
+  // Correction anchors — directive/negation markers rather than preference
+  // verbs. English.
+  /\bstop (?:doing|using|adding|running|writing|committing|pushing)\b/i,
+  /\b(?:that's|this is) wrong\b/i,
+  /\b(?:revert|undo) (?:that|this|the|it|your)\b/i,
+  // Correction anchors — common CJK directive/negation markers. CJK has no
+  // word boundaries, so no \b. Deliberately excludes broad negatives (不行,
+  // 不对, 别) that occur in conversational chatter (如果不行的话, 别人).
+  /不要|不用|别再|回退|错了|停止/,
 ];
+
+// Information-question openers — a line starting with one of these and ending
+// with `?`/`？` asks for information rather than directing work. Directive
+// questions ("Can you always run tests before pushing?") start with modals and
+// survive.
+const INTERROGATIVE_START_RE = /^(?:what|where|when|who|whom|whose|why|how|which)\b/i;
 
 export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
   const prefs: string[] = [];
@@ -23,8 +38,9 @@ export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.length < 5) continue;
       if (trimmed.length > 200) continue;
-      // Reject questions.
-      if (trimmed.endsWith("?") || trimmed.includes("?...")) continue;
+      // Reject information questions only; directive questions survive.
+      if ((trimmed.endsWith("?") || trimmed.endsWith("？")) && INTERROGATIVE_START_RE.test(trimmed))
+        continue;
       if (!PREF_PATTERNS.some((p) => p.test(trimmed))) continue;
 
       const clipped = clip(trimmed, 200);
