@@ -2,7 +2,9 @@
  * Pi-vcc compile entry — orchestrates normalization → noise filtering → section building.
  *
  * Upstream: https://github.com/sting8k/pi-vcc (src/core/summarize.ts)
- * Unmodified.
+ * Modified by pi-blackhole:
+ * - threads touchMessages/cwd into buildSections for file-touch attribution
+ *   (src/extract/file-touch.ts); merge logic otherwise unchanged.
  */
 import type { Message } from "@earendil-works/pi-ai";
 import type { FileOps } from "../types";
@@ -15,6 +17,14 @@ export interface CompileInput {
   messages: Message[];
   previousSummary?: string;
   fileOps?: FileOps;
+  /**
+   * Raw (pre-convertToLlm) session messages for file-touch attribution.
+   * Falls back to `messages` when omitted. bashExecution messages only exist
+   * in the raw form, so passing these preserves bash mutation tracking.
+   */
+  touchMessages?: Message[];
+  /** Working directory — merges relative/absolute file references. */
+  cwd?: string;
   /**
    * Session-global `#N` index per message position (see
    * src/core/global-indices.ts). Parallel to `messages`; a missing entry
@@ -168,16 +178,21 @@ const mergePrevious = (prev: string, fresh: string): string => {
 };
 
 const compileFresh = (
-  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices">,
+  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices" | "touchMessages" | "cwd">,
 ): string => {
   const blocks = filterNoise(normalize(input.messages, input.sourceIndices));
-  const data = buildSections({ blocks });
+  const data = buildSections({
+    blocks,
+    messages: input.touchMessages ?? input.messages,
+    fileOps: input.fileOps,
+    cwd: input.cwd,
+  });
   return formatSummary(data);
 };
 
 /** Build one fresh immutable VCC segment. It never reads an older summary. */
 export const compileSegment = (
-  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices">,
+  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices" | "touchMessages" | "cwd">,
 ): string => {
   const fresh = compileFresh(input);
   return fresh ? wrapLongLines(fresh) : "";

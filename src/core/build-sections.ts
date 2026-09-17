@@ -2,19 +2,30 @@
  * Section building — parses normalized blocks into structured sections.
  *
  * Upstream: https://github.com/sting8k/pi-vcc (src/core/build-sections.ts)
- * Unmodified.
+ * Modified by pi-blackhole:
+ * - Files And Changes also attributes files from raw session messages via
+ *   the file-touch collector (src/extract/file-touch.ts), covering anchor-
+ *   based edit tools and bash mutations that PATH_KEYS matching cannot see.
  */
-import type { NormalizedBlock } from "../types";
+import type { Message } from "@earendil-works/pi-ai";
+import type { FileOps, NormalizedBlock } from "../types";
 import { clipSentence, firstLine, nonEmptyLines } from "./content";
 import type { SectionData } from "../sections";
 import { extractGoals } from "../extract/goals";
 import { extractFiles } from "../extract/files";
+import { collectFilesTouched } from "../extract/file-touch";
 import { extractPreferences, dedupPreferencesAgainstGoals } from "../extract/preferences";
 import { extractCommits, formatCommits } from "../extract/commits";
 import { buildBriefSections, stringifyBrief } from "./brief";
 
 export interface BuildSectionsInput {
   blocks: NormalizedBlock[];
+  /** Raw pre-conversion session messages — enables file-touch attribution. */
+  messages?: Message[];
+  /** Working directory for relative-path merging in file-touch attribution. */
+  cwd?: string;
+  /** Pi's own file-op seed lists (read/written/edited). */
+  fileOps?: FileOps;
 }
 
 const BLOCKER_RE =
@@ -50,8 +61,10 @@ const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
   return items.slice(0, 5);
 };
 
-const formatFileActivity = (blocks: NormalizedBlock[]): string[] => {
-  const act = extractFiles(blocks);
+const formatFileActivity = (input: BuildSectionsInput): string[] => {
+  // Lazy: the touch collector only runs at compaction time, never per tool call.
+  const touched = input.messages ? collectFilesTouched(input.messages, input.cwd) : [];
+  const act = extractFiles(input.blocks, input.fileOps, touched);
   // Dedup: if already Modified, drop from Created (file existed before)
   for (const p of act.modified) act.created.delete(p);
   const lines: string[] = [];
@@ -74,7 +87,7 @@ export const buildSections = (input: BuildSectionsInput): SectionData => {
   return {
     sessionGoal,
     outstandingContext: extractOutstandingContext(blocks),
-    filesAndChanges: formatFileActivity(blocks),
+    filesAndChanges: formatFileActivity(input),
     commits: formatCommits(extractCommits(blocks)),
     userPreferences,
     briefTranscript: stringifyBrief(briefSections),

@@ -1,5 +1,6 @@
 import type { FileOps, NormalizedBlock } from "../types";
 import { extractPath } from "../core/tool-args";
+import type { FilesTouchedEntry } from "./file-touch";
 
 interface FileActivity {
   read: Set<string>;
@@ -7,7 +8,7 @@ interface FileActivity {
   created: Set<string>;
 }
 
-const FILE_READ_TOOLS = new Set(["Read", "read_file", "View"]);
+const FILE_READ_TOOLS = new Set(["Read", "read_file", "View", "read", "view"]);
 
 const FILE_WRITE_TOOLS = new Set([
   "Edit",
@@ -53,13 +54,39 @@ const trimPaths = (set: Set<string>, prefix: string): Set<string> => {
   return out;
 };
 
-export const extractFiles = (blocks: NormalizedBlock[], fileOps?: FileOps): FileActivity => {
+/**
+ * Merge session-touched file attribution (see file-touch.ts) into the
+ * activity sets. Files whose most recent operation was a delete (or that were
+ * moved away) are dropped entirely — scratch scripts created and deleted
+ * mid-session should not surface in [Files And Changes].
+ */
+const seedFromTouched = (act: FileActivity, touched: FilesTouchedEntry[]): void => {
+  for (const t of touched) {
+    if (t.lastOperation === "delete") continue;
+    const ops = t.operations;
+    if (ops.has("write") || ops.has("edit") || ops.has("move")) {
+      act.modified.add(t.path);
+    } else if (ops.has("read")) {
+      act.read.add(t.path);
+    }
+  }
+};
+
+export const extractFiles = (
+  blocks: NormalizedBlock[],
+  fileOps?: FileOps,
+  touched: FilesTouchedEntry[] = [],
+): FileActivity => {
   const act: FileActivity = {
     read: new Set(fileOps?.readFiles ?? []),
     modified: new Set(fileOps?.modifiedFiles ?? []),
     created: new Set(fileOps?.createdFiles ?? []),
   };
 
+  seedFromTouched(act, touched);
+
+  // Legacy name/path-args scan — fallback for tools the touch collector does
+  // not model (e.g. custom extensions writing via path-like args).
   for (const b of blocks) {
     if (b.kind !== "tool_call") continue;
     const p = extractPath(b.args);
@@ -69,6 +96,9 @@ export const extractFiles = (blocks: NormalizedBlock[], fileOps?: FileOps): File
     if (FILE_WRITE_TOOLS.has(b.name)) act.modified.add(p);
     if (FILE_CREATE_TOOLS.has(b.name)) act.created.add(p);
   }
+
+  // A file that was modified is never interesting as "read"
+  for (const p of act.modified) act.read.delete(p);
 
   const all = [...act.read, ...act.modified, ...act.created];
   const prefix = longestCommonDirPrefix(all);

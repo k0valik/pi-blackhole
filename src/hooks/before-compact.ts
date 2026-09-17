@@ -596,10 +596,18 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       previousSummary: preparation.previousSummary,
       fileOps,
       sourceIndices,
+      touchMessages: agentMessages,
+      cwd: ctx.cwd ?? process.cwd(),
     });
     const freshSegmentSummary =
       omRuntime.config.compactionSummaryMode === "append"
-        ? compileSegment({ messages, fileOps, sourceIndices })
+        ? compileSegment({
+            messages,
+            fileOps,
+            sourceIndices,
+            touchMessages: agentMessages,
+            cwd: ctx.cwd ?? process.cwd(),
+          })
         : "";
 
     const branchIds = branchEntries.map((e: any) => e.id);

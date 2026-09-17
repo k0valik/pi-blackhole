@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`[Files And Changes]` now attributes files the older extractor missed entirely** ([#105](https://github.com/k0valik/pi-blackhole/issues/105), Bug 1). The section previously matched only a hardcoded English/PascalCase tool-name list plus `PATH_KEYS` arg sniffing, so on a modern Pi session (lowercase `read`/`write` tools, anchor-based `replace`/`insert` edit tools that carry no path argument, and file mutations done through bash) it listed wrong or missing files — in the reported session it named ten already-deleted `/tmp` scratch scripts and none of the six delivered files. New `src/extract/file-touch.ts` (ported from the proven pi-files-touched implementation) correlates tool calls with their results and attributes reads/writes/edits/moves/deletes across: native tools via path args, anchor-based edit tools via result-text path recovery (`Successfully replaced in <path>.`, `Successfully wrote N bytes to <path>`, no-op results suppressed), and a bash command parser (redirects, `sed -i`, `tee`, `cp`, `mv` with old→new op redirect, `rm`/`git rm`, `touch`, `patch`, `curl -o`, `cat`/`head`/`tail` reads, heredoc bodies ignored, `/dev/null` and non-literal operands skipped). Files whose most recent operation is a delete no longer appear at all. The collector runs only at compaction time (inside `buildSections`), never per tool call; Pi's own `preparation.fileOps` lists are still seeded in and the legacy name-based block scan remains as fallback for unknown extension tools. Cross-form references merge (relative + absolute, `path:10-40` read slices stripped), and the common-directory-prefix display trim is unchanged.
+
 ---
 
 ## [0.5.5] - 2026-09-15
