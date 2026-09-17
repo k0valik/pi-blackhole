@@ -6,8 +6,9 @@
  * summary needs: one word tag per absolute path.
  *
  * Runs only at compaction time (via before-compact → buildSections), once,
- * synchronously with a bounded `execFileSync`; any failure (no git, not a
- * repo) yields an empty map and no annotations — fail-closed.
+ * synchronously with bounded `execFileSync` calls (timeouts + maxBuffer);
+ * any failure (no git, not a repo, timeout, huge output) yields an empty map
+ * and no annotations — fail-closed.
  */
 import { execFileSync } from "node:child_process";
 
@@ -56,6 +57,7 @@ export const loadGitFileTags = (cwd: string): Map<string, string> => {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
     }).trim();
     if (!root) return tags;
     gitRoot = root;
@@ -70,6 +72,7 @@ export const loadGitFileTags = (cwd: string): Map<string, string> => {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 16 * 1024 * 1024,
+      timeout: 5000,
     });
   } catch {
     return tags;

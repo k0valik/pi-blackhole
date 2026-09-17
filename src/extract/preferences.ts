@@ -29,7 +29,13 @@ const PREF_PATTERNS = [
 // with `?`/`？` asks for information rather than directing work. Directive
 // questions ("Can you always run tests before pushing?") start with modals and
 // survive.
+//
+// CJK interrogatives match anywhere, not just at the start: CJK questions
+// commonly front a time scope before the interrogative ("以后怎么提交代码？",
+// "为什么以后要用 pnpm？"), and a `？`-ending line containing one is asking
+// something even when it also matches a standing-instruction marker.
 const INTERROGATIVE_START_RE = /^(?:what|where|when|who|whom|whose|why|how|which)\b/i;
+const CJK_INTERROGATIVE_RE = /为什么|怎么|如何|什么|哪里|哪儿|哪个|哪些|怎样|咋/;
 
 export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
   const prefs: string[] = [];
@@ -49,7 +55,10 @@ export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
       if (!trimmed || trimmed.length < minLength) continue;
       if (trimmed.length > 200) continue;
       // Reject information questions only; directive questions survive.
-      if ((trimmed.endsWith("?") || trimmed.endsWith("？")) && INTERROGATIVE_START_RE.test(trimmed))
+      if (
+        (trimmed.endsWith("?") || trimmed.endsWith("？")) &&
+        (INTERROGATIVE_START_RE.test(trimmed) || CJK_INTERROGATIVE_RE.test(trimmed))
+      )
         continue;
       if (!PREF_PATTERNS.some((p) => p.test(trimmed))) continue;
 

@@ -287,6 +287,22 @@ describe("extractCommits — flag scoping and success-line forms (#105 follow-up
     expect(out[0]?.message).toBe("fix: real subject from heredoc");
   });
 
+  it("ignores an earlier command's heredoc when recovering the commit message", () => {
+    // The first heredoc in the raw command belongs to `cat`, not the commit.
+    // The unscoped search returned "Some notes" and — by priority order —
+    // shadowed both the real heredoc message and git's success line.
+    const cmd = [
+      `cat > notes.md <<'EOF'`,
+      `Some notes`,
+      `EOF`,
+      `git add -A && git commit -F - <<'MSG'`,
+      `fix: real subject`,
+      `MSG`,
+    ].join("\n");
+    const out = extractCommits([toolCall(cmd), toolResult("[main 99e6a9f] fix: real subject")]);
+    expect(out[0]?.message).toBe("fix: real subject");
+  });
+
   it("ignores -m-like text inside the heredoc body", () => {
     const cmd = [
       `git commit -q -F - <<'MSG'`,

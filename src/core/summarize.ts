@@ -155,7 +155,11 @@ const mergeFileLines = (prev: string, fresh: string): string => {
         let rest = line.slice(prefix.length);
         // Strip "(+N more)" suffix
         rest = rest.replace(/\s*\(\+\d+ more\)\s*$/, "");
-        for (const p of rest.split(",")) {
+        // Split on top-level commas only — a git word tag can contain one
+        // ("a.ts (staged,unstaged)"). Splitting inside the parens yields
+        // partial keys ("a.ts (staged", "unstaged)") that defeat the
+        // prev/fresh dedup and duplicate the file on re-touch.
+        for (const p of rest.split(/,(?![^()]*\))/)) {
           const trimmed = p.trim();
           if (!trimmed) continue;
           const key = trimmed.replace(GIT_TAG_SUFFIX_RE, "");

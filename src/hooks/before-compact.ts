@@ -651,21 +651,28 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       sections: [...summary.matchAll(/^\[(.+?)\]/gm)].map((m) => m[1]),
     });
 
+    // The trace call below applies the debugLog flag internally, but its
+    // argument object is evaluated eagerly — gate the diagnostic collection
+    // here so it costs nothing when debugging is off.
+    const debugLogEnabled = omRuntime.config.debugLog === true;
     trace("before_compact.summary_generated", {
       summaryLength: summary.length,
       messageCount: agentMessages.length,
       // Live attribution signal (#105): how many files the touch collector
       // saw in the raw pre-conversion messages. A 0 here alongside a rich
       // window means the in-memory toolCall block shape differs from the
-      // serialized JSONL shape the collector was built against. Runs only at
-      // compaction time, inside the debugLog-gated trace (zero cost by default).
-      filesTouchedCount: (() => {
-        try {
-          return collectFilesTouched(agentMessages, ctx.cwd ?? process.cwd()).length;
-        } catch {
-          return undefined;
-        }
-      })(),
+      // serialized JSONL shape the collector was built against. Computed only
+      // when debugLog is enabled (zero cost by default, and no duplicate of
+      // the collection pass inside compile → buildSections).
+      filesTouchedCount: !debugLogEnabled
+        ? undefined
+        : (() => {
+            try {
+              return collectFilesTouched(agentMessages, ctx.cwd ?? process.cwd()).length;
+            } catch {
+              return undefined;
+            }
+          })(),
     });
 
     let allEntries: any[] = [];

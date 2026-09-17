@@ -97,6 +97,7 @@ const boundaryLine =
   entries.find((x) => x.entry.id === target.entry.firstKeptEntryId)?.line ?? null;
 
 let windowEntries = [];
+let windowRaw = [];
 if (boundaryLine !== null) {
   // Everything from (prev boundary+1 … this boundary-1) that is a message.
   // NOTE: this is an approximation — pi slices the ACTIVE BRANCH, not raw line
@@ -105,9 +106,8 @@ if (boundaryLine !== null) {
   const start = prevFirstKept
     ? (entries.find((x) => x.entry.id === prevFirstKept)?.line ?? 0) + 1
     : 1;
-  windowEntries = entries.filter(
-    (r) => r.line >= start && r.line < boundaryLine && r.entry.type === "message",
-  );
+  windowRaw = entries.filter((r) => r.line >= start && r.line < boundaryLine);
+  windowEntries = windowRaw.filter((r) => r.entry.type === "message");
 }
 const msgs = windowEntries.map((r) => ({
   ...r,
@@ -155,7 +155,9 @@ if (reads.length > 12) console.log(`  ... (+${reads.length - 12} more)`);
 const commits = toolCalls.filter(
   (t) =>
     t.name === "bash" &&
-    /(^|[;|])\s*(?:sudo\s+)?git(\s|\/)[^\n]*\bcommit\b/.test(String(t.args?.command ?? "")),
+    /(^|(?:&&|\|\||[;|\n]))\s*(?:sudo\s+)?git(\s|\/)[^\n]*\bcommit\b/.test(
+      String(t.args?.command ?? ""),
+    ),
 );
 console.log(`\n-- bash calls containing a git commit token (${commits.length}) --`);
 for (const t of commits) {
@@ -186,7 +188,7 @@ for (const [name, body] of Object.entries(sections)) {
 }
 
 // ── Branch-awareness check ───────────────────────────────────────
-const branchBreaks = windowEntries.filter((r) => r.entry.type === "model_change").length;
+const branchBreaks = windowRaw.filter((r) => r.entry.type === "model_change").length;
 if (branchBreaks > 0) {
   console.log(
     `\n⚠  ${branchBreaks} model_change entries inside the raw window — the active branch may exclude some line ranges.`,

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -35,7 +35,7 @@ describe("tagFromPorcelain", () => {
 
 // ── real repo integration ────────────────────────────────────────
 
-const tmp = mkdtempSync(path.join(tmpdir(), "bh-git-status-"));
+const tmp = realpathSync(mkdtempSync(path.join(tmpdir(), "bh-git-status-")));
 const git = (args: string[], cwd: string = tmp) =>
   execFileSync("git", args, { cwd, encoding: "utf-8" });
 

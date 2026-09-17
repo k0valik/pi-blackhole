@@ -44,6 +44,13 @@ describe("extractPreferences — question gate precision", () => {
       expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
     }
   });
+
+  it("drops CJK information questions that contain a standing-instruction marker", () => {
+    // Matches 以后 but asks for information — must not become a preference.
+    for (const text of ["为什么以后要用 pnpm？", "以后怎么提交代码？"]) {
+      expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
+    }
+  });
 });
 
 describe("extractPreferences — correction anchors (English)", () => {

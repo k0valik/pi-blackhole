@@ -358,5 +358,28 @@ describe("vcc-summarize robust merging and stripping", () => {
       }
       expect(r).toContain("prev-only.ts");
     });
+
+    it("keeps (staged,unstaged) tags intact across merge without duplicating the file", () => {
+      // A combined git tag contains a comma. Splitting entries on every comma
+      // breaks it into partial keys ("main.ts (staged", "unstaged)") that
+      // defeat prev/fresh dedup — the file then appears twice and the stale
+      // tag survives alongside the fresh one.
+      const previousSummary =
+        "[Files And Changes]\n- Modified: main.ts (staged,unstaged), b.ts (new)\n\n---\n\n[user]\nold";
+      const r = compile({
+        messages: [userMsg("check")],
+        previousSummary,
+        // Two files sharing /repo/src/ so display trimming engages and the
+        // fresh key ("main.ts") matches the previous key.
+        fileOps: { readFiles: [], modifiedFiles: ["/repo/src/main.ts", "/repo/src/other.ts"] },
+        cwd: "/repo",
+        gitTags: new Map([["/repo/src/main.ts", "staged"]]),
+      });
+      expect(r.match(/main\.ts/g)?.length).toBe(1);
+      expect(r).toContain("main.ts (staged)");
+      expect(r).not.toContain("unstaged)");
+      // Previous-only entry survives (stale tags are stripped by design).
+      expect(r).toContain("b.ts");
+    });
   });
 });

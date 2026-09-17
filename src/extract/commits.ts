@@ -143,18 +143,20 @@ const heredocSubject = (body: string): string | undefined => {
  * Extract the commit message from a `… commit … -F - <<DELIM … DELIM` heredoc
  * in the raw command text. Returns undefined when there is no `-F -`/`--file=-`
  * heredoc.
+ *
+ * Scoped to the commit's own stdin flag: an earlier command in the same bash
+ * call may use its own heredoc (`cat > notes.md <<'EOF' …`), which must not
+ * become the commit message. Only heredocs starting after the flag belong to
+ * this commit.
  */
 const extractHeredocMessage = (cmd: string): string | undefined => {
   // `-F -` / `--file=-` / `--file -` (space- or equals-separated), or `--stdin`
-  if (
-    !/(?:^|\s)(?:-F|--file)(?:=|\s+)-(?=\s|$)/.test(cmd) &&
-    !/(?:^|\s)--stdin(?:\s|$)/.test(cmd)
-  ) {
-    return undefined;
-  }
-  const m = cmd.match(
-    /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?:\n|$)/,
-  );
+  const flag =
+    /(?:^|\s)(?:-F|--file)(?:=|\s+)-(?=\s|$)/.exec(cmd) ?? /(?:^|\s)--stdin(?:\s|$)/.exec(cmd);
+  if (!flag) return undefined;
+  const m = cmd
+    .slice(flag.index)
+    .match(/<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?:\n|$)/);
   if (!m) return undefined;
   return heredocSubject(m[3]);
 };
