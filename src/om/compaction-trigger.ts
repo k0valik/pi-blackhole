@@ -208,9 +208,11 @@ async function handleTurnEnd(
   // "pause"'s run-interrupting ctx.compact() has no user to hand control back
   // to. Both resolve to the transparent inline path at the turn boundary,
   // which does not abort the runner. Persisted sessions keep the configured
-  // semantics exactly; unsupported adapters fail closed into the
-  // inline_adapter_unsupported skip + the /blackhole-memory skip counter.
-  const nonPersisted = ctx.sessionManager.isPersisted?.() === false;
+  // semantics exactly. Fail-closed: an unsupported adapter skips via the
+  // per-turn inline_adapter_unsupported reason (debug-logged only, not
+  // counted) plus the process-once agent_start warning; only scheduled
+  // compactions lost to a stale ctx increment the /blackhole-memory counter.
+  const nonPersisted = ctx?.sessionManager?.isPersisted?.() === false;
   const inlineMode = mode === "resume" || nonPersisted;
   if (mode === "off" && !nonPersisted) {
     dbg("compaction_trigger.turn_end.skip", { reason: "midRunCompaction_off" });
@@ -407,6 +409,19 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   });
 
   // Unified + legacy compaction guards (shared with the turn_end path)
+  // Fail-closed for non-persisted sessions (issue #92): when the inline
+  // adapter is known-permanently unavailable, the turn_end path skips with
+  // inline_adapter_unsupported — the settled ctx.compact() fallback must not
+  // run either. It would lose the parent-dispose race by design, and the
+  // adapter-unavailable warning promises these sessions "will not be
+  // compacted". Persisted sessions are unaffected.
+  if (
+    ctx?.sessionManager?.isPersisted?.() === false &&
+    runtime.inlineCompactionAdapterStatus?.supported === false
+  ) {
+    dbg("compaction_trigger.skip", { reason: "inline_adapter_unsupported" });
+    return;
+  }
   const skipReason = autoCompactionSkipReason(runtime);
   if (skipReason) {
     dbg("compaction_trigger.skip", { reason: skipReason });

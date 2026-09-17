@@ -1015,7 +1015,7 @@ describe("non-persisted session inline fallback (issue #92)", () => {
     expect(runtime.compactInFlight).toBe(false);
   });
 
-  it("N5: off + non-persisted records backoff on inline failure without notifying", async () => {
+  it("N5: off + non-persisted classifies inline unavailability as permanent (no backoff)", async () => {
     const inlineCompact = vi.fn(async () => {
       throw new InlineCompactionUnavailableError("inline unavailable in test");
     });
@@ -1026,7 +1026,34 @@ describe("non-persisted session inline fallback (issue #92)", () => {
 
     expect(inlineCompact).toHaveBeenCalledOnce();
     expect(runtime.compactInFlight).toBe(false);
-    expect((ctx.ui as any).notify).not.toHaveBeenCalled();
+    // Permanent classification: adapter marked unsupported, retry backoff untouched.
+    expect(runtime.inlineCompactionAdapterStatus).toEqual({
+      supported: false,
+      reason: "inline unavailable in test",
+    });
+    expect(runtime.midRunCompactionRetry).toEqual({ failures: 0, retryAfter: 0 });
+  });
+
+  it("N5b: off + non-persisted records backoff on transient inline failure and notifies", async () => {
+    const inlineCompact = vi.fn(async () => {
+      throw new Error("transient provider boom");
+    });
+    const { turnHandler, runtime } = captureHandler({ compactAfterTokens: 3 }, inlineCompact);
+    const ctx = nonPersistedCtx(dueBranch, { hasUI: true, ui: { notify: vi.fn() } });
+
+    await turnHandler(turnEnd(), ctx);
+
+    expect(inlineCompact).toHaveBeenCalledOnce();
+    expect(runtime.compactInFlight).toBe(false);
+    // Transient path: exponential backoff armed, adapter NOT marked unsupported.
+    expect(runtime.midRunCompactionRetry.failures).toBe(1);
+    expect(runtime.midRunCompactionRetry.retryAfter).toBeGreaterThan(Date.now());
+    expect(runtime.inlineCompactionAdapterStatus).toBeUndefined();
+    const errors = (ctx.ui as any).notify.mock.calls.filter(
+      (call: unknown[]) => call[1] === "error",
+    );
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(String(errors[0][0])).toContain("transient provider boom");
   });
 
   it("N6: shared gates still apply for non-persisted sessions (manual compaction)", async () => {
@@ -1104,6 +1131,49 @@ describe("non-persisted session inline fallback (issue #92)", () => {
       (call: unknown[]) => call[1] === "warning",
     );
     expect(turnWarn[0]).toContain("non-persisted sessions will not be compacted");
+  });
+
+  it("N11: non-persisted + unsupported adapter skips the settled agent_end path (no ctx.compact)", async () => {
+    const { handler, turnHandler, runtime, inlineCompact } = captureHandler({
+      compactAfterTokens: 3,
+    });
+    runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+
+    // turn_end fail-closes (existing N4 behavior) ...
+    const turnCtx = nonPersistedCtx(dueBranch);
+    await turnHandler(turnEnd(), turnCtx);
+    expect(inlineCompact).not.toHaveBeenCalled();
+    expect(turnCtx.compact).not.toHaveBeenCalled();
+
+    // ... and the deferred agent_end fallback must not run either: it would
+    // lose the parent-dispose race by design and contradicts the
+    // "will not be compacted" warning. No scheduling means no stale-ctx
+    // counter bump and no idle polling.
+    const endCtx = nonPersistedCtx(dueBranch);
+    handler(agentEnd(), endCtx);
+    await flushAll();
+    await advanceRetryTicks(3);
+
+    expect(endCtx.compact).not.toHaveBeenCalled();
+    expect(runtime.compactInFlight).toBe(false);
+    expect(runtime.autoCompactionController).toBeNull();
+    expect(runtime.staleCtxSkippedCompactions).toBe(0);
+  });
+
+  it("N12: persisted + unsupported adapter still uses the settled agent_end path", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+    runtime.inlineCompactionAdapterStatus = { supported: false, reason: "pi lacks API" };
+    const ctx = fakeCtx([dueBranch]);
+
+    handler(agentEnd(), ctx);
+    await flushAll();
+    await advanceRetryTicks(3);
+
+    // Guard is non-persisted-only: persisted sessions keep settled semantics.
+    // (compactInFlight stays true — the fake ctx.compact never fires
+    // onComplete, same as the pre-existing settled-path tests.)
+    expect(ctx.compact).toHaveBeenCalledOnce();
+    expect(runtime.autoCompactionController).toBeNull();
   });
 });
 
