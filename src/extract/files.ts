@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { FileOps, NormalizedBlock } from "../types";
 import { extractPath } from "../core/tool-args";
 import type { FilesTouchedEntry } from "./file-touch";
@@ -6,6 +8,8 @@ interface FileActivity {
   read: Set<string>;
   modified: Set<string>;
   created: Set<string>;
+  /** Display path → git word tag ("staged", "new", …); only when git status was provided. */
+  gitTags?: Map<string, string>;
 }
 
 const FILE_READ_TOOLS = new Set(["Read", "read_file", "View", "read", "view"]);
@@ -72,10 +76,19 @@ const seedFromTouched = (act: FileActivity, touched: FilesTouchedEntry[]): void 
   }
 };
 
+const toLookupPath = (p: string, cwd?: string): string =>
+  p.replace(/\\/g, "/").startsWith("/") || /^[A-Za-z]:\//.test(p)
+    ? p.replace(/\\/g, "/")
+    : cwd
+      ? path.resolve(cwd, p).replace(/\\/g, "/")
+      : p;
+
 export const extractFiles = (
   blocks: NormalizedBlock[],
   fileOps?: FileOps,
   touched: FilesTouchedEntry[] = [],
+  gitTags?: Map<string, string>,
+  cwd?: string,
 ): FileActivity => {
   const act: FileActivity = {
     read: new Set(fileOps?.readFiles ?? []),
@@ -97,11 +110,43 @@ export const extractFiles = (
     if (FILE_CREATE_TOOLS.has(b.name)) act.created.add(p);
   }
 
+  // Git grounding: a written/edited file git reports as untracked was created
+  // in this session — surface it under Created instead of Modified.
+  if (gitTags) {
+    for (const p of act.modified) {
+      if (gitTags.get(toLookupPath(p, cwd)) === "new") {
+        act.modified.delete(p);
+        act.created.add(p);
+      }
+    }
+  }
+
   // A file that was modified is never interesting as "read"
   for (const p of act.modified) act.read.delete(p);
 
   const all = [...act.read, ...act.modified, ...act.created];
   const prefix = longestCommonDirPrefix(all);
+
+  // Annotate using the original (pre-trim) paths — the lookup needs the full
+  // absolute path; keys are the trimmed display paths. "new" is suppressed on
+  // Read-only entries — an untracked file that was only read was not created
+  // by this session's writes.
+  if (gitTags) {
+    const annotations = new Map<string, string>();
+    const collect = (set: Set<string>, allowNew: boolean) => {
+      for (const p of set) {
+        const tag = gitTags.get(toLookupPath(p, cwd));
+        if (!tag || (tag === "new" && !allowNew)) continue;
+        const display = prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p;
+        annotations.set(display, tag);
+      }
+    };
+    collect(act.modified, true);
+    collect(act.created, true);
+    collect(act.read, false);
+    if (annotations.size > 0) act.gitTags = annotations;
+  }
+
   if (prefix) {
     act.read = trimPaths(act.read, prefix);
     act.modified = trimPaths(act.modified, prefix);

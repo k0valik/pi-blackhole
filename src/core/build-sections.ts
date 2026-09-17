@@ -26,6 +26,8 @@ export interface BuildSectionsInput {
   cwd?: string;
   /** Pi's own file-op seed lists (read/written/edited). */
   fileOps?: FileOps;
+  /** Git working-tree tags (abs path → "staged"/"new"/…), see src/extract/git-status.ts. */
+  gitTags?: Map<string, string>;
 }
 
 const BLOCKER_RE =
@@ -64,14 +66,19 @@ const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
 const formatFileActivity = (input: BuildSectionsInput): string[] => {
   // Lazy: the touch collector only runs at compaction time, never per tool call.
   const touched = input.messages ? collectFilesTouched(input.messages, input.cwd) : [];
-  const act = extractFiles(input.blocks, input.fileOps, touched);
+  const act = extractFiles(input.blocks, input.fileOps, touched, input.gitTags, input.cwd);
   // Dedup: if already Modified, drop from Created (file existed before)
   for (const p of act.modified) act.created.delete(p);
   const lines: string[] = [];
+  const tagOf = (p: string): string => {
+    const tag = act.gitTags?.get(p);
+    return tag ? ` (${tag})` : "";
+  };
   const cap = (set: Set<string>, limit: number) => {
     const arr = [...set];
-    if (arr.length <= limit) return arr.join(", ");
-    return arr.slice(0, limit).join(", ") + ` (+${arr.length - limit} more)`;
+    const render = (p: string) => `${p}${tagOf(p)}`;
+    if (arr.length <= limit) return arr.map(render).join(", ");
+    return arr.slice(0, limit).map(render).join(", ") + ` (+${arr.length - limit} more)`;
   };
   if (act.modified.size > 0) lines.push(`Modified: ${cap(act.modified, 10)}`);
   if (act.created.size > 0) lines.push(`Created: ${cap(act.created, 10)}`);

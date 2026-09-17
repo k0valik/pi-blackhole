@@ -25,6 +25,8 @@ export interface CompileInput {
   touchMessages?: Message[];
   /** Working directory — merges relative/absolute file references. */
   cwd?: string;
+  /** Git working-tree tags for fresh-window annotations (abs path → tag). */
+  gitTags?: Map<string, string>;
   /**
    * Session-global `#N` index per message position (see
    * src/core/global-indices.ts). Parallel to `messages`; a missing entry
@@ -105,13 +107,23 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
   return `[${header}]\n${capped.join("\n")}`;
 };
 
-/** Merge Files And Changes by category, dedup paths across compactions */
+/** Merge Files And Changes by category, dedup paths across compactions. */
+
+/**
+ * Git word-tag suffix appended by the fresh compile ("src/a.ts (staged)").
+ * Tags from the previous summary are stripped (stale point-in-time state);
+ * fresh-window tags survive.
+ */
+const GIT_TAG_SUFFIX_RE =
+  /\s+\((?:staged|unstaged|new|renamed|deleted|conflicted|staged,unstaged)\)\s*$/;
+
 const mergeFileLines = (prev: string, fresh: string): string => {
   const categories = ["Modified", "Created", "Read"] as const;
-  const merged: Record<string, Set<string>> = {};
-  for (const cat of categories) merged[cat] = new Set();
+  // stripped path → display string; prev inserted first, fresh display wins
+  const merged: Record<string, Map<string, string>> = {};
+  for (const cat of categories) merged[cat] = new Map();
 
-  // Parse "- Modified: a, b, c (+N more)" lines from both prev and fresh
+  // Parse "- Modified: a, b (staged), c (+N more)" lines from both prev and fresh
   for (const text of [prev, fresh]) {
     for (const line of text.split("\n")) {
       for (const cat of categories) {
@@ -122,19 +134,27 @@ const mergeFileLines = (prev: string, fresh: string): string => {
         rest = rest.replace(/\s*\(\+\d+ more\)\s*$/, "");
         for (const p of rest.split(",")) {
           const trimmed = p.trim();
-          if (trimmed) merged[cat].add(trimmed);
+          if (!trimmed) continue;
+          const key = trimmed.replace(GIT_TAG_SUFFIX_RE, "");
+          const map = merged[cat];
+          if (!map.has(key)) {
+            map.set(key, text === prev ? key : trimmed);
+          } else if (text === fresh) {
+            // fresh re-touch of a path already listed from prev: fresh tag wins
+            map.set(key, trimmed);
+          }
         }
       }
     }
   }
 
   // Dedup: if already in Modified, drop from Created (file existed before)
-  for (const p of merged.Modified) merged.Created.delete(p);
+  for (const key of merged.Modified.keys()) merged.Created.delete(key);
   // Also remove Read entries that also appear in Modified (same file read+edited)
-  for (const p of merged.Modified) merged.Read.delete(p);
+  for (const key of merged.Modified.keys()) merged.Read.delete(key);
 
-  const cap = (set: Set<string>, limit: number) => {
-    const arr = [...set];
+  const cap = (map: Map<string, string>, limit: number) => {
+    const arr = [...map.values()];
     if (arr.length <= limit) return arr.join(", ");
     return arr.slice(0, limit).join(", ") + ` (+${arr.length - limit} more)`;
   };
@@ -178,7 +198,10 @@ const mergePrevious = (prev: string, fresh: string): string => {
 };
 
 const compileFresh = (
-  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices" | "touchMessages" | "cwd">,
+  input: Pick<
+    CompileInput,
+    "messages" | "fileOps" | "sourceIndices" | "touchMessages" | "cwd" | "gitTags"
+  >,
 ): string => {
   const blocks = filterNoise(normalize(input.messages, input.sourceIndices));
   const data = buildSections({
@@ -186,13 +209,17 @@ const compileFresh = (
     messages: input.touchMessages ?? input.messages,
     fileOps: input.fileOps,
     cwd: input.cwd,
+    gitTags: input.gitTags,
   });
   return formatSummary(data);
 };
 
 /** Build one fresh immutable VCC segment. It never reads an older summary. */
 export const compileSegment = (
-  input: Pick<CompileInput, "messages" | "fileOps" | "sourceIndices" | "touchMessages" | "cwd">,
+  input: Pick<
+    CompileInput,
+    "messages" | "fileOps" | "sourceIndices" | "touchMessages" | "cwd" | "gitTags"
+  >,
 ): string => {
   const fresh = compileFresh(input);
   return fresh ? wrapLongLines(fresh) : "";

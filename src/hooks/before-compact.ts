@@ -27,6 +27,7 @@ import { effectiveContextWindow } from "../om/model-budget.js";
 import { DEFAULTS, configFileNeedsMigration } from "../core/unified-config.js";
 import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
 import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
+import { loadGitFileTags } from "../extract/git-status.js";
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -591,6 +592,9 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       readFiles: [...preparation.fileOps.read],
       modifiedFiles: [...preparation.fileOps.written, ...preparation.fileOps.edited],
     };
+    // Git working-tree tags for fresh-window annotations; empty (no
+    // annotations) outside a repo or if git fails.
+    const gitTags = loadGitFileTags(ctx.cwd ?? process.cwd());
     const summary = compile({
       messages,
       previousSummary: preparation.previousSummary,
@@ -598,6 +602,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       sourceIndices,
       touchMessages: agentMessages,
       cwd: ctx.cwd ?? process.cwd(),
+      gitTags,
     });
     const freshSegmentSummary =
       omRuntime.config.compactionSummaryMode === "append"
@@ -607,6 +612,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
             sourceIndices,
             touchMessages: agentMessages,
             cwd: ctx.cwd ?? process.cwd(),
+            gitTags,
           })
         : "";
 
