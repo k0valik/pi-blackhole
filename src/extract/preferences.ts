@@ -18,6 +18,11 @@ const PREF_PATTERNS = [
   // word boundaries, so no \b. Deliberately excludes broad negatives (不行,
   // 不对, 别) that occur in conversational chatter (如果不行的话, 别人).
   /不要|不用|别再|回退|错了|停止/,
+  // Standing-instruction markers — 以后/下次/必须 scope future behavior, so
+  // they are preference signals by construction. 记住 fires unless followed
+  // by an acknowledgement particle: 记住了/记住吧/记住哦 acknowledges a
+  // previous message rather than directing future work.
+  /以后|下次|必须|记住(?!了|吧|哦)/,
 ];
 
 // Information-question openers — a line starting with one of these and ending
@@ -36,7 +41,12 @@ export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
     let perBlock = 0;
     for (const line of nonEmptyLines(b.text)) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.length < 5) continue;
+      // CJK conveys ~2-3x the information per char — a bare 2-char
+      // correction (回退) is a complete directive where 5 ASCII chars would
+      // be a fragment. Markers are all 2+ chars, so a floor of 2 for CJK
+      // lines cannot admit single-char noise.
+      const minLength = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(trimmed) ? 2 : 5;
+      if (!trimmed || trimmed.length < minLength) continue;
       if (trimmed.length > 200) continue;
       // Reject information questions only; directive questions survive.
       if ((trimmed.endsWith("?") || trimmed.endsWith("？")) && INTERROGATIVE_START_RE.test(trimmed))

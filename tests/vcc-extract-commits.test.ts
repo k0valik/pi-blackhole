@@ -254,3 +254,98 @@ describe("extractCommits — other block kinds", () => {
     expect(extractCommits(blocks)).toEqual([]);
   });
 });
+
+describe("extractCommits — flag scoping and success-line forms (#105 follow-up)", () => {
+  const namedResult = (name: string, text: string, isError = false): NormalizedBlock => ({
+    kind: "tool_result",
+    name,
+    text,
+    isError,
+  });
+
+  it("extracts the space-separated --message long form", () => {
+    // Quiet output: nothing recoverable from git's stdout, so the flag
+    // itself must parse (old code only knew --message=).
+    const out = extractCommits([
+      toolCall(`git commit -q --message "fix: long form"`),
+      toolResult(""),
+    ]);
+    expect(out[0]?.message).toBe("fix: long form");
+  });
+
+  it("ignores -m belonging to a later command in the same call", () => {
+    // The -m flag here belongs to `docker run`, not the commit. The old
+    // whole-command scan returned "2g" and — by priority order — shadowed
+    // the real heredoc message.
+    const cmd = [
+      `git commit -q -F - <<'MSG'`,
+      `fix: real subject from heredoc`,
+      `MSG`,
+      `docker run -m 2g img`,
+    ].join("\n");
+    const out = extractCommits([toolCall(cmd), toolResult("")]);
+    expect(out[0]?.message).toBe("fix: real subject from heredoc");
+  });
+
+  it("ignores -m-like text inside the heredoc body", () => {
+    const cmd = [
+      `git commit -q -F - <<'MSG'`,
+      `fix: real subject`,
+      ``,
+      `Note: run the container with -m 4g of memory.`,
+      `MSG`,
+    ].join("\n");
+    const out = extractCommits([toolCall(cmd), toolResult("")]);
+    expect(out[0]?.message).toBe("fix: real subject");
+  });
+
+  it("extracts root-commit success lines", () => {
+    const out = extractCommits([
+      toolCall(`git commit -m "feat: initial"`),
+      toolResult("[main (root-commit) 99e6a9f] feat: initial"),
+    ]);
+    expect(out[0]?.message).toBe("feat: initial");
+    expect(out[0]?.hash).toBe("99e6a9f");
+  });
+
+  it("extracts detached-HEAD success lines", () => {
+    const out = extractCommits([
+      toolCall(`git commit --amend --no-edit`),
+      toolResult("[detached HEAD 99e6a9f] fix: amended on detached head"),
+    ]);
+    expect(out[0]?.message).toBe("fix: amended on detached head");
+    expect(out[0]?.hash).toBe("99e6a9f");
+  });
+
+  it("does not consume a sibling tool's result for pairing", () => {
+    // Parallel calls interleave results; the read result must not stand in
+    // for the commit's own output (old code took the first result, losing
+    // the hash here).
+    const out = extractCommits([
+      toolCall(`git commit -m "fix: mine"`),
+      namedResult("read", "file contents here"),
+      toolResult("[main 99e6a9f] fix: mine"),
+    ]);
+    expect(out.length).toBe(1);
+    expect(out[0]?.message).toBe("fix: mine");
+    expect(out[0]?.hash).toBe("99e6a9f");
+  });
+
+  it("does not let a foreign error result kill the commit", () => {
+    const out = extractCommits([
+      toolCall(`git commit -m "fix: survives"`),
+      namedResult("read", "Error: file not found", true),
+      toolResult("[main 99e6a9f] fix: survives"),
+    ]);
+    expect(out.length).toBe(1);
+    expect(out[0]?.message).toBe("fix: survives");
+  });
+
+  it("still drops the commit on its own tool error (regression armor)", () => {
+    const out = extractCommits([
+      toolCall(`git commit -m "fix: hook rejected"`),
+      toolResult("husky > pre-commit failed", true),
+    ]);
+    expect(out).toEqual([]);
+  });
+});

@@ -99,6 +99,38 @@ describe("extractOutstandingContext — CJK blockers", () => {
   });
 });
 
+describe("extractOutstandingContext — CJK precision (#105 follow-up)", () => {
+  it("does not flag error-handling mechanism discussion", () => {
+    // 错误处理 describes mechanism, not malfunction — the old stem test
+    // fired on this.
+    for (const text of [
+      "我们需要给解析器添加错误处理逻辑",
+      "错误码的定义放在 constants 里",
+      "失败率最近降到了 1%",
+    ]) {
+      expect(buildSections({ blocks: [assistant(text)] }).outstandingContext).toEqual([]);
+    }
+  });
+
+  it("still fires when a real stem survives beside benign compounds", () => {
+    // Stripping 错误处理 must not swallow the residual 报错.
+    const r = buildSections({ blocks: [assistant("错误处理逻辑里还是报错，启动失败")] });
+    expect(r.outstandingContext.length).toBe(1);
+  });
+
+  it("captures short CJK failure reports", () => {
+    // 失败了 is complete at 3 chars; the old 5-char floor dropped it.
+    const r = buildSections({ blocks: [user("失败了")] });
+    expect(r.outstandingContext.length).toBe(1);
+  });
+
+  it("captures bracket-led CJK blocker headings", () => {
+    const r = buildSections({ blocks: [assistant("【报错】服务启动失败，端口被占用")] });
+    expect(r.outstandingContext.length).toBe(1);
+    expect(r.outstandingContext[0]).toContain("服务启动失败");
+  });
+});
+
 describe("extractOutstandingContext — tool errors unchanged", () => {
   it("still reports tool errors", () => {
     const blocks: NormalizedBlock[] = [

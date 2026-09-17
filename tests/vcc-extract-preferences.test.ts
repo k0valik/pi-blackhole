@@ -114,3 +114,38 @@ describe("extractPreferences — CJK corrections", () => {
     expect(extractPreferences([{ kind: "assistant", text: "不要担心，我会修复的" }])).toEqual([]);
   });
 });
+
+describe("extractPreferences — CJK standing instructions (#105 follow-up)", () => {
+  it("captures a bare 2-char correction (回退)", () => {
+    // The old 5-char floor dropped this before the pattern ever ran, even
+    // though the issue quotes it as a missed user correction.
+    expect(extractPreferences([{ kind: "user", text: "回退" }]).length).toBe(1);
+  });
+
+  it("captures 记住 directives", () => {
+    expect(extractPreferences([{ kind: "user", text: "记住提交信息用中文" }]).length).toBe(1);
+  });
+
+  it("captures 以后/下次/必须 future-scoped instructions", () => {
+    for (const text of [
+      "以后提交前先跑一遍测试",
+      "下次记得更新 changelog",
+      "必须用 pnpm，不能用 npm",
+    ]) {
+      expect(extractPreferences([{ kind: "user", text }]).length).toBe(1);
+    }
+  });
+
+  it("does not capture 记住 acknowledgements", () => {
+    // 记住了/记住吧/记住哦 acknowledges a previous message — no directive.
+    for (const text of ["记住了", "记住了，谢谢", "记住吧"]) {
+      expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
+    }
+  });
+
+  it("does not capture chatter containing excluded broad negatives", () => {
+    for (const text of ["别人都说这个方案好", "如果不行的话就告诉我", "这个不对吧，我再看看"]) {
+      expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
+    }
+  });
+});

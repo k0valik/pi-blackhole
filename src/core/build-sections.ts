@@ -38,9 +38,16 @@ const BLOCKER_RE =
 // excluded to avoid chit-chat matches.
 const BLOCKER_CJK_RE = /失败|报错|错误|卡住|崩溃/;
 
-// Sentence-like start: capital letter, code identifier, quote — or any CJK
-// character (CJK sentences start with a han character, not ASCII capitals).
-const SENTENCE_START_RE = /^\s*["'`*_]?[A-Z`\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+// Benign technical compounds that contain a failure stem but describe
+// mechanism, not malfunction ("add error handling" is not a blocker).
+// Stripped before the stem test, so a line only flags on a *residual* stem:
+// a line with both ("the error handling still 报错") still fires via 报错.
+const CJK_BENIGN_RE = /错误(?:处理|信息|消息|码|类型|日志|堆栈)|失败(?:重试|率)/g;
+
+// Sentence-like start: capital letter, code identifier, quote, CJK bracket —
+// or any CJK character (CJK sentences start with a han character, not ASCII
+// capitals). 【/『/「 lead bracketed CJK headings like 【报错】服务启动失败.
+const SENTENCE_START_RE = /^\s*["'`*_【『「]?[A-Z`\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
 
 const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
   const items: string[] = [];
@@ -59,9 +66,12 @@ const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
 
     if (b.kind === "assistant" || b.kind === "user") {
       for (const line of nonEmptyLines(b.text)) {
-        if (!BLOCKER_RE.test(line) && !BLOCKER_CJK_RE.test(line)) continue;
+        // Benign-compound strip first: mechanism discussion must not flag.
+        const scannable = line.replace(CJK_BENIGN_RE, "");
+        if (!BLOCKER_RE.test(scannable) && !BLOCKER_CJK_RE.test(scannable)) continue;
         // CJK conveys ~2-3x the information per char — 15 is an English floor.
-        const minLength = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(line) ? 5 : 15;
+        // A short failure report (失败了) is complete at 3 chars.
+        const minLength = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(line) ? 2 : 15;
         if (line.length < minLength) continue;
         // Skip continuation fragments (sub-bullets, parentheticals, dangling clauses)
         if (/^\s*[-*+>]\s/.test(line)) continue;

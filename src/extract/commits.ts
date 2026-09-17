@@ -9,8 +9,12 @@ interface CommitInfo {
 // Requires 8+ hex chars to reduce false positives from random hex in tool output.
 const HASH_RE = /\b([0-9a-f]{8,12})\b/;
 
-/** git's success line: `[branch ab12cd34] subject text` */
-const OUTPUT_COMMIT_RE = /\[\S+\s+([0-9a-f]{7,12})\]\s+(.+)/;
+/** git's success line: `[branch ab12cd34] subject text`.
+ * The bracket head is free-form — first commits print
+ * `[main (root-commit) ab12cd34] …`, detached HEAD prints
+ * `[detached HEAD ab12cd34] …`. Scoped to actual git-commit invocations
+ * by the caller, so the loose prefix cannot misfire elsewhere. */
+const OUTPUT_COMMIT_RE = /\[(?:[^\]\n]*\s)?([0-9a-f]{7,12})\]\s+(.+)/;
 /** git refused to commit — not a commit artifact even though the command matched. */
 const NOTHING_TO_COMMIT_RE =
   /nothing(?: to commit| added to commit but untracked)|no changes added to commit/;
@@ -25,7 +29,8 @@ const cleanMessage = (msg: string): string => msg.replace(/\\"/g, '"').replace(/
 /**
  * Tokenize a shell command respecting quotes and `\`-newline continuations.
  * Quoted segments stay single tokens so `grep "git commit -m 'x'"` cannot
- * masquerade as a git invocation.
+ * masquerade as a git invocation. Bare newlines are kept as their own token
+ * so multi-line scripts split into segments (a `\`-continuation still joins).
  */
 const tokenizeCommand = (cmd: string): string[] => {
   const joined = cmd.replace(/\\\s*\n/g, " ");
@@ -46,6 +51,12 @@ const tokenizeCommand = (cmd: string): string[] => {
     if (c === '"' || c === "'") {
       quote = c;
       cur += c;
+      continue;
+    }
+    if (c === "\n") {
+      if (cur) tokens.push(cur);
+      cur = "";
+      tokens.push("\n");
       continue;
     }
     if (/\s/.test(c)) {
@@ -80,17 +91,18 @@ const stripHeredocBodies = (cmd: string): string => {
   return out.join("\n");
 };
 
-const SHELL_CONTROL = new Set(["&&", "||", ";", "|", "&"]);
+const SHELL_CONTROL = new Set(["&&", "||", ";", "|", "&", "\n"]);
 
 /**
- * Was this command an actual `git commit` invocation?
+ * Token segments of actual `git commit` invocations, one per invocation.
  * Token-based: looks for a standalone `commit` token preceded by a `git`
  * executable token within the same shell segment, so flag order (`-c`, `-C`,
  * `--no-pager`, …) and flag values are irrelevant, and quoted occurrences
  * inside other commands don't match.
  */
-const isGitCommitCommand = (cmd: string): boolean => {
+const commitSegments = (cmd: string): string[][] => {
   const tokens = tokenizeCommand(stripHeredocBodies(cmd));
+  const segments: string[][] = [];
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] !== "commit") continue;
     let gitIdx = -1;
@@ -108,10 +120,13 @@ const isGitCommitCommand = (cmd: string): boolean => {
     const segEnd = tokens.findIndex((t, k) => k > gitIdx && SHELL_CONTROL.has(t));
     const segment = tokens.slice(gitIdx, segEnd === -1 ? tokens.length : segEnd);
     if (segment.includes("--dry-run")) continue;
-    return true;
+    segments.push(segment);
   }
-  return false;
+  return segments;
 };
+
+/** Was this command an actual `git commit` invocation? */
+const isGitCommitCommand = (cmd: string): boolean => commitSegments(cmd).length > 0;
 
 /** Extract the subject (first non-comment, non-empty line) from a heredoc body. */
 const heredocSubject = (body: string): string | undefined => {
@@ -144,19 +159,28 @@ const extractHeredocMessage = (cmd: string): string | undefined => {
   return heredocSubject(m[3]);
 };
 
-/** Extract the message from a `-m`/`--message` flag, position-independent. */
+/**
+ * Extract the message from a `-m`/`--message` flag, position-independent.
+ * Scoped to the commit invocation's own token segment: an `-m` belonging to
+ * a later command (`… && docker run -m 2g img`) or inside a heredoc body must
+ * not shadow the real message (or invent one for a `-F -` commit).
+ */
 const extractDashMMessage = (cmd: string): string | undefined => {
-  const m =
-    cmd.match(/(?:^|\s)-m\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/) ??
-    cmd.match(/(?:^|\s)--message=(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/);
-  if (!m) return undefined;
-  const message = firstLineOf(cleanMessage(m[1] ?? m[2] ?? m[3] ?? ""));
-  return message || undefined;
+  for (const segment of commitSegments(cmd)) {
+    const text = segment.join(" ");
+    const m =
+      text.match(/(?:^|\s)-m\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/) ??
+      text.match(/(?:^|\s)--message(?:=|\s+)(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/);
+    if (!m) continue;
+    const message = firstLineOf(cleanMessage(m[1] ?? m[2] ?? m[3] ?? ""));
+    if (message) return message;
+  }
+  return undefined;
 };
 
 /** Extract commit hash from git output text (tool_result or bash output). */
 const extractHashFromOutput = (text: string): string | undefined => {
-  const bracket = text.match(/\[\S+\s+([0-9a-f]{7,12})\]/);
+  const bracket = text.match(/\[(?:[^\]\n]*\s)?([0-9a-f]{7,12})\]/);
   if (bracket) return bracket[1];
   const range = text.match(/\b([0-9a-f]{7,12})\.\.([0-9a-f]{7,12})\b/);
   if (range) return range[2];
@@ -240,10 +264,14 @@ export const extractCommits = (blocks: NormalizedBlock[]): CommitInfo[] => {
       const cmd = b.args && typeof b.args.command === "string" ? b.args.command : "";
       if (!isGitCommitCommand(cmd)) continue;
 
-      // Pair the command with its result; a failed commit is not an artifact.
+      // Pair the command with its own result. Normalized results carry the
+      // tool name, so a sibling tool's result — or its error — must not be
+      // consumed here: an interleaved foreign error previously killed the
+      // commit, and a foreign success line could misattribute hash/message.
       for (let j = i + 1; j < Math.min(blocks.length, i + 3); j++) {
         const r = blocks[j];
         if (r.kind !== "tool_result") continue;
+        if (r.name !== b.name) continue;
         if (r.isError) break;
         const commit = tryExtract(cmd, r.text);
         if (commit) addCommit(commit.hash, commit.message);
