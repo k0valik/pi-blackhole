@@ -4,7 +4,7 @@ How Blackhole keeps auto-compaction working during (not just after) agent runs �
 
 Audience: users configuring `midRunCompaction`, extension authors running subagents, and anyone reading a `debug.ndjson` full of `compaction_trigger.*` events.
 
-> **Last verified:** 2026-09-17 against repo rev `5237a68` (`fix/92-headless-inline`) and pi `@earendil-works/pi-coding-agent` 0.85.1. House rule: any claim of the form "Pi does not expose X" in `docs/` must cite the pi version it was checked against — re-check the vendored pi type surface before repeating one.
+> **Last verified:** 2026-09-17 against repo rev `4e71dda` (`fix/92-headless-inline`) and pi `@earendil-works/pi-coding-agent` 0.85.1. House rule: any claim of the form "Pi does not expose X" in `docs/` must cite the pi version it was checked against — re-check the vendored pi type surface before repeating one.
 
 See also: [[CONFIG.md]] (`midRunCompaction` reference), [[vcc-compaction.md]] (the summary pipeline itself), [[APPEND_COMPACTION.md]] (append-mode summary chains), [[observational-memory.md]] (the OM pipeline that shares the runtime).
 
