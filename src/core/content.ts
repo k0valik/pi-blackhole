@@ -1,11 +1,28 @@
 import type { Message } from "@earendil-works/pi-ai";
+import { hasCJK } from "./segment.js";
 import { PATH_KEYS } from "./tool-args.js";
+
+// CJK pause punctuation — sentences and clauses end with these and are NOT
+// followed by whitespace (#106). Used by clipSentence (sentence-level) and
+// clip (pause-level fallback for space-free text).
+const CJK_PAUSE_GLOBAL_RE = /[。！？；，、：]/gu;
 
 export const clip = (text: string, max = 200): string => {
   if (text.length <= max) return text;
   // Try to cut at a word boundary
   const cut = text.lastIndexOf(" ", max);
   let end = cut > max * 0.6 ? cut : max;
+  // No usable space boundary (CJK text is space-free): fall back to the last
+  // CJK pause punctuation in the window instead of a hard character cut
+  if (end === max && hasCJK(text)) {
+    CJK_PAUSE_GLOBAL_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    let pauseIdx = -1;
+    while ((m = CJK_PAUSE_GLOBAL_RE.exec(text)) !== null && m.index < max) {
+      if (m.index >= max * 0.6) pauseIdx = m.index;
+    }
+    if (pauseIdx >= 0) end = pauseIdx + 1;
+  }
   // Avoid splitting a surrogate pair
   if (end > 0 && end < text.length) {
     const code = text.charCodeAt(end - 1);
@@ -21,9 +38,15 @@ export const clip = (text: string, max = 200): string => {
  */
 export const clipSentence = (text: string, max = 200): string => {
   if (text.length <= max) return text;
-  // Look for sentence terminators followed by space/newline within [max*0.5, max]
+  // Look for sentence terminators followed by space/newline, end of text, or
+  // a CJK character — CJK terminates with 。！？； and does not put a space
+  // after them (#106) — within [max*0.5, max]
   const window = text.slice(0, max);
-  const matches = [...window.matchAll(/[.!?](?:\s|$)/g)];
+  const matches = [
+    ...window.matchAll(
+      /[.!?。！？；](?=\s|$|[\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\uff00-\uff5e])/g,
+    ),
+  ];
   if (matches.length > 0) {
     const last = matches[matches.length - 1];
     const end = (last.index ?? 0) + 1; // include the punctuation

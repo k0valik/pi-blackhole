@@ -2,6 +2,7 @@ import type { NormalizedBlock } from "../types";
 import { clip, firstLine } from "./content";
 import { extractPath } from "./tool-args";
 import { collapseSkillText } from "./skill-collapse";
+import { isWordSegment, wordSegments } from "./segment.js";
 
 const TRUNCATE_USER = 256;
 const TRUNCATE_ASSISTANT = 200;
@@ -18,52 +19,8 @@ const isNoiseUser = (text: string): boolean => {
 
 // ── truncation ──
 
-// Unicode-aware word segmentation via Intl.Segmenter with lazy init & fallback
-let _segmenter: Intl.Segmenter | null | undefined = undefined;
-const wordSegments = (
-  text: string,
-): Array<{ segment: string; index: number; isWordLike?: boolean }> => {
-  // Available: fast path
-  if (_segmenter) return Array.from(_segmenter.segment(text));
-  // Fallback already established: don't retry the constructor
-  if (_segmenter === null) {
-    const parts: Array<{
-      segment: string;
-      index: number;
-      isWordLike?: boolean;
-    }> = [];
-    let idx = 0;
-    for (const part of text.split(/(\s+)/)) {
-      if (!part) continue;
-      parts.push({ segment: part, index: idx, isWordLike: /\S/.test(part) });
-      idx += part.length;
-    }
-    return parts;
-  }
-  // _segmenter === undefined: first call — attempt construction
-  try {
-    _segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
-    return Array.from(_segmenter.segment(text));
-  } catch {
-    _segmenter = null; // permanently fallback
-    const parts: Array<{
-      segment: string;
-      index: number;
-      isWordLike?: boolean;
-    }> = [];
-    let idx = 0;
-    for (const part of text.split(/(\s+)/)) {
-      if (!part) continue;
-      parts.push({ segment: part, index: idx, isWordLike: /\S/.test(part) });
-      idx += part.length;
-    }
-    return parts;
-  }
-};
-
-/** Check if segment is a word (Bun's isWordLike is unreliable for alphanumeric tokens) */
-const isWord = (seg: { segment: string; isWordLike?: boolean }): boolean =>
-  !!seg.isWordLike || /[\p{L}\p{N}]/u.test(seg.segment);
+// Word segmentation + word-like check live in ./segment.js (shared with the
+// recall query tokenizer, #106).
 
 // Common stop words — don't count toward budget
 const STOP_WORDS = new Set([
@@ -173,7 +130,7 @@ const truncateTokens = (text: string, limit: number): string => {
   let count = 0;
   let lastEnd = 0;
   for (const seg of wordSegments(flat)) {
-    if (isWord(seg)) {
+    if (isWordSegment(seg)) {
       if (!STOP_WORDS.has(seg.segment.toLowerCase())) {
         count++;
         if (count > limit) {

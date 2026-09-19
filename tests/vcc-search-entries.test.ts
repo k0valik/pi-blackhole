@@ -450,3 +450,45 @@ describe("searchEntries", () => {
     expect(searchEntriesDetailed(e, m, "alpha alpha", { relativeFloor: 0.9 }).hits).toHaveLength(2);
   });
 });
+
+describe("CJK query tokenization (#106)", () => {
+  const zhTexts = [
+    "为什么面板显示的数字不对",
+    "面板数字已经修复好了",
+    "completely unrelated english text",
+  ];
+  const zhEntries = zhTexts.map((summary, index) => ({
+    index,
+    role: "user" as const,
+    summary,
+  }));
+  const zhMsgs = zhTexts.map((content) => ({ role: "user", content }) as any);
+
+  it("ranks a Chinese natural-language query even when wording differs", () => {
+    // Not a verbatim substring of any doc — the old whole-query literal pattern
+    // matched nothing; segmented terms (为什么/面板/数字…) match doc 0.
+    const r = searchEntries(zhEntries, zhMsgs, "为什么面板的数字不对");
+    expect(r.map((h) => h.index)).toContain(0);
+  });
+
+  it("keeps matching a short verbatim Chinese substring", () => {
+    const r = searchEntries(zhEntries, zhMsgs, "面板");
+    expect(r.map((h) => h.index)).toEqual(expect.arrayContaining([0, 1]));
+  });
+
+  it("does not match docs that share no query terms", () => {
+    const r = searchEntries(zhEntries, zhMsgs, "为什么面板的数字不对");
+    expect(r.map((h) => h.index)).not.toContain(2);
+  });
+
+  it("handles a mixed English-CJK query", () => {
+    // "the" is a stopword, "面板" survives segmentation, "bug" splits normally
+    const r = searchEntries(zhEntries, zhMsgs, "the 面板 bug");
+    expect(r.map((h) => h.index)).toContain(0);
+  });
+
+  it("keeps regex-intent terms intact", () => {
+    const r = searchEntries(zhEntries, zhMsgs, "面板|english");
+    expect(r.map((h) => h.index)).toEqual(expect.arrayContaining([0, 1, 2]));
+  });
+});

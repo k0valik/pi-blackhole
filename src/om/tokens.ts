@@ -2,7 +2,9 @@
  * Token estimation for serialized entries.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/tokens.ts)
- * Unmodified (estimateStringTokens, estimateEntryTokens).
+ * Amended: estimateStringTokens is CJK-script aware (#106) — upstream and the
+ * original copy here used `ceil(chars/4)`, which under-counts CJK text ~3x
+ * (CJK ideographs/kana/hangul are ~1 token/char in BPE vocabularies).
  *
  * Amended: usage-aware helpers (hasUsageData, getUsageTokens) — real-usage
  * measurement core (approach: tavasti@360f24a, pi-vcc upstream PR #40).
@@ -11,9 +13,12 @@ import {
   calculateContextTokens,
   estimateTokens as estimateMessageTokens,
 } from "@earendil-works/pi-coding-agent";
+import { cjkCharCount } from "../core/segment.js";
 
 export function estimateStringTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  const cjk = cjkCharCount(text);
+  const rest = text.length - cjk;
+  return Math.ceil(cjk + rest / 4);
 }
 
 export function hasUsageData(msg: unknown): boolean {
