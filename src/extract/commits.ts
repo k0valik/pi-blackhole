@@ -95,21 +95,57 @@ const stripHeredocBodies = (cmd: string): string => {
 
 const SHELL_CONTROL = new Set(["&&", "||", ";", "|", "&", "\n"]);
 
+/** Strip one layer of shell quotes from a token — the tokenizer keeps them. */
+const unquoteToken = (t: string): string =>
+  t.length >= 2 &&
+  ((t[0] === '"' && t[t.length - 1] === '"') || (t[0] === "'" && t[t.length - 1] === "'"))
+    ? t.slice(1, -1)
+    : t;
+
+/** `--dry-run`/`-n` flag a commit that never happened; quoted forms too. */
+const isDryRunToken = (t: string): boolean => {
+  const u = unquoteToken(t);
+  return u === "--dry-run" || u === "-n";
+};
+
+/** Exec wrappers / VAR=value assignments before the binary don't change the command. */
+const EXEC_WRAPPER_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const EXEC_WRAPPERS = new Set(["sudo", "env", "time", "nice", "nohup", "command", "exec"]);
+
+/** Is the token at `start` (after skipping assignments/wrappers) a git binary? */
+const segmentHeadIsGit = (tokens: string[], start: number): boolean => {
+  let k = start;
+  while (k < tokens.length) {
+    const u = unquoteToken(tokens[k]);
+    if (EXEC_WRAPPER_RE.test(u) || EXEC_WRAPPERS.has(u)) {
+      k += 1;
+      continue;
+    }
+    break;
+  }
+  const head = tokens[k];
+  if (!head) return false;
+  const u = unquoteToken(head);
+  return u === "git" || u.endsWith("/git");
+};
+
+/** Index where the shell segment containing token `i` starts. */
+const segmentStartOf = (tokens: string[], i: number): number => {
+  for (let j = i - 1; j >= 0; j--) {
+    if (SHELL_CONTROL.has(tokens[j])) return j + 1;
+  }
+  return 0;
+};
+
 /** Does this single-segment token list invoke `git commit` (not --dry-run)? */
 const segmentInvokesCommit = (tokens: string[]): boolean => {
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] !== "commit") continue;
-    let gitIdx = -1;
-    for (let j = i - 1; j >= 0; j--) {
-      const t = tokens[j];
-      if (SHELL_CONTROL.has(t)) break; // different shell segment
-      if (t === "git" || t.endsWith("/git")) {
-        gitIdx = j;
-        break;
-      }
-    }
-    if (gitIdx === -1) continue;
-    if (tokens.includes("--dry-run")) continue;
+    // The command word must open the segment: `echo git commit -m x` is an
+    // echo, not a commit. Assignments (VAR=…) and exec wrappers (sudo, env,
+    // …) are skipped — they don't change the command.
+    if (!segmentHeadIsGit(tokens, segmentStartOf(tokens, i))) continue;
+    if (tokens.some(isDryRunToken)) continue;
     return true;
   }
   return false;
@@ -127,21 +163,13 @@ const commitSegments = (cmd: string): string[][] => {
   const segments: string[][] = [];
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] !== "commit") continue;
-    let gitIdx = -1;
-    for (let j = i - 1; j >= 0; j--) {
-      const t = tokens[j];
-      if (SHELL_CONTROL.has(t)) break; // different shell segment
-      if (t === "git" || t.endsWith("/git")) {
-        gitIdx = j;
-        break;
-      }
-    }
-    if (gitIdx === -1) continue;
-    // Reject --dry-run: flags a commit that never happened. Segment-scoped
-    // (from the git binary to the next control token) to stay precise.
-    const segEnd = tokens.findIndex((t, k) => k > gitIdx && SHELL_CONTROL.has(t));
-    const segment = tokens.slice(gitIdx, segEnd === -1 ? tokens.length : segEnd);
-    if (segment.includes("--dry-run")) continue;
+    // Reject --dry-run: flags a commit that never happened. Compare with
+    // quotes stripped — the tokenizer keeps them, and `'--dry-run'` must
+    // not slip past the check.
+    const segEnd = tokens.findIndex((t, k) => k > i && SHELL_CONTROL.has(t));
+    const segment = tokens.slice(segmentStartOf(tokens, i), segEnd === -1 ? tokens.length : segEnd);
+    if (!segmentHeadIsGit(tokens, segmentStartOf(tokens, i))) continue;
+    if (segment.some(isDryRunToken)) continue;
     segments.push(segment);
   }
   return segments;

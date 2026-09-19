@@ -88,7 +88,7 @@ const sanitizeReference = (raw: string): string => {
     last === 92
   ) {
     value = value.replace(/^["'`(<[]+/, "");
-    value = value.replace(/[>"'`,;).\]]+$/, "");
+    value = value.replace(/[>"'`,;).\\\]]+$/, "");
     value = value.replace(/[.,;:]+$/, "");
   }
   return value;
@@ -232,9 +232,16 @@ export const extractFiles = (
  * still parses after `sectionOf` rejoins continuation lines during
  * cross-compaction merge.
  */
-export const formatFileList = (category: string, paths: string[], limit: number): string => {
+export const formatFileList = (
+  category: string,
+  paths: string[],
+  limit: number,
+  /** Preserved historical total — merge output may exceed the parsed entry count. */
+  total?: number,
+): string => {
   const shown = paths.slice(0, limit);
-  const lines = [`${category} (${paths.length}):`, ...shown.map((p) => `  ${p},`)];
-  if (paths.length > limit) lines.push(`  (+${paths.length - limit} more)`);
+  const count = total ?? paths.length;
+  const lines = [`${category} (${count}):`, ...shown.map((p) => `  ${p},`)];
+  if (count > shown.length) lines.push(`  (+${count - shown.length} more)`);
   return lines.join("\n");
 };

@@ -210,6 +210,22 @@ describe("extractOutstandingContext — retry-success extinguishes errors", () =
     expect(buildSections({ blocks }).outstandingContext.length).toBe(1);
   });
 
+  it("keeps a path-bearing error when a later same-tool success carries no path", () => {
+    // Same-tool success with no path token says nothing about the file in the
+    // error — the overlap check must run whenever either side carries paths.
+    const blocks: NormalizedBlock[] = [
+      err("edit", "permission denied for src/a.ts"),
+      ok("edit", "done"),
+    ];
+    const r = buildSections({ blocks });
+    expect(r.outstandingContext.some((l) => l.includes("src/a.ts"))).toBe(true);
+  });
+
+  it("still extinguishes when both sides are pathless", () => {
+    const blocks: NormalizedBlock[] = [err("edit", "Operation not permitted"), ok("edit", "done")];
+    expect(buildSections({ blocks }).outstandingContext).toEqual([]);
+  });
+
   it("an earlier success does not extinguish a later error", () => {
     const blocks: NormalizedBlock[] = [
       call("bash", { command: "pnpm test" }),

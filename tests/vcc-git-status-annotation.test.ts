@@ -134,6 +134,20 @@ describe("extractFiles git grounding", () => {
     const act = extractFiles([], { readFiles: [], modifiedFiles: ["a.ts"] }, []);
     expect(act.gitTags).toBeUndefined();
   });
+
+  it("strips a trailing backslash so the path dedups with its clean form", () => {
+    // sanitizeReference gates cleaning on a trailing backslash (charCode 92)
+    // but the strip regexes never removed it — the key kept a trailing "\"
+    // (rendered "/" after slash normalization) and dodged dedup.
+    const act = extractFiles(
+      [],
+      { readFiles: [], modifiedFiles: ["src/a.ts\\", "src/a.ts"] },
+      [],
+      undefined,
+      "/repo",
+    );
+    expect([...act.modified]).toEqual(["src/a.ts"]);
+  });
 });
 
 // ── end-to-end rendering ─────────────────────────────────────────

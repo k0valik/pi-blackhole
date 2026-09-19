@@ -61,6 +61,15 @@ describe("extractPreferences — question gate precision", () => {
       expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
     }
   });
+
+  it("drops questions wrapped in quotation marks", () => {
+    // nonEmptyLines only trims whitespace — paired quotes survive and bypass
+    // the terminal-punctuation check, so a quoted question that also contains
+    // a marker (“以后怎么提交代码？”) was emitted as a preference.
+    for (const text of ["“以后怎么提交代码？”", '"Why should we always use pnpm?"']) {
+      expect(extractPreferences([{ kind: "user", text }])).toEqual([]);
+    }
+  });
 });
 
 describe("extractPreferences — correction anchors (English)", () => {

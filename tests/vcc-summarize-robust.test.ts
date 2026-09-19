@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { compile } from "../src/core/summarize.js";
+import { formatFileList } from "../src/extract/files.js";
 import { userMsg } from "./vcc-fixtures.js";
 
 describe("vcc-summarize robust merging and stripping", () => {
@@ -422,6 +423,49 @@ describe("vcc-summarize robust merging and stripping", () => {
       });
       expect(r).toContain("src/a.ts");
       expect(r).toContain("/repo/src/a.ts");
+    });
+
+    it("reassembles a path hard-wrapped across lines in the previous section", () => {
+      // wrapLongLines hard-breaks an overlong single-token path mid-word
+      // (no space at the break). The merge must treat the indented physical
+      // fragments of one logical entry — terminated by its trailing comma —
+      // as ONE path, not two phantom entries.
+      const core = "a".repeat(118);
+      const first = compile({
+        messages: [userMsg("check")],
+        fileOps: { readFiles: [], modifiedFiles: [`/repo/src/${core}.ts`] },
+        cwd: "/repo",
+      });
+      // Sanity: the stored form really hard-breaks the path across lines.
+      expect(first).toContain("\n  ");
+
+      const r = compile({
+        messages: [userMsg("check 2")],
+        previousSummary: first,
+        fileOps: { readFiles: [], modifiedFiles: ["/repo/src/other.ts"] },
+        cwd: "/repo",
+      });
+      // Unwrap continuation lines the same way the merge reassembles them
+      // (direct concatenation — the hard break carried no space).
+      const unwrapped = r.replace(/\n {2}(?=\S)/g, "");
+      expect(unwrapped).toContain(`src/${core}.ts`);
+    });
+
+    it("preserves the previous total when the previous list was capped", () => {
+      // A capped previous section (26 files, 20 shown, +6 omitted) shrinks
+      // after a merge unless the header count is carried forward: the
+      // omitted entries are unparsable, so the rendered total must stay at
+      // max(preserved, merged) instead of collapsing to the parsed size.
+      const prevPaths = Array.from({ length: 26 }, (_, i) => `old-${i}.ts`);
+      const previousSummary = `[Files And Changes]\n- ${formatFileList("Modified", prevPaths, 20)}\n\n---\n\n[user]\nold`;
+      const r = compile({
+        messages: [userMsg("check")],
+        previousSummary,
+        fileOps: { readFiles: [], modifiedFiles: ["/repo/src/new.ts"] },
+        cwd: "/repo",
+      });
+      expect(r).toContain("Modified (26):");
+      expect(r.replace(/\n\s*/g, " ")).toContain("(+6 more)");
     });
   });
 });

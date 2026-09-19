@@ -113,16 +113,19 @@ const extractOutstandingContext = (blocks: NormalizedBlock[]): string[] => {
     }
   });
 
+  // Other tools extinguish on a later success sharing a path-like token
+  // with the error text (same file fixed); only when neither side carries
+  // any path token is same-tool success enough — a pathless success says
+  // nothing about the file a path-bearing error mentions.
   const isExtinguished = (e: ErrorEntry): boolean =>
     successes.some((s) => {
       if (s.name !== e.name || s.index <= e.index) return false;
       if (e.name === "bash") return s.command !== undefined && s.command === e.command;
-      if (e.paths.size > 0 && s.paths.size > 0) {
+      if (e.paths.size > 0 || s.paths.size > 0) {
         return [...e.paths].some((p) => s.paths.has(p));
       }
       return true;
     });
-
   for (const e of errors) {
     if (isExtinguished(e)) continue;
     push(e.index, `[${e.name}] ${firstLine(e.text, OUTSTANDING_CLIP)}`);

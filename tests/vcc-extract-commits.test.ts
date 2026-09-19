@@ -159,6 +159,38 @@ describe("extractCommits — precision: commands that must NOT extract", () => {
     expect(out).toEqual([]);
   });
 
+  it("ignores `echo git commit` — git must be the segment command word", () => {
+    // The backward git-scan used to accept a `git` token anywhere in the
+    // segment, so an echoed example command recorded a commit that never
+    // ran. The command word must open the segment (allowing VAR= assignments
+    // and exec wrappers like sudo/env).
+    const out = extractCommits([toolCall(`echo git commit -m "fake"`), toolResult("fake")]);
+    expect(out).toEqual([]);
+  });
+
+  it("rejects a shell-quoted --dry-run", () => {
+    // Tokens keep their quotes, so a bare `includes("--dry-run")` missed the
+    // quoted form and the dry-run was recorded from its -m message.
+    const out = extractCommits([toolCall(`git commit '--dry-run' -m "wip"`), toolResult("")]);
+    expect(out).toEqual([]);
+  });
+
+  it("still detects sudo-prefixed git commit", () => {
+    const out = extractCommits([
+      toolCall(`sudo git commit -m "fix: x"`),
+      toolResult("[main 99e6a9f] fix: x"),
+    ]);
+    expect(formatCommits(out)).toEqual(["99e6a9f: fix: x"]);
+  });
+
+  it("still detects env-assignment-prefixed git commit", () => {
+    const out = extractCommits([
+      toolCall(`GIT_AUTHOR_NAME=a git commit -m "fix: x"`),
+      toolResult("[main 99e6a9f] fix: x"),
+    ]);
+    expect(formatCommits(out)).toEqual(["99e6a9f: fix: x"]);
+  });
+
   it("does not extract a failed commit (nothing to commit output)", () => {
     const out = extractCommits([
       toolCall(`git commit -m "fix: will fail"`),

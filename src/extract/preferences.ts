@@ -55,9 +55,13 @@ export const extractPreferences = (blocks: NormalizedBlock[]): string[] => {
       if (!trimmed || trimmed.length < minLength) continue;
       if (trimmed.length > 200) continue;
       // Reject information questions only; directive questions survive.
+      // Paired quotes are stripped first — nonEmptyLines only trims
+      // whitespace, so a quoted question (“以后怎么提交代码？”) ends with a
+      // quote and bypassed the terminal check, letting its marker through.
+      const questionText = trimmed.replace(/^[“‘"'「『]+/, "").replace(/[”’"'」』]+$/, "");
       if (
-        (trimmed.endsWith("?") || trimmed.endsWith("？")) &&
-        (INTERROGATIVE_START_RE.test(trimmed) || CJK_INTERROGATIVE_RE.test(trimmed))
+        (questionText.endsWith("?") || questionText.endsWith("？")) &&
+        (INTERROGATIVE_START_RE.test(questionText) || CJK_INTERROGATIVE_RE.test(questionText))
       )
         continue;
       if (!PREF_PATTERNS.some((p) => p.test(trimmed))) continue;

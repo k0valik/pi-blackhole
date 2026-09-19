@@ -176,7 +176,7 @@ const GIT_TAG_SUFFIX_RE =
  * ("a.ts (staged", "unstaged)") that defeat the prev/fresh dedup and
  * duplicate the file on re-touch. New-shape list lines hold a single
  * (comma-terminated) path, so the split is a no-op for them — including
- * after sectionOf rejoins the list into one line during merge.
+ * after wrapLineWithContinuation fragments are reassembled by mergeFileLines.
  */
 const addEntries = (
   merged: Record<string, Map<string, string>>,
@@ -200,16 +200,54 @@ const addEntries = (
   }
 };
 
+/** Last top-level comma ends the text (only whitespace after it). */
+const endsWithTopLevelComma = (s: string): boolean => {
+  let lastComma = -1;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) lastComma = i;
+  }
+  return lastComma >= 0 && s.slice(lastComma + 1).trim().length === 0;
+};
+
+/**
+ * Append the next physical line to the pending fragment.
+ *
+ * A line that was hard-broken mid-token (overlong single-token path —
+ * wrapTextWithAnsi splits without consuming a space) must be joined with NO
+ * space, or the reconstructed path is corrupted. A space-broken continuation
+ * (word wrap between entries/tags, e.g. a `(+N more)` tail) needs the space
+ * back. A fragment without whitespace is a mid-token tail; a partial `(+N`
+ * suffix is a space-broken token — joined with a space so the more-suffix
+ * regex still matches.
+ */
+const appendFragment = (fragment: string, next: string): string => {
+  if (fragment.length === 0) return next;
+  if (/\s/.test(fragment) || /\(\+?\d*$/.test(fragment)) return `${fragment} ${next}`;
+  return fragment + next;
+};
+
 export const mergeFileLines = (prev: string, fresh: string): string => {
   const categories = ["Modified", "Created", "Read"] as const;
   // stripped path → display string; prev inserted first, fresh display wins
   const merged: Record<string, Map<string, string>> = {};
   for (const cat of categories) merged[cat] = new Map();
 
+  // Preserved totals: a capped section's omitted entries are unparsable, so
+  // the rendered count must never shrink below the largest total seen in any
+  // header (`- Modified (26):`) or `(+N more)` tail across prev and fresh.
+  const totals: Record<string, number> = {};
+  const bumpTotal = (cat: string, n: number): void => {
+    if (Number.isFinite(n) && n > (totals[cat] ?? 0)) totals[cat] = n;
+  };
+
   // Parse both shapes:
   // - new: "- Modified (12):" header, one path per continuation line
-  //   (entries carry trailing commas, so they also split correctly after
-  //   sectionOf rejoins the lines during merge)
+  //   (entries carry trailing commas, so a hard-wrapped path's physical
+  //   fragments reassemble into the single logical entry they came from)
   // - legacy: "- Modified: a, b (staged), c (+N more)" comma-joined
   // Fresh entries are recency-ordered (most recent first) and prev entries
   // follow in stored order, so the keep-first cap below retains the most
@@ -221,22 +259,51 @@ export const mergeFileLines = (prev: string, fresh: string): string => {
   for (const text of [fresh, prev]) {
     const isFresh = text === fresh;
     let current: string | null = null;
+    let fragment = "";
+    let listed = 0;
+    const flush = (): void => {
+      if (current === null || !fragment.trim()) {
+        fragment = "";
+        return;
+      }
+      const more = fragment.match(/\(\+(\d+) more\)\s*$/);
+      const body = more ? fragment.slice(0, more.index) : fragment;
+      const parts = body.split(/,(?![^()]*\))/).filter((p) => p.trim());
+      listed += parts.length;
+      if (more) bumpTotal(current, parts.length + Number(more[1]));
+      addEntries(merged, current, isFresh, fragment);
+      fragment = "";
+    };
     for (const line of text.split("\n")) {
       const header = line.match(headerRe);
       if (header) {
+        flush();
         current = header[1];
-        addEntries(merged, current, isFresh, header[3]);
+        if (header[2]) bumpTotal(current, Number.parseInt(header[2].replace(/\D/g, ""), 10));
+        fragment = header[3];
+        if (endsWithTopLevelComma(fragment)) flush();
         continue;
       }
       if (current === null) continue;
       if (!line.startsWith(" ") && !line.startsWith("\t")) {
-        current = null;
+        // Blank lines are wrap artifacts around a hard-broken fragment —
+        // they never terminate the category; only real content lines do.
+        if (line.trim()) {
+          flush();
+          current = null;
+        }
         continue;
       }
       const entry = line.trim();
-      if (!entry || moreRe.test(entry)) continue;
-      addEntries(merged, current, isFresh, entry);
+      if (!entry || moreRe.test(entry)) {
+        const more = entry.match(/^\(\+(\d+) more\)$/);
+        if (more && current !== null) bumpTotal(current, listed + Number(more[1]));
+        continue;
+      }
+      fragment = appendFragment(fragment, entry);
+      if (endsWithTopLevelComma(fragment)) flush();
     }
+    flush();
   }
 
   // Dedup: if already in Modified, drop from Created (file existed before)
@@ -244,15 +311,22 @@ export const mergeFileLines = (prev: string, fresh: string): string => {
   // Also remove Read entries that also appear in Modified (same file read+edited)
   for (const key of merged.Modified.keys()) merged.Read.delete(key);
 
+  const preservedTotal = (cat: string): number => Math.max(totals[cat] ?? 0, merged[cat].size);
+
   const lines: string[] = [];
   if (merged.Modified.size > 0)
-    lines.push(`- ${formatFileList("Modified", [...merged.Modified.values()], 20)}`);
+    lines.push(
+      `- ${formatFileList("Modified", [...merged.Modified.values()], 20, preservedTotal("Modified"))}`,
+    );
   if (merged.Created.size > 0)
-    lines.push(`- ${formatFileList("Created", [...merged.Created.values()], 20)}`);
+    lines.push(
+      `- ${formatFileList("Created", [...merged.Created.values()], 20, preservedTotal("Created"))}`,
+    );
   if (merged.Read.size > 0) {
     const arr = [...merged.Read.values()];
+    const readTotal = preservedTotal("Read");
     lines.push(
-      `- Read: ${arr.slice(0, 10).join(", ")}${arr.length > 10 ? ` (+${arr.length - 10} more)` : ""}`,
+      `- Read: ${arr.slice(0, 10).join(", ")}${readTotal > 10 ? ` (+${readTotal - 10} more)` : ""}`,
     );
   }
   if (lines.length === 0) return "";
