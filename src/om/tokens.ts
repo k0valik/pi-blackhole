@@ -13,12 +13,11 @@ import {
   calculateContextTokens,
   estimateTokens as estimateMessageTokens,
 } from "@earendil-works/pi-coding-agent";
-import { cjkCharCount } from "../core/segment.js";
+import { cjkScriptStats } from "../core/segment.js";
 
 export function estimateStringTokens(text: string): number {
-  const cjk = cjkCharCount(text);
-  const rest = text.length - cjk;
-  return Math.ceil(cjk + rest / 4);
+  const { count, units } = cjkScriptStats(text);
+  return Math.ceil(count + (text.length - units) / 4);
 }
 
 export function hasUsageData(msg: unknown): boolean {

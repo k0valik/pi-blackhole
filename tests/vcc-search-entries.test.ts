@@ -491,4 +491,29 @@ describe("CJK query tokenization (#106)", () => {
     const r = searchEntries(zhEntries, zhMsgs, "面板|english");
     expect(r.map((h) => h.index)).toEqual(expect.arrayContaining([0, 1, 2]));
   });
+
+  it("segments CJK terms for file indicators too", () => {
+    // computeFileMatches must use the same segmented terms as ranking —
+    // an unsegmented whole-query literal never matches the file text
+    const ents2 = [...zhEntries, { index: 3, role: "assistant" as const, summary: "面板相关" }];
+    const msgs2 = [
+      ...zhMsgs,
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "write",
+            id: "c1",
+            arguments: { path: "panel.ts", content: "面板显示的数字" },
+          },
+        ],
+      } as any,
+    ];
+    const r = searchEntriesDetailed(ents2, msgs2, "为什么面板的数字不对");
+    const hit = r.hits.find((h) => h.index === 3);
+    expect(hit).toBeDefined();
+    expect(hit?.fileMatches?.length).toBeGreaterThan(0);
+    expect(hit?.fileMatches?.[0]?.path).toBe("panel.ts");
+  });
 });

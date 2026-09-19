@@ -40,4 +40,10 @@ describe("estimateStringTokens — CJK script awareness (#106)", () => {
   it("returns 0 for empty text", () => {
     expect(estimateStringTokens("")).toBe(0);
   });
+
+  it("counts supplementary Han (astral plane) at ~1 token per code point", () => {
+    // U+20BB7 𠮷 occupies 2 UTF-16 units; the /4 path would credit 0.5 tokens
+    expect(estimateStringTokens("𠮷")).toBe(1);
+    expect(estimateStringTokens("a𠮷b")).toBe(2);
+  });
 });

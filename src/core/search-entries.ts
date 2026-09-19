@@ -216,6 +216,9 @@ const queryTerms = (raw: string): string[] => {
   const terms: string[] = [];
   for (const part of parts) {
     if (!part) continue;
+    // Operator-bearing parts keep their regex semantics (segmenting would
+    // break patterns like 面板|dashboard); ASCII parts are already
+    // whitespace-split — only operator-free CJK parts need ICU segmentation
     if (REGEX_TERM_HINT.test(part) || !hasCJK(part)) {
       terms.push(part);
       continue;
@@ -432,14 +435,15 @@ export function getFileIndicators(msg: Message): FileMatch[] {
   return fileMatches;
 }
 
-function computeFileMatches(msg: Message | undefined, query: string): FileMatch[] {
+function computeFileMatches(msg: Message | undefined, terms: string[]): FileMatch[] {
   if (!msg?.content || typeof msg.content === "string") return [];
-  const rawQuery = query.trim();
-  const hasQuery = rawQuery.length > 0;
+  const hasQuery = terms.length > 0;
   if (!hasQuery) return getFileIndicators(msg as Message);
+  // Same segmented terms as ranking (queryTerms), so a CJK natural-language
+  // query also matches file text without appearing verbatim (#106).
   // Per-term matchers: operator-bearing terms stay patterns, plain terms
   // (including dotted filenames) match literally.
-  const regex = snippetRegex(rawQuery.split(/\s+/));
+  const regex = snippetRegex(terms);
   const fileMatches: FileMatch[] = [];
 
   for (const part of msg.content) {
@@ -568,7 +572,7 @@ export const searchEntriesDetailed = (
     const score = bm25Score(hay, compiled, ctx);
     const text = fullTextCache[i];
     const snip = lineSnippet(text, snipRe);
-    const fileMatches = computeFileMatches(messages[i], rawQuery);
+    const fileMatches = computeFileMatches(messages[i], terms);
     const extra = fileMatches.length > 0 ? { fileMatches } : {};
     scored.push({
       hit: { ...e, snippet: snip, matchCount: mc, ...extra },

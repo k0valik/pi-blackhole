@@ -2,9 +2,10 @@ import type { Message } from "@earendil-works/pi-ai";
 import { hasCJK } from "./segment.js";
 import { PATH_KEYS } from "./tool-args.js";
 
-// CJK pause punctuation — sentences and clauses end with these and are NOT
-// followed by whitespace (#106). Used by clipSentence (sentence-level) and
-// clip (pause-level fallback for space-free text).
+// CJK pause punctuation — clauses end with these and are NOT followed by
+// whitespace (#106). Used by clip's fallback for space-free text. (Sentence-
+// level terminators 。！？； are handled by clipSentence directly; this set
+// adds the pause level ，、：.)
 const CJK_PAUSE_GLOBAL_RE = /[。！？；，、：]/gu;
 
 export const clip = (text: string, max = 200): string => {
@@ -38,15 +39,14 @@ export const clip = (text: string, max = 200): string => {
  */
 export const clipSentence = (text: string, max = 200): string => {
   if (text.length <= max) return text;
-  // Look for sentence terminators followed by space/newline, end of text, or
-  // a CJK character — CJK terminates with 。！？； and does not put a space
-  // after them (#106) — within [max*0.5, max]
+  // Sentence boundaries: ASCII terminators require whitespace/EOS after (so
+  // "3.14" and "file.ts" never cut); CJK terminators (。！？；) are boundaries
+  // wherever they appear — they never occur inside words/decimals/URLs, and
+  // CJK text follows them without whitespace (#106). Unconditional matching
+  // also covers mixed-script followers (。Hello, 。𠮷) a follower-class
+  // lookahead would miss. Within [max*0.5, max].
   const window = text.slice(0, max);
-  const matches = [
-    ...window.matchAll(
-      /[.!?。！？；](?=\s|$|[\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\uff00-\uff5e])/g,
-    ),
-  ];
+  const matches = [...window.matchAll(/[.!?](?:\s|$)|[。！？；]/g)];
   if (matches.length > 0) {
     const last = matches[matches.length - 1];
     const end = (last.index ?? 0) + 1; // include the punctuation
