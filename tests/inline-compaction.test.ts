@@ -675,14 +675,16 @@ describe("Blackhole inline compaction adapter", () => {
     expect(parseHostFramePaths(`Error\n    at run (${windowsPath}:12:34)`)).toEqual([windowsPath]);
   });
 
-  it("patches the bundled CLI AgentSession identity", async () => {
-    const fixtureRoot = await mkdtemp(join(tmpdir(), "blackhole-bundled-host-"));
-    const packageRoot = join(fixtureRoot, "node_modules", "@earendil-works", "pi-coding-agent");
-    const dist = join(packageRoot, "dist");
-    const chunks = join(dist, "bundle", "chunks");
-    const cli = join(dist, "bundle", "cli.js");
-    const runtimeChunk = join(chunks, "runtime.js");
-    const sessionSource = `export class AgentSession {
+  it.each(["direct import", "createRequire bootstrap"])(
+    "patches the bundled CLI AgentSession identity through %s",
+    async (launcher) => {
+      const fixtureRoot = await mkdtemp(join(tmpdir(), "blackhole-bundled-host-"));
+      const packageRoot = join(fixtureRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+      const dist = join(packageRoot, "dist");
+      const chunks = join(dist, "bundle", "chunks");
+      const cli = join(dist, "bundle", "cli.js");
+      const runtimeChunk = join(chunks, "runtime.js");
+      const sessionSource = `export class AgentSession {
   constructor() {
     this.agent = { state: { messages: [] } };
     this.sessionManager = {
@@ -700,42 +702,106 @@ describe("Blackhole inline compaction adapter", () => {
   }
 }`;
 
-    try {
-      await mkdir(chunks, { recursive: true });
-      await writeFile(
-        join(packageRoot, "package.json"),
-        JSON.stringify({
-          name: "@earendil-works/pi-coding-agent",
-          type: "module",
-        }),
-      );
-      await writeFile(join(dist, "index.js"), sessionSource);
-      await writeFile(runtimeChunk, `${sessionSource}\nexport function main() {}`);
-      await writeFile(cli, '#!/usr/bin/env node\nimport{main}from"./chunks/runtime.js";main();\n');
+      try {
+        await mkdir(chunks, { recursive: true });
+        await writeFile(
+          join(packageRoot, "package.json"),
+          JSON.stringify({
+            name: "@earendil-works/pi-coding-agent",
+            type: "module",
+          }),
+        );
+        await writeFile(join(dist, "index.js"), sessionSource);
+        await writeFile(runtimeChunk, `${sessionSource}\nexport function main() {}`);
+        const runtimeSource = 'import{main}from"./chunks/runtime.js";main();\n';
+        if (launcher === "createRequire bootstrap") {
+          await writeFile(
+            join(dist, "bundle", "cli-runtime.js"),
+            'throw new Error("discovery must not execute the CLI runtime");\n' + runtimeSource,
+          );
+          await writeFile(
+            cli,
+            '#!/usr/bin/env node\nimport { createRequire, enableCompileCache } from "node:module";\n' +
+              'enableCompileCache();\ncreateRequire(import.meta.url)("./cli-runtime.js");\n',
+          );
+        } else {
+          await writeFile(cli, runtimeSource);
+        }
 
-      const bundledModule = (await import(pathToFileURL(runtimeChunk).href)) as {
-        AgentSession: new () => {
-          agent: { state: { messages: unknown[] } };
-          sessionManager: object;
-          _bindExtensionCore(runner: unknown): void;
+        const bundledModule = (await import(pathToFileURL(runtimeChunk).href)) as {
+          AgentSession: new () => {
+            agent: { state: { messages: unknown[] } };
+            sessionManager: object;
+            _bindExtensionCore(runner: unknown): void;
+          };
         };
-      };
-      const originalBind = bundledModule.AgentSession.prototype._bindExtensionCore;
+        const originalBind = bundledModule.AgentSession.prototype._bindExtensionCore;
 
-      await expect(
-        installHostInlineCompactionAdapter({ entrypoint: cli, stack: "" }),
-      ).resolves.toEqual({ supported: true });
-      expect(bundledModule.AgentSession.prototype._bindExtensionCore).not.toBe(originalBind);
+        await expect(
+          installHostInlineCompactionAdapter({ entrypoint: cli, stack: "" }),
+        ).resolves.toEqual({ supported: true });
+        expect(bundledModule.AgentSession.prototype._bindExtensionCore).not.toBe(originalBind);
 
-      const session = new bundledModule.AgentSession();
-      session._bindExtensionCore({});
-      await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
-        summary: "summary",
-      });
-    } finally {
-      await rm(fixtureRoot, { recursive: true, force: true });
-    }
-  });
+        const session = new bundledModule.AgentSession();
+        session._bindExtensionCore({});
+        await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
+          summary: "summary",
+        });
+      } finally {
+        await rm(fixtureRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(["missing", "outside package"])(
+    "falls back to the root barrel when a createRequire bootstrap is %s",
+    async (kind) => {
+      const fixtureRoot = await mkdtemp(join(tmpdir(), "blackhole-bootstrap-fallback-"));
+      const packageRoot = join(fixtureRoot, "node_modules", "@earendil-works", "pi-coding-agent");
+      const dist = join(packageRoot, "dist");
+      const chunks = join(dist, "bundle", "chunks");
+      const runtimeChunk = join(chunks, "runtime.js");
+      const cli = join(dist, "bundle", "cli.js");
+      try {
+        await mkdir(chunks, { recursive: true });
+        await writeFile(join(packageRoot, "package.json"), HOST_MANIFEST);
+        await writeFile(join(dist, "index.js"), hostSessionSource("bootstrap-fallback"));
+        await writeFile(
+          runtimeChunk,
+          `${hostSessionSource("wrong-host")}\nexport function main() {}\n`,
+        );
+        if (kind === "outside package") {
+          await writeFile(
+            join(packageRoot, "..", "foreign-runtime.js"),
+            'import { main } from "./pi-coding-agent/dist/bundle/chunks/runtime.js"; main();\n',
+          );
+        }
+        const specifier = kind === "missing" ? "./missing.js" : "../../../foreign-runtime.js";
+        await writeFile(
+          cli,
+          `import { createRequire } from "node:module";\ncreateRequire(import.meta.url)(${JSON.stringify(specifier)});\n`,
+        );
+        const bundled = (await import(pathToFileURL(runtimeChunk).href)) as {
+          AgentSession: FixtureSessionClass;
+        };
+        const originalBind = bundled.AgentSession.prototype._bindExtensionCore;
+        await expect(
+          installHostInlineCompactionAdapter({ entrypoint: cli, stack: "" }),
+        ).resolves.toEqual({ supported: true });
+        expect(bundled.AgentSession.prototype._bindExtensionCore).toBe(originalBind);
+        const barrel = (await import(pathToFileURL(join(dist, "index.js")).href)) as {
+          AgentSession: FixtureSessionClass;
+        };
+        const session = new barrel.AgentSession();
+        session._bindExtensionCore({});
+        await expect(compactInlineAtTurnBoundary(session.sessionManager)).resolves.toMatchObject({
+          summary: "bootstrap-fallback",
+        });
+      } finally {
+        await rm(fixtureRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("falls back to a root's dist barrel when its fast candidate lacks AgentSession", async () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "blackhole-unbundled-host-"));

@@ -491,6 +491,17 @@ function findBundledRuntimeModule(entrypoint: string, packageRoot: string): stri
   try {
     resolvedEntrypoint = realpathSync(entrypoint);
     source = readFileSync(resolvedEntrypoint, "utf8");
+    // Pi 0.86 wraps the bundled ESM launcher in a createRequire bootstrap.
+    // Follow that local file without executing it or leaving this Pi package.
+    const bootstrap = source.match(
+      /\bcreateRequire\s*\(\s*import\.meta\.url\s*\)\s*\(\s*["'](\.[^"']+)["']\s*\)/,
+    );
+    if (bootstrap) {
+      const runtime = realpathSync(join(dirname(resolvedEntrypoint), bootstrap[1]));
+      if (findPiPackageRoot(runtime) !== packageRoot) return undefined;
+      resolvedEntrypoint = runtime;
+      source = readFileSync(resolvedEntrypoint, "utf8");
+    }
   } catch {
     return undefined;
   }
