@@ -82,7 +82,7 @@
   "packageManager": "pnpm@11.27.1",
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
   }
 }
