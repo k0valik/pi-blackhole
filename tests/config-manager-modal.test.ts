@@ -171,6 +171,56 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
   });
 });
 
+describe("workerAttemptTimeoutMs persistence (0e1b110)", () => {
+  it("writes workerAttemptTimeoutMs on a fresh global save", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    const { readFileSync } = await import("node:fs");
+
+    const cfgDir = join(testDir, "pi-blackhole-wat-fresh");
+    mkdirSync(cfgDir, { recursive: true });
+
+    config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 15_000 }, "global", undefined, cfgDir);
+
+    const written = JSON.parse(
+      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(written.workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("replaces an existing file value on a global save", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    const { readFileSync, writeFileSync } = await import("node:fs");
+
+    const cfgDir = join(testDir, "pi-blackhole-wat-replace");
+    mkdirSync(cfgDir, { recursive: true });
+    writeFileSync(
+      join(cfgDir, "pi-blackhole-config.json"),
+      JSON.stringify({ workerAttemptTimeoutMs: 60_000 }),
+    );
+
+    config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 15_000 }, "global", undefined, cfgDir);
+
+    const written = JSON.parse(
+      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(written.workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("persists and reloads through the project scope", async () => {
+    const { config, GLOBAL_CONFIG_DIR } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+
+    const projDir = join(testDir, "pi-blackhole-wat-proj");
+    mkdirSync(projDir, { recursive: true });
+
+    config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 20_000 }, "project", projDir);
+
+    expect(config.load(projDir, GLOBAL_CONFIG_DIR).workerAttemptTimeoutMs).toBe(20_000);
+  });
+});
+
 describe("preset-curve select + hand-edited preset definitions (window curve)", () => {
   it("exposes the compactAfterPreset select with built-in + user preset names", async () => {
     const { config } = await import("../src/pi-base/blackhole-settings.js");
@@ -343,6 +393,17 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
     ).toBeUndefined();
     expect((await validate({ providerIdleTimeoutMs: 0 })).providerIdleTimeoutMs).toBe(0);
     expect((await validate({ providerIdleTimeoutMs: 30_000 })).providerIdleTimeoutMs).toBe(30_000);
+  });
+
+  it("drops invalid workerAttemptTimeoutMs but keeps 0 (disabled)", async () => {
+    expect((await validate({ workerAttemptTimeoutMs: -1 })).workerAttemptTimeoutMs).toBeUndefined();
+    expect(
+      (await validate({ workerAttemptTimeoutMs: "fast" })).workerAttemptTimeoutMs,
+    ).toBeUndefined();
+    expect((await validate({ workerAttemptTimeoutMs: 0 })).workerAttemptTimeoutMs).toBe(0);
+    expect((await validate({ workerAttemptTimeoutMs: 30_000 })).workerAttemptTimeoutMs).toBe(
+      30_000,
+    );
   });
 });
 

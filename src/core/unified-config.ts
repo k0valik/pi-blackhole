@@ -7,7 +7,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { applyEnvOverrides, DECLARATIVE_ENV_OVERRIDES } from "./config-env.js";
+import { applyEnvOverrides, DECLARATIVE_ENV_OVERRIDES, MAX_TIMER_DELAY_MS } from "./config-env.js";
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 
@@ -227,6 +227,9 @@ export interface UnifiedConfig {
   /** Body-idle timeout for background provider streams. Uses pi's default when unset;
    *  set to 0 to explicitly disable the wrapper. */
   providerIdleTimeoutMs?: number;
+  /** Hard elapsed deadline for each worker/model attempt, including headers,
+   *  streaming, tool turns, and final confirmation. Unset or 0 disables it. */
+  workerAttemptTimeoutMs?: number;
 
   /** Base model override for all memory workers. */
   model?: OmModelConfig;
@@ -306,6 +309,11 @@ export const DEFAULTS: UnifiedConfig = {
   observerChunkMaxTokens: 40_000,
   observerPreambleMaxTokens: 0,
   agentMaxTurns: 16,
+  // Optional knobs must still be DEFAULTS members (as undefined) or
+  // ConfigManager.save() — which diffs against Object.keys(DEFAULTS) —
+  // silently drops them when saving from the settings modal.
+  providerIdleTimeoutMs: undefined,
+  workerAttemptTimeoutMs: undefined,
 
   memory: true,
   debugLog: false,
@@ -510,6 +518,17 @@ export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
   if (!(typeof idle === "number" && Number.isInteger(idle) && idle >= 0)) {
     delete rec.providerIdleTimeoutMs;
   }
+  const workerAttempt = rec.workerAttemptTimeoutMs;
+  if (
+    !(
+      typeof workerAttempt === "number" &&
+      Number.isInteger(workerAttempt) &&
+      workerAttempt >= 0 &&
+      workerAttempt <= MAX_TIMER_DELAY_MS
+    )
+  ) {
+    delete rec.workerAttemptTimeoutMs;
+  }
 }
 
 function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
@@ -524,11 +543,13 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
 
   // Threshold knobs (compactAfterTokens / Ratio / Reserve / Preset /
-  // Presets / providerIdleTimeoutMs) — copied bluntly, then scrubbed by the
+  // Presets / providerIdleTimeoutMs / workerAttemptTimeoutMs) — copied bluntly, then scrubbed by the
   // shared normalizeThresholdKnobs: 0/absent behaves as unset, out-of-range
   // values are dropped, legacy 81000 residue is dropped, and preset
   // definitions are validated + sorted. Same scrubber the modal validate
-  // uses, so both loaders agree on every key.
+  // uses, so both loaders agree on every key. Runs after the numKeys pass
+  // below so its bounds (e.g. MAX_TIMER_DELAY_MS) are the final word for
+  // keys validated in both places.
   const THRESHOLD_BLUNT_KEYS = [
     "compactAfterTokens",
     "compactAfterRatio",
@@ -536,6 +557,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "compactAfterPreset",
     "compactAfterPresets",
     "providerIdleTimeoutMs",
+    "workerAttemptTimeoutMs",
   ] as const;
 
   // Provider-aware skip list (entries: provider or "provider:api")
@@ -600,9 +622,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   for (const k of THRESHOLD_BLUNT_KEYS) {
     if (raw[k] !== undefined) (c as Record<string, unknown>)[k] = raw[k];
   }
-  normalizeThresholdKnobs(c as unknown as Record<string, unknown>);
   for (const k of numKeys) {
-    // observerPreambleMaxTokens and providerIdleTimeoutMs accept 0 (disabled/inherit);
+    // observerPreambleMaxTokens and timeout fields accept 0 (disabled/inherit);
     // everything else must be > 0.
     const validator =
       k === "observerPreambleMaxTokens" ||
@@ -615,6 +636,10 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     const v = validator(raw[k]);
     if (v !== undefined) (c as Record<string, unknown>)[k] = v;
   }
+  // SAFETY: c is a plain config record; the normalizer only validates or deletes named properties.
+  // Runs after the numKeys pass so its bounds (e.g. MAX_TIMER_DELAY_MS) are
+  // the final word for keys validated in both places.
+  normalizeThresholdKnobs(c as unknown as Record<string, unknown>);
 
   // Models
   const model = parseModel(raw.model);

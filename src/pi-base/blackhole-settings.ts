@@ -343,6 +343,17 @@ export const config = new ConfigManager<UnifiedConfig>({
       step: 1000,
     },
     {
+      key: "workerAttemptTimeoutMs",
+      type: "number",
+      label: "Worker attempt timeout (ms)",
+      description:
+        "Hard elapsed deadline per worker/model attempt; timeout aborts the call and tries the next fallback; 0 = disabled",
+      value: cfg.workerAttemptTimeoutMs ?? 0,
+      min: 0,
+      max: 3_600_000,
+      step: 1000,
+    },
+    {
       key: "fullFoldAlways",
       type: "boolean",
       label: "Preserve OM on first compaction",
@@ -471,6 +482,7 @@ export const config = new ConfigManager<UnifiedConfig>({
     // (Runs before the merge so an emptied preset name falls back to the
     // DEFAULTS "default", and dropped knobs stay absent. Env overrides
     // re-apply afterwards, so env-set values stay explicit.)
+    // SAFETY: parsed is a plain config record; the normalizer only validates or deletes named properties.
     normalizeThresholdKnobs(parsed as unknown as Record<string, unknown>);
 
     // ── Merge with defaults ──
