@@ -493,6 +493,24 @@ export class Runtime {
         };
       }
 
+      // In-memory per-cycle failures also apply to the session fallback: when
+      // the session model shares provider/id with a candidate that already
+      // failed this cycle (cooldownHours: 0), it IS the same model. Returning
+      // it would re-run an identical stalled model, and findCandidateConfig
+      // would match the configured entry — defeating the stage-level break.
+      if (
+        typeof sessionIdentity.provider === "string" &&
+        typeof sessionIdentity.id === "string" &&
+        this.failedInCycle.has(
+          modelKey({ provider: sessionIdentity.provider, id: sessionIdentity.id }),
+        )
+      ) {
+        return {
+          ok: false,
+          reason: `no model available for ${stageName} (all candidates exhausted, session model ${sessionIdentity.provider}/${sessionIdentity.id} failed this cycle)`,
+        };
+      }
+
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
       signal?.throwIfAborted();
       let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;

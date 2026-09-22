@@ -34,6 +34,8 @@ interface ObserverAgentInput {
   allowedSourceEntryIds: string[];
   priorObservations: string[];
   priorReflections: string[];
+  model?: { provider?: string; id?: string };
+  signal?: AbortSignal;
 }
 
 const agents = vi.hoisted(() => ({
@@ -862,17 +864,22 @@ function makePipelineFixture(options: {
   observeAfterTokens: number;
   runtime?: Runtime;
   entries?: TestEntry[];
+  modelRegistry?: ConsolidationCtx["modelRegistry"];
+  useRuntimeModelResolver?: boolean;
+  sessionModel?: ConsolidationCtx["model"];
 }): PipelineFixture {
   const runtime = options.runtime ?? new Runtime();
   runtime.configLoaded = true;
   runtime.config.memory = true;
   runtime.config.observeAfterTokens = options.observeAfterTokens;
   runtime.config.reflectAfterTokens = 1_000_000;
-  runtime.resolveModel = async () => ({
-    ok: true as const,
-    model: { provider: "test", id: "model", contextWindow: 1_000_000 },
-    apiKey: "test",
-  });
+  if (!options.useRuntimeModelResolver) {
+    runtime.resolveModel = async () => ({
+      ok: true as const,
+      model: { provider: "test", id: "model", contextWindow: 1_000_000 },
+      apiKey: "test",
+    });
+  }
   const entries = options.entries ?? [];
   const pi = createExtensionApiDouble({
     appendEntry: (customType, data) => {
@@ -889,8 +896,8 @@ function makePipelineFixture(options: {
   const ctx = {
     cwd: "/tmp",
     hasUI: false,
-    model: undefined,
-    modelRegistry: {},
+    model: options.sessionModel,
+    modelRegistry: options.modelRegistry ?? {},
     sessionManager: { getBranch: () => entries, getSessionId: () => "cursor-session" },
   };
   return {
@@ -924,7 +931,224 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   rmSync(cursorTestDir, { recursive: true, force: true });
+});
+
+describe("worker attempt hard timeout", () => {
+  test("observer falls through to the next model after the deadline", async () => {
+    vi.useFakeTimers();
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100,
+      useRuntimeModelResolver: true,
+      modelRegistry: {
+        find: (provider: string, id: string) => ({ provider, id, contextWindow: 1_000_000 }),
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+        hasConfiguredAuth: () => true,
+      },
+    });
+    fixture.runtime.config.workerAttemptTimeoutMs = 100;
+    // cooldownHours: 0 tracks the stalled primary in-memory for this stage
+    // only (no cooldown-file writes); the real resolver then skips it.
+    fixture.runtime.config.observerModel = { provider: "test", id: "stalled", cooldownHours: 0 };
+    fixture.runtime.config.observerFallbackModels = [{ provider: "test", id: "fallback" }];
+    agents.runObserver
+      .mockImplementationOnce((input) => {
+        const signal = input.signal;
+        if (!signal) return Promise.reject(new Error("observer did not receive an attempt signal"));
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      })
+      .mockResolvedValueOnce({
+        observations: [],
+        emptyReason: { kind: "no_new_content" as const },
+      });
+    fixture.entries.push(rawMessage("source-1", "x".repeat(40_000)));
+
+    const pipeline = fixture.run();
+    await vi.advanceTimersByTimeAsync(100);
+    await pipeline;
+
+    // The real resolver only skips "stalled" because its timeout was tracked
+    // in-cycle, so this call sequence proves the fallback chain engaged.
+    expect(agents.runObserver.mock.calls.map(([input]) => input.model?.id)).toEqual([
+      "stalled",
+      "fallback",
+    ]);
+  });
+
+  test("session cancellation does not resolve a fallback model", async () => {
+    const fixture = makePipelineFixture({ observeAfterTokens: 100 });
+    fixture.runtime.startSession("cursor-session");
+    fixture.runtime.config.workerAttemptTimeoutMs = 60_000;
+    const resolveModel = vi.fn(async () => ({
+      ok: true as const,
+      model: { provider: "test", id: "stalled", contextWindow: 1_000_000 },
+      apiKey: "test",
+    }));
+    fixture.runtime.resolveModel = resolveModel;
+    agents.runObserver.mockImplementationOnce(async () => await new Promise<never>(() => {}));
+    fixture.entries.push(rawMessage("source-1", "x".repeat(40_000)));
+
+    const pipeline = fixture.run();
+    await vi.waitFor(() => expect(agents.runObserver).toHaveBeenCalledOnce());
+    fixture.runtime.startSession("next-session");
+    await pipeline;
+
+    expect(resolveModel).toHaveBeenCalledOnce();
+  });
+
+  test("a timed-out session model is not retried within the same stage", async () => {
+    vi.useFakeTimers();
+    const fixture = makePipelineFixture({ observeAfterTokens: 100 });
+    fixture.runtime.config.workerAttemptTimeoutMs = 100;
+    const resolveModel = vi.fn(async () => ({
+      ok: true as const,
+      model: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
+      apiKey: "test",
+    }));
+    fixture.runtime.resolveModel = resolveModel;
+    agents.runObserver.mockImplementation((input) => {
+      const signal = input.signal;
+      if (!signal) return Promise.reject(new Error("observer did not receive an attempt signal"));
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    fixture.entries.push(rawMessage("source-1", "x".repeat(40_000)));
+
+    const pipeline = fixture.run();
+    // Buggy behavior: every one of the MAX_STAGE_ATTEMPTS retries burns the
+    // full 100 ms deadline, so all attempts complete within 2 s of fake time.
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pipeline;
+
+    // The session model has no fallback chain — a timeout must exhaust the
+    // stage immediately instead of re-running the same stalled model.
+    expect(agents.runObserver).toHaveBeenCalledTimes(1);
+    expect(resolveModel).toHaveBeenCalledTimes(1);
+  });
+
+  test("a timed-out candidate identical to the session model is not retried via session fallback", async () => {
+    vi.useFakeTimers();
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100,
+      useRuntimeModelResolver: true,
+      sessionModel: { provider: "test", id: "stalled" },
+      modelRegistry: {
+        find: (provider: string, id: string) => ({ provider, id, contextWindow: 1_000_000 }),
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+        hasConfiguredAuth: () => true,
+      },
+    });
+    fixture.runtime.config.workerAttemptTimeoutMs = 100;
+    // Configured candidate shares provider/id with the session model. Its
+    // timeout is tracked in-cycle (cooldownHours: 0); without the fix the
+    // resolver's session fallback returned the identical stalled model and
+    // findCandidateConfig matched the configured entry — ten retries.
+    fixture.runtime.config.observerModel = { provider: "test", id: "stalled", cooldownHours: 0 };
+    fixture.runtime.config.observerFallbackModels = [];
+    agents.runObserver.mockImplementation((input) => {
+      const signal = input.signal;
+      if (!signal) return Promise.reject(new Error("observer did not receive an attempt signal"));
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    fixture.entries.push(rawMessage("source-1", "x".repeat(40_000)));
+
+    const pipeline = fixture.run();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pipeline;
+
+    expect(agents.runObserver).toHaveBeenCalledTimes(1);
+  });
+
+  test("a timed-out session model is not retried in the reflector stage", async () => {
+    vi.useFakeTimers();
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100_000,
+      entries: [
+        rawMessage("big-1", "x".repeat(40_000)),
+        {
+          type: "custom",
+          id: "obs-1",
+          customType: "om.observations.recorded",
+          data: {
+            coversUpToId: "big-1",
+            observations: [{ id: "o1", content: "a".repeat(100), tokenCount: 25 }],
+          },
+        },
+      ],
+    });
+    fixture.runtime.config.reflectAfterTokens = 100;
+    fixture.runtime.config.workerAttemptTimeoutMs = 100;
+    const resolveModel = vi.fn(async () => ({
+      ok: true as const,
+      model: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
+      apiKey: "test",
+    }));
+    fixture.runtime.resolveModel = resolveModel;
+    agents.runReflector.mockImplementation((input) => {
+      const signal = input.signal;
+      if (!signal) return Promise.reject(new Error("reflector did not receive an attempt signal"));
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+
+    const pipeline = fixture.run();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pipeline;
+
+    expect(agents.runObserver).not.toHaveBeenCalled();
+    expect(agents.runReflector).toHaveBeenCalledTimes(1);
+    expect(resolveModel).toHaveBeenCalledTimes(1);
+  });
+
+  test("a timed-out session model is not retried in the dropper stage", async () => {
+    vi.useFakeTimers();
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100_000,
+      entries: [
+        rawMessage("big-1", "x".repeat(40_000)),
+        {
+          type: "custom",
+          id: "obs-1",
+          customType: "om.observations.recorded",
+          data: {
+            coversUpToId: "big-1",
+            observations: [{ id: "o1", content: "a".repeat(100), tokenCount: 25 }],
+          },
+        },
+      ],
+    });
+    fixture.runtime.config.reflectAfterTokens = 100;
+    fixture.runtime.config.workerAttemptTimeoutMs = 100;
+    const resolveModel = vi.fn(async () => ({
+      ok: true as const,
+      model: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
+      apiKey: "test",
+    }));
+    fixture.runtime.resolveModel = resolveModel;
+    // Reflector resolves and completes empty so the pipeline reaches the dropper.
+    agents.runReflector.mockResolvedValue([]);
+    agents.runDropper.mockImplementation((input) => {
+      const signal = input.signal;
+      if (!signal) return Promise.reject(new Error("dropper did not receive an attempt signal"));
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+
+    const pipeline = fixture.run();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pipeline;
+
+    expect(agents.runReflector).toHaveBeenCalledTimes(1);
+    expect(agents.runDropper).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("repeated consolidation pipeline cycles", () => {

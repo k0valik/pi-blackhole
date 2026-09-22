@@ -14,6 +14,7 @@ import type { ConfiguredModel } from "./config.js";
 import { debugLog, withDebugLogContext } from "./debug-log.js";
 import { type ResolveResult, type Runtime, type RuntimeGeneration } from "./runtime.js";
 import { withProviderAttributionHeaders } from "./provider-stream.js";
+import { runWorkerAttempt, WorkerAttemptTimeoutError } from "./worker-attempt.js";
 import {
   isCooldownWorthyError,
   isDeterministicError,
@@ -811,23 +812,33 @@ export async function runObserverStage(
 
     try {
       const { runObserver } = await import("./agents/observer/agent.js");
-      const result = await runObserver({
-        model: resolved.model as any,
-        apiKey: resolved.apiKey,
-        headers: withProviderAttributionHeaders(resolved.model as any, resolved.headers, sessionId),
-        env: resolved.env,
-        priorReflections,
-        priorObservations,
-        chunk,
-        allowedSourceEntryIds: sourceEntryIds,
-        sourceEntryTimestamps,
-        maxTurns: runtime.config.agentMaxTurns,
-        thinkingLevel: stageThinkingLevel(runtime, "observer", stageModelForThinking),
-        providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
-        signal: generation.signal,
-        modelRegistry: ctx.modelRegistry,
-        sessionId,
-      });
+      const result = await runWorkerAttempt(
+        "observer",
+        runtime.config.workerAttemptTimeoutMs,
+        generation.signal,
+        (signal) =>
+          runObserver({
+            model: resolved.model as any,
+            apiKey: resolved.apiKey,
+            headers: withProviderAttributionHeaders(
+              resolved.model as any,
+              resolved.headers,
+              sessionId,
+            ),
+            env: resolved.env,
+            priorReflections,
+            priorObservations,
+            chunk,
+            allowedSourceEntryIds: sourceEntryIds,
+            sourceEntryTimestamps,
+            maxTurns: runtime.config.agentMaxTurns,
+            thinkingLevel: stageThinkingLevel(runtime, "observer", stageModelForThinking),
+            providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+            signal,
+            modelRegistry: ctx.modelRegistry,
+            sessionId,
+          }),
+      );
       if (!runtime.isGenerationActive(generation)) return "abort";
 
       if (result.observations && result.observations.length > 0) {
@@ -896,6 +907,7 @@ export async function runObserverStage(
       }
       return "continue";
     } catch (error) {
+      if (!runtime.isGenerationActive(generation)) return "abort";
       if (isStaleExtensionContextError(error)) {
         debugLog("observer.stale_ctx", { error: String(error) });
         return "abort";
@@ -921,6 +933,10 @@ export async function runObserverStage(
         deterministic: isDeterministicError(error),
         cooldownWorthy: isCooldownWorthyError(error),
       });
+      // A timed-out session model has no candidate config to cool down, so
+      // the loop would re-resolve the same stalled model and burn the full
+      // deadline on every remaining attempt. Treat the stage as exhausted.
+      if (!candidateConfig && error instanceof WorkerAttemptTimeoutError) break;
       // Continue loop — resolveModel will skip the cooled-down model
       continue;
     }
@@ -1110,22 +1126,32 @@ async function runReflectorStage(
       );
 
       const { runReflector } = await import("./agents/reflector/agent.js");
-      const reflections = await runReflector({
-        model: resolved.model as any,
-        apiKey: resolved.apiKey,
-        headers: withProviderAttributionHeaders(resolved.model as any, resolved.headers, sessionId),
-        env: resolved.env,
-        reflections: newReflections,
-        observations: newObservations,
-        existingReflectionsSummary: existingReflectionsSummary || undefined,
-        existingObservationsSummary: existingObservationsSummary || undefined,
-        maxTurns: runtime.config.agentMaxTurns,
-        thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForThinking),
-        providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
-        signal: generation.signal,
-        modelRegistry: ctx.modelRegistry,
-        sessionId,
-      });
+      const reflections = await runWorkerAttempt(
+        "reflector",
+        runtime.config.workerAttemptTimeoutMs,
+        generation.signal,
+        (signal) =>
+          runReflector({
+            model: resolved.model as any,
+            apiKey: resolved.apiKey,
+            headers: withProviderAttributionHeaders(
+              resolved.model as any,
+              resolved.headers,
+              sessionId,
+            ),
+            env: resolved.env,
+            reflections: newReflections,
+            observations: newObservations,
+            existingReflectionsSummary: existingReflectionsSummary || undefined,
+            existingObservationsSummary: existingObservationsSummary || undefined,
+            maxTurns: runtime.config.agentMaxTurns,
+            thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForThinking),
+            providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+            signal,
+            modelRegistry: ctx.modelRegistry,
+            sessionId,
+          }),
+      );
       if (!runtime.isGenerationActive(generation))
         return { outcome: "abort", sameRunReflections: [] };
 
@@ -1164,6 +1190,8 @@ async function runReflectorStage(
         effectiveReflectionCoverageId: data.coversUpToId,
       };
     } catch (error) {
+      if (!runtime.isGenerationActive(generation))
+        return { outcome: "abort", sameRunReflections: [] };
       if (isStaleExtensionContextError(error)) {
         debugLog("reflector.stale_ctx", { error: String(error) });
         return { outcome: "abort", sameRunReflections: [] };
@@ -1184,6 +1212,9 @@ async function runReflectorStage(
         deterministic: isDeterministicError(error),
         cooldownWorthy: isCooldownWorthyError(error),
       });
+      // A timed-out session model has no candidate config to cool down, so
+      // retrying would stall on the same model for the full deadline again.
+      if (!candidateConfig && error instanceof WorkerAttemptTimeoutError) break;
       continue;
     }
   }
@@ -1363,23 +1394,33 @@ async function runDropperStage(
       }
 
       const { runDropper } = await import("./agents/dropper/agent.js");
-      const droppedIds = await runDropper({
-        model: resolved.model as any,
-        apiKey: resolved.apiKey,
-        headers: withProviderAttributionHeaders(resolved.model as any, resolved.headers, sessionId),
-        env: resolved.env,
-        reflections: reflectionsForDropper,
-        observations: newObservations,
-        existingObservationsSummary: existingObservationsSummary || undefined,
-        budgetTokens: runtime.config.observationsPoolMaxTokens,
-        skipFullness: runtime.config.dropperPoolFullnessThreshold,
-        maxTurns: runtime.config.agentMaxTurns,
-        thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
-        providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
-        signal: generation.signal,
-        modelRegistry: ctx.modelRegistry,
-        sessionId,
-      });
+      const droppedIds = await runWorkerAttempt(
+        "dropper",
+        runtime.config.workerAttemptTimeoutMs,
+        generation.signal,
+        (signal) =>
+          runDropper({
+            model: resolved.model as any,
+            apiKey: resolved.apiKey,
+            headers: withProviderAttributionHeaders(
+              resolved.model as any,
+              resolved.headers,
+              sessionId,
+            ),
+            env: resolved.env,
+            reflections: reflectionsForDropper,
+            observations: newObservations,
+            existingObservationsSummary: existingObservationsSummary || undefined,
+            budgetTokens: runtime.config.observationsPoolMaxTokens,
+            skipFullness: runtime.config.dropperPoolFullnessThreshold,
+            maxTurns: runtime.config.agentMaxTurns,
+            thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
+            providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+            signal,
+            modelRegistry: ctx.modelRegistry,
+            sessionId,
+          }),
+      );
       if (!runtime.isGenerationActive(generation)) return "abort";
       const latestReflectionCoverageId = isManualMode(runtime.config)
         ? pending?.reflection?.coversUpToId
@@ -1412,6 +1453,7 @@ async function runDropperStage(
       }
       return "continue";
     } catch (error) {
+      if (!runtime.isGenerationActive(generation)) return "abort";
       if (isStaleExtensionContextError(error)) {
         debugLog("dropper.stale_ctx", { error: String(error) });
         return "abort";
@@ -1432,6 +1474,9 @@ async function runDropperStage(
         deterministic: isDeterministicError(error),
         cooldownWorthy: isCooldownWorthyError(error),
       });
+      // A timed-out session model has no candidate config to cool down, so
+      // retrying would stall on the same model for the full deadline again.
+      if (!candidateConfig && error instanceof WorkerAttemptTimeoutError) break;
       continue;
     }
   }
