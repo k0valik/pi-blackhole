@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Git status annotations no longer follow a leaked `GIT_DIR`.** `loadGitFileTags` spawned `git` with the inherited environment, so an exported `GIT_DIR`/`GIT_WORK_TREE` (common when the agent runs inside a worktree) made `rev-parse --show-toplevel` resolve `cwd` but `status` read the _other_ repo's index — wrong [Files And Changes] tags, and on the test side `git config` actually wrote `user.name`/`user.email` into the ambient repo. Both call sites now run with `gitEnv()`, which strips the repo-location variables so discovery is anchored to `cwd`.
+
 ---
 
 ## [0.5.8] - 2026-09-22

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { tagFromPorcelain, loadGitFileTags } from "../src/extract/git-status.js";
+import { tagFromPorcelain, loadGitFileTags, gitEnv } from "../src/extract/git-status.js";
 import { extractFiles } from "../src/extract/files.js";
 import { buildSections } from "../src/core/build-sections.js";
 import { compile } from "../src/core/summarize.js";
@@ -36,8 +36,10 @@ describe("tagFromPorcelain", () => {
 // ── real repo integration ────────────────────────────────────────
 
 const tmp = realpathSync(mkdtempSync(path.join(tmpdir(), "bh-git-status-")));
+// `env: gitEnv()` strips GIT_DIR/GIT_WORK_TREE/... so these setup commands can
+// never target (and mutate, e.g. `git config`) a repo from the ambient env.
 const git = (args: string[], cwd: string = tmp) =>
-  execFileSync("git", args, { cwd, encoding: "utf-8" });
+  execFileSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8" });
 
 try {
   git(["init", "-q"]);
@@ -64,6 +66,21 @@ try {
 
     it("returns an empty map outside a repo (fail-closed)", () => {
       expect(loadGitFileTags(tmpdir()).size).toBe(0);
+    });
+
+    it("ignores an ambient GIT_DIR — discovery is anchored to cwd", () => {
+      const outside = realpathSync(mkdtempSync(path.join(tmpdir(), "bh-non-repo-")));
+      const prev = process.env.GIT_DIR;
+      process.env.GIT_DIR = path.join(tmp, ".git");
+      try {
+        // A leaked GIT_DIR (e.g. from the agent's worktree env) must not make a
+        // non-repo directory look like a repo, nor leak the other repo's tags.
+        expect(loadGitFileTags(outside).size).toBe(0);
+      } finally {
+        if (prev === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = prev;
+        rmSync(outside, { recursive: true, force: true });
+      }
     });
   });
 } finally {

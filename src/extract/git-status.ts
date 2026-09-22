@@ -21,6 +21,32 @@ const stripReadSliceSuffix = (p: string): string => p.replace(/:(\d+)-(\d+)$/, "
 const CONFLICT_CODES = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 
 /**
+ * Env vars that relocate git's repository/worktree discovery. Inheriting them
+ * (e.g. a leaked GIT_DIR from an agent worktree) makes every git subprocess
+ * target that repo regardless of `cwd` — status would reflect the wrong tree,
+ * and writes like `git config` would land in it. Stripping them anchors
+ * discovery to `cwd`, which is the contract of `loadGitFileTags`.
+ */
+const GIT_REPO_ENV_VARS = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_COMMON_DIR",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_NAMESPACE",
+  "GIT_PREFIX",
+] as const;
+
+/** Copy of the process env with repo-location vars removed. */
+export const gitEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => {
+  const clean = { ...env };
+  for (const key of GIT_REPO_ENV_VARS) delete clean[key];
+  return clean;
+};
+
+/**
  * Map a raw XY porcelain status to a display tag.
  * X = staged column, Y = unstaged column (see `git status --porcelain` docs).
  */
@@ -56,6 +82,7 @@ export const loadGitFileTags = (cwd: string): Map<string, string> => {
     const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       cwd,
       encoding: "utf-8",
+      env: gitEnv(),
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2000,
     }).trim();
@@ -70,6 +97,7 @@ export const loadGitFileTags = (cwd: string): Map<string, string> => {
     stdout = execFileSync("git", ["status", "--porcelain=1", "-z"], {
       cwd: gitRoot,
       encoding: "utf-8",
+      env: gitEnv(),
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 16 * 1024 * 1024,
       timeout: 5000,
