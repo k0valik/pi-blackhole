@@ -306,7 +306,9 @@ Based on interview answers, build the config object. Write it to:
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
-  "agentMaxTurns": 16                  // max agent-loop turns per worker per run
+  "agentMaxTurns": 16,                 // max agent-loop turns per worker per run
+  "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
+  "workerAttemptTimeoutMs": 0          // hard deadline per model attempt (0/unset = disabled, max 2147483647); configured candidates: cooldown + fallback; session fallback: once per stage, no cooldown
 }
 ```
 

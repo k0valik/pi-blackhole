@@ -1,8 +1,15 @@
 ## [Unreleased]
 
+### Added
+
+- **Hard elapsed timeout for background worker/model attempts.** Optional `workerAttemptTimeoutMs` bounds the complete Observer, Reflector, or Dropper agent loop for one selected model—including response-header waits, streamed heartbeats, tool turns, and final confirmation. Expiry aborts the attempt, records the normal model cooldown, and immediately engages the next fallback with a fresh deadline. This is separate from `providerIdleTimeoutMs`, which remains a response-body inactivity timeout and cannot guarantee wall-clock failover. Configurable via config file, `/blackhole settings`, or `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS`; foreground Pi chats are unaffected.
+
 ### Fixed
 
 - **Git status annotations no longer follow a leaked `GIT_DIR`.** `loadGitFileTags` spawned `git` with the inherited environment, so an exported `GIT_DIR`/`GIT_WORK_TREE` (common when the agent runs inside a worktree) made `rev-parse --show-toplevel` resolve `cwd` but `status` read the _other_ repo's index — wrong [Files And Changes] tags, and on the test side `git config` actually wrote `user.name`/`user.email` into the ambient repo. Both call sites now run with `gitEnv()`, which strips the repo-location variables so discovery is anchored to `cwd`.
+- **A timed-out final session fallback is attempted once per stage instead of up to ten times.** When a `workerAttemptTimeoutMs` expiry hit the last-resort session model, the failure matched no configured candidate, so nothing was recorded and the stage loop re-resolved and retried the same session model up to `MAX_STAGE_ATTEMPTS` — ten full deadlines per stage. The Observer, Reflector, and Dropper loops now stop selecting models once a timed-out attempt resolves to no configured candidate, and the session fallback honors the in-cycle failure set, so a configured candidate sharing provider/id with the session model cannot be re-resolved either. Configured candidates still engage the normal cooldown and fallback chain; the final session fallback is attempted once per stage and is never given a persisted cooldown.
+- **`/blackhole settings` saves now persist `workerAttemptTimeoutMs` and `providerIdleTimeoutMs` at every scope.** Both keys were missing from the default key set the settings modal's save path iterates for global and project files, so edits at those two scopes were silently dropped (session saves write the full config and were unaffected). Both are now first-class defaults and round-trip through save and reload at all three scopes — `workerAttemptTimeoutMs` stays disabled when unset, while `providerIdleTimeoutMs` keeps inheriting Pi's global provider timeout.
+- **Direct config and env values of `workerAttemptTimeoutMs` above Node's timer maximum are rejected.** Values over 2,147,483,647 ms previously overflowed the 32-bit timer into an approximately 1 ms deadline. File parsing and `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS` now reject them; the settings UI's 3,600,000 ms cap is unchanged.
 
 ---
 
