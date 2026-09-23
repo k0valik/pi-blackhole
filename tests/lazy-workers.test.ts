@@ -35,6 +35,8 @@ function fixture() {
   runtime.scheduleCursorFlush = vi.fn();
   runtime.resolveModel = vi.fn(async () => ({
     ok: true as const,
+    source: "candidate" as const,
+    candidateConfig: { provider: "test", id: "model" },
     model: { provider: "test", id: "model", contextWindow: 1_000_000 },
     apiKey: "test",
   }));

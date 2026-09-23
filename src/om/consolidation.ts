@@ -768,15 +768,10 @@ export async function runObserverStage(
       priorObservations: priorObservations.length,
     });
 
-    // Resolve thinking level for the specific model (fallbacks may have their own thinking config)
-    const stageModelForThinking = runtime.findCandidateConfig(resolved.model, {
-      model: ctx.model,
-      modelRegistry: ctx.modelRegistry,
-      hasUI: ctx.hasUI,
-      ui: ctx.ui,
-      stageModel: stageModelConfig(runtime, "observer"),
-      stageFallbacks: stageFallbackModels(runtime, "observer"),
-    });
+    // Candidate provenance is captured during resolution so a settings reload
+    // cannot change which model config owns this attempt.
+    const stageModelForThinking =
+      resolved.source === "candidate" ? resolved.candidateConfig : undefined;
 
     // Check if the full estimated prompt fits in the model's context window:
     // chunk + rendered preamble + system prompt, plus the agent-loop reserve
@@ -917,14 +912,7 @@ export async function runObserverStage(
       // Deterministic 4xx (e.g. MissingSessionID) additionally cools the
       // resolved model itself: the session model has no candidate config, so
       // without this it would retry identically on every cycle.
-      const candidateConfig = runtime.findCandidateConfig(resolved.model, {
-        model: ctx.model,
-        modelRegistry: ctx.modelRegistry,
-        hasUI: ctx.hasUI,
-        ui: ctx.ui,
-        stageModel: stageModelConfig(runtime, "observer"),
-        stageFallbacks: stageFallbackModels(runtime, "observer"),
-      });
+      const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "observer");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "observer");
       debugLog("observer.error", {
@@ -1061,15 +1049,10 @@ async function runReflectorStage(
       `Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`,
     );
 
-    // Resolve thinking level for the specific model (fallbacks may have their own thinking config)
-    const stageModelForThinking = runtime.findCandidateConfig(resolved.model, {
-      model: ctx.model,
-      modelRegistry: ctx.modelRegistry,
-      hasUI: ctx.hasUI,
-      ui: ctx.ui,
-      stageModel: stageModelConfig(runtime, "reflector"),
-      stageFallbacks: stageFallbackModels(runtime, "reflector"),
-    });
+    // Candidate provenance is captured during resolution so a settings reload
+    // cannot change which model config owns this attempt.
+    const stageModelForThinking =
+      resolved.source === "candidate" ? resolved.candidateConfig : undefined;
 
     // Check if estimated input fits in model's context window
     // Use actual computed input size (new items + summary budget) instead of cap
@@ -1196,14 +1179,7 @@ async function runReflectorStage(
         debugLog("reflector.stale_ctx", { error: String(error) });
         return { outcome: "abort", sameRunReflections: [] };
       }
-      const candidateConfig = runtime.findCandidateConfig(resolved.model, {
-        model: ctx.model,
-        modelRegistry: ctx.modelRegistry,
-        hasUI: ctx.hasUI,
-        ui: ctx.ui,
-        stageModel: stageModelConfig(runtime, "reflector"),
-        stageFallbacks: stageFallbackModels(runtime, "reflector"),
-      });
+      const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "reflector");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
       debugLog("reflector.error", {
@@ -1329,6 +1305,11 @@ async function runDropperStage(
       `Observational memory: dropper running (~${effectiveDropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`,
     );
 
+    // Candidate provenance is captured during resolution so a settings reload
+    // cannot change which model config owns this attempt.
+    const stageModelForThinking =
+      resolved.source === "candidate" ? resolved.candidateConfig : undefined;
+
     try {
       // Existing active observations summary for context (capped).
       // In manual mode, merge accumulated pending batches with
@@ -1357,16 +1338,6 @@ async function runDropperStage(
           ]
         : folded.reflections;
       const reflectionsForDropper = mergeReflections(pendingReflections, sameRunReflections);
-
-      // Resolve thinking level for the specific model (fallbacks may have their own thinking config)
-      const stageModelForThinking = runtime.findCandidateConfig(resolved.model, {
-        model: ctx.model,
-        modelRegistry: ctx.modelRegistry,
-        hasUI: ctx.hasUI,
-        ui: ctx.ui,
-        stageModel: stageModelConfig(runtime, "dropper"),
-        stageFallbacks: stageFallbackModels(runtime, "dropper"),
-      });
 
       // Check if estimated input fits in model's context window
       // Use actual computed input size (new observations + summary budget) instead of cap
@@ -1458,14 +1429,7 @@ async function runDropperStage(
         debugLog("dropper.stale_ctx", { error: String(error) });
         return "abort";
       }
-      const candidateConfig = runtime.findCandidateConfig(resolved.model, {
-        model: ctx.model,
-        modelRegistry: ctx.modelRegistry,
-        hasUI: ctx.hasUI,
-        ui: ctx.ui,
-        stageModel: stageModelConfig(runtime, "dropper"),
-        stageFallbacks: stageFallbackModels(runtime, "dropper"),
-      });
+      const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "dropper");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "dropper");
       debugLog("dropper.error", {

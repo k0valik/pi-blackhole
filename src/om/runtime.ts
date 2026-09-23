@@ -26,15 +26,21 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthResult } from "@earendil-works/pi-ai";
 import { debugLog } from "./debug-log.js";
 
+interface ResolvedModelBase {
+  ok: true;
+  model: any;
+  apiKey: string;
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+  cooldownApplied?: boolean;
+}
+
 export type ResolveResult =
-  | {
-      ok: true;
-      model: any;
-      apiKey: string;
-      headers?: Record<string, string>;
-      env?: Record<string, string>;
-      cooldownApplied?: boolean;
-    }
+  | (ResolvedModelBase & {
+      source: "candidate";
+      candidateConfig: ConfiguredModel;
+    })
+  | (ResolvedModelBase & { source: "session" })
   | { ok: false; reason: string };
 
 type NotifyLevel = "warning" | "info" | "error";
@@ -456,6 +462,8 @@ export class Runtime {
 
       return {
         ok: true,
+        source: "candidate",
+        candidateConfig: candidate,
         model: resolvedModel,
         apiKey: (auth.apiKey as string) ?? "",
         headers: auth.headers as Record<string, string> | undefined,
@@ -540,6 +548,7 @@ export class Runtime {
 
       return {
         ok: true,
+        source: "session",
         model: resolvedModel,
         apiKey: (auth.apiKey as string) ?? "",
         headers: auth.headers as Record<string, string> | undefined,
@@ -621,23 +630,6 @@ export class Runtime {
       ...(refreshError ? { refreshError } : {}),
     });
     return recovered;
-  }
-
-  /**
-   * Get the model config for the currently resolved model (used for cooldown recording).
-   * Returns the candidate config if the model was from the candidate list,
-   * or undefined if it's the session model.
-   */
-  findCandidateConfig(resolvedModel: unknown, ctx: ResolveCtx): ConfiguredModel | undefined {
-    const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
-    const model = resolvedModel as { provider?: string; id?: string };
-    if (!model.provider || !model.id) return undefined;
-    return (
-      candidates.find((c) => c.provider === model.provider && c.id === model.id) ??
-      (this.config.model?.provider === model.provider && this.config.model?.id === model.id
-        ? this.config.model
-        : undefined)
-    );
   }
 
   /**

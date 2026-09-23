@@ -876,6 +876,8 @@ function makePipelineFixture(options: {
   if (!options.useRuntimeModelResolver) {
     runtime.resolveModel = async () => ({
       ok: true as const,
+      source: "candidate" as const,
+      candidateConfig: { provider: "test", id: "model" },
       model: { provider: "test", id: "model", contextWindow: 1_000_000 },
       apiKey: "test",
     });
@@ -978,12 +980,70 @@ describe("worker attempt hard timeout", () => {
     ]);
   });
 
+  test("a configured timeout still falls through when config changes mid-attempt", async () => {
+    vi.useFakeTimers();
+    let signalAuthStarted: (() => void) | undefined;
+    let releaseAuth: (() => void) | undefined;
+    const authStarted = new Promise<void>((resolve) => {
+      signalAuthStarted = resolve;
+    });
+    const authGate = new Promise<void>((resolve) => {
+      releaseAuth = resolve;
+    });
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100,
+      useRuntimeModelResolver: true,
+      modelRegistry: {
+        find: (provider: string, id: string) => ({ provider, id, contextWindow: 1_000_000 }),
+        getApiKeyAndHeaders: async () => {
+          signalAuthStarted?.();
+          await authGate;
+          return { ok: true, apiKey: "test" };
+        },
+        hasConfiguredAuth: () => true,
+      },
+    });
+    fixture.runtime.config.workerAttemptTimeoutMs = 100;
+    fixture.runtime.config.observerModel = {
+      provider: "test",
+      id: "stalled",
+      cooldownHours: 0,
+    };
+    agents.runObserver
+      .mockImplementationOnce((input) => {
+        const signal = input.signal;
+        if (!signal) return Promise.reject(new Error("observer did not receive an attempt signal"));
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      })
+      .mockResolvedValueOnce({
+        observations: [],
+        emptyReason: { kind: "no_new_content" as const },
+      });
+    fixture.entries.push(rawMessage("source-1", "x".repeat(40_000)));
+
+    const pipeline = fixture.run();
+    await authStarted;
+    fixture.runtime.config.observerModel = { provider: "test", id: "replacement" };
+    releaseAuth?.();
+    await vi.advanceTimersByTimeAsync(100);
+    await pipeline;
+
+    expect(agents.runObserver.mock.calls.map(([input]) => input.model?.id)).toEqual([
+      "stalled",
+      "replacement",
+    ]);
+  });
+
   test("session cancellation does not resolve a fallback model", async () => {
     const fixture = makePipelineFixture({ observeAfterTokens: 100 });
     fixture.runtime.startSession("cursor-session");
     fixture.runtime.config.workerAttemptTimeoutMs = 60_000;
     const resolveModel = vi.fn(async () => ({
       ok: true as const,
+      source: "candidate" as const,
+      candidateConfig: { provider: "test", id: "stalled" },
       model: { provider: "test", id: "stalled", contextWindow: 1_000_000 },
       apiKey: "test",
     }));
@@ -1001,14 +1061,17 @@ describe("worker attempt hard timeout", () => {
 
   test("a timed-out session model is not retried within the same stage", async () => {
     vi.useFakeTimers();
-    const fixture = makePipelineFixture({ observeAfterTokens: 100 });
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100,
+      useRuntimeModelResolver: true,
+      sessionModel: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+        hasConfiguredAuth: () => true,
+      },
+    });
     fixture.runtime.config.workerAttemptTimeoutMs = 100;
-    const resolveModel = vi.fn(async () => ({
-      ok: true as const,
-      model: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
-      apiKey: "test",
-    }));
-    fixture.runtime.resolveModel = resolveModel;
+    const resolveModel = vi.spyOn(fixture.runtime, "resolveModel");
     agents.runObserver.mockImplementation((input) => {
       const signal = input.signal;
       if (!signal) return Promise.reject(new Error("observer did not receive an attempt signal"));
@@ -1069,6 +1132,12 @@ describe("worker attempt hard timeout", () => {
     vi.useFakeTimers();
     const fixture = makePipelineFixture({
       observeAfterTokens: 100_000,
+      useRuntimeModelResolver: true,
+      sessionModel: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+        hasConfiguredAuth: () => true,
+      },
       entries: [
         rawMessage("big-1", "x".repeat(40_000)),
         {
@@ -1084,12 +1153,7 @@ describe("worker attempt hard timeout", () => {
     });
     fixture.runtime.config.reflectAfterTokens = 100;
     fixture.runtime.config.workerAttemptTimeoutMs = 100;
-    const resolveModel = vi.fn(async () => ({
-      ok: true as const,
-      model: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
-      apiKey: "test",
-    }));
-    fixture.runtime.resolveModel = resolveModel;
+    const resolveModel = vi.spyOn(fixture.runtime, "resolveModel");
     agents.runReflector.mockImplementation((input) => {
       const signal = input.signal;
       if (!signal) return Promise.reject(new Error("reflector did not receive an attempt signal"));
@@ -1111,6 +1175,12 @@ describe("worker attempt hard timeout", () => {
     vi.useFakeTimers();
     const fixture = makePipelineFixture({
       observeAfterTokens: 100_000,
+      useRuntimeModelResolver: true,
+      sessionModel: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+        hasConfiguredAuth: () => true,
+      },
       entries: [
         rawMessage("big-1", "x".repeat(40_000)),
         {
@@ -1126,12 +1196,6 @@ describe("worker attempt hard timeout", () => {
     });
     fixture.runtime.config.reflectAfterTokens = 100;
     fixture.runtime.config.workerAttemptTimeoutMs = 100;
-    const resolveModel = vi.fn(async () => ({
-      ok: true as const,
-      model: { provider: "test", id: "session-model", contextWindow: 1_000_000 },
-      apiKey: "test",
-    }));
-    fixture.runtime.resolveModel = resolveModel;
     // Reflector resolves and completes empty so the pipeline reaches the dropper.
     agents.runReflector.mockResolvedValue([]);
     agents.runDropper.mockImplementation((input) => {
@@ -1481,6 +1545,8 @@ describe("observer preamble cap", () => {
     // The old chunk-only guard would have passed this call through.
     fixture.runtime.resolveModel = async () => ({
       ok: true as const,
+      source: "candidate" as const,
+      candidateConfig: { provider: "test", id: "model" },
       model: { provider: "test", id: "model", contextWindow: 11_000 },
       apiKey: "test",
     });
