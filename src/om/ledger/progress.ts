@@ -141,49 +141,54 @@ export function rawTokensSinceDropCoverage(entries: Entry[]): number {
   return rawTokensSinceCoverage(entries, OM_OBSERVATIONS_DROPPED);
 }
 
-/**
- * Canonical observation-pool measurement shared by the dropper trigger and
- * the user-facing pool displays.
- *
- * Measures the live active pool — `foldLedger(entries).activeObservations`,
- * every recorded observation not tombstoned by a drop — plus, when `pending`
- * is supplied (manual mode, where records live in pending.json instead of the
- * branch), every observation in `pending.observationBatches`.
- *
- * `pending` is explicit at every call site so a caller cannot obtain the
- * number without stating which universe it means. This helper only measures;
- * it does not select dropper candidates — the dropper deliberately ranges
- * over a narrower delta (see `agents/dropper/agent.ts`).
- *
- * Sums the stored `tokenCount` (content-only, recorded at write time with the
- * CJK-aware `estimateStringTokens`, #106) so all callers move together if that
- * basis ever changes.
- */
+/** Canonical live pool used by pressure measurement and candidates. */
+export function livePoolObservations(entries: Entry[], pending?: PendingOMState): Observation[] {
+  const pool = new Map(
+    foldLedger(entries).activeObservations.map((observation) => [observation.id, observation]),
+  );
+  for (const batch of pending?.observationBatches ?? []) {
+    const data = batch.data as { observations?: unknown } | undefined;
+    if (!Array.isArray(data?.observations)) continue;
+    for (const value of data.observations) {
+      if (typeof value !== "object" || value === null) continue;
+      const observation = value as Partial<Observation>;
+      if (
+        typeof observation.id !== "string" ||
+        typeof observation.content !== "string" ||
+        typeof observation.tokenCount !== "number" ||
+        pool.has(observation.id)
+      ) {
+        continue;
+      }
+      pool.set(observation.id, observation as Observation);
+    }
+  }
+
+  const dropped = pending?.droppedBatches?.length
+    ? pending.droppedBatches
+    : pending?.dropped
+      ? [pending.dropped]
+      : [];
+  for (const batch of dropped) {
+    const data = batch.data as { observationIds?: unknown } | undefined;
+    if (!Array.isArray(data?.observationIds)) continue;
+    for (const id of data.observationIds) {
+      if (typeof id === "string") pool.delete(id);
+    }
+  }
+  return [...pool.values()];
+}
+
+/** Canonical observation-pool measurement shared by triggers and displays. */
 export function observationPoolTokens(
   entries: Entry[],
   pending?: PendingOMState,
 ): { tokens: number; count: number } {
-  const { activeObservations } = foldLedger(entries);
-  let tokens = activeObservations.reduce(
-    (sum, observation) => sum + (observation.tokenCount ?? 0),
-    0,
-  );
-  let count = activeObservations.length;
-
-  for (const batch of pending?.observationBatches ?? []) {
-    const data = batch.data;
-    if (typeof data !== "object" || data === null) continue;
-    const observations = (data as { observations?: unknown }).observations;
-    if (!Array.isArray(observations)) continue;
-    for (const observation of observations) {
-      count += 1;
-      if (typeof observation !== "object" || observation === null) continue;
-      const tokenCount = (observation as { tokenCount?: unknown }).tokenCount;
-      if (typeof tokenCount === "number") tokens += tokenCount;
-    }
-  }
-
-  return { tokens, count };
+  const pool = livePoolObservations(entries, pending);
+  return {
+    tokens: pool.reduce((sum, observation) => sum + observation.tokenCount, 0),
+    count: pool.length,
+  };
 }
 
 export function findLastCompactionIndex(entries: Entry[]): number {

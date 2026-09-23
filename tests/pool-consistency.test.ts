@@ -193,6 +193,38 @@ describe("observationPoolTokens", () => {
   });
 });
 
+describe("dropper pool pressure", () => {
+  function pressureRuntime(pressure: number, poolMax = POOL_MAX): Runtime {
+    return triggerRuntime({
+      reflectAfterTokens: 1_000_000,
+      reflectorInputMaxTokens: 1_000_000,
+      observationsPoolMaxTokens: poolMax,
+      dropperPressureThreshold: pressure,
+    });
+  }
+
+  it("uses observationsPoolMaxTokens as the pressure basis", () => {
+    const entries = asEntries(observationBranch()); // 1,400 / 2,800 tokens
+    const runtime = pressureRuntime(0.49); // threshold 1,372
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+  });
+
+  it("stays idle below the pressure threshold", () => {
+    const entries = asEntries(observationBranch());
+    const runtime = pressureRuntime(0.51); // threshold 1,428
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+
+  it("treats a threshold of 1 as pressure disabled", () => {
+    const entries = asEntries(observationBranch());
+    const runtime = pressureRuntime(1, 1_400);
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+});
+
 describe("trigger / display pool agreement", () => {
   it("auto mode: the trigger gate and the memory pool line share the live pool fraction", async () => {
     const entries = asEntries(observationBranch());

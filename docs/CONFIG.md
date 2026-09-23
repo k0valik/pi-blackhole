@@ -468,7 +468,7 @@ Max preamble tokens per section (`CURRENT REFLECTIONS` / `CURRENT OBSERVATIONS`)
 
 ### `dropperPressureThreshold`
 
-Fraction of `reflectorInputMaxTokens` at which the dropper runs even without new observation or reflection data. This is a **pool-size pressure valve**: when the active observation pool exceeds this fraction of `reflectorInputMaxTokens`, the dropper fires to keep the pool pruned. The reflector's own input is capped separately by `reflectorInputMaxTokens` and only includes new items plus a summary budget.
+Fraction of `observationsPoolMaxTokens` at which the dropper runs without new data. The pool must also clear `dropperPoolFullnessThreshold`; `1.0` disables pressure.
 
 | Type | Default | Range |
 |------|---------|-------|

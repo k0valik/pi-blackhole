@@ -305,7 +305,7 @@ Based on interview answers, build the config object. Write it to:
   "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
-  "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
+  "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
 }
 ```

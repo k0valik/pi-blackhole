@@ -53,6 +53,7 @@ import {
   isSourceEntry,
   latestCoverageIndex,
   latestCoverageMarkerId,
+  livePoolObservations,
   observationsCreatedAfterIndex,
   observationPoolTokens,
   observationToSummaryLine,
@@ -175,6 +176,15 @@ function pendingObservationsCreatedAfter(
   return newObs;
 }
 
+function dropperPressureReached(config: Runtime["config"], poolTokens: number): boolean {
+  const poolMax = config.observationsPoolMaxTokens;
+  if (poolMax <= 0 || config.dropperPressureThreshold >= 1) return false;
+  return (
+    poolTokens / poolMax >= (config.dropperPoolFullnessThreshold ?? 0.1) &&
+    poolTokens >= config.dropperPressureThreshold * poolMax
+  );
+}
+
 /** Cursor-aware stage-due check.  Uses cursors when available; falls back to
  *  legacy coverage markers when cursors are absent (cold start, fork recovery).
  *
@@ -257,10 +267,7 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
           // Must have at least dropperPoolFullnessThreshold fullness to consider dropper
           if (fullnessVsPool < (config.dropperPoolFullnessThreshold ?? 0.1)) return false;
 
-          // Pressure check: pool ≥ threshold × reflectorInputMaxTokens
-          const pressure =
-            poolTokens >= config.dropperPressureThreshold * config.reflectorInputMaxTokens;
-          if (pressure) return true;
+          if (dropperPressureReached(config, poolTokens)) return true;
 
           // New data check: new obs or ref batches after dropper cursor
           const cursor = cursors.dropper;
@@ -1222,13 +1229,18 @@ async function runDropperStage(
   }
   let dropTokens = 0;
   let observationCoverageId: string | undefined;
+  const pressurePending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
+  const pressureRun = dropperPressureReached(
+    runtime.config,
+    observationPoolTokens(entries, pressurePending).tokens,
+  );
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
     const hasPendingObs = (pending.observationBatches ?? []).some(
       (b: any) => (b.data as any)?.observations?.length,
     );
-    if (!hasPendingObs) {
+    if (!hasPendingObs && !pressureRun) {
       runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped");
       return "continue";
     }
@@ -1236,13 +1248,13 @@ async function runDropperStage(
     if (pending.dropped?.coversUpToId) {
       const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
       const dropIdx = entryIndexForId(entries, pending.dropped.coversUpToId);
-      if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx) {
+      if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx && !pressureRun) {
         runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "skipped");
         return "continue";
       }
       if (dropIdx >= 0) {
         dropTokens = rawTokensAfterIndex(entries, dropIdx);
-        if (dropTokens < runtime.config.reflectAfterTokens) {
+        if (dropTokens < runtime.config.reflectAfterTokens && !pressureRun) {
           runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "not_due");
           return "continue";
         }
@@ -1254,16 +1266,17 @@ async function runDropperStage(
     }
   } else {
     dropTokens = rawTokensSinceDropCoverage(entries);
-    if (dropTokens < runtime.config.reflectAfterTokens) {
+    if (dropTokens < runtime.config.reflectAfterTokens && !pressureRun) {
       runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "not_due");
       return "continue";
     }
     observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
-    if (!observationCoverageId) {
+    if (!observationCoverageId && !pressureRun) {
       runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped");
       return "continue";
     }
   }
+  if (!observationCoverageId) observationCoverageId = entries.at(-1)?.id ?? "unknown";
 
   for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
     const resolved = await resolveModel("dropper");
@@ -1273,9 +1286,11 @@ async function runDropperStage(
     const folded = foldLedger(entries);
     const pending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
     const lastDropIdx = pending ? -1 : latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED);
-    const newObservations = pending
-      ? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
-      : observationsCreatedAfterIndex(entries, lastDropIdx);
+    const newObservations = pressureRun
+      ? livePoolObservations(entries, pending)
+      : pending
+        ? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
+        : observationsCreatedAfterIndex(entries, lastDropIdx);
     const dropperNewObsTokens = Math.ceil(
       newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4,
     );

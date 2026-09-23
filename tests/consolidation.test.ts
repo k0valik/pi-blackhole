@@ -13,6 +13,8 @@ import {
   branchSummary,
   compactionEntry,
   customMessage,
+  observation,
+  observationsDroppedEntry,
   observationsRecordedEntry,
   rawMessage,
   reflection,
@@ -21,6 +23,12 @@ import {
   type TestEntry,
 } from "./fixtures/session.js";
 import { createExtensionApiDouble } from "./fixtures/pi-extension-api.js";
+import {
+  clearPendingState,
+  readPendingState,
+  savePendingDropped,
+  savePendingObservation,
+} from "../src/om/pending.js";
 
 /** Cursor round trips write real pending files, so redirect the agent dir. */
 const cursorTestDir = join(tmpdir(), `pi-blackhole-consolidation-cursors-${Date.now()}`);
@@ -36,10 +44,16 @@ interface ObserverAgentInput {
   priorReflections: string[];
 }
 
+interface DropperAgentInput {
+  observations: Array<{ id: string }>;
+  budgetTokens: number;
+  signal?: AbortSignal;
+}
+
 const agents = vi.hoisted(() => ({
   runObserver: vi.fn<(input: ObserverAgentInput) => Promise<unknown>>(),
   runReflector: vi.fn(),
-  runDropper: vi.fn(),
+  runDropper: vi.fn<(input: DropperAgentInput) => Promise<string[] | undefined>>(),
 }));
 vi.mock("../src/om/agents/observer/agent.js", () => ({ runObserver: agents.runObserver }));
 vi.mock("../src/om/agents/reflector/agent.js", () => ({ runReflector: agents.runReflector }));
@@ -911,6 +925,12 @@ function observerChunkArg(callIndex = 0): ObserverAgentInput {
   return call[0];
 }
 
+function dropperCallArg(): DropperAgentInput {
+  const call = agents.runDropper.mock.calls[0];
+  if (!call) throw new Error("dropper did not run");
+  return call[0];
+}
+
 const smallSource = (id: string) => rawMessage(id, `SMALL-${id} ${"x".repeat(120)}`);
 
 beforeEach(() => {
@@ -1282,5 +1302,90 @@ describe("observer preamble cap", () => {
     await fixture.run();
 
     expect(agents.runObserver).not.toHaveBeenCalled();
+  });
+});
+
+describe("dropper pressure valve", () => {
+  function pressureFixture(): PipelineFixture {
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 1_000_000,
+      entries: [
+        rawMessage("big-1", "x".repeat(400)),
+        observationsRecordedEntry("obs-1", {
+          coversUpToId: "big-1",
+          observations: [
+            observation("aaaaaaaaaaaa", { tokenCount: 800, sourceEntryIds: ["big-1"] }),
+            observation("bbbbbbbbbbbb", { tokenCount: 200, sourceEntryIds: ["big-1"] }),
+          ],
+        }),
+        observationsDroppedEntry("drop-0", {
+          coversUpToId: "obs-1",
+          observationIds: ["older-observation"],
+        }),
+      ],
+    });
+    fixture.runtime.config.reflectAfterTokens = 1_000_000;
+    fixture.runtime.config.observationsPoolMaxTokens = 1_000;
+    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
+    fixture.runtime.config.dropperPressureThreshold = 0.7;
+    fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
+    return fixture;
+  }
+
+  test("pressure runs over the full live pool when the post-drop delta is empty", async () => {
+    const fixture = pressureFixture();
+    agents.runDropper.mockResolvedValue(["aaaaaaaaaaaa"]);
+
+    await fixture.run();
+
+    expect(agents.runDropper).toHaveBeenCalledOnce();
+    expect(dropperCallArg().observations.map((observation) => observation.id)).toEqual([
+      "aaaaaaaaaaaa",
+      "bbbbbbbbbbbb",
+    ]);
+    expect(
+      fixture.entries.filter(
+        (entry) => entry.customType === "om.observations.dropped" && entry.id !== "drop-0",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("manual pressure bypasses covered-data gates and records the drop", async () => {
+    clearPendingState("cursor-session");
+    const fixture = makePipelineFixture({ observeAfterTokens: 1_000_000 });
+    fixture.entries.push(rawMessage("raw-1", "x".repeat(400)));
+    fixture.runtime.config.compaction = "manual";
+    fixture.runtime.config.reflectAfterTokens = 1_000_000;
+    fixture.runtime.config.observationsPoolMaxTokens = 1_000;
+    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
+    fixture.runtime.config.dropperPressureThreshold = 0.7;
+    savePendingObservation("cursor-session", {
+      coversUpToId: "raw-1",
+      data: {
+        observations: [
+          observation("aaaaaaaaaaaa", { tokenCount: 800, sourceEntryIds: ["raw-1"] }),
+          observation("bbbbbbbbbbbb", { tokenCount: 200, sourceEntryIds: ["raw-1"] }),
+        ],
+      },
+    });
+    savePendingDropped("cursor-session", {
+      coversUpToId: "raw-1",
+      data: { coversUpToId: "raw-1", observationIds: ["older-observation"] },
+    });
+    fixture.runtime.advanceCursor("dropper", "raw-1", "skipped");
+    agents.runDropper.mockResolvedValue(["aaaaaaaaaaaa"]);
+
+    await fixture.run();
+
+    expect(dropperCallArg().observations.map((observation) => observation.id)).toEqual([
+      "aaaaaaaaaaaa",
+      "bbbbbbbbbbbb",
+    ]);
+    expect(readPendingState("cursor-session").dropped?.data).toMatchObject({
+      coversUpToId: "raw-1",
+      observationIds: ["aaaaaaaaaaaa"],
+    });
+    await fixture.run();
+    expect(agents.runDropper).toHaveBeenCalledOnce();
   });
 });

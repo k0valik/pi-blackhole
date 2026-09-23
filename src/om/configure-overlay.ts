@@ -175,7 +175,7 @@ const FIELDS: FieldDef[] = [
     type: "number",
     section: "Observational Memory",
     helpText:
-      "Fraction of reflectorInputMaxTokens that triggers pressure-driven dropper (0-1, default 0.70)",
+      "Fraction of observationsPoolMaxTokens that triggers pressure-driven dropper (1 disables)",
   },
   {
     key: "agentMaxTurns",
@@ -284,6 +284,7 @@ export function createConfigureOverlay(
     raw = {};
   }
 
+  // SAFETY: DEFAULTS is a plain config object indexed only by declared field keys.
   const defaults = DEFAULTS as unknown as Record<string, unknown>;
   const fields: FieldState[] = FIELDS.map((def) => ({
     def,
