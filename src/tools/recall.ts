@@ -504,7 +504,9 @@ export function registerRecallTool(
             parsed.pathPattern === "text"
               ? `use #${parsed.index}:text:offset:limit with narrower line ranges`
               : `use #${parsed.index}:${parsed.pathPattern}:offset:limit with narrower line ranges`;
-          text = `${clip(text, maxChars)}\n\n--- recall response capped at ${maxChars} characters; ${continuation} ---`;
+          const note = `\n\n--- recall response capped at ${maxChars} characters; ${continuation} ---`;
+          const allowed = Math.max(0, maxChars - note.length);
+          text = allowed > 0 ? `${clip(text, allowed)}${note}` : clip(note.trim(), maxChars);
         }
         return {
           content: [{ type: "text" as const, text }],

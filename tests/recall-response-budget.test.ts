@@ -271,9 +271,33 @@ describe("recall tool response budget", () => {
     try {
       const tool = register(300);
       const text = await invoke(tool, file, { query: "#0:huge.ts" }, session);
-      expect(text.length).toBeLessThan(500);
+      expect(text.length).toBeLessThanOrEqual(300);
       expect(text).toContain("--- recall response capped at 300 characters");
       expect(text).toContain("use #0:huge.ts:offset:limit with narrower line ranges");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("caps large #N:text message body drill-down content to maxChars", async () => {
+    const hugeBody = "user message text\n".repeat(4_000);
+    const session = [
+      {
+        id: "m1",
+        type: "message",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: hugeBody }],
+        },
+      },
+    ];
+    const { dir, file } = makeSession(session as any);
+    try {
+      const tool = register(300);
+      const text = await invoke(tool, file, { query: "#0:text" }, session);
+      expect(text.length).toBeLessThanOrEqual(300);
+      expect(text).toContain("--- recall response capped at 300 characters");
+      expect(text).toContain("use #0:text:offset:limit with narrower line ranges");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
