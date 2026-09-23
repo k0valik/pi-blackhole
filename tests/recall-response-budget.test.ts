@@ -248,6 +248,37 @@ describe("recall tool response budget", () => {
     }
   });
 
+  it("caps large #N:path drill-down content to maxChars", async () => {
+    const hugeContent = "const line = 'x';\n".repeat(4_000);
+    const session = [
+      {
+        id: "m1",
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tc1",
+              name: "write",
+              arguments: { path: "huge.ts", content: hugeContent },
+            },
+          ],
+        },
+      },
+    ];
+    const { dir, file } = makeSession(session as any);
+    try {
+      const tool = register(300);
+      const text = await invoke(tool, file, { query: "#0:huge.ts" }, session);
+      expect(text.length).toBeLessThan(500);
+      expect(text).toContain("--- recall response capped at 300 characters");
+      expect(text).toContain("use #0:huge.ts:offset:limit with narrower line ranges");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("entry-aware truncation keeps the header and names the omitted count", () => {
     const capped = capRecallBlocks({
       header: 'Page 1/10 (50 matches) for "budgetneedle":',

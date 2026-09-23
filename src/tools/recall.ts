@@ -491,7 +491,7 @@ export function registerRecallTool(
             };
           }
         }
-        const text = expandEntryFile(
+        let text = expandEntryFile(
           sessionFile,
           parsed.index,
           parsed.pathPattern,
@@ -499,6 +499,13 @@ export function registerRecallTool(
           parsed.offset,
           parsed.limit,
         );
+        if (maxChars > 0 && text.length > maxChars) {
+          const continuation =
+            parsed.pathPattern === "text"
+              ? `use #${parsed.index}:text:offset:limit with narrower line ranges`
+              : `use #${parsed.index}:${parsed.pathPattern}:offset:limit with narrower line ranges`;
+          text = `${clip(text, maxChars)}\n\n--- recall response capped at ${maxChars} characters; ${continuation} ---`;
+        }
         return {
           content: [{ type: "text" as const, text }],
           details: undefined,
