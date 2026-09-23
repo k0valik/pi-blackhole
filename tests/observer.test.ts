@@ -766,6 +766,34 @@ describe("runObserver", () => {
 
     expect(seenReasoning).toBeUndefined();
   });
+
+  it("throws when agent encounters stream error even if partial observations were recorded", async () => {
+    const loop = ((_prompts: any[], context: any) => ({
+      async *[Symbol.asyncIterator]() {
+        await context.tools[0].execute("call-1", {
+          observations: [
+            {
+              content: "User prefers terse output",
+              relevance: "high",
+              sourceEntryIds: ["entry-a"],
+            },
+          ],
+        });
+        yield {
+          type: "agent_end",
+          messages: [{ stopReason: "error", errorMessage: "Stream connection severed" }],
+        };
+      },
+      result: async () => ({}),
+    })) as any;
+
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: loop,
+      }),
+    ).rejects.toThrow("Observer API error: Stream connection severed");
+  });
 });
 
 describe("normalizeSourceEntryIds", () => {

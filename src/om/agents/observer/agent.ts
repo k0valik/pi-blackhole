@@ -354,7 +354,7 @@ ${conversation}`;
   }
   await stream.result();
 
-  if (agentError && accumulated.size === 0) {
+  if (agentError) {
     throw new Error(`Observer API error: ${agentError}`);
   }
 
