@@ -485,5 +485,23 @@ describe("status bar", () => {
       await h.fire("session_shutdown", {});
       expect(h.lastStatus()).toBeUndefined();
     });
+
+    it("does not render or start polling when ctx.hasUI is false", async () => {
+      const h = setup();
+      h.setEntries([msg("e1", 1_000)]);
+      const timersBefore = vi.getTimerCount();
+      await h.fire("session_start", {}, { ...h.ctx, hasUI: false });
+      expect(h.setStatus).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(timersBefore);
+    });
+
+    it("does not render or start polling when ctx.ui is undefined", async () => {
+      const h = setup();
+      h.setEntries([msg("e1", 1_000)]);
+      const timersBefore = vi.getTimerCount();
+      await h.fire("session_start", {}, { ...h.ctx, ui: undefined });
+      expect(h.setStatus).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(timersBefore);
+    });
   });
 });
