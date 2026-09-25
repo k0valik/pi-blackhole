@@ -15,12 +15,13 @@ import type { SearchHit } from "../core/search-entries";
 import { formatRecallEntry, formatTouchedOutput } from "../core/format-recall";
 import {
   capRecallBlocks,
+  capDrillDownText,
   expandAllocation,
   DEFAULT_RECALL_RESPONSE_MAX_CHARS,
 } from "../core/recall-budget";
 import { getActiveLineageEntryIds } from "../core/lineage";
 import { normalizeRecallScope, normalizeRecallMode } from "../core/recall-scope";
-import { parseDrillDown, expandEntryFile } from "../core/drill-down.js";
+import { parseDrillDown, expandEntryFileDetailed } from "../core/drill-down.js";
 import { recallMemorySources, type Entry } from "../om/ledger/recall.js";
 import { renderRecallSourceEntries } from "../om/serialize.js";
 import {
@@ -491,7 +492,7 @@ export function registerRecallTool(
             };
           }
         }
-        let text = expandEntryFile(
+        const expanded = expandEntryFileDetailed(
           sessionFile,
           parsed.index,
           parsed.pathPattern,
@@ -499,15 +500,13 @@ export function registerRecallTool(
           parsed.offset,
           parsed.limit,
         );
-        if (maxChars > 0 && text.length > maxChars) {
-          const continuation =
-            parsed.pathPattern === "text"
-              ? `use #${parsed.index}:text:offset:limit with narrower line ranges`
-              : `use #${parsed.index}:${parsed.pathPattern}:offset:limit with narrower line ranges`;
-          const note = `\n\n--- recall response capped at ${maxChars} characters; ${continuation} ---`;
-          const allowed = Math.max(0, maxChars - note.length);
-          text = allowed > 0 ? `${clip(text, allowed)}${note}` : clip(note.trim(), maxChars);
-        }
+        const text = capDrillDownText({
+          text: expanded.text,
+          paging: expanded.paging,
+          index: parsed.index,
+          pathPattern: parsed.pathPattern,
+          maxChars,
+        });
         return {
           content: [{ type: "text" as const, text }],
           details: undefined,

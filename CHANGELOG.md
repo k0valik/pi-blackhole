@@ -2,6 +2,7 @@
 
 ### Fixed
 
+- **Capped recall drill-downs tell the agent where to continue.** File/message drill-downs (`#N:path`, `#N:text`) returned their expansion uncapped, so a minified bundle or a verbose write dumped the whole payload into context, and the cap that did exist named a non-actionable `#N:path:offset:limit` placeholder. Every drill-down response is now bounded by `recallResponseMaxChars`, and `capDrillDownText()` appends a concrete continuation — `continue at #42:src/auth.ts:412:30` — computed from the line the clip actually stopped inside of, so the next call resumes there with nothing skipped or repeated. Paths containing colons round-trip through the parser unchanged; when the cap leaves no further lines to page (a single line bigger than the whole budget) the footer says so and points at a regex query instead.
 - **Git status annotations no longer follow a leaked `GIT_DIR`.** `loadGitFileTags` spawned `git` with the inherited environment, so an exported `GIT_DIR`/`GIT_WORK_TREE` (common when the agent runs inside a worktree) made `rev-parse --show-toplevel` resolve `cwd` but `status` read the _other_ repo's index — wrong [Files And Changes] tags, and on the test side `git config` actually wrote `user.name`/`user.email` into the ambient repo. Both call sites now run with `gitEnv()`, which strips the repo-location variables so discovery is anchored to `cwd`.
 
 ---

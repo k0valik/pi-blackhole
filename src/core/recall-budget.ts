@@ -9,6 +9,9 @@
  * needs to stay in sync across config/docs.
  */
 
+import { clip } from "./content.js";
+import { DRILLDOWN_PAGE_LINES, type DrillDownPaging } from "./drill-down.js";
+
 /** Fallback used when a recall tool is registered without a runtime/config. */
 export const DEFAULT_RECALL_RESPONSE_MAX_CHARS = 48_000;
 
@@ -117,4 +120,83 @@ export function capRecallBlocks(input: CapRecallBlocksInput): CapRecallBlocksRes
     return { text: text + note, omittedEntries: 0, totalEntries, capped: true };
   }
   return { text, omittedEntries: 0, totalEntries, capped: false };
+}
+
+export interface CapDrillDownTextInput {
+  /** Rendered drill-down output, before the budget cap. */
+  text: string;
+  /** Paging coordinates of the rendered body, when the expansion produced one. */
+  paging?: DrillDownPaging;
+  /** Entry index the drill-down query targeted. */
+  index: number;
+  /** Path pattern the query targeted, echoed back verbatim in the hint. */
+  pathPattern: string;
+  /** Response budget in characters. 0/negative = unbounded. */
+  maxChars: number;
+}
+
+const countNewlines = (text: string): number => {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) n++;
+  }
+  return n;
+};
+
+/**
+ * Body lines the cap actually left visible, counting a line the cap cut in the
+ * middle of as seen (the continuation must not skip its remainder).
+ */
+function visibleBodyLines(paging: DrillDownPaging, text: string, cut: string): number {
+  const shown = Math.max(0, Math.min(paging.shownLines, paging.totalLines - paging.startLine));
+  if (shown === 0) return 0;
+  const complete = countNewlines(cut) - paging.headerNewlines;
+  const partial = cut.length < text.length && text[cut.length] !== "\n" ? 1 : 0;
+  return Math.max(0, Math.min(shown, complete + partial));
+}
+
+function drillDownCapNote(input: CapDrillDownTextInput, cut: string): string {
+  const { paging, index, pathPattern, maxChars } = input;
+  const head = `--- recall response capped at ${maxChars} characters; `;
+  if (!paging) {
+    return `\n\n${head}re-request a narrower range with #${index}:${pathPattern}:offset:limit ---`;
+  }
+  const visible = visibleBodyLines(paging, input.text, cut);
+  if (visible === 0) {
+    return `\n\n${head}no content fit the budget — request one line with #${index}:${pathPattern}:${paging.startLine}:1 ---`;
+  }
+  const nextOffset = paging.startLine + visible;
+  const remaining = paging.totalLines - nextOffset;
+  if (remaining <= 0) {
+    return `\n\n${head}no further lines to page — use a regex query to target a region ---`;
+  }
+  const limit = Math.min(DRILLDOWN_PAGE_LINES, remaining);
+  return `\n\n${head}continue at #${index}:${pathPattern}:${nextOffset}:${limit} ---`;
+}
+
+/**
+ * Cap a drill-down response to `maxChars` and append a hint the caller can act
+ * on directly: with paging coordinates it names the exact line the cap stopped
+ * inside of (`#3:src/a.ts:412:30`), so the next call continues there instead of
+ * re-reading or skipping content. The hint and the clip reserve each other's
+ * space, so the result never exceeds `maxChars`.
+ */
+export function capDrillDownText(input: CapDrillDownTextInput): string {
+  const { text, maxChars } = input;
+  if (maxChars <= 0 || text.length <= maxChars) return text;
+
+  // The hint's length depends on the resume numbers, and the resume numbers
+  // depend on where the clip lands — which depends on the reserved hint length.
+  // Iterate to a fixed point; each round can only shift the cut by the hint's
+  // own length, so this settles immediately in practice.
+  let note = "";
+  for (let round = 0; round < 4; round++) {
+    const allowed = maxChars - note.length;
+    if (allowed <= 0) return clip(note.trim(), maxChars);
+    const next = drillDownCapNote(input, clip(text, allowed));
+    if (next === note) break;
+    note = next;
+  }
+  const allowed = Math.max(0, maxChars - note.length);
+  return allowed > 0 ? clip(text, allowed) + note : clip(note.trim(), maxChars);
 }

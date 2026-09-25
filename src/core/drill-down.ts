@@ -18,6 +18,31 @@ import { loadAllMessages } from "./load-messages.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
+/** Lines a drill-down shows per page when the caller passes no limit. */
+export const DRILLDOWN_PAGE_LINES = 30;
+
+/**
+ * Where a rendered drill-down body sits inside the stored payload. The recall
+ * budget cap uses this to name the exact line a continuation should resume at
+ * instead of an opaque `offset:limit` placeholder.
+ */
+export interface DrillDownPaging {
+  /** 0-based index of the first body line rendered in `text`. */
+  startLine: number;
+  /** Body lines rendered in `text` (before any response-budget clipping). */
+  shownLines: number;
+  /** Body lines available in the stored payload. */
+  totalLines: number;
+  /** Newlines in the header prefix of `text`, i.e. lines before the body. */
+  headerNewlines: number;
+}
+
+export interface DrillDownResult {
+  text: string;
+  /** Absent when `text` is not a body rendering (lists, "not found" notices). */
+  paging?: DrillDownPaging;
+}
+
 interface ContentBearingCall {
   name: string;
   path: string;
@@ -70,7 +95,7 @@ function formatToolCallContent(
   tc: ContentBearingCall,
   entryIndex: number,
   options?: { full?: boolean; offset?: number; limit?: number },
-): string {
+): DrillDownResult {
   let body: string;
   if (tc.content) {
     body = tc.content;
@@ -91,36 +116,49 @@ function formatToolCallContent(
   const limit = options?.limit;
   const allLines = body.split("\n");
   const totalLines = allLines.length;
-  const previewLimit = 30;
+  const previewLimit = DRILLDOWN_PAGE_LINES;
   const MAX_FULL_BYTES = 50 * 1024;
 
   if (full) {
     // Full content: capped at 50KB
     if (Buffer.byteLength(body, "utf8") > MAX_FULL_BYTES) {
       const truncated = body.slice(0, MAX_FULL_BYTES);
-      return `File: ${tc.path}
+      return {
+        text: `File: ${tc.path}
 Tool: ${tc.name}
 
 ${truncated}
 
-... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — file exceeds 50KB display limit. Use #${entryIndex}:${tc.path}:${previewLimit} for next page.)`;
+... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — file exceeds 50KB display limit. Use #${entryIndex}:${tc.path}:${previewLimit} for next page.)`,
+        paging: {
+          startLine: 0,
+          shownLines: truncated.split("\n").length,
+          totalLines,
+          headerNewlines: 3,
+        },
+      };
     }
-    return `File: ${tc.path}
+    return {
+      text: `File: ${tc.path}
 Tool: ${tc.name}
 
-${body}`;
+${body}`,
+      paging: { startLine: 0, shownLines: totalLines, totalLines, headerNewlines: 3 },
+    };
   }
 
   if (offset !== undefined) {
     // Offset-based window: show slice
     const startLine = Math.max(0, offset);
-    const maxLines = limit ?? 30;
+    const maxLines = limit ?? DRILLDOWN_PAGE_LINES;
     const endLine = Math.min(startLine + maxLines, totalLines);
     const visible = allLines.slice(startLine, endLine);
     const displayStart = startLine + 1; // 1-indexed for user display
 
     if (visible.length === 0) {
-      return `Offset ${startLine} is beyond file length ${totalLines}. Use #${entryIndex}:${tc.path} for the first ${previewLimit} lines.`;
+      return {
+        text: `Offset ${startLine} is beyond file length ${totalLines}. Use #${entryIndex}:${tc.path} for the first ${previewLimit} lines.`,
+      };
     }
 
     let result = `File: ${tc.path}
@@ -136,24 +174,38 @@ Lines ${displayStart}-${endLine} (of ${totalLines}):
       result += `\n\n(End of file)`;
     }
 
-    return result;
+    return {
+      text: result,
+      paging: {
+        startLine,
+        shownLines: visible.length,
+        totalLines,
+        headerNewlines: 4,
+      },
+    };
   }
 
   // Default preview mode: first ${previewLimit} lines
   if (totalLines > previewLimit) {
     const preview = allLines.slice(0, previewLimit).join("\n");
-    return `File: ${tc.path}
+    return {
+      text: `File: ${tc.path}
 Tool: ${tc.name}
 
 ${preview}
 
-...(${totalLines - previewLimit} more lines — use #${entryIndex}:${tc.path}:full for complete content, or #${entryIndex}:${tc.path}:${previewLimit} for next ${previewLimit} lines)`;
+...(${totalLines - previewLimit} more lines — use #${entryIndex}:${tc.path}:full for complete content, or #${entryIndex}:${tc.path}:${previewLimit} for next ${previewLimit} lines)`,
+      paging: { startLine: 0, shownLines: previewLimit, totalLines, headerNewlines: 3 },
+    };
   }
 
-  return `File: ${tc.path}
+  return {
+    text: `File: ${tc.path}
 Tool: ${tc.name}
 
-${body}`;
+${body}`,
+    paging: { startLine: 0, shownLines: totalLines, totalLines, headerNewlines: 3 },
+  };
 }
 
 /**
@@ -183,11 +235,11 @@ function formatMessageText(
   msg: Record<string, unknown>,
   entryIndex: number,
   options?: { full?: boolean; offset?: number; limit?: number },
-): string {
+): DrillDownResult {
   const body = messageBodyText(msg);
   const trimmed = body.trim();
   if (!trimmed) {
-    return `Entry #${entryIndex} has no message text.`;
+    return { text: `Entry #${entryIndex} has no message text.` };
   }
 
   const full = options?.full ?? false;
@@ -195,26 +247,39 @@ function formatMessageText(
   const limit = options?.limit;
   const allLines = body.split("\n");
   const totalLines = allLines.length;
-  const previewLimit = 30;
+  const previewLimit = DRILLDOWN_PAGE_LINES;
   const MAX_FULL_BYTES = 50 * 1024;
 
   if (full) {
     if (Buffer.byteLength(body, "utf8") > MAX_FULL_BYTES) {
       const truncated = body.slice(0, MAX_FULL_BYTES);
-      return `Entry #${entryIndex} message text:\n\n${truncated}\n\n... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — entry exceeds 50KB display limit. Use #${entryIndex}:text:${previewLimit} for next page.)`;
+      return {
+        text: `Entry #${entryIndex} message text:\n\n${truncated}\n\n... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — entry exceeds 50KB display limit. Use #${entryIndex}:text:${previewLimit} for next page.)`,
+        paging: {
+          startLine: 0,
+          shownLines: truncated.split("\n").length,
+          totalLines,
+          headerNewlines: 2,
+        },
+      };
     }
-    return `Entry #${entryIndex} message text:\n\n${body}`;
+    return {
+      text: `Entry #${entryIndex} message text:\n\n${body}`,
+      paging: { startLine: 0, shownLines: totalLines, totalLines, headerNewlines: 2 },
+    };
   }
 
   if (offset !== undefined) {
     const startLine = Math.max(0, offset);
-    const maxLines = limit ?? 30;
+    const maxLines = limit ?? DRILLDOWN_PAGE_LINES;
     const endLine = Math.min(startLine + maxLines, totalLines);
     const visible = allLines.slice(startLine, endLine);
     const displayStart = startLine + 1;
 
     if (visible.length === 0) {
-      return `Offset ${startLine} is beyond message length ${totalLines}. Use #${entryIndex}:text for the first ${previewLimit} lines.`;
+      return {
+        text: `Offset ${startLine} is beyond message length ${totalLines}. Use #${entryIndex}:text for the first ${previewLimit} lines.`,
+      };
     }
 
     let result = `Entry #${entryIndex} message text — lines ${displayStart}-${endLine} (of ${totalLines}):\n\n`;
@@ -225,15 +290,24 @@ function formatMessageText(
     } else if (offset > 0) {
       result += `\n\n(End of message)`;
     }
-    return result;
+    return {
+      text: result,
+      paging: { startLine, shownLines: visible.length, totalLines, headerNewlines: 2 },
+    };
   }
 
   if (totalLines > previewLimit) {
     const preview = allLines.slice(0, previewLimit).join("\n");
-    return `Entry #${entryIndex} message text:\n\n${preview}\n\n...(${totalLines - previewLimit} more lines — use #${entryIndex}:text:full for complete content, or #${entryIndex}:text:${previewLimit} for next ${previewLimit} lines)`;
+    return {
+      text: `Entry #${entryIndex} message text:\n\n${preview}\n\n...(${totalLines - previewLimit} more lines — use #${entryIndex}:text:full for complete content, or #${entryIndex}:text:${previewLimit} for next ${previewLimit} lines)`,
+      paging: { startLine: 0, shownLines: previewLimit, totalLines, headerNewlines: 2 },
+    };
   }
 
-  return `Entry #${entryIndex} message text:\n\n${body}`;
+  return {
+    text: `Entry #${entryIndex} message text:\n\n${body}`,
+    paging: { startLine: 0, shownLines: totalLines, totalLines, headerNewlines: 2 },
+  };
 }
 
 // ── Parse drill-down query ────────────────────────────────────────────────
@@ -326,10 +400,26 @@ export function expandEntryFile(
   offset?: number,
   limit?: number,
 ): string {
+  return expandEntryFileDetailed(sessionFile, entryIndex, pathPattern, full, offset, limit).text;
+}
+
+/**
+ * Same expansion as {@link expandEntryFile}, plus the paging coordinates of the
+ * rendered body. Callers that cap the response (recall budget) use them to point
+ * a continuation at the line the cap stopped inside of.
+ */
+export function expandEntryFileDetailed(
+  sessionFile: string,
+  entryIndex: number,
+  pathPattern: string,
+  full = false,
+  offset?: number,
+  limit?: number,
+): DrillDownResult {
   const { rawMessages } = loadAllMessages(sessionFile, true);
 
   if (entryIndex < 0 || entryIndex >= rawMessages.length) {
-    return `Entry #${entryIndex} not found in session history.`;
+    return { text: `Entry #${entryIndex} not found in session history.` };
   }
 
   const msg = rawMessages[entryIndex];
@@ -346,15 +436,15 @@ export function expandEntryFile(
   // message text, legacy file-substring matching applies unchanged.
   if (pathPattern === "text") {
     if (messageBodyText(msg as unknown as Record<string, unknown>).trim()) {
-      let out = formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
+      const rendered = formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
         full,
         offset,
         limit,
       });
       if (matched.length > 0) {
-        out += `\n\n--- Note: entry #${entryIndex} also has ${matched.length} file operation(s) matching "text" — use #${entryIndex}:<more-specific-path> or #${entryIndex}:file for file content ---`;
+        rendered.text += `\n\n--- Note: entry #${entryIndex} also has ${matched.length} file operation(s) matching "text" — use #${entryIndex}:<more-specific-path> or #${entryIndex}:file for file content ---`;
       }
-      return out;
+      return rendered;
     }
     if (matched.length === 0) {
       return formatMessageText(msg as unknown as Record<string, unknown>, entryIndex, {
@@ -369,7 +459,7 @@ export function expandEntryFile(
   // Special case: #42:file keyword
   if (pathPattern === "file") {
     if (calls.length === 0) {
-      return `No file content found in entry #${entryIndex}.`;
+      return { text: `No file content found in entry #${entryIndex}.` };
     }
     if (calls.length === 1) {
       return formatToolCallContent(calls[0], entryIndex, {
@@ -380,20 +470,24 @@ export function expandEntryFile(
     }
     // Multiple content-bearing calls — list them
     const items = calls.map((tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`);
-    return `Entry #${entryIndex} has ${calls.length} file operations:\n${items.join("\n")}\n\nUse #${entryIndex}:path to drill into a specific file.`;
+    return {
+      text: `Entry #${entryIndex} has ${calls.length} file operations:\n${items.join("\n")}\n\nUse #${entryIndex}:path to drill into a specific file.`,
+    };
   }
 
   if (matched.length === 0) {
-    return `No file content found in entry #${entryIndex} for "${pathPattern}".`;
+    return { text: `No file content found in entry #${entryIndex} for "${pathPattern}".` };
   }
 
   if (matched.length > 1) {
     // Ambiguous match — list options instead of silently picking the first
     const items = matched.map((tc) => `  [#${entryIndex}:${tc.path}] ${tc.name}(${tc.path})`);
-    return `Entry #${entryIndex} has ${matched.length} file operations matching "${pathPattern}":
+    return {
+      text: `Entry #${entryIndex} has ${matched.length} file operations matching "${pathPattern}":
 ${items.join("\n")}
 
-Use #${entryIndex}:<more-specific-path> to drill into a specific file.`;
+Use #${entryIndex}:<more-specific-path> to drill into a specific file.`,
+    };
   }
 
   return formatToolCallContent(matched[0], entryIndex, { full, offset, limit });
