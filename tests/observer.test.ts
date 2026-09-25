@@ -190,7 +190,7 @@ describe("runObserver", () => {
     expect(description).toContain("Incomplete or rejected work stays open.");
   });
 
-  it("documents the empty complete batch as the nothing-new close", async () => {
+  it("documents the empty complete batch as the only sanctioned empty close", async () => {
     let batchDescription = "";
     const loop = fakeAgentLoop((_prompts, context) => {
       batchDescription = (
@@ -201,7 +201,29 @@ describe("runObserver", () => {
     await runObserver({ ...baseArgs, agentLoop: loop });
 
     expect(batchDescription).toContain(
-      "May be empty only if the tool is not called at all, or with complete=true to close a run that found nothing new.",
+      "May be empty only alongside complete=true, which closes a run that found nothing new.",
+    );
+    // The old wording pointed the model at the deprecated plain-text path, which
+    // the code reports as a tool_not_called warning.
+    expect(batchDescription).not.toContain("if the tool is not called at all");
+  });
+
+  it("scopes the cite-valid-ids rule to non-empty batches", async () => {
+    let systemPrompt = "";
+    const loop = fakeAgentLoop((_prompts, context) => {
+      systemPrompt = leadingSystemPrompt(context);
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    // The unscoped form ("do not call record_observations until you can cite
+    // valid source ids") forbids the empty close the next rule mandates: a model
+    // with nothing to record can never cite ids.
+    expect(systemPrompt).toContain(
+      "so do not submit a non-empty batch until you can cite valid source ids",
+    );
+    expect(systemPrompt).not.toContain(
+      "so do not call record_observations until you can cite valid source ids",
     );
   });
 

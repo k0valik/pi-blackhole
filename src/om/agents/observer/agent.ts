@@ -89,9 +89,14 @@ const RecordObservationsSchema = Type.Object({
       }),
     }),
     {
+      // The empty batch is the only sanctioned way to close a chunk that yielded
+      // nothing, so it is paired with the flag. The previous wording also offered
+      // "if the tool is not called at all", which is both self-contradictory (an
+      // uncalled tool has no array) and points at the plain-text path the observer
+      // stage reports as a tool_not_called warning.
       description:
-        "Batch of new observations. May be empty only if the tool is not called at all, " +
-        "or with complete=true to close a run that found nothing new.",
+        "Batch of new observations. May be empty only alongside complete=true, " +
+        "which closes a run that found nothing new.",
     },
   ),
   // Optional on purpose: a model that omits the flag must lose only the

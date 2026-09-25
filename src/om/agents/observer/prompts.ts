@@ -24,7 +24,7 @@ What to emit:
 - Produce NEW observations for the new chunk only. Do not restate facts already present in reflections or current observations unless something has materially changed.
 - For every observation, include sourceEntryIds: the smallest exact set of "[Source entry id: ...]" ids that directly support the observation.
 - Never invent source entry ids. Use only ids printed in the chunk. If an observation spans multiple turns or tool results, include every supporting source entry id.
-- Observations with missing, empty, or invalid sourceEntryIds will be rejected and not recorded, so do not call record_observations until you can cite valid source ids.
+- Observations with missing, empty, or invalid sourceEntryIds will be rejected and not recorded, so do not submit a non-empty batch until you can cite valid source ids. The empty close below is exempt: it cites nothing because it records nothing.
 - Group repeated similar tool calls into a single observation rather than one per call.
 - Skip routine, low-information events. It is fine to emit zero observations if the chunk carries no new information — in that case, close the run with a single record_observations call carrying an empty observations array and complete=true.
 
