@@ -6,7 +6,7 @@
  * and throws if the API errored without collecting any tool results.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -59,6 +59,12 @@ interface RunReflectorArgs {
    * OpenCode `x-opencode-session`) without per-provider branching upstream.
    */
   sessionId?: string;
+  /**
+   * Provider-neutral prompt-cache retention preference
+   * (`SimpleStreamOptions.cacheRetention`). Unset keeps pi's own default
+   * (`short`); adapters ignore values they do not support.
+   */
+  cacheRetention?: CacheRetention;
 }
 
 const RecordReflectionsSchema = Type.Object({
@@ -71,6 +77,10 @@ const RecordReflectionsSchema = Type.Object({
     }),
     { minItems: 1 },
   ),
+  complete: Type.Boolean({
+    description:
+      "Whether this batch completes reflection review. Set false when more reflections or corrections remain.",
+  }),
 });
 
 type RecordReflectionsArgs = Static<typeof RecordReflectionsSchema>;
@@ -115,7 +125,10 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
   const recordReflections: AgentTool<typeof RecordReflectionsSchema> = {
     name: "record_reflections",
     label: "Record reflections",
-    description: "Record new durable reflections with supporting observation ids.",
+    description:
+      "Record a batch of new durable reflections with supporting observation ids. " +
+      "complete=true ends a fully valid reflection review; set complete=false when more reflections or corrections remain. " +
+      "Incomplete or rejected work stays open.",
     parameters: RecordReflectionsSchema,
     execute: async (_id, params: RecordReflectionsArgs) => {
       let added = 0;
@@ -152,6 +165,9 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
           },
         ],
         details: { added, duplicates, rejected, total: accumulated.size },
+        // complete=true only closes the run when nothing was rejected: rejected
+        // records still owe a corrected batch, so incomplete work stays open.
+        terminate: params.complete && rejected === 0,
       };
     },
   };
@@ -182,6 +198,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
     headers,
     env,
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { applyEnvOverrides, DECLARATIVE_ENV_OVERRIDES, MAX_TIMER_DELAY_MS } from "./config-env.js";
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { CacheRetention, ModelThinkingLevel } from "@earendil-works/pi-ai";
 
 // ── getAgentDir with PI_CODING_AGENT_DIR override ───────────────────────────
 
@@ -229,6 +229,10 @@ export interface UnifiedConfig {
   /** Hard elapsed deadline for each worker/model attempt, including headers,
    *  streaming, tool turns, and final confirmation. Unset or 0 disables it. */
   workerAttemptTimeoutMs?: number;
+  /** Provider-neutral prompt-cache retention preference for the memory
+   *  workers. Unset keeps pi's own default (`short`); adapters ignore values
+   *  they do not support, so `long` is opt-in rather than our default. */
+  cacheRetention?: CacheRetention;
 
   /** Base model override for all memory workers. */
   model?: OmModelConfig;
@@ -317,6 +321,7 @@ export const DEFAULTS: UnifiedConfig = {
   // silently drops them when saving from the settings modal.
   providerIdleTimeoutMs: undefined,
   workerAttemptTimeoutMs: undefined,
+  cacheRetention: undefined,
 
   memory: true,
   debugLog: false,
@@ -405,6 +410,13 @@ function nonEmptyString(v: unknown): string | undefined {
 
 function isThinkingLevel(v: unknown): v is ModelThinkingLevel {
   return typeof v === "string" && THINKING_LEVELS.includes(v);
+}
+
+/** Supported `SimpleStreamOptions.cacheRetention` values (pi-ai). */
+export const CACHE_RETENTION_VALUES: readonly CacheRetention[] = ["none", "short", "long"];
+
+export function isCacheRetention(v: unknown): v is CacheRetention {
+  return typeof v === "string" && (CACHE_RETENTION_VALUES as readonly string[]).includes(v);
 }
 
 function positiveInt(v: unknown): number | undefined {
@@ -545,6 +557,7 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
   if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
+  if (isCacheRetention(raw.cacheRetention)) c.cacheRetention = raw.cacheRetention;
 
   // Threshold knobs (compactAfterTokens / Ratio / Reserve / Preset /
   // Presets / providerIdleTimeoutMs / workerAttemptTimeoutMs) — copied bluntly, then scrubbed by the

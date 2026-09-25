@@ -7,7 +7,7 @@
  * This allows the consolidation pipeline to fall back to alternative models.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -55,6 +55,12 @@ interface RunObserverArgs {
    * OpenCode `x-opencode-session`) without per-provider branching upstream.
    */
   sessionId?: string;
+  /**
+   * Provider-neutral prompt-cache retention preference
+   * (`SimpleStreamOptions.cacheRetention`). Unset keeps pi's own default
+   * (`short`); adapters ignore values they do not support.
+   */
+  cacheRetention?: CacheRetention;
 }
 
 const RelevanceSchema = Type.Union([
@@ -85,6 +91,10 @@ const RecordObservationsSchema = Type.Object({
       description: "Batch of new observations. May be empty only if the tool is not called at all.",
     },
   ),
+  complete: Type.Boolean({
+    description:
+      "Whether this batch completes chunk coverage. Set false when more observations or corrections remain.",
+  }),
 });
 
 type RecordObservationsArgs = Static<typeof RecordObservationsSchema>;
@@ -180,8 +190,8 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
     label: "Record observations",
     description:
       "Record a batch of new observations distilled from the conversation chunk. " +
-      "Call this multiple times as you work through the chunk. Stop calling when coverage is complete, " +
-      "then emit a short plain-text confirmation to end the run.",
+      "complete=true ends fully valid chunk coverage; use complete=false when more observations or corrections remain. " +
+      "Incomplete or rejected work stays open.",
     parameters: RecordObservationsSchema,
     execute: async (_id, params: RecordObservationsArgs) => {
       toolCalled = true;
@@ -225,21 +235,26 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           : ".") +
         rejectedPart +
         ` Total so far this run: ${accumulated.size}. ` +
-        `Continue if the chunk still has uncovered content; otherwise stop calling the tool and emit a short plain-text confirmation.`;
+        `Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.`;
       return {
         content: [{ type: "text", text: ack }],
         details: { added, duplicates, rejected, total: accumulated.size },
+        // complete=true only closes the run when nothing was rejected: rejected
+        // records still owe a corrected batch, so incomplete work stays open.
+        terminate: params.complete && rejected === 0,
       };
     },
   };
 
+  // Append-stable memory first, per-run values (chunk) last, so prefix caches
+  // can reuse the reflection/observation preamble across observer runs.
   const userText = `CURRENT REFLECTIONS:
 ${joinOrEmpty(priorReflections)}
 
 CURRENT OBSERVATIONS:
 ${joinOrEmpty(priorObservations)}
 
-Compress the following new conversation chunk into observations by calling record_observations one or more times. Do not restate facts already present in current reflections or current observations. Stop calling the tool and reply with a short plain-text confirmation once the chunk is fully covered.
+Compress the following new conversation chunk into observations by calling record_observations one or more times. Use complete=false for partial batches or corrections, and use complete=true only on the final valid batch after the chunk is fully covered. If no observations are warranted, do not call the tool and reply with a short plain-text confirmation. Do not restate facts already present in current reflections or current observations.
 
 NEW CONVERSATION CHUNK:
 ${conversation}`;
@@ -264,6 +279,7 @@ ${conversation}`;
     headers,
     env,
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],

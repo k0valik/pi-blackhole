@@ -308,6 +308,7 @@ Based on interview answers, build the config object. Write it to:
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
+  "cacheRetention": "unset",       // worker prompt-cache retention: unset (pi's default "short") | "none" | "short" | "long"
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
 }
 ```
@@ -537,6 +538,7 @@ These override config file values at load time, applied AFTER config is parsed. 
 | `PI_BLACKHOLE_PASSIVE` | Sets `compaction: "off"` + `memory: false` | `1`, `true`, `yes`, `on` |
 | `PI_BLACKHOLE_COMPACTION` | Overrides `compaction` | `auto`, `manual`, `off` |
 | `PI_BLACKHOLE_COMPACTION_ENGINE` | Overrides `compactionEngine` | `blackhole`, `pi-default` |
+| `PI_BLACKHOLE_CACHE_RETENTION` | Overrides `cacheRetention` (worker prompt cache) | `none`, `short`, `long` |
 
 Legacy aliases (still work): `PI_VCC_OM_PASSIVE`, `PI_OBSERVATIONAL_MEMORY_PASSIVE`.
 

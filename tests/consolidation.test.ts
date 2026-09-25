@@ -1240,6 +1240,38 @@ describe("worker attempt hard timeout", () => {
   });
 });
 
+describe("worker stream options", () => {
+  test("forwards the session id and cache retention to every memory worker", async () => {
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100,
+      entries: [rawMessage("big-1", "x".repeat(40_000))],
+    });
+    fixture.runtime.config.reflectAfterTokens = 100;
+    fixture.runtime.config.cacheRetention = "long";
+    agents.runObserver.mockResolvedValue({
+      observations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["big-1"], tokenCount: 8_000 })],
+    });
+    agents.runReflector.mockResolvedValue([reflection("rrrrrrrrrrrr", ["aaaaaaaaaaaa"])]);
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect(agents.runObserver).toHaveBeenCalledOnce();
+    expect(agents.runReflector).toHaveBeenCalledOnce();
+    expect(agents.runDropper).toHaveBeenCalledOnce();
+    for (const calls of [
+      agents.runObserver.mock.calls,
+      agents.runReflector.mock.calls,
+      agents.runDropper.mock.calls,
+    ]) {
+      expect(calls[0]?.[0]).toMatchObject({
+        sessionId: "cursor-session",
+        cacheRetention: "long",
+      });
+    }
+  });
+});
+
 describe("repeated consolidation pipeline cycles", () => {
   test("never observes below threshold, then covers every accumulated source entry", async () => {
     const fixture = makePipelineFixture({ observeAfterTokens: 5_000 });

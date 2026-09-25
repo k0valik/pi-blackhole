@@ -230,4 +230,15 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
         : undefined;
     },
   },
+  // Prompt-cache retention preference for the memory workers; an unsupported
+  // value leaves the file value (or pi's default) in place.
+  cacheRetention: {
+    var: "PI_BLACKHOLE_CACHE_RETENTION",
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase();
+      return ["none", "short", "long"].includes(trimmed)
+        ? (trimmed as "none" | "short" | "long")
+        : undefined;
+    },
+  },
 };

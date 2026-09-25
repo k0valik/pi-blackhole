@@ -18,7 +18,12 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
-import { DEFAULTS, normalizeThresholdKnobs, type UnifiedConfig } from "../core/unified-config.js";
+import {
+  DEFAULTS,
+  isCacheRetention,
+  normalizeThresholdKnobs,
+  type UnifiedConfig,
+} from "../core/unified-config.js";
 import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
@@ -343,6 +348,23 @@ export const config = new ConfigManager<UnifiedConfig>({
       step: 1000,
     },
     {
+      key: "cacheRetention",
+      type: "enum",
+      label: "Worker prompt-cache retention",
+      description:
+        "Provider-neutral prompt-cache retention for the memory workers; unset keeps pi's own default (short). Adapters ignore values they do not support.",
+      // "unset" is a modal-only sentinel: validate() drops it before the config
+      // is persisted, so an untouched field never pins a value in the file.
+      value: cfg.cacheRetention ?? "unset",
+      options: ["unset", "none", "short", "long"],
+      optionLabels: {
+        unset: "unset — pi default (short)",
+        none: "none — no prompt caching where supported",
+        short: "short — pi's default retention",
+        long: "long — extended retention where supported",
+      },
+    },
+    {
       key: "workerAttemptTimeoutMs",
       type: "number",
       label: "Worker attempt timeout (ms)",
@@ -496,6 +518,13 @@ export const config = new ConfigManager<UnifiedConfig>({
     // re-apply afterwards, so env-set values stay explicit.)
     // SAFETY: parsed is a plain config record; the normalizer only validates or deletes named properties.
     normalizeThresholdKnobs(parsed as unknown as Record<string, unknown>);
+
+    // ── cacheRetention: drop the modal "unset" sentinel and any unsupported value ──
+    // Keeps the modal path in lockstep with loadUnifiedConfig's parseConfig,
+    // which only accepts none|short|long.
+    if (parsed.cacheRetention !== undefined && !isCacheRetention(parsed.cacheRetention)) {
+      delete parsed.cacheRetention;
+    }
 
     // ── Merge with defaults ──
     const merged = { ...DEFAULTS, ...parsed } as UnifiedConfig;
