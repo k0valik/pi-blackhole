@@ -197,6 +197,70 @@ describe("observationPoolTokens", () => {
     });
   });
 
+  it("counts an observation recorded in both the branch and pending only once", () => {
+    const pending: PendingOMState = {
+      observationBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { observations: [observation("aaaaaaaaaaaa", { tokenCount: 700 })] },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
+  it("applies pending drop batches to pending observations", () => {
+    const pending: PendingOMState = {
+      observationBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { observations: [observation("cccccccccccc", { tokenCount: 300 })] },
+        },
+      ],
+      droppedBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { coversUpToId: "raw-1", observationIds: ["cccccccccccc"] },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
+  it("falls back to the singular pending drop when no drop batches exist", () => {
+    const pending: PendingOMState = {
+      dropped: {
+        coversUpToId: "om-obs-1",
+        data: { coversUpToId: "om-obs-1", observationIds: ["bbbbbbbbbbbb"] },
+      },
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 700,
+      count: 1,
+    });
+  });
+
+  it("skips pending observations without a usable id/content/tokenCount", () => {
+    const pending: PendingOMState = {
+      observationBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { observations: [{ id: "cccccccccccc", content: "no token count here" }] },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
   it("measures only the branch when pending is omitted", () => {
     const entries = asEntries([textCustomMessage("raw-1", "x".repeat(400))]);
     expect(observationPoolTokens(entries)).toEqual({ tokens: 0, count: 0 });

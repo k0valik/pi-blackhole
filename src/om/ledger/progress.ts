@@ -141,7 +141,30 @@ export function rawTokensSinceDropCoverage(entries: Entry[]): number {
   return rawTokensSinceCoverage(entries, OM_OBSERVATIONS_DROPPED);
 }
 
-/** Canonical live pool used by pressure measurement and candidates. */
+/**
+ * The live observation pool: every recorded observation that still counts
+ * against the pool budget.
+ *
+ * Starts from `foldLedger(entries).activeObservations` (branch records minus
+ * drop tombstones) and then folds in `pending.observationBatches`, which is
+ * where manual mode keeps records instead of the branch. Two rules keep the
+ * merged set honest:
+ *
+ * - dedup by id, branch first: an observation that exists in both universes
+ *   counts once, and pending records the ledger already tombstoned are never
+ *   restored;
+ * - pending drop results (`pending.droppedBatches`, or `pending.dropped` for
+ *   files written before batches existed) tombstone whatever they name,
+ *   pending or branch.
+ *
+ * Pending records missing `id`/`content`/`tokenCount` are skipped rather than
+ * coerced, so a hand-edited or half-written pending file cannot corrupt a
+ * token sum.
+ *
+ * Scope is the caller's decision, not this helper's: a pressure-triggered run
+ * hands the whole set to the dropper, while a cadence-triggered run narrows to
+ * the post-last-drop delta at the call site (see `runDropperStage`).
+ */
 export function livePoolObservations(entries: Entry[], pending?: PendingOMState): Observation[] {
   const folded = foldLedger(entries);
   const pool = new Map(
@@ -181,7 +204,22 @@ export function livePoolObservations(entries: Entry[], pending?: PendingOMState)
   return [...pool.values()];
 }
 
-/** Canonical observation-pool measurement shared by triggers and displays. */
+/**
+ * Canonical observation-pool measurement shared by the dropper trigger — both
+ * the `dropperPoolFullnessThreshold` gate and the `dropperPressureThreshold`
+ * pressure basis — and the user-facing pool displays (`/blackhole-memory`,
+ * the footer P gauge). All of them sum the same `livePoolObservations` set, so
+ * no surface can drift onto a different token basis or dedup rule.
+ *
+ * `pending` is explicit at every call site so a caller cannot obtain the
+ * number without stating which universe it means: the trigger and the memory
+ * command pass pending in manual mode, while the footer P gauge deliberately
+ * measures the branch alone (#120).
+ *
+ * Sums the stored `tokenCount` (content-only, recorded at write time with the
+ * CJK-aware `estimateStringTokens`, #106) so all callers move together if that
+ * basis ever changes.
+ */
 export function observationPoolTokens(
   entries: Entry[],
   pending?: PendingOMState,

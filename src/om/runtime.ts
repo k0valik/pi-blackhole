@@ -53,7 +53,9 @@ export type CursorState = "initial" | "recorded" | "empty" | "error" | "skipped"
 export interface PipelineCursor {
   entryId: string;
   state: CursorState;
-  /** Active observation IDs from an empty pressure run; dropper only. */
+  /** Signature (sorted observation-id list) of the pool an empty pressure run
+   *  evaluated — dropper only, and only on `"empty"` cursors. It suppresses
+   *  repeat pressure runs until the pool changes; see `consolidation.ts`. */
   activePoolSignature?: string;
 }
 

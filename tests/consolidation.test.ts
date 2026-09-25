@@ -1339,6 +1339,30 @@ describe("dropper pressure valve", () => {
     return fixture;
   }
 
+  test("the dropper stage honors the dropperPoolFullness floor over a lower pressure threshold", async () => {
+    // Pool is 1,000 / 2,000 tokens (50%): well over the 10% pressure
+    // threshold, but under the configured 60% fullness floor.
+    const fixture = pressureFixture({ poolMaxTokens: 2_000 });
+    fixture.runtime.config.dropperPressureThreshold = 0.1;
+    fixture.runtime.config.dropperPoolFullnessThreshold = 0.6;
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect(agents.runDropper).not.toHaveBeenCalled();
+  });
+
+  test("the due-check applies the same fullness floor as the stage", async () => {
+    const fixture = pressureFixture({ poolMaxTokens: 2_000 });
+    fixture.runtime.config.dropperPressureThreshold = 0.1;
+    fixture.runtime.config.dropperPoolFullnessThreshold = 0.6;
+
+    expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(false);
+
+    fixture.runtime.config.dropperPoolFullnessThreshold = 0.4;
+    expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(true);
+  });
+
   test("pressure runs over the full live pool when the post-drop delta is empty", async () => {
     const fixture = pressureFixture();
     agents.runDropper.mockResolvedValue(["aaaaaaaaaaaa"]);
