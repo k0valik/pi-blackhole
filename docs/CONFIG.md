@@ -500,9 +500,9 @@ Shared turn cap for background memory agents. It is passed as `maxTurns` to `run
 
 ### `cacheRetention`
 
-Provider-neutral prompt-cache retention preference forwarded to the observer, reflector, and dropper worker streams. Unset defers to pi's effective setting: pi's providers default to `short`, and pi-ai honors its own `PI_CACHE_RETENTION=long` opt-in (`long` is the only value it maps) when no explicit value is set. Adapters that do not support a value ignore it, so `long` is opt-in rather than our default.
+Provider-neutral prompt-cache retention preference forwarded to the observer, reflector, and dropper worker streams. Unset defers to pi's effective setting (its provider default is `short`). Adapters that do not support a value ignore it, so `long` is opt-in rather than our default.
 
-- **unset** — inherit pi's effective setting (pi's provider default is `short`; pi-ai maps `PI_CACHE_RETENTION=long` when exported).
+- **unset** — inherit pi's effective setting (its provider default is `short`).
 - **`none`** — no prompt caching where the adapter supports it.
 - **`short`** — short-lived retention, pi's provider default.
 - **`long`** — extended retention where supported.

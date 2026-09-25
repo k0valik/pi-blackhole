@@ -127,8 +127,9 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
   const allowedObservationIds = observations.map((observation) => observation.id);
   const existingReflectionIds = new Set(reflections.map((reflection) => reflection.id));
   const accumulated = new Map<string, Reflection>();
-  // Run-scoped for the receipt only: the model needs to see corrections still
-  // outstanding from earlier batches, not just the current batch's count.
+  // Cumulative rejections for this run, including reflections the model
+  // corrected in a later batch. Reported so the model can reconcile what it
+  // already sent — it is history, not a count of corrections still owed.
   let runRejected = 0;
 
   const recordReflections: AgentTool<typeof RecordReflectionsSchema> = {
@@ -167,27 +168,41 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
         added++;
       }
       runRejected += rejected;
+      const terminates = params.complete === true && rejected === 0;
+      const rejectionReason =
+        rejected > 0 ? " (invalid content or unknown supporting observation ids)" : "";
       const refusal =
         params.complete === true && rejected > 0
-          ? ` complete=true was not honored: ${rejected} reflection${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit corrected entries (rejected reflections are dropped when the run ends), or reply with plain text to end the run.`
+          ? ` complete=true was not honored: ${rejected} reflection${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with supportingObservationIds copied from the observation lines; anything not re-submitted is discarded and will not be recorded.`
           : "";
+      // Cumulative history, not pending work: a corrected batch must not read
+      // as carrying an outstanding obligation while it closes the run.
+      const totals =
+        ` Run totals: ${accumulated.size} recorded, ` +
+        `${runRejected} rejected cumulatively (includes reflections the model corrected in a later batch).`;
+      const guidance = terminates
+        ? ""
+        : ` complete=true ends the review; complete=false asks for another batch.`;
       return {
         content: [
           {
             type: "text",
             text:
-              `Recorded ${added} reflection${added === 1 ? "" : "s"}; ${duplicates} duplicate${duplicates === 1 ? "" : "s"}; ${rejected} rejected. ` +
-              `Run totals: ${accumulated.size} recorded, ${runRejected} rejected.` +
+              `Recorded ${added} reflection${added === 1 ? "" : "s"}; ` +
+              `${duplicates} duplicate${duplicates === 1 ? "" : "s"}; ` +
+              `${rejected} rejected in this batch${rejectionReason}.` +
+              totals +
+              guidance +
               refusal,
           },
         ],
         details: { added, duplicates, rejected, total: accumulated.size },
         // Per-batch gate, deliberately not run-scoped: an earlier rejection was
-        // reported in its own receipt and stays visible in the run totals, and a
-        // corrected later batch must still be able to close the run — run-wide
-        // gating would disable early-stop for the whole run after any single
-        // rejected entry, including runs that fixed it.
-        terminate: params.complete === true && rejected === 0,
+        // reported in its own receipt and stays visible in the cumulative run
+        // totals, and a corrected later batch must still be able to close the
+        // run — run-wide gating would disable early-stop for the whole run
+        // after any single rejected entry, including runs that fixed it.
+        terminate: terminates,
       };
     },
   };

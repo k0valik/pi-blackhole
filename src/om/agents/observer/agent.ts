@@ -234,28 +234,39 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
         rejected > 0
           ? ` ${rejected} observation${rejected === 1 ? "" : "s"} rejected for missing or invalid sourceEntryIds.`
           : "";
+      const terminates = params.complete === true && rejected === 0;
       const refusal =
         params.complete === true && rejected > 0
-          ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit corrected entries (observations rejected for invalid sourceEntryIds are dropped when the run ends), or reply with plain text to end the run.`
+          ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with sourceEntryIds copied from the chunk; anything not re-submitted is discarded and will not be recorded.`
           : "";
+      // The run totals are cumulative history, not pending work: they let the
+      // model reconcile proposals it already sent without implying an
+      // outstanding obligation on a batch that is closing the run.
+      const totals =
+        ` Run totals: ${accumulated.size} recorded, ` +
+        `${totalDuplicates} duplicate${totalDuplicates === 1 ? "" : "s"} skipped, ` +
+        `${totalRejected} rejected cumulatively (includes entries the model corrected in a later batch).`;
+      const guidance = terminates
+        ? ""
+        : ` Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.`;
       const ack =
         `Recorded ${added} new observation${added === 1 ? "" : "s"} ` +
         (duplicates > 0
           ? `(${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped).`
           : ".") +
         rejectedPart +
-        ` Run totals: ${accumulated.size} recorded, ${totalRejected} rejected. ` +
-        `Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.` +
+        totals +
+        guidance +
         refusal;
       return {
         content: [{ type: "text", text: ack }],
         details: { added, duplicates, rejected, total: accumulated.size },
         // Per-batch gate, deliberately not run-scoped: an earlier rejection was
-        // reported in its own receipt and stays visible in the run totals, and a
-        // corrected later batch must still be able to close the run — run-wide
-        // gating would disable early-stop for the whole run after any single
-        // rejected entry, including runs that fixed it.
-        terminate: params.complete === true && rejected === 0,
+        // reported in its own receipt and stays visible in the cumulative run
+        // totals, and a corrected later batch must still be able to close the
+        // run — run-wide gating would disable early-stop for the whole run
+        // after any single rejected entry, including runs that fixed it.
+        terminate: terminates,
       };
     },
   };
