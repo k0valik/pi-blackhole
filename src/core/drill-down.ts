@@ -29,7 +29,11 @@ export const DRILLDOWN_PAGE_LINES = 30;
 export interface DrillDownPaging {
   /** 0-based index of the first body line rendered in `text`. */
   startLine: number;
-  /** Body lines rendered in `text` (before any response-budget clipping). */
+  /**
+   * Body lines rendered in `text` in full (before any response-budget
+   * clipping). A line the 50KB byte cap cut off mid-line does not count — the
+   * budget cap must never resume past a line the caller has not fully seen.
+   */
   shownLines: number;
   /** Body lines available in the stored payload. */
   totalLines: number;
@@ -132,7 +136,7 @@ ${truncated}
 ... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — file exceeds 50KB display limit. Use #${entryIndex}:${tc.path}:${previewLimit} for next page.)`,
         paging: {
           startLine: 0,
-          shownLines: truncated.split("\n").length,
+          shownLines: truncated.split("\n").length - 1,
           totalLines,
           headerNewlines: 3,
         },
@@ -257,7 +261,7 @@ function formatMessageText(
         text: `Entry #${entryIndex} message text:\n\n${truncated}\n\n... (${Buffer.byteLength(body, "utf8") - MAX_FULL_BYTES} more bytes — entry exceeds 50KB display limit. Use #${entryIndex}:text:${previewLimit} for next page.)`,
         paging: {
           startLine: 0,
-          shownLines: truncated.split("\n").length,
+          shownLines: truncated.split("\n").length - 1,
           totalLines,
           headerNewlines: 2,
         },

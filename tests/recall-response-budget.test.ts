@@ -376,12 +376,13 @@ describe("drill-down cap hint resumes where the cap stopped", () => {
       expect(resume?.offset).toBeGreaterThan(0);
       expect(resume?.limit).toBeGreaterThan(0);
 
-      // The last body line in the first chunk is cut mid-token; the resume must
-      // start at the line right after it — nothing skipped, nothing re-read.
+      // The cap only cuts at line boundaries: the last line it shows is a
+      // whole original line, and the resume starts at the line right after
+      // it — nothing skipped, nothing re-read.
       const capped = first.slice(0, first.indexOf("\n\n--- recall response capped at"));
-      const partial = capped.slice(capped.lastIndexOf("\n") + 1);
-      expect(partial.length).toBeGreaterThan(0);
-      expect(lineToken(resume!.offset!).startsWith(partial)).toBe(true);
+      const lastShown = capped.trimEnd().split("\n").at(-1) ?? "";
+      expect(lastShown).toMatch(/^L\d{4}$/);
+      expect(resume!.offset!).toBe(Number(lastShown.slice(1)));
 
       const second = await invoke(tool, file, { query }, session);
       expect(second).toContain(`Lines ${resume!.offset! + 1}-`);
@@ -494,6 +495,74 @@ describe("drill-down cap hint resumes where the cap stopped", () => {
   });
 });
 
+describe("a capped drill-down never loses a line across its resume chain", () => {
+  /** Realistic lines (spaces inside) so clip() cuts on a word boundary. */
+  const spacedBody = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, i) => `const value_${i + 1} = compute(${i}); // pad pad pad pad pad`,
+    ).join("\n");
+
+  /** Follow the cap hint until the tool stops offering one. */
+  const followHints = async (
+    tool: any,
+    file: string,
+    session: any[],
+    startQuery: string,
+    maxChars: number,
+  ): Promise<string[]> => {
+    const responses: string[] = [];
+    let query = startQuery;
+    for (let hop = 0; hop < 40; hop++) {
+      const text = await invoke(tool, file, { query }, session);
+      expect(text.length).toBeLessThanOrEqual(maxChars);
+      responses.push(text);
+      let next: string;
+      try {
+        next = hintQuery(text);
+      } catch {
+        break;
+      }
+      query = next;
+    }
+    return responses;
+  };
+
+  const expectEveryLineDelivered = (responses: string[], body: string) => {
+    const all = responses.join("\n");
+    const missing = body.split("\n").filter((line) => !all.includes(line));
+    expect(missing).toEqual([]);
+  };
+
+  it("delivers every line of a #N:path preview and its resume chain", async () => {
+    const content = spacedBody(60);
+    const session = [writeEntry("huge.ts", content)];
+    const { dir, file } = makeSession(session as any);
+    try {
+      const tool = register(300);
+      const responses = await followHints(tool, file, session, "#0:huge.ts", 300);
+      expect(responses.length).toBeGreaterThan(1);
+      expectEveryLineDelivered(responses, content);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivers every line of a #N:text body and its resume chain", async () => {
+    const content = spacedBody(60);
+    const session = [textEntry(content)];
+    const { dir, file } = makeSession(session as any);
+    try {
+      const tool = register(300);
+      const responses = await followHints(tool, file, session, "#0:text", 300);
+      expect(responses.length).toBeGreaterThan(1);
+      expectEveryLineDelivered(responses, content);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("capDrillDownText", () => {
   const paging = {
     startLine: 0,
@@ -549,6 +618,38 @@ describe("capDrillDownText", () => {
     expect(out.length).toBeLessThanOrEqual(20);
   });
 
+  it("never cuts a body line in half", () => {
+    const lines = Array.from(
+      { length: 30 },
+      (_, i) => `const value_${i + 1} = compute(${i}); // pad pad pad pad pad`,
+    );
+    const out = capDrillDownText({
+      text: `File: huge.ts\nTool: write\n\n${lines.join("\n")}`,
+      paging: { startLine: 0, shownLines: 30, totalLines: 500, headerNewlines: 3 },
+      index: 0,
+      pathPattern: "huge.ts",
+      maxChars: 300,
+    });
+    expect(out.length).toBeLessThanOrEqual(300);
+    const capped = out.slice(0, out.indexOf("\n\n--- recall response capped at"));
+    const lastShown = capped.trimEnd().split("\n").at(-1) ?? "";
+    expect(lastShown.length).toBeGreaterThan(0);
+    expect(lines).toContain(lastShown);
+  });
+
+  it("names an oversized line and pages past it", () => {
+    const out = capDrillDownText({
+      text: `File: min.js\nTool: write\n\n${"Z".repeat(5_000)}\nL2\nL3`,
+      paging: { startLine: 0, shownLines: 1, totalLines: 3, headerNewlines: 3 },
+      index: 0,
+      pathPattern: "min.js",
+      maxChars: 300,
+    });
+    expect(out.length).toBeLessThanOrEqual(300);
+    expect(out).toContain("does not fit the budget");
+    expect(hintQuery(out)).toBe("#0:min.js:1:2");
+  });
+
   it("suggests a single line when the cap left no body line visible", () => {
     const longPath = "d/".repeat(40);
     const text = `File: ${longPath}\nTool: write\n\n${numberedBody(30)}`;
@@ -557,9 +658,11 @@ describe("capDrillDownText", () => {
       paging: { ...paging, headerNewlines: 3 },
       index: 0,
       pathPattern: longPath,
-      maxChars: 260,
+      // Budget too small for the header plus one body line: the cut lands
+      // inside the header, so no body line fits at all.
+      maxChars: 240,
     });
-    expect(out.length).toBeLessThanOrEqual(260);
+    expect(out.length).toBeLessThanOrEqual(240);
     expect(out).toContain("no content fit the budget");
     expect(hintQuery(out)).toBe(`#0:${longPath}:0:1`);
   });

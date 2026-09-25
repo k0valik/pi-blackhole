@@ -143,16 +143,42 @@ const countNewlines = (text: string): number => {
   return n;
 };
 
+/** First body character: just past the header's last newline. */
+function bodyStartIndex(text: string, headerNewlines: number): number {
+  let seen = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) {
+      seen++;
+      if (seen === headerNewlines) return i + 1;
+    }
+  }
+  return text.length;
+}
+
 /**
- * Body lines the cap actually left visible, counting a line the cap cut in the
- * middle of as seen (the continuation must not skip its remainder).
+ * Clip `text` to `max` characters, stopping only at a line boundary: the cut
+ * ends right after a newline, so every shown body line is whole and the
+ * continuation resumes at exactly the next line — nothing skipped, nothing
+ * re-read. Falls back to {@link clip} only when the window contains no newline
+ * at all (a header that alone exceeds the budget).
  */
-function visibleBodyLines(paging: DrillDownPaging, text: string, cut: string): number {
-  const shown = Math.max(0, Math.min(paging.shownLines, paging.totalLines - paging.startLine));
-  if (shown === 0) return 0;
+function clipAtLineBoundary(text: string, max: number): string {
+  if (max <= 0) return "";
+  const nl = text.lastIndexOf("\n", max - 1);
+  if (nl < 0) return clip(text, max);
+  return text.slice(0, nl + 1);
+}
+
+/**
+ * Body lines the cut left fully visible. `cut` always ends at a line boundary
+ * (or inside the header), so complete lines are the newlines it contains minus
+ * the header's; footer newlines can inflate the count, hence the clamp to
+ * `shownLines`.
+ */
+function visibleBodyLines(paging: DrillDownPaging, cut: string): number {
   const complete = countNewlines(cut) - paging.headerNewlines;
-  const partial = cut.length < text.length && text[cut.length] !== "\n" ? 1 : 0;
-  return Math.max(0, Math.min(shown, complete + partial));
+  const shown = Math.max(0, Math.min(paging.shownLines, paging.totalLines - paging.startLine));
+  return Math.max(0, Math.min(shown, complete));
 }
 
 function drillDownCapNote(input: CapDrillDownTextInput, cut: string): string {
@@ -161,9 +187,19 @@ function drillDownCapNote(input: CapDrillDownTextInput, cut: string): string {
   if (!paging) {
     return `\n\n${head}re-request a narrower range with #${index}:${pathPattern}:offset:limit ---`;
   }
-  const visible = visibleBodyLines(paging, input.text, cut);
+  const visible = visibleBodyLines(paging, cut);
   if (visible === 0) {
-    return `\n\n${head}no content fit the budget — request one line with #${index}:${pathPattern}:${paging.startLine}:1 ---`;
+    // The cut never left a whole body line: either the header alone ate the
+    // budget, or the first body line is longer than what is left of it.
+    if (cut.length < bodyStartIndex(input.text, paging.headerNewlines)) {
+      return `\n\n${head}no content fit the budget — request one line with #${index}:${pathPattern}:${paging.startLine}:1 ---`;
+    }
+    const next = paging.startLine + 1;
+    if (next >= paging.totalLines) {
+      return `\n\n${head}no further lines to page — use a regex query to target a region ---`;
+    }
+    const limit = Math.min(DRILLDOWN_PAGE_LINES, paging.totalLines - next);
+    return `\n\n${head}the line at offset ${paging.startLine} does not fit the budget; continue at #${index}:${pathPattern}:${next}:${limit} ---`;
   }
   const nextOffset = paging.startLine + visible;
   const remaining = paging.totalLines - nextOffset;
@@ -176,27 +212,28 @@ function drillDownCapNote(input: CapDrillDownTextInput, cut: string): string {
 
 /**
  * Cap a drill-down response to `maxChars` and append a hint the caller can act
- * on directly: with paging coordinates it names the exact line the cap stopped
- * inside of (`#3:src/a.ts:412:30`), so the next call continues there instead of
- * re-reading or skipping content. The hint and the clip reserve each other's
- * space, so the result never exceeds `maxChars`.
+ * on directly: with paging coordinates it names the exact line the cap did not
+ * show (`#3:src/a.ts:412:30`), so the next call continues there. The cut only
+ * ever lands on a line boundary, so following the hint neither skips nor
+ * re-reads content. The hint and the clip reserve each other's space, so the
+ * result never exceeds `maxChars`.
  */
 export function capDrillDownText(input: CapDrillDownTextInput): string {
   const { text, maxChars } = input;
   if (maxChars <= 0 || text.length <= maxChars) return text;
 
   // The hint's length depends on the resume numbers, and the resume numbers
-  // depend on where the clip lands — which depends on the reserved hint length.
+  // depend on where the cut lands — which depends on the reserved hint length.
   // Iterate to a fixed point; each round can only shift the cut by the hint's
   // own length, so this settles immediately in practice.
   let note = "";
-  for (let round = 0; round < 4; round++) {
+  for (let round = 0; round < 8; round++) {
     const allowed = maxChars - note.length;
     if (allowed <= 0) return clip(note.trim(), maxChars);
-    const next = drillDownCapNote(input, clip(text, allowed));
+    const next = drillDownCapNote(input, clipAtLineBoundary(text, allowed));
     if (next === note) break;
     note = next;
   }
   const allowed = Math.max(0, maxChars - note.length);
-  return allowed > 0 ? clip(text, allowed) + note : clip(note.trim(), maxChars);
+  return allowed > 0 ? clipAtLineBoundary(text, allowed) + note : clip(note.trim(), maxChars);
 }
