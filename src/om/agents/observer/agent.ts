@@ -57,8 +57,9 @@ interface RunObserverArgs {
   sessionId?: string;
   /**
    * Provider-neutral prompt-cache retention preference
-   * (`SimpleStreamOptions.cacheRetention`). Unset keeps pi's own default
-   * (`short`); adapters ignore values they do not support.
+   * (`SimpleStreamOptions.cacheRetention`). Unset defers to pi's effective
+   * setting (provider default `short`; `PI_CACHE_RETENTION=long` opts in);
+   * adapters ignore values they do not support.
    */
   cacheRetention?: CacheRetention;
 }
@@ -91,10 +92,15 @@ const RecordObservationsSchema = Type.Object({
       description: "Batch of new observations. May be empty only if the tool is not called at all.",
     },
   ),
-  complete: Type.Boolean({
-    description:
-      "Whether this batch completes chunk coverage. Set false when more observations or corrections remain.",
-  }),
+  // Optional on purpose: a model that omits the flag must lose only the
+  // early-stop hint, never the batch itself (a required field would fail
+  // host-side validation and drop every observation in the call).
+  complete: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether this batch completes chunk coverage. Set false when more observations or corrections remain.",
+    }),
+  ),
 });
 
 type RecordObservationsArgs = Static<typeof RecordObservationsSchema>;
@@ -228,6 +234,10 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
         rejected > 0
           ? ` ${rejected} observation${rejected === 1 ? "" : "s"} rejected for missing or invalid sourceEntryIds.`
           : "";
+      const refusal =
+        params.complete === true && rejected > 0
+          ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit corrected entries, or reply with plain text to end the run.`
+          : "";
       const ack =
         `Recorded ${added} new observation${added === 1 ? "" : "s"} ` +
         (duplicates > 0
@@ -235,13 +245,15 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           : ".") +
         rejectedPart +
         ` Total so far this run: ${accumulated.size}. ` +
-        `Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.`;
+        `Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.` +
+        refusal;
       return {
         content: [{ type: "text", text: ack }],
         details: { added, duplicates, rejected, total: accumulated.size },
-        // complete=true only closes the run when nothing was rejected: rejected
-        // records still owe a corrected batch, so incomplete work stays open.
-        terminate: params.complete && rejected === 0,
+        // complete=true closes the run only when THIS batch was clean: entries
+        // rejected moments ago still owe a corrected batch, while rejections
+        // from earlier batches were already reported in their own receipts.
+        terminate: params.complete === true && rejected === 0,
       };
     },
   };

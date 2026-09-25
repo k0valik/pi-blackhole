@@ -308,7 +308,7 @@ Based on interview answers, build the config object. Write it to:
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
-  "cacheRetention": "unset",       // worker prompt-cache retention: unset (pi's default "short") | "none" | "short" | "long"
+  // "cacheRetention": "long",     // optional worker prompt cache: "none" | "short" | "long" (omit = inherit pi's effective setting)
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
 }
 ```

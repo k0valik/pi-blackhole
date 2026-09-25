@@ -48,7 +48,7 @@ Each worker also forwards the consolidation `sessionId` (keeping provider prompt
 
 Compresses a chunk of recent conversation into timestamped, rated observations. System prompt `OBSERVER_SYSTEM` in [[src/om/agents/observer/prompts.ts]]; agent `runObserver` in [[src/om/agents/observer/agent.ts]].
 
-**Tool**: `record_observations` — `observations[]`, each `{ timestamp: "YYYY-MM-DD HH:MM" (regex-validated), content: string (minLength 1, single-line), relevance: low|medium|high|critical, sourceEntryIds: string[] (minItems 1) }`, plus `complete: boolean` (`true` on the final batch; the host sends `terminate` when it is `true` and no entries were rejected).
+**Tool**: `record_observations` — `observations[]`, each `{ content: string (minLength 1, single-line), relevance: low|medium|high|critical, sourceEntryIds: string[] (minItems 1) }` (timestamps are derived from the cited source entries, not taken from the model), plus optional `complete?: boolean` (`true` on the final batch; the host sends `terminate` when it is `true` and that batch rejected nothing — a model that omits the flag only loses the early stop).
 
 **Injected inputs** (assembled into the user message): current reflections, current observations formatted `[id] date [relevance] content`, the new conversation chunk with `[Source entry id: <id>]` labels and inline message timestamps, and a current local-time fallback.
 
@@ -62,7 +62,7 @@ Compresses a chunk of recent conversation into timestamped, rated observations. 
 
 Distills durable reflections from active observations — explicitly not a second observation layer. System prompt `REFLECTOR_SYSTEM` in [[src/om/agents/reflector/prompts.ts]]; agent `runReflector` in [[src/om/agents/reflector/agent.ts]].
 
-**Tool**: `record_reflections` — `reflections[]` (minItems 1), each `{ content: string (minLength 1), supportingObservationIds: string[] (minItems 1) }`, plus `complete: boolean` (`true` when the full active observation set has been reviewed; the host sends `terminate` when it is `true` and no reflections were rejected).
+**Tool**: `record_reflections` — `reflections[]` (minItems 1), each `{ content: string (minLength 1), supportingObservationIds: string[] (minItems 1) }`, plus optional `complete?: boolean` (`true` when the full active observation set has been reviewed; the host sends `terminate` when it is `true` and that batch rejected nothing).
 
 **Injected inputs**: current reflections, current observations shown as `[id] date [relevance] [coverage: none|partial|strong] content` (coverage tiers from [[src/om/agents/dropper/coverage.ts]]), and optional compact summaries of existing reflections/observations marked "for context only — do NOT re-process".
 

@@ -19,6 +19,7 @@ import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import {
+  CACHE_RETENTION_VALUES,
   DEFAULTS,
   isCacheRetention,
   normalizeThresholdKnobs,
@@ -352,15 +353,15 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "enum",
       label: "Worker prompt-cache retention",
       description:
-        "Provider-neutral prompt-cache retention for the memory workers; unset keeps pi's own default (short). Adapters ignore values they do not support.",
+        "Provider-neutral prompt-cache retention for the memory workers; unset defers to pi's effective setting (provider default short, PI_CACHE_RETENTION=long opts in). Adapters ignore values they do not support.",
       // "unset" is a modal-only sentinel: validate() drops it before the config
       // is persisted, so an untouched field never pins a value in the file.
       value: cfg.cacheRetention ?? "unset",
-      options: ["unset", "none", "short", "long"],
+      options: ["unset", ...CACHE_RETENTION_VALUES],
       optionLabels: {
-        unset: "unset — pi default (short)",
+        unset: "unset — inherit pi's effective setting",
         none: "none — no prompt caching where supported",
-        short: "short — pi's default retention",
+        short: "short — pi's provider default",
         long: "long — extended retention where supported",
       },
     },

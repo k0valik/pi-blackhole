@@ -61,8 +61,9 @@ interface RunReflectorArgs {
   sessionId?: string;
   /**
    * Provider-neutral prompt-cache retention preference
-   * (`SimpleStreamOptions.cacheRetention`). Unset keeps pi's own default
-   * (`short`); adapters ignore values they do not support.
+   * (`SimpleStreamOptions.cacheRetention`). Unset defers to pi's effective
+   * setting (provider default `short`; `PI_CACHE_RETENTION=long` opts in);
+   * adapters ignore values they do not support.
    */
   cacheRetention?: CacheRetention;
 }
@@ -77,10 +78,15 @@ const RecordReflectionsSchema = Type.Object({
     }),
     { minItems: 1 },
   ),
-  complete: Type.Boolean({
-    description:
-      "Whether this batch completes reflection review. Set false when more reflections or corrections remain.",
-  }),
+  // Optional on purpose: a model that omits the flag must lose only the
+  // early-stop hint, never the batch itself (a required field would fail
+  // host-side validation and drop every reflection in the call).
+  complete: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether this batch completes reflection review. Set false when more reflections or corrections remain.",
+    }),
+  ),
 });
 
 type RecordReflectionsArgs = Static<typeof RecordReflectionsSchema>;
@@ -157,17 +163,24 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
         });
         added++;
       }
+      const refusal =
+        params.complete === true && rejected > 0
+          ? ` complete=true was not honored: ${rejected} reflection${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit corrected entries, or reply with plain text to end the run.`
+          : "";
       return {
         content: [
           {
             type: "text",
-            text: `Recorded ${added} reflection${added === 1 ? "" : "s"}; ${duplicates} duplicate${duplicates === 1 ? "" : "s"}; ${rejected} rejected. Total this run: ${accumulated.size}.`,
+            text:
+              `Recorded ${added} reflection${added === 1 ? "" : "s"}; ${duplicates} duplicate${duplicates === 1 ? "" : "s"}; ${rejected} rejected. Total this run: ${accumulated.size}.` +
+              refusal,
           },
         ],
         details: { added, duplicates, rejected, total: accumulated.size },
-        // complete=true only closes the run when nothing was rejected: rejected
-        // records still owe a corrected batch, so incomplete work stays open.
-        terminate: params.complete && rejected === 0,
+        // complete=true closes the run only when THIS batch was clean: entries
+        // rejected moments ago still owe a corrected batch, while rejections
+        // from earlier batches were already reported in their own receipts.
+        terminate: params.complete === true && rejected === 0,
       };
     },
   };

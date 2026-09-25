@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 
 import {
   normalizeSourceEntryIds,
@@ -32,6 +33,7 @@ function fakeAgentLoop(
 interface CapturedToolResult {
   terminate?: boolean;
   details: Record<string, number>;
+  content?: Array<{ type?: string; text?: string }>;
 }
 
 describe("OBSERVATION_TIMESTAMP_PATTERN", () => {
@@ -372,6 +374,111 @@ describe("runObserver", () => {
     expect(result.observations?.map((observation) => observation.content)).toEqual([
       "First observation",
       "Second observation",
+    ]);
+    expect(toolResults.map((entry) => entry.terminate)).toEqual([false, true]);
+  });
+
+  it("records the batch and keeps the run open when the model omits complete", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        observations: [
+          {
+            content: "No flag observation",
+            relevance: "medium",
+            sourceEntryIds: ["entry-a"],
+          },
+        ],
+      });
+    });
+
+    const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(result.observations?.map((observation) => observation.content)).toEqual([
+      "No flag observation",
+    ]);
+    expect(toolResult?.terminate).toBe(false);
+  });
+
+  it("accepts a tool call whose arguments omit complete", async () => {
+    let tool: any;
+    const loop = fakeAgentLoop((_prompts, context) => {
+      tool = context.tools[0];
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(() =>
+      validateToolArguments(tool, {
+        id: "call-1",
+        name: "record_observations",
+        arguments: {
+          observations: [
+            {
+              content: "Omitted flag",
+              relevance: "low",
+              sourceEntryIds: ["entry-a"],
+            },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("tells the model when its complete=true batch was refused", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        observations: [
+          {
+            content: "Bad source",
+            relevance: "medium",
+            sourceEntryIds: ["missing"],
+          },
+        ],
+        complete: true,
+      });
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(toolResult?.terminate).toBe(false);
+    expect(toolResult?.content?.[0]?.text).toContain("complete=true was not honored");
+  });
+
+  it("closes only after a clean complete batch follows a rejected one", async () => {
+    const toolResults: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResults.push(
+        await context.tools[0].execute("tool-1", {
+          observations: [
+            {
+              content: "Bad source",
+              relevance: "medium",
+              sourceEntryIds: ["missing"],
+            },
+          ],
+          complete: true,
+        }),
+      );
+      toolResults.push(
+        await context.tools[0].execute("tool-2", {
+          observations: [
+            {
+              content: "Recovered observation",
+              relevance: "high",
+              sourceEntryIds: ["entry-a"],
+            },
+          ],
+          complete: true,
+        }),
+      );
+    });
+
+    const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(result.observations?.map((observation) => observation.content)).toEqual([
+      "Recovered observation",
     ]);
     expect(toolResults.map((entry) => entry.terminate)).toEqual([false, true]);
   });

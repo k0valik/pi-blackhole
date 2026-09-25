@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 
 import {
   normalizeSupportingObservationIds,
@@ -33,6 +34,7 @@ function fakeAgentLoop(
 interface CapturedToolResult {
   terminate?: boolean;
   details: Record<string, number>;
+  content?: Array<{ type?: string; text?: string }>;
 }
 
 describe("V3 reflector agent", () => {
@@ -380,6 +382,61 @@ describe("V3 reflector agent", () => {
     await runReflector({ ...baseArgs, agentLoop: loop });
 
     expect(toolResult?.terminate).toBe(false);
+  });
+
+  it("records the batch and keeps the run open when the model omits complete", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        reflections: [
+          {
+            content: "No flag reflection.",
+            supportingObservationIds: ["aaaaaaaaaaaa"],
+          },
+        ],
+      });
+    });
+
+    const result = await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(result?.map((item) => item.content)).toEqual(["No flag reflection."]);
+    expect(toolResult?.terminate).toBe(false);
+  });
+
+  it("accepts a tool call whose arguments omit complete", async () => {
+    let tool: any;
+    const loop = fakeAgentLoop((_prompts, context) => {
+      tool = context.tools[0];
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(() =>
+      validateToolArguments(tool, {
+        id: "call-1",
+        name: "record_reflections",
+        arguments: {
+          reflections: [
+            { content: "Omitted flag reflection.", supportingObservationIds: ["aaaaaaaaaaaa"] },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("tells the model when its complete=true batch was refused", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
+        complete: true,
+      });
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(toolResult?.terminate).toBe(false);
+    expect(toolResult?.content?.[0]?.text).toContain("complete=true was not honored");
   });
 
   it("dedupes proposals and skips existing reflection ids", async () => {
