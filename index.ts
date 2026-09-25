@@ -8,6 +8,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { scaffoldSettings } from "./src/core/settings";
+import { migrateConfigFiles } from "./src/core/config-migration/index.js";
 import { registerBeforeCompactHook } from "./src/hooks/before-compact";
 import { registerCompactFailedHook } from "./src/hooks/compact-failed.js";
 import { registerCompactionContextHook } from "./src/hooks/compaction-context.js";
@@ -68,6 +69,17 @@ export default async (pi: ExtensionAPI) => {
   });
 
   scaffoldSettings();
+
+  // Config-file migration (plan-10): rewrite the global and project config
+  // files once per session, before any reader runs, so by the time the modal
+  // or the runtime loads them the keys on disk match the keys the code reads.
+  // Best-effort: read-only installs and stale ctx must never be fatal (the
+  // loader also migrates in memory, so behavior is correct even if this skips).
+  pi.on("session_start", (_event: unknown, ctx: any) => {
+    void migrateConfigFiles(ctx.cwd).catch(() => {
+      /* migration is best-effort — never fatal */
+    });
+  });
 
   const omRuntime = new Runtime();
   // Carry the startup probe result into the runtime so triggers can explain an

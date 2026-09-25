@@ -18,6 +18,9 @@ import {
 export { CACHE_RETENTION_VALUES, normalizeCacheRetention };
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
 import type { CacheRetention, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { applyConfigMigrations, foldCompaction } from "./config-migration/steps.js";
+
+export { foldCompaction };
 
 // ── getAgentDir with PI_CODING_AGENT_DIR override ───────────────────────────
 
@@ -552,26 +555,9 @@ export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
 
 /**
  * Fold the legacy two-key compaction surface (`compaction` + `compactionEngine`)
- * into the single `compaction` enum (plan-09 §3.1). Runs on the raw record so
- * the runtime behaves correctly even before the on-disk migration (read-only
- * installs), and so `compaction: "auto"` + `compactionEngine: "pi-default"`
- * still resolves to the semantically-equivalent `off`.
+ * into the single `compaction` enum (plan-09 §3.1). The implementation lives in
+ * config-migration/steps.ts so the in-memory and on-disk paths share it.
  */
-export function foldCompaction(
-  compaction: unknown,
-  engine: unknown,
-): "automatic" | "manual" | "off" | undefined {
-  const engineIsPiDefault = engine === "pi-default";
-  if (compaction === "off") return "off";
-  if (compaction === "manual") return "manual";
-  if (compaction === "automatic" || compaction === "auto") {
-    return engineIsPiDefault ? "off" : "automatic";
-  }
-  // No (recognized) compaction value — the engine alone decides.
-  if (engineIsPiDefault) return "off";
-  if (engine === "blackhole") return "automatic";
-  return undefined;
-}
 
 function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   const c: Partial<UnifiedConfig> = {};
@@ -809,13 +795,21 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     raw = merged;
   }
 
+  // Capture the pre-migration legacy signal the passive env undo needs —
+  // migration deletes `passive` before the env block runs.
+  const legacyPassiveKey = raw?.passive === true;
+
+  // In-memory migration of the global/legacy layer (plan-10): the on-disk
+  // rewrite happens at session start; this keeps read-only installs correct.
+  if (raw) raw = applyConfigMigrations(raw).config;
+
   // Project-local override: <cwd>/.pi/pi-blackhole-config.json
   const projectConfigPath = join(cwd, ".pi", CONFIG_FILE);
   const projectResult = readJson(projectConfigPath);
   const projectRaw = projectResult.data;
   if (projectResult.error && onWarn) onWarn(projectResult.error);
   if (projectRaw && isRecord(projectRaw)) {
-    raw = { ...raw, ...projectRaw };
+    raw = { ...raw, ...applyConfigMigrations(projectRaw).config };
   }
 
   const parsed = parseConfig(raw);
@@ -835,7 +829,7 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
       parsed.memory = false;
     } else if (["0", "false", "no", "off"].includes(v)) {
       // Falsy env override: undo passive migration when config relied on legacy key
-      if (raw?.passive === true) {
+      if (legacyPassiveKey) {
         delete parsed.compaction;
         delete parsed.memory;
       }
@@ -882,6 +876,16 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     // shape is exactly the Record<string, unknown> applyEnvOverrides expects.
     DEFAULTS as unknown as Record<string, unknown>,
   );
+
+  // An explicit threshold env var selects its shape, so it keeps winning over
+  // a migrated file's compactAfterBy (env vars are never migrated).
+  if (process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS !== undefined) {
+    withEnv.compactAfterBy = "tokens";
+  } else if (process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO !== undefined) {
+    withEnv.compactAfterBy = "percent";
+  } else if (process.env.PI_BLACKHOLE_COMPACT_RESERVE_TOKENS !== undefined) {
+    withEnv.compactAfterBy = "reserve";
+  }
 
   // Legacy-81000 note: file residue never reaches this point — parseConfig
   // already ran it through normalizeThresholdKnobs, which drops a file-level

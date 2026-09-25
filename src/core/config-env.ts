@@ -129,12 +129,16 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
       return Number.isInteger(n) && n > 0 ? n : undefined;
     },
   },
-  // Float in (0, 1] — window-derived threshold ratio (issue #60)
+  // Percent in (0, 100] — window-derived threshold ratio (issue #60). Also
+  // accepts the pre-plan fraction form (0, 1] and converts it to a percent,
+  // since env vars are never migrated.
   compactAfterRatio: {
     var: "PI_BLACKHOLE_COMPACT_AFTER_RATIO",
     parse: (raw: string) => {
       const n = Number.parseFloat(raw);
-      return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
+      if (!Number.isFinite(n) || n <= 0) return undefined;
+      if (n <= 1) return Math.round(n * 100);
+      return n <= 100 ? n : undefined;
     },
   },
   // Positive integer — window headroom reserve (issue #60)

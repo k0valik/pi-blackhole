@@ -117,7 +117,7 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
     expect(config.compactReserveTokens).toBeUndefined();
     expect(config.compactAfterTokens).toBeUndefined();
   });
@@ -135,7 +135,7 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     writeConfig({ compactAfterTokens: 180_000, compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBe(180_000);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
   });
 
   it("a DEFAULT-valued compactAfterTokens in the file does not block derived mode", async () => {
@@ -189,7 +189,7 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterRatio: 0.5, compactReserveTokens: 1_000 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.5);
+    expect(config.compactAfterRatio).toBe(50);
     expect(config.compactReserveTokens).toBe(1_000);
     expect(config.compactAfterTokens).toBeUndefined();
   });
@@ -779,12 +779,12 @@ describe("Declarative env overrides apply at runtime", () => {
     process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "0.5";
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.5);
+    expect(config.compactAfterRatio).toBe(50);
     expect(config.compactAfterTokens).toBeUndefined();
   });
 
   it("invalid env compactAfterRatio is rejected (keeps configured state)", async () => {
-    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "1.5";
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "150";
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterRatio).toBeUndefined();
@@ -820,7 +820,7 @@ describe("Declarative env overrides apply at runtime", () => {
     writeConfig({ compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBe(180_000);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
   });
 });
 
@@ -918,7 +918,7 @@ describe("compactAfterPreset / compactAfterPresets (window-curve presets)", () =
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
     expect(config.compactAfterTokens).toBeUndefined();
   });
 
