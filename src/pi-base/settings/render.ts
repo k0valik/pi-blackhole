@@ -439,7 +439,7 @@ export function renderFieldDesc(
     }
   }
 
-  if (field.key) {
+  if (field.key && field.type !== "section") {
     lines.push(state.args.theme.fg("dim", `  key: ${field.key}`));
   }
 }
@@ -458,6 +458,8 @@ export function estimateDescriptionRows(state: BodyState): number {
       estimate = Math.max(estimate, 2);
     }
   }
+  // Key legend is always rendered for data fields (see renderFieldDesc).
+  if (focused.field.type !== "section") estimate = Math.max(estimate, 1);
   // Validation warning
   const warning = validateFieldValue(focused.field, focused.value);
   if (warning) estimate = Math.max(estimate, 1);

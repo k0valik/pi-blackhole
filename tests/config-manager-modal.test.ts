@@ -585,13 +585,14 @@ it("reflection row is keyboard-editable and readable at narrow/normal/wide width
     tui.terminal.columns = width;
     const lines = body.render(width);
     const text = lines.join("\n");
-    expect(text).toContain("Reflection output max");
+    expect(text).toContain("Insight memory budget");
     expect(text).toContain("8000");
     expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     snapshots.push(`WIDTH ${width}\n${text}`);
   }
-  // Existing search reduces the list so the full wrapped description is readable.
-  for (const char of "Reflection output") body.handleInput?.(char);
+  // Search narrows to the insight budget row (an exact-label query matches
+  // only this field under fuzzy matching), so its wrapped description fits.
+  for (const char of "insight memory budget") body.handleInput?.(char);
   const filtered = body.render(40).join("\n");
   expect(filtered).toContain("recall");
   snapshots.push(`FILTERED WIDTH 40\n${filtered}`);
