@@ -386,7 +386,7 @@ describe("saveUnifiedConfig — atomic write", () => {
 // ── Tests: scaffoldConfig for NixOS safety ────────────────────────────────
 
 describe("scaffoldConfig — NixOS safety", () => {
-  it("creates config file with defaults when missing", async () => {
+  it("creates config file with curated defaults when missing", async () => {
     const { scaffoldConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     expect(existsSync(configPath())).toBe(false);
 
@@ -395,6 +395,42 @@ describe("scaffoldConfig — NixOS safety", () => {
     expect(existsSync(configPath())).toBe(true);
     const config = loadUnifiedConfig(testDir);
     expect(config.compaction).toBe("automatic");
+  });
+
+  it("writes only the curated key subset, never the full DEFAULTS dump", async () => {
+    const { scaffoldConfig, SCAFFOLD_DEFAULTS } = await import("../src/core/unified-config.js");
+    scaffoldConfig();
+
+    const written = JSON.parse(readFileSync(configPath(), "utf8")) as Record<string, unknown>;
+    expect(Object.keys(written).sort()).toEqual(Object.keys(SCAFFOLD_DEFAULTS).sort());
+    // The out-of-box shape is stated explicitly so a fresh file is self-describing.
+    expect(written.compactAfterBy).toBe("preset");
+    // Advanced/derived/expert keys stay out of the starter file.
+    for (const key of [
+      "debug",
+      "debugLog",
+      "fullFoldAlways",
+      "reflectorInputMaxTokens",
+      "agentMaxTurns",
+      "providerIdleTimeoutMs",
+      "workerAttemptTimeoutMs",
+      "cacheRetention",
+      "compactAfterTokens",
+      "compactAfterPresets",
+    ]) {
+      expect(key in written).toBe(false);
+    }
+  });
+
+  it("loads a curated scaffold into the full effective config", async () => {
+    const { scaffoldConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    scaffoldConfig();
+
+    const config = loadUnifiedConfig(testDir);
+    expect(config.debug).toBe(false);
+    expect(config.fullFoldAlways).toBe(true);
+    expect(config.reflectorInputMaxTokens).toBe(80_000);
+    expect(config.agentMaxTurns).toBe(16);
   });
 
   it("does not overwrite existing config on scaffold", async () => {

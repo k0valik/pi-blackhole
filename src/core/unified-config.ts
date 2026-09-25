@@ -947,7 +947,32 @@ export function saveUnifiedConfigScoped(
 }
 
 /**
- * Ensure ~/.pi/agent/pi-blackhole/pi-blackhole-config.json exists with defaults.
+ * Curated scaffold (plan-09 §7.6): the small, outcome-oriented starter set a
+ * fresh install writes to its config file. Deliberately not the full `DEFAULTS`
+ * dump — that pinned derived/advanced knobs and made the file look
+ * authoritative — and not `{}`, which would hide the surface entirely. Missing
+ * keys are filled from `DEFAULTS` at read time.
+ */
+export const SCAFFOLD_DEFAULTS = {
+  compaction: DEFAULTS.compaction,
+  compactionSummaryMode: DEFAULTS.compactionSummaryMode,
+  tailBehavior: DEFAULTS.tailBehavior,
+  showPreCompactionMessage: DEFAULTS.showPreCompactionMessage,
+  // DEFAULTS leaves this unset to preserve legacy precedence; the file states
+  // the out-of-box shape explicitly so a fresh install is self-describing.
+  compactAfterBy: "preset" as const,
+  retainedToolOutputMaxTokens: DEFAULTS.retainedToolOutputMaxTokens,
+  memory: DEFAULTS.memory,
+  observeAfterTokens: DEFAULTS.observeAfterTokens,
+  reflectAfterTokens: DEFAULTS.reflectAfterTokens,
+  observationsPoolMaxTokens: DEFAULTS.observationsPoolMaxTokens,
+  reflectionsPoolMaxTokens: DEFAULTS.reflectionsPoolMaxTokens,
+  statusBar: DEFAULTS.statusBar,
+} as const;
+
+/**
+ * Ensure ~/.pi/agent/pi-blackhole/pi-blackhole-config.json exists with the
+ * curated starter keys.
  *
  * Only creates the file if it doesn't exist. Missing keys are filled at read
  * time by loadUnifiedConfig() via { ...DEFAULTS, ...parsed } merge, so there
@@ -961,7 +986,7 @@ export function scaffoldConfig(): void {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     if (!existsSync(path)) {
-      writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`);
+      writeFileSync(path, `${JSON.stringify(SCAFFOLD_DEFAULTS, null, 2)}\n`);
     }
   } catch (e) {
     console.error("blackhole: config scaffold failed", e);
