@@ -1,0 +1,23 @@
+{
+  "_comment": "Pre-reorg (v0.5.8) config surface — migration fixture for plan-10. Not shipped; no comments are read by the loader.",
+  "compaction": "auto",
+  "compactionEngine": "blackhole",
+  "compactionSummaryMode": "default",
+  "tailBehavior": "minimal",
+  "midRunCompaction": "off",
+  "showPreCompactionMessage": true,
+  "compactAfterTokens": 81000,
+  "compactAfterRatio": 0.65,
+  "observationsPoolMaxTokens": 20000,
+  "reflectionsPoolMaxTokens": 8000,
+  "observationsPoolTargetTokens": 10000,
+  "observerPreambleMaxTokens": 0,
+  "dropperInputMaxTokens": 70000,
+  "dropperPressureThreshold": 0.4,
+  "dropperPoolFullnessThreshold": 0.6,
+  "observerChunkMaxTokens": 40000,
+  "agentMaxTurns": 16,
+  "memory": true,
+  "unknownHandKey": { "keep": "me" },
+  "model": { "provider": "openrouter", "id": "example/model:free" }
+}

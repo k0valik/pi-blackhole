@@ -401,18 +401,19 @@ describe("dropperPressureThreshold", () => {
     expect(config.dropperPressureThreshold).toBe(0.7);
   });
 
-  it("can be overridden via config file", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPressureThreshold: 0.5 });
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPressureThreshold).toBe(0.5);
-  });
+  it.each([0.01, 0.1, 0.25, 0.5, 0.6, 0.7, 0.9, 0.99, 1])(
+    "round-trips a valid fraction %s",
+    async (threshold) => {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ dropperPressureThreshold: threshold });
+      expect(loadUnifiedConfig(testDir).dropperPressureThreshold).toBe(threshold);
+    },
+  );
 
-  it("falls back to default for invalid values", async () => {
+  it.each([1.0001, 1.5, 2, 0, -0.1])("falls back to default for invalid value %s", async (v) => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPressureThreshold: 1.5 }); // > 1
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPressureThreshold).toBe(0.7);
+    writeConfig({ dropperPressureThreshold: v });
+    expect(loadUnifiedConfig(testDir).dropperPressureThreshold).toBe(0.7);
   });
 
   it("accepts 1.0 to disable pressure-driven dropper", async () => {

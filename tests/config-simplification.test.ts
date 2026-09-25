@@ -217,18 +217,24 @@ describe("Old → new key migration", () => {
   it("T7: all new keys directly — no migration runs", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({
-      compaction: "automatic",
-      tailBehavior: "minimal",
+      compaction: "manual",
+      compactionSummaryMode: "append",
+      tailBehavior: "pi-default",
+      compactAfterBy: "tokens",
+      compactAfterTokens: 90_000,
     });
 
     const config = loadUnifiedConfig(testDir);
 
-    expect(config.compaction).toBe("automatic");
-    expect(config.tailBehavior).toBe("minimal");
+    // Non-default new values survive untouched — no legacy fold overrode them.
+    expect(config.compaction).toBe("manual");
+    expect(config.compactionSummaryMode).toBe("append");
+    expect(config.tailBehavior).toBe("pi-default");
+    expect(config.compactAfterBy).toBe("tokens");
+    expect(config.compactAfterTokens).toBe(90_000);
 
     // Existing unrelated keys should be untouched
     expect(config.memory).toBe(true);
-    expect(config.compactAfterTokens).toBeUndefined();
     expect(config.compactAfterPreset).toBe("default");
   });
 

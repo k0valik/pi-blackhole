@@ -286,6 +286,84 @@ describe("compactThresholdTokens — shape + band (plan-09 §3.2)", () => {
     ).toBe(200_000);
   });
 
+  it.each([
+    [1, 131_072, 1_310],
+    [46, 128_000, 58_880],
+    [46, 262_144, 120_586],
+    [46, 1_048_576, 482_344],
+    [100, 200_000, 200_000],
+  ])("percent %s on a %s-token window resolves to %s tokens", (ratio, window, expected) => {
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: ratio }, window),
+    ).toBe(expected);
+  });
+
+  it("a tiny percent on a tiny window still clamps to at least 1 token", () => {
+    expect(compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 0.01 }, 1)).toBe(
+      1,
+    );
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 0.01 }, 1_000),
+    ).toBe(1);
+  });
+
+  it("the band applies on top of the preset shape", () => {
+    // Default curve gives 183,500 on a 256k window; the floor lifts it.
+    expect(
+      compactThresholdTokens(
+        { compactAfterBy: "preset", compactAfterPreset: "default", compactAfterMinTokens: 200_000 },
+        262_144,
+      ),
+    ).toBe(200_000);
+    // Default curve gives 419,430 on a 1M window; the ceiling pins it.
+    expect(
+      compactThresholdTokens(
+        { compactAfterBy: "preset", compactAfterPreset: "default", compactAfterMaxTokens: 180_000 },
+        1_048_576,
+      ),
+    ).toBe(180_000);
+  });
+
+  it("the band applies on top of the reserve shape", () => {
+    // 128,000 − 32,768 = 95,232; the floor and ceiling each override it.
+    expect(
+      compactThresholdTokens(
+        { compactAfterBy: "reserve", compactReserveTokens: 32_768, compactAfterMinTokens: 100_000 },
+        128_000,
+      ),
+    ).toBe(100_000);
+    expect(
+      compactThresholdTokens(
+        { compactAfterBy: "reserve", compactReserveTokens: 32_768, compactAfterMaxTokens: 90_000 },
+        128_000,
+      ),
+    ).toBe(90_000);
+  });
+
+  it("applies a floor-only or ceiling-only band to the legacy chain", () => {
+    expect(
+      compactThresholdTokens(
+        { compactAfterTokens: 40_000, compactAfterMinTokens: 50_000 },
+        200_000,
+      ),
+    ).toBe(50_000);
+    expect(
+      compactThresholdTokens(
+        { compactAfterTokens: 40_000, compactAfterMaxTokens: 30_000 },
+        200_000,
+      ),
+    ).toBe(30_000);
+  });
+
+  it("collapses a floor equal to the ceiling to that value", () => {
+    expect(
+      compactThresholdTokens(
+        { compactAfterTokens: 1_000, compactAfterMinTokens: 50_000, compactAfterMaxTokens: 50_000 },
+        1_000_000,
+      ),
+    ).toBe(50_000);
+  });
+
   it("explicit shape falls through to the legacy chain only when its value is missing", () => {
     // shape "percent" without a ratio → the legacy chain (tokens) still applies.
     expect(

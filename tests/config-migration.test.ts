@@ -141,6 +141,33 @@ describe("threshold-array", () => {
     expect(c.compactAfterRatio).toBe(65);
   });
 
+  it.each([
+    [
+      "tokens beats ratio and reserve",
+      { compactAfterTokens: 180_000, compactAfterRatio: 0.65, compactReserveTokens: 32_768 },
+      "tokens",
+    ],
+    ["ratio beats reserve", { compactAfterRatio: 0.65, compactReserveTokens: 32_768 }, "percent"],
+    [
+      "tokens beats reserve",
+      { compactAfterTokens: 180_000, compactReserveTokens: 32_768 },
+      "tokens",
+    ],
+  ])("old precedence: %s", (_name, raw, shape) => {
+    expect(migrated(raw as Record<string, unknown>).compactAfterBy).toBe(shape);
+  });
+
+  it.each([
+    [0.5, 50],
+    [0.01, 1],
+    [0.65, 65],
+    [1, 100],
+  ])("converts the old fraction %s to %s percent", (fraction, percent) => {
+    const c = migrated({ compactAfterRatio: fraction });
+    expect(c.compactAfterRatio).toBe(percent);
+    expect(c.compactAfterBy).toBe("percent");
+  });
+
   it("sets compactAfterBy=percent for a ratio-only file", () => {
     const c = migrated({ compactAfterRatio: 0.65 });
     expect(c.compactAfterBy).toBe("percent");
@@ -188,6 +215,12 @@ describe("dropper-fraction-merge", () => {
     expect(migrated({ dropperPoolFullnessThreshold: 0.9 }).dropperPressureThreshold).toBe(0.9);
   });
 
+  it("leaves a pressure-only file untouched (no fullness key)", () => {
+    const c = migrated({ dropperPressureThreshold: 0.42 });
+    expect(c.dropperPressureThreshold).toBe(0.42);
+    expect("dropperPoolFullnessThreshold" in c).toBe(false);
+  });
+
   it("aborts on an unrecognized fullness value", () => {
     expect(projectConfig({ dropperPoolFullnessThreshold: 2 }).error).toBeTruthy();
   });
@@ -205,6 +238,12 @@ describe("input-budget-merge", () => {
   it("keeps an explicit reflector value and still drops the dropper key", () => {
     const c = migrated({ dropperInputMaxTokens: 5_000, reflectorInputMaxTokens: 9_000 });
     expect(c.reflectorInputMaxTokens).toBe(9_000);
+    expect("dropperInputMaxTokens" in c).toBe(false);
+  });
+
+  it("leaves a reflector-only file untouched", () => {
+    const c = migrated({ reflectorInputMaxTokens: 42_000 });
+    expect(c.reflectorInputMaxTokens).toBe(42_000);
     expect("dropperInputMaxTokens" in c).toBe(false);
   });
 
@@ -261,6 +300,47 @@ describe("runner — real fixture", () => {
     expect(after._comment).toBe(old._comment);
     expect(after._notes).toEqual(old._notes);
     expect(after.model).toEqual(old.model);
+  });
+});
+
+describe("runner — v2 pre-reorg fixture", () => {
+  const fixturePath = join(process.cwd(), "tests", "fixtures", "example-config-v2.json");
+  const CONSUMED = [
+    "compactionEngine",
+    "observationsPoolTargetTokens",
+    "observerPreambleMaxTokens",
+    "dropperInputMaxTokens",
+    "dropperPoolFullnessThreshold",
+  ] as const;
+
+  it("migrates every fold from the v2 surface in one pass", async () => {
+    writeConfig(GLOBAL, JSON.parse(readFileSync(fixturePath, "utf-8")));
+    const res = await migrateConfigFile(GLOBAL, { backup: async () => {}, warn: () => {} });
+    expect(res.persisted).toBe(true);
+
+    const after = readConfig(GLOBAL);
+    for (const k of CONSUMED) expect(k in after).toBe(false);
+    expect(after.compaction).toBe("automatic"); // compactionEngine:blackhole folded
+    expect(after.compactAfterBy).toBe("percent"); // 81000 residue dropped, ratio wins
+    expect(after.compactAfterRatio).toBe(65); // fraction converted
+    expect("compactAfterTokens" in after).toBe(false); // 81000 residue
+    expect(after.dropperPressureThreshold).toBe(0.6); // max(0.4, 0.6)
+    expect(after.reflectorInputMaxTokens).toBe(70_000); // dropper budget merged
+    expect(after.configVersion).toBe(CONFIG_VERSION);
+    expect(after.unknownHandKey).toEqual({ keep: "me" });
+  });
+
+  it("the in-memory loader agrees with the on-disk rewrite", async () => {
+    const raw = JSON.parse(readFileSync(fixturePath, "utf-8")) as Record<string, unknown>;
+    const inMemory = migrated(raw);
+    writeConfig(GLOBAL, raw);
+    await migrateConfigFile(GLOBAL, { backup: async () => {}, warn: () => {} });
+    const onDisk = readConfig(GLOBAL);
+    // configVersion is the only key the on-disk path adds.
+    expect({ ...onDisk, configVersion: undefined }).toEqual({
+      ...inMemory,
+      configVersion: undefined,
+    });
   });
 });
 

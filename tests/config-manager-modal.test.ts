@@ -319,12 +319,12 @@ describe("preset-curve select + hand-edited preset definitions (window curve)", 
 
     // …and saves an unrelated field (ratio). save() re-reads the file, so the
     // hand edit must survive; the stale v1 snapshot must NOT be written back.
-    const modalCfg = { ...DEFAULTS, compactAfterRatio: 0.5 } as Record<string, unknown>;
+    const modalCfg = { ...DEFAULTS, compactAfterRatio: 50 } as Record<string, unknown>;
     config.save(modalCfg as never, "global", undefined, cfgDir);
 
     const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     expect(written.compactAfterPresets).toEqual(v2);
-    expect(written.compactAfterRatio).toBe(0.5);
+    expect(written.compactAfterRatio).toBe(50);
   });
 });
 
@@ -351,8 +351,14 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
   });
 
   it("drops out-of-range ratios", async () => {
-    for (const ratio of [0, -0.5, 101, Number.NaN]) {
+    for (const ratio of [0, -0.5, -1, 100.0001, 101, 1e9, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBeUndefined();
+    }
+  });
+
+  it("keeps percent boundary values (0, 100]", async () => {
+    for (const ratio of [0.01, 1, 46, 99.9, 100]) {
+      expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBe(ratio);
     }
   });
 
@@ -366,11 +372,11 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
   it("keeps explicitly set valid knobs", async () => {
     const out = await validate({
       compactAfterTokens: 180_000,
-      compactAfterRatio: 0.65,
+      compactAfterRatio: 65,
       compactReserveTokens: 32_768,
     });
     expect(out.compactAfterTokens).toBe(180_000);
-    expect(out.compactAfterRatio).toBe(0.65);
+    expect(out.compactAfterRatio).toBe(65);
     expect(out.compactReserveTokens).toBe(32_768);
   });
 

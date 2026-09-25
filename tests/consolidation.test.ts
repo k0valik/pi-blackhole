@@ -1554,6 +1554,41 @@ describe("observer preamble cap", () => {
     expect(input.priorReflections.length).toBeGreaterThan(0);
   });
 
+  test("the 30% preamble budget scales with observerChunkMaxTokens", async () => {
+    function buildFixture(chunkTokens: number): PipelineFixture {
+      const fixture = makePipelineFixture({ observeAfterTokens: 100 });
+      fixture.runtime.config.compaction = "auto";
+      fixture.runtime.config.observerChunkMaxTokens = chunkTokens;
+      const observations = Array.from({ length: 20 }, (_, i) => ({
+        id: Math.abs(i + 1)
+          .toString(16)
+          .padStart(12, "0"),
+        content: `Observation ${i} ` + "x".repeat(200),
+        timestamp: "2026-05-02 10:00",
+        relevance: "medium" as const,
+        sourceEntryIds: ["src-1"],
+        tokenCount: 0,
+      }));
+      fixture.entries.push(rawMessage("src-1", "Source entry " + "y".repeat(100_000)));
+      fixture.entries.push(
+        observationsRecordedEntry("obs-marker", { observations, coversUpToId: "src-1" }),
+      );
+      fixture.entries.push(rawMessage("src-2", "More source " + "z".repeat(100_000)));
+      return fixture;
+    }
+
+    await buildFixture(1_000).run(); // 300-token budget
+    const small = observerChunkArg(0).priorObservations.length;
+    await buildFixture(4_000).run(); // 1,200-token budget
+    const large = observerChunkArg(1).priorObservations.length;
+
+    // A larger reading batch must keep more of the same prior notes; a fixed
+    // cap (not derived from observerChunkMaxTokens) would flatten this.
+    expect(small).toBeGreaterThan(0);
+    expect(small).toBeLessThan(large);
+    expect(large).toBeLessThanOrEqual(20);
+  });
+
   test("skips observer when chunk fits but full prompt with preamble exceeds context window", async () => {
     const fixture = makePipelineFixture({ observeAfterTokens: 100 });
     fixture.runtime.config.compaction = "auto";
@@ -1624,17 +1659,23 @@ describe("dropper pressure valve", () => {
     return fixture;
   }
 
-  test("the pressure threshold blocks the dropper when the pool is below it", async () => {
-    // Pool is 1,000 / 2,000 tokens (50%): under the configured 60% pressure
-    // threshold, so the no-new-data pressure path must not fire.
-    const fixture = pressureFixture({ poolMaxTokens: 2_000 });
-    fixture.runtime.config.dropperPressureThreshold = 0.6;
-    agents.runDropper.mockResolvedValue([]);
+  it.each([
+    ["0.3 (below the 50% pool)", 0.3, true],
+    ["0.5 (at the 50% pool)", 0.5, true],
+    ["0.6 (above the 50% pool)", 0.6, false],
+    ["1.0 (pressure disabled)", 1.0, false],
+  ])(
+    "runs the pruner only when the pool clears the pressure line (%s)",
+    async (_name, threshold, expected) => {
+      const fixture = pressureFixture({ poolMaxTokens: 2_000 });
+      fixture.runtime.config.dropperPressureThreshold = threshold;
+      agents.runDropper.mockResolvedValue([]);
 
-    await fixture.run();
+      await fixture.run();
 
-    expect(agents.runDropper).not.toHaveBeenCalled();
-  });
+      expect(agents.runDropper.mock.calls.length > 0).toBe(expected);
+    },
+  );
 
   test("the due-check applies the same pressure threshold as the stage", async () => {
     const fixture = pressureFixture({ poolMaxTokens: 2_000 });
