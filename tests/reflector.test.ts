@@ -359,6 +359,38 @@ describe("V3 reflector agent", () => {
     expect(description).toContain("Incomplete or rejected work stays open.");
   });
 
+  it("states that a reflection batch may not be empty", async () => {
+    let description = "";
+    const loop = fakeAgentLoop((_prompts, context) => {
+      description = context.tools[0].description;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    // The observer's empty close does not exist here (minItems: 1), so the
+    // description has to point the model at the plain-text path instead.
+    expect(description).toContain(
+      "May not be empty: when nothing is stable enough, do not call the tool and reply briefly instead.",
+    );
+  });
+
+  it("rejects an empty complete batch instead of accepting the observer's close", async () => {
+    let tool: any;
+    const loop = fakeAgentLoop((_prompts, context) => {
+      tool = context.tools[0];
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(() =>
+      validateToolArguments(tool, {
+        id: "call-1",
+        name: "record_reflections",
+        arguments: { reflections: [], complete: true },
+      }),
+    ).toThrow();
+  });
+
   it("terminates after a complete valid reflection batch", async () => {
     let toolResult: CapturedToolResult | undefined;
     const loop = fakeAgentLoop(async (_prompts, context) => {

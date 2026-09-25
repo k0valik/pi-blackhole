@@ -139,7 +139,11 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
     description:
       "Record a batch of new durable reflections with supporting observation ids. " +
       "complete=true ends a fully valid reflection review; set complete=false when more reflections or corrections remain. " +
-      "Incomplete or rejected work stays open.",
+      "Incomplete or rejected work stays open. " +
+      // The reflector's batch carries minItems: 1, so unlike the observer it has
+      // no empty close — say so, or a model mirroring the observer's protocol
+      // emits a batch the host rejects and burns turns on it.
+      "May not be empty: when nothing is stable enough, do not call the tool and reply briefly instead.",
     parameters: RecordReflectionsSchema,
     execute: async (_id, params: RecordReflectionsArgs) => {
       let added = 0;

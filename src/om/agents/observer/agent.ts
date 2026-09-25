@@ -290,7 +290,7 @@ ${joinOrEmpty(priorReflections)}
 CURRENT OBSERVATIONS:
 ${joinOrEmpty(priorObservations)}
 
-Compress the following new conversation chunk into observations by calling record_observations one or more times. Use complete=false for partial batches or corrections, and use complete=true only on the final valid batch after the chunk is fully covered. If no observations are warranted, do not call the tool and reply with a short plain-text confirmation. Do not restate facts already present in current reflections or current observations.
+Compress the following new conversation chunk into observations by calling record_observations one or more times. Use complete=false for partial batches or corrections, and use complete=true only on the final valid batch after the chunk is fully covered. If no observations are warranted, close the run with one record_observations call carrying an empty observations array and complete=true. Do not restate facts already present in current reflections or current observations.
 
 NEW CONVERSATION CHUNK:
 ${conversation}`;

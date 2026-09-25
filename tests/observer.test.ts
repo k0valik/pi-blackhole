@@ -125,6 +125,12 @@ describe("runObserver", () => {
     expect(systemPrompt).not.toContain(
       "STOP calling the tool and reply with a brief plain-text confirmation",
     );
+    // The empty complete batch is the only sanctioned nothing-new close, so the
+    // prompt must not leave the model a quieter-and-louder second option.
+    expect(systemPrompt).toContain(
+      "close the run with a single record_observations call carrying an empty observations array and complete=true",
+    );
+    expect(systemPrompt).not.toContain("simply do not call the tool and end with a plain-text");
     expect(systemPrompt).toContain("The dropper will drop these first");
     expect(systemPrompt).toContain("highest-resistance, load-bearing observations");
     expect(systemPrompt).toContain("Grounding rules");
@@ -162,10 +168,13 @@ describe("runObserver", () => {
       "Use complete=false for partial batches or corrections, and use complete=true only on the final valid batch after the chunk is fully covered.",
     );
     expect(userText).toContain(
-      "If no observations are warranted, do not call the tool and reply with a short plain-text confirmation.",
+      "If no observations are warranted, close the run with one record_observations call carrying an empty observations array and complete=true.",
     );
     expect(userText).not.toContain(
       "reply with a short plain-text confirmation once the chunk is fully covered",
+    );
+    expect(userText).not.toContain(
+      "do not call the tool and reply with a short plain-text confirmation",
     );
   });
 
@@ -436,6 +445,25 @@ describe("runObserver", () => {
             },
           ],
         },
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts the empty complete close that both observer prompts instruct", async () => {
+    let tool: any;
+    const loop = fakeAgentLoop((_prompts, context) => {
+      tool = context.tools[0];
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    // The prompts tell the model to close a nothing-new chunk this way, so the
+    // host schema has to accept it — a rejected batch would cost the whole run.
+    expect(() =>
+      validateToolArguments(tool, {
+        id: "call-1",
+        name: "record_observations",
+        arguments: { observations: [], complete: true },
       }),
     ).not.toThrow();
   });
