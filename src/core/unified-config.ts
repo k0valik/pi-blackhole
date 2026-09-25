@@ -207,18 +207,16 @@ export interface UnifiedConfig {
   /** Treat every compaction as a full-fold boundary so early reflections/drops
    *  survive the first compaction in a fresh session. Default true. */
   fullFoldAlways: boolean;
-  /** Max prompt tokens for reflector model input (rolling window cap). */
+  /** Max prompt tokens for a memory-snapshot job (reflector or pruner), a
+   *  rolling window cap. plan-09 §3.5 merged the former
+   *  dropperInputMaxTokens into this one — both read the same memory pool. */
   reflectorInputMaxTokens: number;
-  /** Max prompt tokens for dropper model input (rolling window cap). */
-  dropperInputMaxTokens: number;
   /** Fraction of observationsPoolMaxTokens that triggers pressure-driven
    *  dropping without new data. A value of 1 disables pressure.
-   *  Default 0.70 (70%). Must be in range (0, 1]. */
+   *  Default 0.70 (70%). Must be in range (0, 1]. The former
+   *  dropperPoolFullnessThreshold was merged into this (plan-09 §3.3); the
+   *  new-data path uses the constant floor DROPPER_NEWDATA_FLOOR (0.10). */
   dropperPressureThreshold: number;
-  /** Minimum observation-pool fullness (fraction of observationsPoolMaxTokens)
-   *  before the dropper may run. Prevents churn on a nearly empty pool.
-   *  Default 0.10 (10%). Must be in range (0, 1]. */
-  dropperPoolFullnessThreshold: number;
   /** Max source entries tokens sent to observer per chunk. */
   observerChunkMaxTokens: number;
   /** Shared turn cap for background memory agents. */
@@ -312,9 +310,7 @@ export const DEFAULTS: UnifiedConfig = {
   reflectionsPoolMaxTokens: 8_000,
   fullFoldAlways: true,
   reflectorInputMaxTokens: 80_000,
-  dropperInputMaxTokens: 80_000,
   dropperPressureThreshold: 0.7,
-  dropperPoolFullnessThreshold: 0.1,
   observerChunkMaxTokens: 40_000,
   agentMaxTurns: 16,
   // Optional knobs must still be DEFAULTS members (as undefined) or
@@ -648,7 +644,6 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "observationsPoolMaxTokens",
     "reflectionsPoolMaxTokens",
     "reflectorInputMaxTokens",
-    "dropperInputMaxTokens",
     "observerChunkMaxTokens",
     "agentMaxTurns",
     "providerIdleTimeoutMs",
@@ -662,15 +657,6 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     raw.dropperPressureThreshold <= 1
   ) {
     c.dropperPressureThreshold = raw.dropperPressureThreshold;
-  }
-  // dropperPoolFullnessThreshold: fractional, must be in (0, 1]
-  if (
-    typeof raw.dropperPoolFullnessThreshold === "number" &&
-    Number.isFinite(raw.dropperPoolFullnessThreshold) &&
-    raw.dropperPoolFullnessThreshold > 0 &&
-    raw.dropperPoolFullnessThreshold <= 1
-  ) {
-    c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
   }
   for (const k of THRESHOLD_BLUNT_KEYS) {
     if (raw[k] !== undefined) (c as Record<string, unknown>)[k] = raw[k];

@@ -423,32 +423,12 @@ describe("dropperPressureThreshold", () => {
   });
 });
 
-describe("dropperPoolFullnessThreshold", () => {
-  it("defaults to 0.10 when no config file exists", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(0.1);
-  });
-
-  it("can be overridden via config file", async () => {
+describe("dropperPoolFullnessThreshold (removed in plan-09 §3.3)", () => {
+  it("is ignored now that the two dropper fractions are merged", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ dropperPoolFullnessThreshold: 0.05 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(0.05);
-  });
-
-  it("falls back to default for invalid values", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPoolFullnessThreshold: 1.5 }); // > 1
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(0.1);
-  });
-
-  it("accepts 1.0 to disable the fullness gate", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPoolFullnessThreshold: 1.0 });
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(1.0);
+    expect((config as Record<string, unknown>).dropperPoolFullnessThreshold).toBeUndefined();
   });
 });
 

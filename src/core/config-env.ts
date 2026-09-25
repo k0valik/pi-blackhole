@@ -168,7 +168,6 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
     },
   },
   reflectorInputMaxTokens: "PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS",
-  dropperInputMaxTokens: "PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS",
   observerChunkMaxTokens: "PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS",
   agentMaxTurns: "PI_BLACKHOLE_AGENT_MAX_TURNS",
   // Non-negative integer (0 = disabled, unset = inherit pi default)
@@ -191,14 +190,6 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   // Float in (0, 1]
   dropperPressureThreshold: {
     var: "PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD",
-    parse: (raw: string) => {
-      const n = Number.parseFloat(raw);
-      return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
-    },
-  },
-  // Float in (0, 1]
-  dropperPoolFullnessThreshold: {
-    var: "PI_BLACKHOLE_DROPPER_POOL_FULLNESS_THRESHOLD",
     parse: (raw: string) => {
       const n = Number.parseFloat(raw);
       return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;

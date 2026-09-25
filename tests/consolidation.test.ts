@@ -204,18 +204,17 @@ describe("anyStageDue with cursors", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
 
-  test("dropper due when pool fullness passes a lowered fullness threshold", async () => {
+  test("dropper due via the new-data path once the pool clears the constant floor", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const { anyStageDue } = await import("../src/om/consolidation.js");
     const runtime = new Runtime();
     runtime.config.observeAfterTokens = 100000;
     runtime.config.reflectAfterTokens = 5;
-    runtime.config.observationsPoolMaxTokens = 100_000;
-    runtime.config.dropperPoolFullnessThreshold = 0.01; // 1%
+    runtime.config.observationsPoolMaxTokens = 10_000;
     runtime.config.dropperPressureThreshold = 0.7;
     runtime.config.reflectorInputMaxTokens = 10_000; // pressure needs 7,000 — pool only has 1,400
     // No dropper cursor → token condition is rawTokensSinceDropCoverage ≥ 5 (msg-1 ≈ 50 tokens).
-    // Pool: 2 obs × 700 = 1,400 / 100,000 = 1.4% ≥ 1% → dropper due.
+    // Pool: 2 obs × 700 = 1,400 / 10,000 = 14% ≥ the constant 10% floor → dropper due.
     // Reflector is silenced by advancing its cursor past all entries.
     const entries = [
       {
@@ -257,14 +256,13 @@ describe("anyStageDue with cursors", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(true);
   });
 
-  test("dropper NOT due when pool fullness is below the configured threshold", async () => {
+  test("dropper NOT due when pool fullness is below the constant floor", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const { anyStageDue } = await import("../src/om/consolidation.js");
     const runtime = new Runtime();
     runtime.config.observeAfterTokens = 100000;
     runtime.config.reflectAfterTokens = 5;
     runtime.config.observationsPoolMaxTokens = 100_000;
-    runtime.config.dropperPoolFullnessThreshold = 0.05; // 5% — pool at 1.4%
     runtime.config.dropperPressureThreshold = 0.7;
     runtime.config.reflectorInputMaxTokens = 10_000; // pressure needs 7,000 — pool only has 1,400
     const entries = [
@@ -1621,18 +1619,16 @@ describe("dropper pressure valve", () => {
     });
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
     fixture.runtime.config.observationsPoolMaxTokens = options.poolMaxTokens ?? 1_000;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
     return fixture;
   }
 
-  test("the dropper stage honors the dropperPoolFullness floor over a lower pressure threshold", async () => {
-    // Pool is 1,000 / 2,000 tokens (50%): well over the 10% pressure
-    // threshold, but under the configured 60% fullness floor.
+  test("the pressure threshold blocks the dropper when the pool is below it", async () => {
+    // Pool is 1,000 / 2,000 tokens (50%): under the configured 60% pressure
+    // threshold, so the no-new-data pressure path must not fire.
     const fixture = pressureFixture({ poolMaxTokens: 2_000 });
-    fixture.runtime.config.dropperPressureThreshold = 0.1;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.6;
+    fixture.runtime.config.dropperPressureThreshold = 0.6;
     agents.runDropper.mockResolvedValue([]);
 
     await fixture.run();
@@ -1640,14 +1636,13 @@ describe("dropper pressure valve", () => {
     expect(agents.runDropper).not.toHaveBeenCalled();
   });
 
-  test("the due-check applies the same fullness floor as the stage", async () => {
+  test("the due-check applies the same pressure threshold as the stage", async () => {
     const fixture = pressureFixture({ poolMaxTokens: 2_000 });
-    fixture.runtime.config.dropperPressureThreshold = 0.1;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.6;
+    fixture.runtime.config.dropperPressureThreshold = 0.6;
 
     expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(false);
 
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.4;
+    fixture.runtime.config.dropperPressureThreshold = 0.4;
     expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(true);
   });
 
@@ -1680,7 +1675,7 @@ describe("dropper pressure valve", () => {
         }),
       ],
     });
-    fixture.runtime.config.dropperInputMaxTokens = 1_000;
+    fixture.runtime.config.reflectorInputMaxTokens = 1_000;
     fixture.runtime.config.dropperModel = { provider: "test", id: "primary", cooldownHours: 0 };
     fixture.runtime.config.dropperFallbackModels = [{ provider: "test", id: "fallback" }];
     let resolutionCount = 0;
@@ -1769,7 +1764,6 @@ describe("dropper pressure valve", () => {
     fixture.runtime.config.compaction = "manual";
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
     fixture.runtime.config.observationsPoolMaxTokens = 1_000;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     savePendingObservation("cursor-session", {
       coversUpToId: "raw-1",
@@ -1853,7 +1847,6 @@ describe("showWorkerNotifications", () => {
     });
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
     fixture.runtime.config.observationsPoolMaxTokens = 1_000;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
     return fixture;

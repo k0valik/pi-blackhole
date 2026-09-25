@@ -178,25 +178,28 @@ function pendingObservationsCreatedAfter(
 }
 
 /**
+ * Minimum pool fullness before the dropper may run on the new-data path.
+ * A constant, not a knob: plan-09 §3.3 merged the former
+ * `dropperPoolFullnessThreshold` into `dropperPressureThreshold`, which now
+ * only drives the no-new-data pressure path. 0.10 matches the old default.
+ */
+export const DROPPER_NEWDATA_FLOOR = 0.1;
+
+/**
  * Pressure gate for the dropper: the pool is full enough that it should be
  * pruned even though no new observation or reflection data has arrived.
  *
  * The basis is `observationsPoolMaxTokens` — the same maximum the footer
  * P gauge and `/blackhole-memory` divide by — not `reflectorInputMaxTokens`,
- * which only sizes reflector/dropper prompts. Both configured fractions have to
- * clear, so the effective trigger is
- * `max(dropperPressureThreshold, dropperPoolFullnessThreshold) × pool max`.
- * A threshold of `1.0` (the documented "off" value), or a non-positive pool
- * max, disables pressure entirely; the ordinary new-data trigger is
- * unaffected.
+ * which only sizes reflector/dropper prompts. A threshold of `1.0` (the
+ * documented "off" value), or a non-positive pool max, disables pressure
+ * entirely; the ordinary new-data trigger (gated by DROPPER_NEWDATA_FLOOR)
+ * is unaffected.
  */
 function dropperPressureReached(config: Runtime["config"], poolTokens: number): boolean {
   const poolMax = config.observationsPoolMaxTokens;
   if (poolMax <= 0 || config.dropperPressureThreshold >= 1) return false;
-  return (
-    poolTokens / poolMax >= (config.dropperPoolFullnessThreshold ?? 0.1) &&
-    poolTokens >= config.dropperPressureThreshold * poolMax
-  );
+  return poolTokens >= config.dropperPressureThreshold * poolMax;
 }
 
 /**
@@ -305,8 +308,8 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
               ? poolTokens / config.observationsPoolMaxTokens
               : 0;
 
-          // Must have at least dropperPoolFullnessThreshold fullness to consider dropper
-          if (fullnessVsPool < (config.dropperPoolFullnessThreshold ?? 0.1)) return false;
+          // Must have at least DROPPER_NEWDATA_FLOOR fullness to consider dropper
+          if (fullnessVsPool < DROPPER_NEWDATA_FLOOR) return false;
 
           // Pressure check: pool ≥ max(pressure, fullness) fraction of
           // observationsPoolMaxTokens — and not for a pool the dropper has
@@ -1368,11 +1371,12 @@ async function runDropperStage(
     const dropperNewObsTokens = Math.ceil(
       newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4,
     );
-    const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
+    const dropperSummaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.2);
     // Deliberately uncapped: the prompt carries every candidate observation, so
     // this has to be the size that will actually be sent — capping it at
-    // dropperInputMaxTokens would hide an oversized pressure prompt from the
-    // context-window check below and hand it to a model that cannot hold it.
+    // reflectorInputMaxTokens (the shared memory-read budget) would hide an
+    // oversized pressure prompt from the context-window check below and hand it
+    // to a model that cannot hold it.
     const dropperInputTokens = dropperNewObsTokens + dropperSummaryBudget;
     // Adjust accumulated for pending coverage in manual mode
     let effectiveDropTokens = dropTokens;
@@ -1407,7 +1411,7 @@ async function runDropperStage(
         : folded.activeObservations;
       const existingObservationsSummary = buildExistingObservationsSummary(
         sourceObsForDropper.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
-        Math.floor(runtime.config.dropperInputMaxTokens * 0.2),
+        Math.floor(runtime.config.reflectorInputMaxTokens * 0.2),
       );
       // In manual mode, merge accumulated reflection batches with
       // branch data (preserving pre-switch markers), matching the
@@ -1466,7 +1470,7 @@ async function runDropperStage(
             observations: newObservations,
             existingObservationsSummary: existingObservationsSummary || undefined,
             budgetTokens: runtime.config.observationsPoolMaxTokens,
-            skipFullness: runtime.config.dropperPoolFullnessThreshold,
+            skipFullness: DROPPER_NEWDATA_FLOOR,
             maxTurns: runtime.config.agentMaxTurns,
             thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
             providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,

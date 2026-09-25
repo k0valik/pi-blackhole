@@ -33,6 +33,7 @@ import {
   type Projection,
 } from "../om/ledger/index.js";
 import { readPendingState } from "../om/pending.js";
+import { DROPPER_NEWDATA_FLOOR } from "../om/consolidation.js";
 import {
   isFixedTokenThreshold,
   isManualMode,
@@ -54,13 +55,9 @@ function pct(current: number, total: number): number {
   return total > 0 ? Math.round((current / total) * 100) : 0;
 }
 
-function pressureHint(config: {
-  dropperPressureThreshold: number;
-  dropperPoolFullnessThreshold: number;
-}): string {
+function pressureHint(config: { dropperPressureThreshold: number }): string {
   if (config.dropperPressureThreshold >= 1) return "pressure off";
-  const threshold = Math.max(config.dropperPressureThreshold, config.dropperPoolFullnessThreshold);
-  return `pressure at ≥${Math.round(threshold * 100)}% pool`;
+  return `pressure at ≥${Math.round(config.dropperPressureThreshold * 100)}% pool`;
 }
 
 /**
@@ -263,7 +260,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         "Transcript accumulated since last run. Triggers when exceeding threshold.",
         `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
         `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
-        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
+        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(DROPPER_NEWDATA_FLOOR * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"

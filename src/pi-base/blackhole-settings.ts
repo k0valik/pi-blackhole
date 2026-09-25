@@ -290,19 +290,10 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "reflectorInputMaxTokens",
       type: "number",
-      label: "Reflector input max",
-      description: "Max prompt tokens for reflector model input (rolling window cap)",
+      label: "Memory read per job",
+      description:
+        "Largest memory snapshot a memory-snapshot job (insight-builder or pruner) reads at once",
       value: cfg.reflectorInputMaxTokens,
-      min: 1_000,
-      max: 500_000,
-      step: 1_000,
-    },
-    {
-      key: "dropperInputMaxTokens",
-      type: "number",
-      label: "Dropper input max",
-      description: "Max prompt tokens for dropper model input (rolling window cap)",
-      value: cfg.dropperInputMaxTokens,
       min: 1_000,
       max: 500_000,
       step: 1_000,
@@ -320,21 +311,10 @@ export const config = new ConfigManager<UnifiedConfig>({
     {
       key: "dropperPressureThreshold",
       type: "number",
-      label: "Dropper pressure threshold",
+      label: "Prune memory when",
       description:
-        "Fraction of observationsPoolMaxTokens that triggers pressure-driven dropper (1 disables)",
+        "Percentage full that triggers pruning of low-value notes even without new ones (1 disables pressure)",
       value: cfg.dropperPressureThreshold,
-      min: 0.01,
-      max: 1,
-      step: 0.01,
-    },
-    {
-      key: "dropperPoolFullnessThreshold",
-      type: "number",
-      label: "Dropper pool fullness threshold",
-      description:
-        "Min observation-pool fullness (fraction of pool max) before the dropper runs (0-1, default 0.10)",
-      value: cfg.dropperPoolFullnessThreshold,
       min: 0.01,
       max: 1,
       step: 0.01,
@@ -555,7 +535,6 @@ export const config = new ConfigManager<UnifiedConfig>({
       "observationsPoolMaxTokens",
       "reflectionsPoolMaxTokens",
       "reflectorInputMaxTokens",
-      "dropperInputMaxTokens",
       "observerChunkMaxTokens",
       "agentMaxTurns",
     ];
@@ -581,12 +560,6 @@ export const config = new ConfigManager<UnifiedConfig>({
     const dpt = merged.dropperPressureThreshold;
     if (typeof dpt !== "number" || !Number.isFinite(dpt) || dpt <= 0 || dpt > 1) {
       merged.dropperPressureThreshold = DEFAULTS.dropperPressureThreshold;
-    }
-
-    // dropperPoolFullnessThreshold — must be in (0, 1]
-    const dpf = merged.dropperPoolFullnessThreshold;
-    if (typeof dpf !== "number" || !Number.isFinite(dpf) || dpf <= 0 || dpf > 1) {
-      merged.dropperPoolFullnessThreshold = DEFAULTS.dropperPoolFullnessThreshold;
     }
 
     return merged;

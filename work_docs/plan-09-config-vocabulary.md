@@ -276,13 +276,19 @@ that; acceptable per the back-compat posture. Keep `noteReadingBatch` separate
 because it caps a transcript prompt, not a memory prompt. **Merge confirmed
 (§7.3).**
 
-### 3.6 Split the pruner cadence from the insight cadence (architecture)
+### 3.6 Split the pruner cadence from the insight cadence (architecture) — DEFERRED
 
 `reflectAfterTokens` is both the insight-build trigger and the pruner's
 new-data threshold (plan-08 §1.4). Tuning insight frequency silently retunes
-pruning. After §3.3, propose the pruner be governed solely by `pruneWhenFull`
+pruning. After §3.3, the pruner could be governed solely by `pruneWhenFull`
 plus new-data availability, and stop overloading `reflectAfterTokens`. This is
 the kind of "centralize in a helper" change the root-cause rule in §6 asks for.
+
+**Deferred (owner: behavior-preservation).** Removing the `reflectAfterTokens`
+gate from the pruner's new-data path is a real cadence change, not a merge of
+redundant knobs, and the dropper-merge requirement was "behavior should be
+unchanged." It needs its own decision + observation window; it is not folded
+into the §3.3 migration. The one-knob merge (§3.3) ships without it.
 
 ### 3.7 Clarify `observationsPoolMaxTokens`'s three jobs (surface, not merge)
 

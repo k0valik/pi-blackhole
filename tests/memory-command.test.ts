@@ -53,7 +53,6 @@ function createMockEnvironment() {
       reflectAfterTokens: 25_000,
       compactAfterTokens: 81_000,
       observationsPoolMaxTokens: 20_000,
-      dropperPoolFullnessThreshold: 0.1,
       dropperPressureThreshold: 0.7,
       observerChunkMaxTokens: 40_000,
       passive: false,

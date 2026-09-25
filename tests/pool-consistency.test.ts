@@ -78,7 +78,6 @@ function baseConfig(overrides: Record<string, unknown> = {}) {
     compactAfterTokens: 81_000,
     observationsPoolMaxTokens: POOL_MAX,
     dropperPressureThreshold: 1,
-    dropperPoolFullnessThreshold: 0.4,
     reflectorInputMaxTokens: 1_000_000,
     observerChunkMaxTokens: 40_000,
     passive: false,
@@ -314,12 +313,14 @@ describe("trigger / display pool agreement", () => {
     // Pool is 1,400 / 2,800 = 50%.
     expect(observationPoolTokens(entries).tokens).toBe(1_400);
 
-    const below = triggerRuntime({ dropperPoolFullnessThreshold: 0.49 });
+    const below = triggerRuntime({ dropperPressureThreshold: 0.49 });
     below.advanceCursor("reflector", tip, "skipped");
+    below.advanceCursor("dropper", tip, "skipped");
     expect(anyStageDue(entries, below, undefined)).toBe(true);
 
-    const above = triggerRuntime({ dropperPoolFullnessThreshold: 0.51 });
+    const above = triggerRuntime({ dropperPressureThreshold: 0.51 });
     above.advanceCursor("reflector", tip, "skipped");
+    above.advanceCursor("dropper", tip, "skipped");
     expect(anyStageDue(entries, above, undefined)).toBe(false);
 
     const message = await memoryStatus(entries, baseConfig());
@@ -344,7 +345,7 @@ describe("trigger / display pool agreement", () => {
     expect(observationPoolTokens(entries).tokens).toBe(0);
     expect(observationPoolTokens(entries, pending).tokens).toBe(1_400);
 
-    const config = baseConfig({ compaction: "manual", dropperPoolFullnessThreshold: 0.49 });
+    const config = baseConfig({ compaction: "manual", dropperPressureThreshold: 0.49 });
     const runtime = triggerRuntime(config);
     runtime.advanceCursor("reflector", "raw-1", "skipped");
     expect(anyStageDue(entries, runtime, pending)).toBe(true);
