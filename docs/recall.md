@@ -37,6 +37,7 @@ Every recall response is capped at `recallResponseMaxChars` (default 48,000 char
 
 - **Search snippet lines** are capped (~1000 chars) with the match kept visible, so one huge tool-result line cannot flood a page.
 - **Expanded entries** share the budget (`expandAllocation()`); each carries a continuation marker to `#N:text:full` / `#N:path:full` for the full payload.
+- **Drill-down bodies** (`#N:path`, `#N:text`) are capped to the same total budget by `capDrillDownText()`. The cut only ever lands on a line boundary, and the footer names the first line it did not show (`continue at #42:src/auth.ts:412:30`), so following the hint neither skips nor re-reads content. Degenerate cases say so plainly instead of inventing a resume point: a line too big for the budget is named and paged past (`the line at offset 42 does not fit the budget; continue at ...`), nothing left to page points at a regex query, and a header so large that no line fits asks for a single line.
 - **Related observation/reflection bodies** are capped (~1200 chars); full content stays reachable via the 12-hex memory id.
 - **Total budget** (`capRecallBlocks()`) is enforced entry-aware: trailing entries drop before the header, and a footer names the omitted count and continuation affordance (`page:N` / `expand:[N]` / `#N:text` / `#N:path`).
 
