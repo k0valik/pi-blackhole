@@ -9,6 +9,7 @@
  * the runtime ignored the declarative map and only applied the passive
  * trio + compaction/compaction-engine vars.)
  */
+import type { CacheRetention } from "@earendil-works/pi-ai";
 import { readBooleanEnv, readPositiveIntEnv } from "../pi-base/config.js";
 
 export interface EnvParser {
@@ -16,6 +17,28 @@ export interface EnvParser {
   var: string;
   /** Custom parse function (receives raw string, returns parsed value) */
   parse: (raw: string, current: unknown) => unknown;
+}
+
+/**
+ * Supported `SimpleStreamOptions.cacheRetention` values (pi-ai). Lives here so
+ * the env parser, the config loader, and the settings modal all derive from one
+ * list: `unified-config.ts` imports this module, so it cannot own the constant
+ * without creating an import cycle. `unified-config.ts` re-exports both.
+ */
+export const CACHE_RETENTION_VALUES: readonly CacheRetention[] = ["none", "short", "long"];
+
+/**
+ * Canonicalize a raw retention value, or `undefined` when it is not one.
+ * Case and surrounding whitespace are normalized so all three entry points
+ * (file, env var, settings modal) resolve `"LONG"` the same way instead of the
+ * env var accepting it while the file silently drops it.
+ */
+export function normalizeCacheRetention(v: unknown): CacheRetention | undefined {
+  if (typeof v !== "string") return undefined;
+  const canonical = v.trim().toLowerCase();
+  return (CACHE_RETENTION_VALUES as readonly string[]).includes(canonical)
+    ? (canonical as CacheRetention)
+    : undefined;
 }
 
 /**
@@ -229,5 +252,11 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
         ? (trimmed as "resume" | "pause" | "off")
         : undefined;
     },
+  },
+  // Prompt-cache retention preference for the memory workers; an unsupported
+  // value leaves the file value (or pi's effective setting) in place.
+  cacheRetention: {
+    var: "PI_BLACKHOLE_CACHE_RETENTION",
+    parse: (raw: string) => normalizeCacheRetention(raw),
   },
 };

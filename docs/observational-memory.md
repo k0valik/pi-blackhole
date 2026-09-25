@@ -42,17 +42,19 @@ Each worker runs an `agentLoop` driven by a system prompt and a single record/dr
 
 All three workers share the same loop configuration: `toolExecution: "sequential"`, `thinkingLevel: "low"` (default), `maxTurns` capped by the config's `agentMaxTurns` (default 16) through `createTurnCap` in [[src/om/agents/turn-cap.ts]], which emits both Pi's `shouldStopAfterTurn` (0.85/0.86) and `finishTurn` (0.87+) hooks so either generation enforces the same budget, and `maxTokens` bounded by `boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS)` where [[src/om/model-budget.ts]] `AGENT_LOOP_MAX_TOKENS = 32_000`. Record identity is a content hash (`hashId` in [[src/om/ids.ts]]), so identical content is deduplicated within and across calls.
 
+Each worker also forwards the consolidation `sessionId` (keeping provider prompt caching scoped to one pipeline run) and the optional [`cacheRetention`](CONFIG.md) preference when configured. Observer and reflector loops end early through a `complete: true` flag on their final tool call: when that batch is flagged complete and rejected nothing, the host sends `terminate`, so a finished run stops instead of spending the remaining turn budget. The gate is per batch, not per run — an incomplete batch, or a complete batch that rejected entries, lets the loop continue so the model can correct and close on a later batch.
+
 ### Observer contract
 
 Compresses a chunk of recent conversation into timestamped, rated observations. System prompt `OBSERVER_SYSTEM` in [[src/om/agents/observer/prompts.ts]]; agent `runObserver` in [[src/om/agents/observer/agent.ts]].
 
-**Tool**: `record_observations` — `observations[]`, each `{ timestamp: "YYYY-MM-DD HH:MM" (regex-validated), content: string (minLength 1, single-line), relevance: low|medium|high|critical, sourceEntryIds: string[] (minItems 1) }`.
+**Tool**: `record_observations` — `observations[]`, each `{ content: string (minLength 1, single-line), relevance: low|medium|high|critical, sourceEntryIds: string[] (minItems 1) }` (timestamps are derived from the cited source entries, not taken from the model), plus optional `complete?: boolean` (`true` on the final batch; the host sends `terminate` when it is `true` and that batch rejected nothing — a model that omits the flag only loses the early stop). The array may be empty only alongside `complete: true`, which is how a chunk with nothing worth recording closes the run.
 
 **Injected inputs** (assembled into the user message): current reflections, current observations formatted `[id] date [relevance] content`, the new conversation chunk with `[Source entry id: <id>]` labels and inline message timestamps, and a current local-time fallback.
 
 **Validation**: `normalizeSourceEntryIds` *filters* unknown ids rather than rejecting the whole batch (one hallucinated id must not discard valid observations — the same pattern as the dropper). Content is truncated by `truncateRecordContent`. Each observation with no surviving valid `sourceEntryIds` is rejected individually. Duplicates are skipped by content hash.
 
-**Edge cases**: when nothing is recorded, `ObserverEmptyReason` distinguishes `no_new_content`, `tool_not_called`, `all_rejected` (every `sourceEntryIds` invalid), `all_duplicates`, and `empty_array`. If the stream ends with `stopReason: "error"` **and** zero observations were collected, `runObserver` throws so the pipeline can fall back to another model; if some observations were collected, they are kept.
+**Edge cases**: when nothing is recorded, `ObserverEmptyReason` distinguishes `no_new_content`, `tool_not_called`, `all_rejected` (every `sourceEntryIds` invalid), `all_duplicates`, and `empty_array`. Both observer prompts instruct the empty `complete: true` batch as the only nothing-new close, so it reports `no_new_content` (info level); replying with plain text instead leaves the tool uncalled and reports `tool_not_called` (warning), as does an unflagged empty batch. All of these outcomes advance the cursor to `"empty"`, i.e. the chunk counts as covered. If the stream ends with `stopReason: "error"` **and** zero observations were collected, `runObserver` throws so the pipeline can fall back to another model; if some observations were collected, they are kept.
 
 **Why it matters**: the relevance level assigned here drives downstream dropping, and `sourceEntryIds` are the only provenance link back to the raw conversation. The prompt enforces single-fact granularity (one fact per observation) so retrieval and dropping can operate at fact resolution.
 
@@ -60,7 +62,7 @@ Compresses a chunk of recent conversation into timestamped, rated observations. 
 
 Distills durable reflections from active observations — explicitly not a second observation layer. System prompt `REFLECTOR_SYSTEM` in [[src/om/agents/reflector/prompts.ts]]; agent `runReflector` in [[src/om/agents/reflector/agent.ts]].
 
-**Tool**: `record_reflections` — `reflections[]` (minItems 1), each `{ content: string (minLength 1), supportingObservationIds: string[] (minItems 1) }`.
+**Tool**: `record_reflections` — `reflections[]` (minItems 1), each `{ content: string (minLength 1), supportingObservationIds: string[] (minItems 1) }`, plus optional `complete?: boolean` (`true` when the full active observation set has been reviewed; the host sends `terminate` when it is `true` and that batch rejected nothing). Unlike the observer there is no empty close: a reflection batch may not be empty, so a run with nothing stable enough ends by replying in plain text without calling the tool.
 
 **Injected inputs**: current reflections, current observations shown as `[id] date [relevance] [coverage: none|partial|strong] content` (coverage tiers from [[src/om/agents/dropper/coverage.ts]]), and optional compact summaries of existing reflections/observations marked "for context only — do NOT re-process".
 

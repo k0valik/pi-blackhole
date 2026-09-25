@@ -886,6 +886,7 @@ export async function runObserverStage(
             signal,
             modelRegistry: ctx.modelRegistry,
             sessionId,
+            cacheRetention: runtime.config.cacheRetention,
           }),
       );
       if (!runtime.isGenerationActive(generation)) return "abort";
@@ -1187,6 +1188,7 @@ async function runReflectorStage(
             signal,
             modelRegistry: ctx.modelRegistry,
             sessionId,
+            cacheRetention: runtime.config.cacheRetention,
           }),
       );
       if (!runtime.isGenerationActive(generation))
@@ -1476,6 +1478,7 @@ async function runDropperStage(
             signal,
             modelRegistry: ctx.modelRegistry,
             sessionId,
+            cacheRetention: runtime.config.cacheRetention,
           }),
       );
       if (!runtime.isGenerationActive(generation)) return "abort";

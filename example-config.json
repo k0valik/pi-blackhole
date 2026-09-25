@@ -139,6 +139,7 @@
     "  dropperPressureThreshold (0-1, default 0.70) — fraction of observationsPoolMaxTokens where dropper fires without new data (1 disables)",
     "  providerIdleTimeoutMs (ms, 0=disabled, unset=inherit pi default) — body-idle timeout for background provider streams",
     "  workerAttemptTimeoutMs (ms, 0/unset=disabled, max 2147483647) — hard elapsed deadline per worker/model attempt; a configured candidate's timeout engages its cooldown + the next fallback; the session fallback is tried once per stage, with no cooldown",
+    "  cacheRetention (none|short|long, unset=inherit pi's effective setting) — prompt-cache retention for the observer/reflector/dropper streams; left unset here on purpose, since pinning \"short\" downgrades a host whose effective setting is longer. \"long\" is opt-in, and adapters that lack it ignore the value",
     "  compactAfterPreset / compactAfterPresets — auto-compaction preset curve selection + definitions (default curve 0.90@32k → 0.40@1M); replaces the flat 81000 default — a file compactAfterTokens of exactly 81000 is legacy residue and is dropped",
     "",
     "Backward compat: old keys (overrideDefaultCompaction, noAutoCompact, passive)",
@@ -151,6 +152,7 @@
     "  PI_BLACKHOLE_COMPACTION_SUMMARY_MODE → override compactionSummaryMode setting",
     "  PI_BLACKHOLE_COMPACT_AFTER_PRESET → override the compaction preset curve selection",
     "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget",
-    "  PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS → override reflection output budget"
+    "  PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS → override reflection output budget",
+    "  PI_BLACKHOLE_CACHE_RETENTION → override worker prompt-cache retention (none|short|long)"
   ]
 }

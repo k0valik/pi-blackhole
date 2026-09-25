@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 
 import {
   normalizeSupportingObservationIds,
@@ -30,6 +31,12 @@ function fakeAgentLoop(
   })) as any;
 }
 
+interface CapturedToolResult {
+  terminate?: boolean;
+  details: Record<string, number>;
+  content?: Array<{ type?: string; text?: string }>;
+}
+
 describe("V3 reflector agent", () => {
   const obsA = observation("aaaaaaaaaaaa");
   const obsB = observation("bbbbbbbbbbbb");
@@ -39,6 +46,39 @@ describe("V3 reflector agent", () => {
     reflections: [],
     observations: [obsA, obsB],
   };
+
+  it("forwards sessionId to the agent loop config", async () => {
+    let seenSessionId: unknown = "unset";
+    const loop = fakeAgentLoop((_prompts, _context, config) => {
+      seenSessionId = config.sessionId;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop, sessionId: "session-abc" });
+
+    expect(seenSessionId).toBe("session-abc");
+  });
+
+  it("forwards cacheRetention to the agent loop config", async () => {
+    let seenCacheRetention: unknown;
+    const loop = fakeAgentLoop((_prompts, _context, config) => {
+      seenCacheRetention = config.cacheRetention;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop, cacheRetention: "long" });
+
+    expect(seenCacheRetention).toBe("long");
+  });
+
+  it("omits cacheRetention from the agent loop config when unset", async () => {
+    let seenCacheRetention: unknown = "sentinel";
+    const loop = fakeAgentLoop((_prompts, _context, config) => {
+      seenCacheRetention = config.cacheRetention;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(seenCacheRetention).toBeUndefined();
+  });
 
   it("caps reflector turns through the 0.86 shouldStopAfterTurn hook", async () => {
     let shouldStopAfterTurn: any;
@@ -94,6 +134,9 @@ describe("V3 reflector agent", () => {
       "If the candidate fails that future-agent utility test, leave it as an observation",
     );
     expect(systemPrompt).toContain("If unsure, emit no reflection");
+    expect(systemPrompt).toContain(
+      "Set complete=true only when the full active observation set has been reviewed and no further reflections remain. Set complete=false when another batch or correction is needed.",
+    );
     expect(systemPrompt).toContain(
       "High and critical observations deserve careful review, not automatic reflection",
     );
@@ -193,6 +236,19 @@ describe("V3 reflector agent", () => {
     expect(userText).not.toContain("drop-resistance");
   });
 
+  it("instructs complete=false for a partial batch and complete=true only on the final batch", async () => {
+    let userText = "";
+    const loop = fakeAgentLoop((prompts) => {
+      userText = prompts[0].content[0].text;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(userText).toContain(
+      "Use complete=false for a partial batch or a correction, and use complete=true only on the final valid batch once every active observation has been reviewed.",
+    );
+  });
+
   it("renders reflector observation lines with coverage evidence only", () => {
     const line = observationToReflectorLine(
       observation("aaaaaaaaaaaa", {
@@ -257,6 +313,7 @@ describe("V3 reflector agent", () => {
             supportingObservationIds: ["bbbbbbbbbbbb", "aaaaaaaaaaaa"],
           },
         ],
+        complete: true,
       });
     });
 
@@ -273,16 +330,273 @@ describe("V3 reflector agent", () => {
   });
 
   it("rejects invented support ids and multiline content", async () => {
+    let toolResult: CapturedToolResult | undefined;
     const loop = fakeAgentLoop(async (_prompts, context) => {
-      await context.tools[0].execute("tool-1", {
+      toolResult = await context.tools[0].execute("tool-1", {
         reflections: [
           { content: "Bad support", supportingObservationIds: ["missing"] },
           { content: "Two\nlines", supportingObservationIds: ["aaaaaaaaaaaa"] },
         ],
+        complete: true,
       });
     });
 
     await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
+    // A fully rejected batch must not close the run: the model still owes a valid one.
+    expect(toolResult?.terminate).toBe(false);
+    expect(toolResult?.details).toMatchObject({ added: 0, rejected: 2 });
+  });
+
+  it("describes the complete flag on the record_reflections tool", async () => {
+    let description = "";
+    const loop = fakeAgentLoop((_prompts, context) => {
+      description = context.tools[0].description;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(description).toContain("complete=true ends a fully valid reflection review");
+    expect(description).toContain("Incomplete or rejected work stays open.");
+  });
+
+  it("states that a reflection batch may not be empty", async () => {
+    let description = "";
+    const loop = fakeAgentLoop((_prompts, context) => {
+      description = context.tools[0].description;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    // The observer's empty close does not exist here (minItems: 1), so the
+    // description has to point the model at the plain-text path instead.
+    expect(description).toContain(
+      "May not be empty: when nothing is stable enough, do not call the tool and reply briefly instead.",
+    );
+  });
+
+  it("rejects an empty complete batch instead of accepting the observer's close", async () => {
+    let tool: any;
+    const loop = fakeAgentLoop((_prompts, context) => {
+      tool = context.tools[0];
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(() =>
+      validateToolArguments(tool, {
+        id: "call-1",
+        name: "record_reflections",
+        arguments: { reflections: [], complete: true },
+      }),
+    ).toThrow();
+  });
+
+  it("terminates after a complete valid reflection batch", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        reflections: [
+          {
+            content: "User prefers source-backed memory.",
+            supportingObservationIds: ["aaaaaaaaaaaa"],
+          },
+        ],
+        complete: true,
+      });
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(toolResult?.terminate).toBe(true);
+  });
+
+  it("keeps an incomplete valid reflection batch open", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        reflections: [
+          {
+            content: "User prefers source-backed memory.",
+            supportingObservationIds: ["aaaaaaaaaaaa"],
+          },
+        ],
+        complete: false,
+      });
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(toolResult?.terminate).toBe(false);
+  });
+
+  it("records the batch and keeps the run open when the model omits complete", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        reflections: [
+          {
+            content: "No flag reflection.",
+            supportingObservationIds: ["aaaaaaaaaaaa"],
+          },
+        ],
+      });
+    });
+
+    const result = await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(result?.map((item) => item.content)).toEqual(["No flag reflection."]);
+    expect(toolResult?.terminate).toBe(false);
+  });
+
+  it("accepts a tool call whose arguments omit complete", async () => {
+    let tool: any;
+    const loop = fakeAgentLoop((_prompts, context) => {
+      tool = context.tools[0];
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(() =>
+      validateToolArguments(tool, {
+        id: "call-1",
+        name: "record_reflections",
+        arguments: {
+          reflections: [
+            { content: "Omitted flag reflection.", supportingObservationIds: ["aaaaaaaaaaaa"] },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("tells the model when its complete=true batch was refused", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", {
+        reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
+        complete: true,
+      });
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(toolResult?.terminate).toBe(false);
+    expect(toolResult?.content?.[0]?.text).toContain("complete=true was not honored");
+    expect(toolResult?.content?.[0]?.text).toContain("discarded and will not be recorded");
+  });
+
+  it("keeps earlier rejections visible in later batch receipts", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
+          complete: false,
+        }),
+      );
+      results.push(
+        await context.tools[0].execute("tool-2", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(2);
+    expect(results[1].content?.[0]?.text).toContain(
+      "Run totals: 1 recorded, 0 duplicates skipped, 1 rejected cumulatively across this run",
+    );
+    // Explained as counter semantics on the receipt that creates the count.
+    expect(results[0].content?.[0]?.text).toContain("does not mean corrections are still owed");
+  });
+
+  it("surfaces cumulative duplicates when a reflection is re-proposed", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: false,
+        }),
+      );
+      results.push(
+        await context.tools[0].execute("tool-2", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(2);
+    // The re-proposal is deduplicated; the cumulative duplicate count has to
+    // survive into batch 2 or recorded + duplicates + rejected stops reconciling.
+    expect(results[1].content?.[0]?.text).toContain(
+      "Run totals: 1 recorded, 1 duplicate skipped, 0 rejected cumulatively across this run",
+    );
+  });
+
+  it("never tells the model a refused complete batch ends the review", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].content?.[0]?.text).toContain("complete=true was not honored");
+    expect(results[0].content?.[0]?.text).not.toContain("complete=true ends the review");
+  });
+
+  it("terminates on a clean complete batch after an earlier rejection", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
+          complete: false,
+        }),
+      );
+      results.push(
+        await context.tools[0].execute("tool-2", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(2);
+    // The cumulative count is history, not a pending obligation, so the
+    // corrected batch can still close the run.
+    expect(results[1].terminate).toBe(true);
+  });
+
+  it("omits the continue-the-run guidance on a batch that terminates", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].content?.[0]?.text).not.toContain("complete=false asks for another batch");
   });
 
   it("dedupes proposals and skips existing reflection ids", async () => {
@@ -301,6 +615,7 @@ describe("V3 reflector agent", () => {
             supportingObservationIds: ["bbbbbbbbbbbb"],
           },
         ],
+        complete: true,
       });
     });
 
