@@ -417,14 +417,30 @@ export function renderFieldDesc(
     }
   }
 
-  // Validation warning: show when the focused row's current value
-  // violates its type constraints (enum membership, number range, etc.).
+  // Dynamic value-aware help line (slot 2) for knobs whose meaning depends on
+  // the current number, e.g. "At 20000 — memory is pruned once notes reach ~20k".
+  const dynamicVd = field.valueDescription?.(focused.value);
+  if (dynamicVd) {
+    lines.push("");
+    const vdColor = field.disabled ? "muted" : "accent";
+    for (const line of wrapLine(state.args.theme.fg(vdColor, dynamicVd), Math.max(1, width - 4))) {
+      lines.push(`  ${line}`);
+    }
+  }
+
+  // Key legend (§4.8): surface the underlying JSON key so a user can map the UI
+  // label to the file and tune it by hand. Rendered from the field's own key so
+  // it can never drift from the real key.
   const warning = validateFieldValue(focused.field, focused.value);
   if (warning) {
     lines.push("");
     for (const line of wrapLine(warning, Math.max(1, width - 4))) {
       lines.push(state.args.theme.fg("warning", `  ${line}`));
     }
+  }
+
+  if (field.key) {
+    lines.push(state.args.theme.fg("dim", `  key: ${field.key}`));
   }
 }
 
