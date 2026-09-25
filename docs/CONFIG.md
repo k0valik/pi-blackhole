@@ -63,6 +63,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "agentMaxTurns": 16,            // Max turns per memory agent
   "providerIdleTimeoutMs": 0,     // Background provider body-idle timeout in ms (0 = disabled, unset = inherit pi default)
   "workerAttemptTimeoutMs": 0,    // Hard elapsed deadline per worker/model attempt (0 or unset = disabled)
+  // "cacheRetention": "long",    // Optional worker prompt-cache retention: "none" | "short" | "long" (omit = inherit pi's effective setting)
 
   // ── Model configs (edit by hand) ──
   "model": { "provider": "...", "id": "..." },
@@ -497,6 +498,21 @@ Shared turn cap for background memory agents. It is passed as `maxTurns` to `run
 |------|---------|
 | number | 16 |
 
+### `cacheRetention`
+
+Provider-neutral prompt-cache retention preference forwarded to the observer, reflector, and dropper worker streams. Unset defers to pi's effective setting (its provider default is `short`). Adapters that do not support a value ignore it, so `long` is opt-in rather than our default.
+
+- **unset** — inherit pi's effective setting (its provider default is `short`).
+- **`none`** — no prompt caching where the adapter supports it.
+- **`short`** — short-lived retention, pi's provider default.
+- **`long`** — extended retention where supported.
+
+Accepted via plain config, `/blackhole settings`, or `PI_BLACKHOLE_CACHE_RETENTION`. The settings modal shows an explicit `unset` option so an untouched field never pins a value; invalid file or env values are dropped at load and the previous value stays. The setting only affects memory workers, never foreground Pi chat requests.
+
+| Type | Default | Values |
+|------|---------|--------|
+| string | unset | `none` \| `short` \| `long` |
+
 ### `providerIdleTimeoutMs`
 
 Body-idle timeout for background provider streams (observer/reflector/dropper worker HTTP requests). Higher values let background memory jobs tolerate longer silent provider intervals without forcing interactive Pi requests to wait equally long. Applied by wrapping the provider `fetch` with an undici dispatcher that injects `bodyTimeout`.
@@ -689,6 +705,12 @@ Preset-name field (non-empty string):
 | Variable | Overrides |
 |----------|-----------|
 | `PI_BLACKHOLE_COMPACT_AFTER_PRESET` | `compactAfterPreset` |
+
+Enum fields (invalid values keep the file value):
+
+| Variable | Overrides |
+|----------|-----------|
+| `PI_BLACKHOLE_CACHE_RETENTION` | `cacheRetention` (`none` \| `short` \| `long`) |
 
 ### Paths and internals
 

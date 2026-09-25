@@ -294,6 +294,86 @@ describe("showWorkerNotifications", () => {
   });
 });
 
+describe("cacheRetention", () => {
+  const envKey = "PI_BLACKHOLE_CACHE_RETENTION";
+  const mgrDir = join(testDir, "mgr-cache-retention");
+
+  afterEach(() => {
+    delete process.env[envKey];
+    rmSync(mgrDir, { recursive: true, force: true });
+  });
+
+  async function modalCacheRetention(data: Record<string, unknown>): Promise<unknown> {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    mkdirSync(mgrDir, { recursive: true });
+    writeFileSync(join(mgrDir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
+    const loaded = config.loadWithWarnings(undefined, mgrDir).config as {
+      cacheRetention?: unknown;
+    };
+    return loaded.cacheRetention;
+  }
+
+  it("stays unset by default so pi's own retention applies", async () => {
+    const { loadUnifiedConfig, DEFAULTS } = await import("../src/core/unified-config.js");
+    expect(DEFAULTS.cacheRetention).toBeUndefined();
+    expect(loadUnifiedConfig(testDir).cacheRetention).toBeUndefined();
+  });
+
+  it("accepts every supported retention value from the file", async () => {
+    const { loadUnifiedConfig, CACHE_RETENTION_VALUES } =
+      await import("../src/core/unified-config.js");
+    for (const cacheRetention of CACHE_RETENTION_VALUES) {
+      writeConfig({ cacheRetention });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe(cacheRetention);
+    }
+  });
+
+  it("ignores an unsupported file value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ cacheRetention: "forever" });
+    expect(loadUnifiedConfig(testDir).cacheRetention).toBeUndefined();
+  });
+
+  it("env override wins over the file value", async () => {
+    process.env[envKey] = "long";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ cacheRetention: "none" });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe("long");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("an unsupported env value leaves the file value in place", async () => {
+    process.env[envKey] = "forever";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ cacheRetention: "short" });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe("short");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("resolves identically on the file loader and the settings-modal loader", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    for (const data of [
+      { cacheRetention: "long" },
+      { cacheRetention: "forever" },
+      // Modal "unset" sentinel must never survive into an effective value.
+      { cacheRetention: "unset" },
+      {},
+    ]) {
+      writeConfig(data);
+      const viaFileLoader = loadUnifiedConfig(testDir).cacheRetention;
+      expect(await modalCacheRetention(data)).toBe(viaFileLoader);
+    }
+    writeConfig({ cacheRetention: "long" });
+    expect(await modalCacheRetention({ cacheRetention: "long" })).toBe("long");
+  });
+});
+
 describe("dropperPressureThreshold", () => {
   it("defaults to 0.70 when no config file exists", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
