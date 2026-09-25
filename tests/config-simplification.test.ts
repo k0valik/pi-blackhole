@@ -64,8 +64,7 @@ describe("New config keys — defaults", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
 
-    expect(config.compaction).toBe("auto");
-    expect(config.compactionEngine).toBe("blackhole");
+    expect(config.compaction).toBe("automatic");
     expect(config.tailBehavior).toBe("minimal");
     expect(config.midRunCompaction).toBe("off");
   });
@@ -101,11 +100,18 @@ describe("New key parsing", () => {
     expect(config.compaction).toBe("manual");
   });
 
-  it("parses compactionEngine string enum", async () => {
+  it("folds compactionEngine:pi-default into compaction:off", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactionEngine: "pi-default" });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactionEngine).toBe("pi-default");
+    expect(config.compaction).toBe("off");
+  });
+
+  it("folds compactionEngine:blackhole into compaction:automatic", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactionEngine: "blackhole" });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compaction).toBe("automatic");
   });
 
   it("parses tailBehavior string enum", async () => {
@@ -128,7 +134,7 @@ describe("New key parsing", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compaction: "turbo" });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compaction).toBe("auto");
+    expect(config.compaction).toBe("automatic");
   });
 
   it("T12: invalid tailBehavior value falls back to default", async () => {
@@ -138,24 +144,24 @@ describe("New key parsing", () => {
     expect(config.tailBehavior).toBe("minimal");
   });
 
-  it("rejects invalid compactionEngine value", async () => {
+  it("ignores an unknown compactionEngine value", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactionEngine: "hybrid" });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactionEngine).toBe("blackhole");
+    expect(config.compaction).toBe("automatic");
   });
 });
 
 // ── Tests: Old → New migration ────────────────────────────────────────────
 
 describe("Old → new key migration", () => {
-  it("T2: overrideDefaultCompaction:true → compactionEngine:blackhole + tailBehavior:minimal", async () => {
+  it("T2: overrideDefaultCompaction:true → compaction:automatic + tailBehavior:minimal", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ overrideDefaultCompaction: true });
 
     const config = loadUnifiedConfig(testDir);
 
-    expect(config.compactionEngine).toBe("blackhole");
+    expect(config.compaction).toBe("automatic");
     // Existing users with override=true keep aggressive cut
     expect(config.tailBehavior).toBe("minimal");
     // Old key should be removed by migration
@@ -183,14 +189,14 @@ describe("Old → new key migration", () => {
     expect((config as any).passive).toBeUndefined();
   });
 
-  it("T5: memory:false alone (no old compaction knobs) → memory:false, compaction still auto", async () => {
+  it("T5: memory:false alone (no old compaction knobs) → memory:false, compaction still automatic", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ memory: false });
 
     const config = loadUnifiedConfig(testDir);
 
     expect(config.memory).toBe(false);
-    expect(config.compaction).toBe("auto"); // memory is orthogonal now
+    expect(config.compaction).toBe("automatic"); // memory is orthogonal now
     // memory is NOT being removed — it stays as a kept key
   });
 
@@ -205,22 +211,19 @@ describe("Old → new key migration", () => {
 
     expect(config.compaction).toBe("manual"); // new wins
     // overrideDefaultCompaction should NOT migrate since new key was present
-    expect(config.compactionEngine).toBe("blackhole"); // default, not migrated
     expect(config.tailBehavior).toBe("minimal"); // default, not migrated
   });
 
   it("T7: all new keys directly — no migration runs", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({
-      compaction: "manual",
-      compactionEngine: "pi-default",
+      compaction: "automatic",
       tailBehavior: "minimal",
     });
 
     const config = loadUnifiedConfig(testDir);
 
-    expect(config.compaction).toBe("manual");
-    expect(config.compactionEngine).toBe("pi-default");
+    expect(config.compaction).toBe("automatic");
     expect(config.tailBehavior).toBe("minimal");
 
     // Existing unrelated keys should be untouched
@@ -235,25 +238,23 @@ describe("Old → new key migration", () => {
 
     // First load — migration runs
     const config1 = loadUnifiedConfig(testDir);
-    expect(config1.compactionEngine).toBe("blackhole");
+    expect(config1.compaction).toBe("automatic");
 
-    // Second load — old keys are gone from disk? No — migration is in-memory.
-    // But the function should not re-migrate already-migrated config.
-    // The on-disk file hasn't changed, so second load would re-run migration
-    // which is idempotent. Let's verify it's stable.
+    // Second load — the in-memory migration is idempotent; the on-disk file
+    // is unchanged here (the on-disk rewrite is plan-10's job).
     const config2 = loadUnifiedConfig(testDir);
-    expect(config2.compactionEngine).toBe("blackhole");
+    expect(config2.compaction).toBe("automatic");
     expect(config2.tailBehavior).toBe("minimal");
   });
 
-  it("overrideDefaultCompaction:false → compactionEngine:pi-default", async () => {
+  it("overrideDefaultCompaction:false → compaction:off", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ overrideDefaultCompaction: false });
 
     const config = loadUnifiedConfig(testDir);
 
     // Explicit false means "use Pi's default"
-    expect(config.compactionEngine).toBe("pi-default");
+    expect(config.compaction).toBe("off");
     expect(config.tailBehavior).toBe("minimal"); // default, not migrated
   });
 
@@ -263,8 +264,7 @@ describe("Old → new key migration", () => {
 
     const config = loadUnifiedConfig(testDir);
 
-    expect(config.compaction).toBe("auto");
-    expect(config.compactionEngine).toBe("pi-default");
+    expect(config.compaction).toBe("off");
     expect(config.tailBehavior).toBe("minimal");
   });
 });
@@ -302,13 +302,13 @@ describe("Env overrides", () => {
     expect(config.compaction).toBe("manual");
   });
 
-  it("PI_BLACKHOLE_COMPACTION_ENGINE env var overrides compactionEngine", async () => {
-    process.env.PI_BLACKHOLE_COMPACTION_ENGINE = "pi-default";
+  it("PI_BLACKHOLE_COMPACTION=auto is accepted as the pre-plan alias", async () => {
+    process.env.PI_BLACKHOLE_COMPACTION = "auto";
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ compactionEngine: "blackhole" });
+    writeConfig({ compaction: "manual" });
 
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactionEngine).toBe("pi-default");
+    expect(config.compaction).toBe("automatic");
   });
 
   it("PI_BLACKHOLE_MID_RUN_COMPACTION env var overrides midRunCompaction", async () => {
@@ -347,10 +347,10 @@ describe("saveUnifiedConfig — atomic write", () => {
     const { saveUnifiedConfig, loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compaction: "manual", memory: false });
 
-    saveUnifiedConfig({ compaction: "auto" });
+    saveUnifiedConfig({ compaction: "automatic" });
 
     const config = loadUnifiedConfig(testDir);
-    expect(config.compaction).toBe("auto");
+    expect(config.compaction).toBe("automatic");
     expect(config.memory).toBe(false); // preserved
   });
 
@@ -394,8 +394,7 @@ describe("scaffoldConfig — NixOS safety", () => {
 
     expect(existsSync(configPath())).toBe(true);
     const config = loadUnifiedConfig(testDir);
-    expect(config.compaction).toBe("auto");
-    expect(config.compactionEngine).toBe("blackhole");
+    expect(config.compaction).toBe("automatic");
   });
 
   it("does not overwrite existing config on scaffold", async () => {

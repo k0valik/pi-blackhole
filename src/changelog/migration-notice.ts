@@ -31,7 +31,7 @@ const MESSAGE =
 
 /** The subset of UnifiedConfig the candidate check needs. */
 export interface MigrationNoticeConfig {
-  compaction?: "auto" | "manual" | "off";
+  compaction?: "auto" | "automatic" | "manual" | "off";
   compactionEngine?: "blackhole" | "pi-default";
   compactAfterTokens?: number;
   compactAfterRatio?: number;
@@ -70,7 +70,12 @@ export interface MigrationNoticeDeps {
  * post-load value is always a deliberate pin.
  */
 export function isThresholdMigrationCandidate(config: MigrationNoticeConfig): boolean {
-  if (config.compactionEngine !== "blackhole") return false;
+  // An explicit non-blackhole engine (legacy key) or an unset engine that the
+  // loader folded to "off" means pi handles compaction — the threshold message
+  // is meaningless. (Absent engine = pre-fold/blackhole, so continue.)
+  if (config.compactionEngine !== undefined && config.compactionEngine !== "blackhole") {
+    return false;
+  }
   // Already engaged with context-window derivation → no nudge.
   if (config.compactAfterRatio !== undefined) return false;
   if (config.compactReserveTokens !== undefined) return false;
@@ -84,7 +89,7 @@ export function isThresholdMigrationCandidate(config: MigrationNoticeConfig): bo
     return false;
   }
   // Auto + no pin → already on the default preset curve.
-  if (config.compaction === "auto") {
+  if (config.compaction === "auto" || config.compaction === "automatic") {
     return typeof config.compactAfterTokens === "number";
   }
   // manual / off (or unset) → opted out, worth nudging.

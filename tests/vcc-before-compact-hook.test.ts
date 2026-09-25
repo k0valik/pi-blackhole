@@ -35,8 +35,7 @@ function createMockPi(initialConfig?: Record<string, unknown>, ctxModel?: unknow
   const config = {
     overrideDefaultCompaction: false,
     noAutoCompact: false,
-    compaction: "auto",
-    compactionEngine: "blackhole",
+    compaction: "automatic",
     tailBehavior: "pi-default",
     ...initialConfig,
   };
@@ -138,7 +137,6 @@ describe("registerBeforeCompactHook: cancel paths", () => {
     // Use legacy-style config (no new keys) to exercise the legacy guard path
     const { pi, invoke, notifyCalls, omRuntime } = createMockPi({
       compaction: undefined,
-      compactionEngine: undefined,
     });
     omRuntime.config.overrideDefaultCompaction = false;
     registerBeforeCompactHook(pi, omRuntime);
@@ -320,9 +318,9 @@ describe("registerBeforeCompactHook: new config key guards", () => {
     expect(result.compaction).toBeDefined();
   });
 
-  test("T34: compactionEngine:pi-default + auto → return (let Pi handle)", () => {
+  test("T34: compaction:off + auto → return (let Pi handle)", () => {
     const { pi, invoke, omRuntime } = createMockPi({
-      compactionEngine: "pi-default",
+      compaction: "off",
     });
     registerBeforeCompactHook(pi, omRuntime);
 
@@ -337,9 +335,9 @@ describe("registerBeforeCompactHook: new config key guards", () => {
     expect(result).toBeUndefined();
   });
 
-  test("T35: compactionEngine:pi-default + /blackhole → proceeds (/blackhole always uses blackhole)", () => {
+  test("T35: compaction:off + /blackhole → proceeds (/blackhole always uses blackhole)", () => {
     const { pi, invoke, omRuntime } = createMockPi({
-      compactionEngine: "pi-default",
+      compaction: "off",
     });
     registerBeforeCompactHook(pi, omRuntime);
 

@@ -432,7 +432,7 @@ describe("/blackhole-memory command", () => {
   it("status shows the context-window-derived threshold with its basis (issue #60)", async () => {
     const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
     runtime.config.compactAfterTokens = undefined; // derived mode
-    runtime.config.compactAfterRatio = 0.65;
+    runtime.config.compactAfterRatio = 65;
     runtime.config.compactReserveTokens = undefined;
     registerMemoryCommand(pi as any, runtime as any);
 

@@ -87,11 +87,10 @@ function notifySafely(
 function autoCompactionSkipReason(runtime: Runtime): string | null {
   if (runtime.config.compaction === "off") return "compaction_off";
   if (runtime.config.compaction === "manual") return "compaction_manual";
-  if (runtime.config.compactionEngine === "pi-default") return "compactionEngine_pi_default";
-  // NOTE: memory does not gate compaction — memory:false + compaction:auto = compact without OM
+  // NOTE: memory does not gate compaction — memory:false + compaction:automatic = compact without OM
 
-  // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
-  if (runtime.config.compaction === undefined && runtime.config.compactionEngine === undefined) {
+  // LEGACY: old config key guards — only apply when the new key is absent (unmigrated config)
+  if (runtime.config.compaction === undefined) {
     if (runtime.config.passive === true) return "passive";
     if (runtime.config.noAutoCompact === true) return "manual";
     // Don't force Pi to compact unless the user explicitly opted into blackhole's pipeline.

@@ -2,16 +2,23 @@ import type { Model } from "@earendil-works/pi-ai";
 import {
   isFixedTokenThreshold,
   isReserveTokens,
-  isWindowRatio,
+  isWindowPercent,
   type OmModelConfig,
 } from "../core/unified-config.js";
 
 export const AGENT_LOOP_MAX_TOKENS = 32_000;
 
 export interface CompactThresholdConfig {
+  /** Shape selector (plan-09 §3.2). Unset preserves the legacy precedence. */
+  compactAfterBy?: "preset" | "percent" | "tokens" | "reserve";
   compactAfterTokens?: number;
+  /** Percent of the context window, in (0, 100]. */
   compactAfterRatio?: number;
   compactReserveTokens?: number;
+  /** Floor: never compact below this many tokens. */
+  compactAfterMinTokens?: number;
+  /** Ceiling: never wait past this many tokens. */
+  compactAfterMaxTokens?: number;
   /** Selection knob: name of the preset curve to apply (built-in or user-defined). */
   compactAfterPreset?: string;
   /** User-editable preset definitions (hand-edited JSON only — never a modal/DEFAULTS key). */
@@ -72,33 +79,8 @@ export function presetRatioForWindow(anchors: PresetAnchor[], window: number): n
 /** Names already warned about (unknown preset fallback) — warn once per process. */
 const warnedPresetNames = new Set<string>();
 
-/**
- * Resolve the effective auto-compaction threshold.
- *
- * Precedence (each tier applies only when its value is valid — 0 means
- * "not set" and invalid values fall through to the next tier):
- *  1. Explicit `compactAfterTokens` (positive integer; always wins when valid)
- *  2. `compactAfterRatio` (in (0, 1]) → max(1, floor(window × ratio))
- *  3. `compactReserveTokens` (positive integer) → max(1, window − reserve)
- *  4. Selected preset curve (`compactAfterPreset`, defaulting to "default") →
- *     max(1, floor(window × ratio₍window₎)) over the effective anchors
- *
- * A config straight from loadUnifiedConfig always carries `compactAfterPreset`
- * (DEFAULTS "default"), so the built-in curve is the no-knob behavior. Always
- * returns a positive integer ≥ 1 — never undefined (an undefined threshold
- * would invert the trigger gate and compact on every event).
- */
-export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindow: number): number {
-  // Validity (not mere presence) decides: 0 means "not set" and out-of-range
-  // values fall through to the next tier — see isFixedTokenThreshold et al.
-  // A literal 81000 still pins here; dropping that residue is the loader's job.
-  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return cfg.compactAfterTokens;
-  if (isWindowRatio(cfg.compactAfterRatio)) {
-    return Math.max(1, Math.floor(contextWindow * cfg.compactAfterRatio));
-  }
-  if (isReserveTokens(cfg.compactReserveTokens)) {
-    return Math.max(1, contextWindow - cfg.compactReserveTokens);
-  }
+/** Threshold from the selected preset curve (with unknown-name fallback + warn). */
+function presetThreshold(cfg: CompactThresholdConfig, contextWindow: number): number {
   const name = cfg.compactAfterPreset ?? "default";
   const anchors = effectivePresets(cfg)[name];
   if (anchors === undefined) {
@@ -114,6 +96,65 @@ export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindo
     );
   }
   return Math.max(1, Math.floor(contextWindow * presetRatioForWindow(anchors, contextWindow)));
+}
+
+/**
+ * Resolve the shape's own threshold — before the floor/ceiling band is applied.
+ *
+ * When `compactAfterBy` is set, only that shape is consulted; if its value is
+ * invalid/absent it falls through to the legacy precedence (tokens > percent >
+ * reserve > preset), which is also what an unset selector uses. That keeps
+ * pre-plan in-memory configs (and read-only installs that were never rewritten
+ * on disk) behaving exactly as before.
+ */
+function shapeThreshold(cfg: CompactThresholdConfig, contextWindow: number): number {
+  const shape = cfg.compactAfterBy;
+  if (shape === "tokens") {
+    if (isFixedTokenThreshold(cfg.compactAfterTokens)) return cfg.compactAfterTokens;
+  } else if (shape === "percent") {
+    if (isWindowPercent(cfg.compactAfterRatio)) {
+      return Math.max(1, Math.floor((contextWindow * cfg.compactAfterRatio) / 100));
+    }
+  } else if (shape === "reserve") {
+    if (isReserveTokens(cfg.compactReserveTokens)) {
+      return Math.max(1, contextWindow - cfg.compactReserveTokens);
+    }
+  } else if (shape === "preset") {
+    return presetThreshold(cfg, contextWindow);
+  }
+  // Unset selector, or an explicit shape whose value is missing: legacy
+  // precedence (each tier applies only when its value is valid).
+  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return cfg.compactAfterTokens;
+  if (isWindowPercent(cfg.compactAfterRatio)) {
+    return Math.max(1, Math.floor((contextWindow * cfg.compactAfterRatio) / 100));
+  }
+  if (isReserveTokens(cfg.compactReserveTokens)) {
+    return Math.max(1, contextWindow - cfg.compactReserveTokens);
+  }
+  return presetThreshold(cfg, contextWindow);
+}
+
+/**
+ * Resolve the effective auto-compaction threshold.
+ *
+ * `effective = max(1, compactAfterMinTokens, min(shape(window), compactAfterMaxTokens))`
+ *
+ * The shape is chosen by `compactAfterBy` (preset | percent | tokens |
+ * reserve); when unset, the legacy precedence applies (tokens > percent >
+ * reserve > preset). Both band bounds are optional and orthogonal to the
+ * shape: the floor protects against a model downgrade when a percent shape is
+ * pinned, the ceiling pins an absolute operating point on a huge window.
+ *
+ * Always returns a positive integer ≥ 1 — never undefined (an undefined
+ * threshold would invert the trigger gate and compact on every event).
+ */
+export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindow: number): number {
+  const base = shapeThreshold(cfg, contextWindow);
+  const min = isFixedTokenThreshold(cfg.compactAfterMinTokens) ? cfg.compactAfterMinTokens : 0;
+  const max = isFixedTokenThreshold(cfg.compactAfterMaxTokens)
+    ? cfg.compactAfterMaxTokens
+    : Number.POSITIVE_INFINITY;
+  return Math.max(1, min, Math.min(base, max));
 }
 
 /**

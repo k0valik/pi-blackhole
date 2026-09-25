@@ -21,6 +21,7 @@ import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import {
   CACHE_RETENTION_VALUES,
   DEFAULTS,
+  foldCompaction,
   normalizeCacheRetention,
   normalizeThresholdKnobs,
   type UnifiedConfig,
@@ -50,25 +51,13 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "enum",
       label: "Compaction mode",
       description:
-        "auto=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline",
+        "automatic=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline",
       value: cfg.compaction,
-      options: ["auto", "manual", "off"],
+      options: ["automatic", "manual", "off"],
       optionLabels: {
-        auto: "auto — trigger on threshold",
+        automatic: "automatic — trigger on threshold",
         manual: "manual — only /blackhole",
         off: "off — auto:Pi handles, /blackhole:blackhole pipeline",
-      },
-    },
-    {
-      key: "compactionEngine",
-      type: "enum",
-      label: "Compaction engine",
-      description: "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
-      value: cfg.compactionEngine,
-      options: ["blackhole", "pi-default"],
-      optionLabels: {
-        blackhole: "blackhole — structured summary + OM",
-        "pi-default": "pi-default — built-in Pi summarization",
       },
     },
     {
@@ -124,15 +113,31 @@ export const config = new ConfigManager<UnifiedConfig>({
       },
     },
     {
+      key: "compactAfterBy",
+      type: "enum",
+      label: "Auto-compact when",
+      description:
+        "How the automatic compaction point is chosen. Presets scale with the model's context window; percent, tokens, and reserve are absolute overrides.",
+      value: cfg.compactAfterBy ?? "preset",
+      options: ["preset", "percent", "tokens", "reserve"],
+      optionLabels: {
+        preset: "preset — a curve scaled to each model's window",
+        percent: "percent — a percent of each model's window",
+        tokens: "tokens — the same fixed count on every model",
+        reserve: "reserve — keep a fixed amount of headroom free",
+      },
+    },
+    {
       key: "compactAfterTokens",
       type: "number",
-      label: "Auto-compact threshold (tokens)",
-      description:
-        "Explicit fixed token threshold; wins over the window-derived knobs and the preset curve. 0 = not set (a preset curve, ratio, or reserve governs).",
+      label: "Fixed token threshold",
+      description: "Compact once the session reaches this many tokens, on any model.",
       value: cfg.compactAfterTokens ?? 0,
       min: 0,
       max: 500_000,
       step: 1_000,
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "tokens",
     },
     {
       key: "retainedToolOutputMaxTokens",
@@ -145,39 +150,64 @@ export const config = new ConfigManager<UnifiedConfig>({
       max: 200_000,
       step: 1_000,
     },
-    // Context-window-derived knobs (issue #60) + preset curve (spec §4). Always
-    // visible: 0 means "not set" (the loader treats 0 as unset, so the selected
-    // preset curve governs). Type a value to engage the knob; set it back to 0
-    // to turn it off. The tokens field above wins whenever it holds an explicit
-    // non-zero value; ratio wins over reserve when both are set; the preset
-    // select (below) picks the curve that applies when no numeric knob is set.
+    // Shape + band (plan-09 §3.2). The selector picks exactly one shape; the
+    // floor/ceiling always apply on top of whatever it computes. 0 = "not set"
+    // for every numeric field here (the loader treats 0 as unset).
     {
       key: "compactAfterRatio",
       type: "number",
-      label: "Auto-compact ratio (of context window)",
+      label: "Percent of context window",
       description:
-        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob and the preset curve.",
+        "Compact once the session reaches this percent of the active model's context window (e.g. 65 on a 200k model fires at ~130k).",
       value: cfg.compactAfterRatio ?? 0,
       min: 0,
-      max: 1,
+      max: 100,
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "percent",
     },
     {
       key: "compactReserveTokens",
       type: "number",
-      label: "Auto-compact headroom reserve",
+      label: "Context headroom kept free",
       description:
-        "Alternative window-derived knob: compact when only this many tokens of headroom remain (threshold = window − reserve). 0 = not set. An explicit token threshold wins; ratio wins when both are set.",
+        "Compact once only this many tokens of headroom remain (threshold = window − reserve).",
       value: cfg.compactReserveTokens ?? 0,
       integer: true,
       min: 0,
       max: 2_000_000,
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "reserve",
+    },
+    {
+      key: "compactAfterMinTokens",
+      type: "number",
+      label: "Never compact below",
+      description:
+        "Lower bound on the threshold, whatever the shape computes — protects a big model's setting when you switch to a smaller one.",
+      value: cfg.compactAfterMinTokens ?? 0,
+      min: 0,
+      max: 2_000_000,
+      step: 1_000,
+      depth: 1,
+    },
+    {
+      key: "compactAfterMaxTokens",
+      type: "number",
+      label: "Never compact later than",
+      description:
+        "Upper bound on the threshold, whatever the shape computes — pins an absolute operating point on a huge window.",
+      value: cfg.compactAfterMaxTokens ?? 0,
+      min: 0,
+      max: 2_000_000,
+      step: 1_000,
+      depth: 1,
     },
     {
       key: "compactAfterPreset",
       type: "enum",
-      label: "Compaction threshold preset",
+      label: "Preset curve",
       description:
-        "Window-scaled curve that sets the threshold when no numeric knob above is set (default: compact at 90% of a 32k window, falling to 40% at 1M). To edit the curve or add presets, hand-edit compactAfterPresets in the config file.",
+        "The window-scaled curve used when the shape is preset (default: compact at 90% of a 32k window, falling to 40% at 1M). To edit the curve or add presets, hand-edit compactAfterPresets in the config file.",
       value: cfg.compactAfterPreset ?? "default",
       // Options = built-in preset names + any user-added names from the file
       // (same effective-presets merge the resolver uses, so the modal list and
@@ -191,6 +221,8 @@ export const config = new ConfigManager<UnifiedConfig>({
             : `${name} (custom preset)`,
         ]),
       ),
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "preset",
     },
 
     // ── Observational Memory ──
@@ -412,7 +444,16 @@ export const config = new ConfigManager<UnifiedConfig>({
     const parsed = { ...raw } as Partial<UnifiedConfig>;
 
     // ── Migration: legacy keys → new surface ──
-    if (parsed.compaction === undefined && parsed.compactionEngine === undefined) {
+    // Fold the two-key compaction surface (plan-09 §3.1) with the same helper
+    // the file loader uses, so the modal and the runtime agree.
+    const foldedCompaction = foldCompaction(
+      (parsed as Record<string, unknown>).compaction,
+      (parsed as Record<string, unknown>).compactionEngine,
+    );
+    if (foldedCompaction !== undefined) parsed.compaction = foldedCompaction;
+    delete (parsed as Record<string, unknown>).compactionEngine;
+
+    if (parsed.compaction === undefined) {
       if (parsed.passive === true) {
         parsed.compaction = "off";
         parsed.memory = false;
@@ -420,17 +461,17 @@ export const config = new ConfigManager<UnifiedConfig>({
         parsed.compaction = "manual";
       }
       if (parsed.overrideDefaultCompaction === true) {
-        parsed.compactionEngine = "blackhole";
+        if (parsed.compaction === undefined) parsed.compaction = "automatic";
         if (parsed.tailBehavior === undefined) {
           parsed.tailBehavior = "minimal";
         }
       } else if (parsed.overrideDefaultCompaction === false) {
-        parsed.compactionEngine = "pi-default";
+        if (parsed.compaction === undefined) parsed.compaction = "off";
       }
-      delete (parsed as Record<string, unknown>).passive;
-      delete (parsed as Record<string, unknown>).noAutoCompact;
-      delete (parsed as Record<string, unknown>).overrideDefaultCompaction;
     }
+    delete (parsed as Record<string, unknown>).passive;
+    delete (parsed as Record<string, unknown>).noAutoCompact;
+    delete (parsed as Record<string, unknown>).overrideDefaultCompaction;
 
     // ── Legacy passive env vars (Layer 4, highest priority) ──
     const envPassive =
@@ -454,19 +495,10 @@ export const config = new ConfigManager<UnifiedConfig>({
     const envCompaction = process.env.PI_BLACKHOLE_COMPACTION;
     if (envCompaction !== undefined) {
       const trimmed = envCompaction.trim().toLowerCase();
-      if (!["auto", "manual", "off"].includes(trimmed)) {
+      // "auto" is the pre-plan alias; env vars are not migrated.
+      if (!["automatic", "manual", "off", "auto"].includes(trimmed)) {
         console.warn(
           `blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`,
-        );
-      }
-    }
-
-    const envCompactionEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
-    if (envCompactionEngine !== undefined) {
-      const trimmed = envCompactionEngine.trim().toLowerCase();
-      if (!["blackhole", "pi-default"].includes(trimmed)) {
-        console.warn(
-          `blackhole: invalid PI_BLACKHOLE_COMPACTION_ENGINE value "${envCompactionEngine}"; ignoring`,
         );
       }
     }

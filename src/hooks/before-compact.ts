@@ -344,13 +344,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       return;
     }
 
-    // compactionEngine "pi-default" means let Pi handle auto-triggered compactions
-    if (omRuntime.config.compactionEngine === "pi-default" && !isPiVcc) {
-      trace("before_compact.return_early", {
-        reason: "compactionEngine_pi_default",
-      });
-      return;
-    }
+    // compactionEngine "pi-default" is folded into compaction "off" at parse
+    // time (plan-09 §3.1), so this single guard covers both.
 
     // compaction "manual": /compact falls through to Pi, /blackhole still works
     if (omRuntime.config.compaction === "manual" && !isPiVcc) {
@@ -359,10 +354,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     }
 
     // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)
-    if (
-      omRuntime.config.compaction === undefined &&
-      omRuntime.config.compactionEngine === undefined
-    ) {
+    if (omRuntime.config.compaction === undefined) {
       if (!isPiVcc && !omRuntime.config.overrideDefaultCompaction) {
         trace("before_compact.return_early", {
           reason: "overrideDefaultCompaction=false and not /blackhole",

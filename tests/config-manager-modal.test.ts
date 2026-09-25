@@ -117,21 +117,39 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
 
     expect(ratio).toBeDefined();
     expect(reserve).toBeDefined();
-    // Unset values surface as 0 (the modal's "off" convention), not hidden.
+    const selector = unsetFields.find((f: { key: string }) => f.key === "compactAfterBy");
+    const floor = unsetFields.find((f: { key: string }) => f.key === "compactAfterMinTokens");
+    const ceiling = unsetFields.find((f: { key: string }) => f.key === "compactAfterMaxTokens");
+    expect(selector).toBeDefined();
+    expect(floor).toBeDefined();
+    expect(ceiling).toBeDefined();
+    // Unset numeric values surface as 0 (the modal's "off" convention); the
+    // selector defaults to the effective "preset" shape.
+    expect(selector.value).toBe("preset");
     expect(ratio.value).toBe(0);
     expect(ratio.min).toBe(0);
-    expect(ratio.max).toBe(1);
+    expect(ratio.max).toBe(100);
     expect(reserve.value).toBe(0);
     expect(reserve.min).toBe(0);
     expect(reserve.max).toBe(2_000_000);
+    expect(floor.value).toBe(0);
+    expect(ceiling.value).toBe(0);
 
     // Configured values surface verbatim for editing.
-    base.compactAfterRatio = 0.65;
+    base.compactAfterRatio = 65;
     base.compactReserveTokens = 32_768;
+    base.compactAfterMinTokens = 150_000;
+    base.compactAfterMaxTokens = 180_000;
     const setFields = config.opts.fields(base as never);
-    expect(setFields.find((f: { key: string }) => f.key === "compactAfterRatio").value).toBe(0.65);
+    expect(setFields.find((f: { key: string }) => f.key === "compactAfterRatio").value).toBe(65);
     expect(setFields.find((f: { key: string }) => f.key === "compactReserveTokens").value).toBe(
       32_768,
+    );
+    expect(setFields.find((f: { key: string }) => f.key === "compactAfterMinTokens").value).toBe(
+      150_000,
+    );
+    expect(setFields.find((f: { key: string }) => f.key === "compactAfterMaxTokens").value).toBe(
+      180_000,
     );
   });
 
@@ -149,7 +167,7 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
 
     const cfg = {
       ...DEFAULTS,
-      compactAfterRatio: 0.65,
+      compactAfterRatio: 65,
       compactReserveTokens: 32_768,
     } as Record<string, unknown>;
     config.save(cfg as never, "global", undefined, cfgDir);
@@ -157,7 +175,7 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
     const written = JSON.parse(
       readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
     ) as Record<string, unknown>;
-    expect(written.compactAfterRatio).toBe(0.65);
+    expect(written.compactAfterRatio).toBe(65);
     expect(written.compactReserveTokens).toBe(32_768);
 
     // Untouched knobs are NOT written as 0 — only real edits land in the file.
@@ -333,7 +351,7 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
   });
 
   it("drops out-of-range ratios", async () => {
-    for (const ratio of [0, -0.5, 2.5, Number.NaN]) {
+    for (const ratio of [0, -0.5, 101, Number.NaN]) {
       expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBeUndefined();
     }
   });

@@ -121,7 +121,7 @@ describe("effectiveContextWindow", () => {
 describe("compactThresholdTokens", () => {
   it("explicit compactAfterTokens wins over ratio and reserve", () => {
     expect(
-      compactThresholdTokens({ compactAfterTokens: 180_000, compactAfterRatio: 0.65 }, 1_000_000),
+      compactThresholdTokens({ compactAfterTokens: 180_000, compactAfterRatio: 65 }, 1_000_000),
     ).toBe(180_000);
     expect(
       compactThresholdTokens(
@@ -131,14 +131,14 @@ describe("compactThresholdTokens", () => {
     ).toBe(180_000);
   });
 
-  it("derives floor(window × ratio) when only compactAfterRatio is set", () => {
-    expect(compactThresholdTokens({ compactAfterRatio: 0.65 }, 200_000)).toBe(130_000);
-    expect(compactThresholdTokens({ compactAfterRatio: 0.65 }, 128_000)).toBe(83_200);
-    expect(compactThresholdTokens({ compactAfterRatio: 1 }, 128_000)).toBe(128_000);
+  it("derives floor(window × ratio/100) when only compactAfterRatio is set", () => {
+    expect(compactThresholdTokens({ compactAfterRatio: 65 }, 200_000)).toBe(130_000);
+    expect(compactThresholdTokens({ compactAfterRatio: 65 }, 128_000)).toBe(83_200);
+    expect(compactThresholdTokens({ compactAfterRatio: 100 }, 128_000)).toBe(128_000);
   });
 
   it("ratio floor is clamped to at least 1 token", () => {
-    expect(compactThresholdTokens({ compactAfterRatio: 0.5 }, 1)).toBe(1);
+    expect(compactThresholdTokens({ compactAfterRatio: 50 }, 1)).toBe(1);
     expect(compactThresholdTokens({ compactAfterRatio: 0.01 }, 1)).toBe(1);
   });
 
@@ -156,7 +156,7 @@ describe("compactThresholdTokens", () => {
 
   it("ratio wins over reserve when both are configured (tokens > ratio > reserve)", () => {
     expect(
-      compactThresholdTokens({ compactAfterRatio: 0.5, compactReserveTokens: 1_000 }, 200_000),
+      compactThresholdTokens({ compactAfterRatio: 50, compactReserveTokens: 1_000 }, 200_000),
     ).toBe(100_000);
   });
 
@@ -173,14 +173,14 @@ describe("compactThresholdTokens", () => {
     // key, never as a live threshold (0 would compact on every event).
     expect(compactThresholdTokens({ compactAfterTokens: 0 } as never, 200_000)).toBe(149_482);
     expect(
-      compactThresholdTokens({ compactAfterTokens: 0, compactAfterRatio: 0.65 } as never, 200_000),
+      compactThresholdTokens({ compactAfterTokens: 0, compactAfterRatio: 65 } as never, 200_000),
     ).toBe(130_000);
   });
 
   it("non-integer or negative compactAfterTokens falls through", () => {
     expect(
       compactThresholdTokens(
-        { compactAfterTokens: 81_000.5, compactAfterRatio: 0.65 } as never,
+        { compactAfterTokens: 81_000.5, compactAfterRatio: 65 } as never,
         200_000,
       ),
     ).toBe(130_000);
@@ -193,9 +193,9 @@ describe("compactThresholdTokens", () => {
     expect(compactThresholdTokens({ compactAfterTokens: 81_000 }, 200_000)).toBe(81_000);
   });
 
-  it("compactAfterRatio 0 or outside (0, 1] falls through to the next tier", () => {
+  it("compactAfterRatio 0 or outside (0, 100] falls through to the next tier", () => {
     expect(compactThresholdTokens({ compactAfterRatio: 0 } as never, 200_000)).toBe(149_482);
-    expect(compactThresholdTokens({ compactAfterRatio: 2.5 } as never, 200_000)).toBe(149_482);
+    expect(compactThresholdTokens({ compactAfterRatio: 101 } as never, 200_000)).toBe(149_482);
     expect(compactThresholdTokens({ compactAfterRatio: -0.5 } as never, 200_000)).toBe(149_482);
     expect(compactThresholdTokens({ compactAfterRatio: NaN } as never, 200_000)).toBe(149_482);
     // …and a valid lower tier still governs when the ratio is unusable.
@@ -218,6 +218,79 @@ describe("compactThresholdTokens", () => {
     expect(compactThresholdTokens({ compactReserveTokens: 0 } as never, 128_000)).toBe(102_800);
     expect(compactThresholdTokens({ compactReserveTokens: -5 } as never, 200_000)).toBe(149_482);
     expect(compactThresholdTokens({ compactReserveTokens: 1.5 } as never, 200_000)).toBe(149_482);
+  });
+});
+
+describe("compactThresholdTokens — shape + band (plan-09 §3.2)", () => {
+  it("tokens shape uses only compactAfterTokens and ignores other values", () => {
+    expect(
+      compactThresholdTokens(
+        { compactAfterBy: "tokens", compactAfterTokens: 180_000, compactAfterRatio: 50 },
+        1_000_000,
+      ),
+    ).toBe(180_000);
+  });
+
+  it("percent shape uses compactAfterRatio as a percent", () => {
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 40 }, 1_000_000),
+    ).toBe(400_000);
+  });
+
+  it("reserve shape keeps compactReserveTokens headroom", () => {
+    expect(
+      compactThresholdTokens({ compactAfterBy: "reserve", compactReserveTokens: 32_768 }, 128_000),
+    ).toBe(95_232);
+  });
+
+  it("preset shape ignores a stray percent value", () => {
+    expect(
+      compactThresholdTokens(
+        { compactAfterBy: "preset", compactAfterPreset: "default", compactAfterRatio: 50 },
+        131_072,
+      ),
+    ).toBe(104_857);
+  });
+
+  it("floor absorbs a model downgrade when a percent shape is pinned", () => {
+    const cfg = {
+      compactAfterBy: "percent" as const,
+      compactAfterRatio: 40,
+      compactAfterMinTokens: 150_000,
+    };
+    expect(compactThresholdTokens(cfg, 1_048_576)).toBe(419_430);
+    expect(compactThresholdTokens(cfg, 262_144)).toBe(150_000);
+  });
+
+  it("ceiling pins an absolute operating point on a huge window", () => {
+    const cfg = {
+      compactAfterBy: "percent" as const,
+      compactAfterRatio: 46,
+      compactAfterMaxTokens: 180_000,
+    };
+    expect(compactThresholdTokens(cfg, 262_144)).toBe(120_586);
+    expect(compactThresholdTokens(cfg, 1_048_576)).toBe(180_000);
+  });
+
+  it("floor wins when it exceeds the ceiling", () => {
+    expect(
+      compactThresholdTokens(
+        {
+          compactAfterBy: "tokens",
+          compactAfterTokens: 100_000,
+          compactAfterMinTokens: 200_000,
+          compactAfterMaxTokens: 150_000,
+        },
+        1_000_000,
+      ),
+    ).toBe(200_000);
+  });
+
+  it("explicit shape falls through to the legacy chain only when its value is missing", () => {
+    // shape "percent" without a ratio → the legacy chain (tokens) still applies.
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterTokens: 90_000 }, 200_000),
+    ).toBe(90_000);
   });
 });
 
@@ -306,7 +379,7 @@ describe("compactThresholdTokens — preset curves", () => {
 
   it("numeric knobs still win over the preset", () => {
     expect(
-      compactThresholdTokens({ compactAfterPreset: "default", compactAfterRatio: 0.5 }, 200_000),
+      compactThresholdTokens({ compactAfterPreset: "default", compactAfterRatio: 50 }, 200_000),
     ).toBe(100_000);
     expect(
       compactThresholdTokens(

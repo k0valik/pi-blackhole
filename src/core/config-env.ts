@@ -219,17 +219,10 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
     var: "PI_BLACKHOLE_COMPACTION",
     parse: (raw: string) => {
       const trimmed = raw.trim().toLowerCase();
-      return ["auto", "manual", "off"].includes(trimmed)
-        ? (trimmed as "auto" | "manual" | "off")
-        : undefined;
-    },
-  },
-  compactionEngine: {
-    var: "PI_BLACKHOLE_COMPACTION_ENGINE",
-    parse: (raw: string) => {
-      const trimmed = raw.trim().toLowerCase();
-      return ["blackhole", "pi-default"].includes(trimmed)
-        ? (trimmed as "blackhole" | "pi-default")
+      // "auto" is the pre-plan alias; env vars are not migrated, so keep it working.
+      if (trimmed === "auto") return "automatic" as const;
+      return ["automatic", "manual", "off"].includes(trimmed)
+        ? (trimmed as "automatic" | "manual" | "off")
         : undefined;
     },
   },

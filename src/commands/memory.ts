@@ -37,7 +37,7 @@ import {
   isFixedTokenThreshold,
   isManualMode,
   isReserveTokens,
-  isWindowRatio,
+  isWindowPercent,
 } from "../core/unified-config.js";
 
 function firstArg(args: unknown): string | undefined {
@@ -65,26 +65,58 @@ function pressureHint(config: {
 
 /**
  * Basis suffix for the auto-compaction threshold line. Empty for an explicit
- * fixed token threshold; describes the window-derived basis otherwise
- * (issue #60 + preset curves). The preset branch resolves the same ratio the
- * trigger uses, so display and trigger cannot disagree.
+ * fixed token threshold; describes the active shape and the floor/ceiling band
+ * otherwise (issue #60 + preset curves). Mirrors the resolver's shape
+ * fallback, so display and trigger cannot disagree.
  */
 function compactThresholdSuffix(cfg: CompactThresholdConfig, window: number): string {
   // Validity (not mere presence) decides the tier — mirrors compactThresholdTokens
   // so display and trigger cannot disagree, even for unnormalized configs.
-  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return ""; // explicit fixed token threshold
-  if (isWindowRatio(cfg.compactAfterRatio)) {
-    return ` · ${Math.round(cfg.compactAfterRatio * 100)}% of ${window.toLocaleString()}-token window`;
+  const tokens = isFixedTokenThreshold(cfg.compactAfterTokens);
+  const percent = isWindowPercent(cfg.compactAfterRatio);
+  const reserve = isReserveTokens(cfg.compactReserveTokens);
+  const shape = cfg.compactAfterBy;
+  const effective =
+    shape === "tokens" && tokens
+      ? "tokens"
+      : shape === "percent" && percent
+        ? "percent"
+        : shape === "reserve" && reserve
+          ? "reserve"
+          : shape === "preset"
+            ? "preset"
+            : tokens
+              ? "tokens"
+              : percent
+                ? "percent"
+                : reserve
+                  ? "reserve"
+                  : "preset";
+
+  let suffix: string;
+  if (effective === "tokens") {
+    suffix = ""; // explicit fixed token threshold
+  } else if (effective === "percent" && percent) {
+    suffix = ` · ${Math.round(cfg.compactAfterRatio as number)}% of ${window.toLocaleString()}-token window`;
+  } else if (effective === "reserve" && reserve) {
+    suffix = ` · keeps ${(cfg.compactReserveTokens as number).toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+  } else {
+    // Preset curve (incl. the out-of-box default preset): describe the effective
+    // ratio at this window, resolved by the same pure functions as the trigger.
+    const name = cfg.compactAfterPreset ?? "default";
+    const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
+    const ratio = presetRatioForWindow(anchors, window);
+    suffix = ` · ${Math.round(ratio * 100)}% of ${window.toLocaleString()}-token window (preset: ${name})`;
   }
-  if (isReserveTokens(cfg.compactReserveTokens)) {
-    return ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+
+  const band: string[] = [];
+  if (isFixedTokenThreshold(cfg.compactAfterMinTokens)) {
+    band.push(`floor ${cfg.compactAfterMinTokens.toLocaleString()}`);
   }
-  // Preset curve (incl. the out-of-box default preset): describe the effective
-  // ratio at this window, resolved by the same pure functions as the trigger.
-  const name = cfg.compactAfterPreset ?? "default";
-  const anchors = effectivePresets(cfg)[name] ?? BUILTIN_PRESETS.default;
-  const ratio = presetRatioForWindow(anchors, window);
-  return ` · ${Math.round(ratio * 100)}% of ${window.toLocaleString()}-token window (preset: ${name})`;
+  if (isFixedTokenThreshold(cfg.compactAfterMaxTokens)) {
+    band.push(`ceiling ${cfg.compactAfterMaxTokens.toLocaleString()}`);
+  }
+  return band.length > 0 ? `${suffix} · ${band.join(", ")}` : suffix;
 }
 
 function tokenSum(items: { tokenCount: number }[]): number {

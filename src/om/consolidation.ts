@@ -506,10 +506,8 @@ function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
   // EXPERIMENTAL compat shim — do not extend; see src/core/provider-skip.ts.
   if (matchesSkippedProvider(runtime.config, ctx.model)) return;
 
-  // LEGACY: passive check — only applies when new keys are absent (unmigrated config)
-  if (runtime.config.compaction === undefined && runtime.config.compactionEngine === undefined) {
-    if (runtime.config.passive === true) return;
-  }
+  // LEGACY: passive check — only applies when the new key is absent (unmigrated config)
+  if (runtime.config.compaction === undefined && runtime.config.passive === true) return;
   if (runtime.consolidationInFlight) return;
   if (runtime.isConsolidationRetryGated()) return;
 

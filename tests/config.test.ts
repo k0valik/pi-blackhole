@@ -45,8 +45,7 @@ describe("Config defaults", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
     // New config surface defaults
-    expect(config.compaction).toBe("auto");
-    expect(config.compactionEngine).toBe("blackhole");
+    expect(config.compaction).toBe("automatic");
     expect(config.tailBehavior).toBe("minimal");
     expect(config.debug).toBe(false);
     expect(config.observeAfterTokens).toBe(15_000);
@@ -144,15 +143,15 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     // file — that must not count as an explicit choice, or derived mode could
     // never engage for those users.
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 0.65 });
+    writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 65 });
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBeUndefined();
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
   });
 
   it("rejects out-of-range ratios (no derived knob; preset governs)", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ compactAfterRatio: 1.5 }); // > 1
+    writeConfig({ compactAfterRatio: 101 }); // > 100
     let config = loadUnifiedConfig(testDir);
     expect(config.compactAfterRatio).toBeUndefined();
     expect(config.compactAfterTokens).toBeUndefined();
@@ -618,8 +617,8 @@ describe("Legacy config fallback", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ overrideDefaultCompaction: true, debug: true }, "pi-vcc-config.json");
     const config = loadUnifiedConfig(testDir);
-    // Legacy overrideDefaultCompaction:true → compactionEngine:blackhole + tailBehavior:minimal
-    expect(config.compactionEngine).toBe("blackhole");
+    // Legacy overrideDefaultCompaction:true → compaction:automatic + tailBehavior:minimal
+    expect(config.compaction).toBe("automatic");
     expect(config.tailBehavior).toBe("minimal");
     expect(config.debug).toBe(true);
     expect((config as any).overrideDefaultCompaction).toBeUndefined();
@@ -636,7 +635,6 @@ describe("Legacy config fallback", () => {
     );
     const config = loadUnifiedConfig(testDir);
     expect(config.compaction).toBe("off");
-    expect(config.compactionEngine).toBe("pi-default");
     expect(config.debug).toBe(false);
   });
 
@@ -698,7 +696,7 @@ describe("Env overrides", () => {
     writeConfig({ passive: true });
     const config = loadUnifiedConfig(testDir);
     // Falsy env override undoes the passive migration, falling back to defaults
-    expect(config.compaction).toBe("auto");
+    expect(config.compaction).toBe("automatic");
     expect(config.memory).toBe(true);
   });
 
@@ -1040,14 +1038,14 @@ describe("loader parity: file bytes → same effective threshold on both loaders
   });
 
   it("out-of-range ratio resolves to the preset curve on both loaders", async () => {
-    const t = await thresholdsForFile({ compactAfterRatio: 2.5 });
+    const t = await thresholdsForFile({ compactAfterRatio: 101 });
     expect(t.viaFileLoader).toBe(102_800);
     expect(t.viaModalLoader).toBe(t.viaFileLoader);
   });
 
   it("valid knobs resolve identically on both loaders", async () => {
     expect((await thresholdsForFile({ compactAfterTokens: 180_000 })).viaModalLoader).toBe(180_000);
-    const ratio = await thresholdsForFile({ compactAfterRatio: 0.65 });
+    const ratio = await thresholdsForFile({ compactAfterRatio: 65 });
     expect(ratio.viaFileLoader).toBe(83_200);
     expect(ratio.viaModalLoader).toBe(ratio.viaFileLoader);
     const reserve = await thresholdsForFile({ compactReserveTokens: 32_768 });

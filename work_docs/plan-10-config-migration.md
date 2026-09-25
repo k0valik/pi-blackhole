@@ -137,14 +137,14 @@ async function atomicWrite(path: string, text: string): Promise<void> {
 
 ## 5. Steps (derived from plan-09 §3)
 
-| id                       | consumes                                                                                     | produces / does                                                                                                                                                                                                         |
-| ------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `compaction-engine-fold` | `compactionEngine`                                                                           | drops it; `compaction: "auto"` + `pi-default` → `off` (equivalent); value `auto` → `automatic`                                                                                                                          |
-| `threshold-array`        | `compactAfterTokens`, `compactAfterRatio`, `compactAfterReserveTokens`, `compactAfterPreset` | sets `compactAfterBy` by the old precedence (tokens > ratio > reserve > preset); `ratio` ×100 (fraction → percent); `compactAfterReserveTokens` is **preserved** as `compactAfterBy: "reserve"`; legacy `81000` dropped |
-| `dropper-fraction-merge` | `dropperPoolFullnessThreshold`                                                               | sets `dropperPressureThreshold = max(oldPressure, oldFullness)`, drops the fullness key; the new-data floor becomes the constant 0.10 (plan-09 §3.3)                                                                    |
-| `input-budget-merge`     | `dropperInputMaxTokens`                                                                      | folds into `reflectorInputMaxTokens` when the survivor is unset; drops the dropper key                                                                                                                                  |
-| `dead-knobs`             | `observationsPoolTargetTokens`, `observerPreambleMaxTokens`                                  | deletes them                                                                                                                                                                                                            |
-| `legacy-modes`           | `passive`, `noAutoCompact`, `overrideDefaultCompaction`                                      | same mapping as the in-memory `migrateOldKnobs`, persisted                                                                                                                                                              |
+| id                       | consumes                                                                                | produces / does                                                                                                                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `compaction-engine-fold` | `compactionEngine`                                                                      | drops it; `compaction: "auto"` + `pi-default` → `off` (equivalent); value `auto` → `automatic`                                                                                                                     |
+| `threshold-array`        | `compactAfterTokens`, `compactAfterRatio`, `compactReserveTokens`, `compactAfterPreset` | sets `compactAfterBy` by the old precedence (tokens > ratio > reserve > preset); `ratio` ×100 (fraction → percent); `compactReserveTokens` is **preserved** as `compactAfterBy: "reserve"`; legacy `81000` dropped |
+| `dropper-fraction-merge` | `dropperPoolFullnessThreshold`                                                          | sets `dropperPressureThreshold = max(oldPressure, oldFullness)`, drops the fullness key; the new-data floor becomes the constant 0.10 (plan-09 §3.3)                                                               |
+| `input-budget-merge`     | `dropperInputMaxTokens`                                                                 | folds into `reflectorInputMaxTokens` when the survivor is unset; drops the dropper key                                                                                                                             |
+| `dead-knobs`             | `observationsPoolTargetTokens`, `observerPreambleMaxTokens`                             | deletes them                                                                                                                                                                                                       |
+| `legacy-modes`           | `passive`, `noAutoCompact`, `overrideDefaultCompaction`                                 | same mapping as the in-memory `migrateOldKnobs`, persisted                                                                                                                                                         |
 
 Notes:
 
@@ -216,7 +216,7 @@ Follow AGENTS T1–T8: failing test first, one behavior per test, cleanup in
    its replacement is verified on disk. Stamp `configVersion` on first migration
    for future gating.
 2. **One-time `.bak`** before the first write; atomic rename stays.
-3. **`compactAfterReserveTokens` is preserved** as a shape
+3. **`compactReserveTokens` is preserved** as a shape
    (`compactAfterBy: "reserve"`). Users actively rely on it; dropping it would
    regress them.
 4. **The dropper fractions merge to one knob** (`dropperPressureThreshold`).

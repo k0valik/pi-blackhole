@@ -106,7 +106,7 @@ Shown only when Auto-compact when = tokens.
   - At 180000 — compaction starts at 180k tokens on every model.
   - At 90000 — suited to small local models.
 
-### Headroom reserve — `compactAfterReserveTokens`
+### Headroom reserve — `compactReserveTokens`
 
 Shown only when Auto-compact when = reserve.
 

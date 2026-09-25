@@ -89,14 +89,14 @@ a config key. `docs/CONFIG.md` gets a key/code → UI-surface mapping table.
 Six keys plus a magic `81000` migration rule, presenting as four competing
 formulations of the same decision. Reworked as **shape + band** (§3.2):
 
-| Control     | Key                                                                                | Role                                    |
-| ----------- | ---------------------------------------------------------------------------------- | --------------------------------------- |
-| Shape       | `compactAfterBy`: `preset` / `percent` / `tokens` / `reserve`                      | how the threshold tracks the window     |
-| Curve       | `compactAfterPreset`                                                               | when shape = preset (default)           |
-| Value       | `compactAfterRatio` (percent) / `compactAfterTokens` / `compactAfterReserveTokens` | when shape = percent / tokens / reserve |
-| Floor       | `compactAfterMinTokens` _(new)_                                                    | never compact below N                   |
-| Ceiling     | `compactAfterMaxTokens` _(new)_                                                    | never wait past N                       |
-| Definitions | `compactAfterPresets`                                                              | expert curve editing                    |
+| Control     | Key                                                                           | Role                                    |
+| ----------- | ----------------------------------------------------------------------------- | --------------------------------------- |
+| Shape       | `compactAfterBy`: `preset` / `percent` / `tokens` / `reserve`                 | how the threshold tracks the window     |
+| Curve       | `compactAfterPreset`                                                          | when shape = preset (default)           |
+| Value       | `compactAfterRatio` (percent) / `compactAfterTokens` / `compactReserveTokens` | when shape = percent / tokens / reserve |
+| Floor       | `compactAfterMinTokens` _(new)_                                               | never compact below N                   |
+| Ceiling     | `compactAfterMaxTokens` _(new)_                                               | never wait past N                       |
+| Definitions | `compactAfterPresets`                                                         | expert curve editing                    |
 
 `effective = clamp(shape(window), minTokens, maxTokens)`.
 
@@ -192,14 +192,14 @@ scalar cannot serve a user who runs a 1M model and a 256k model in the same
 conversation, and a flat percentage is window-blind. The surface becomes a
 **shape plus a band**:
 
-| Control     | Key                                                                                | Role                                    |
-| ----------- | ---------------------------------------------------------------------------------- | --------------------------------------- |
-| Shape       | `compactAfterBy`: `preset` / `percent` / `tokens` / `reserve`                      | how the threshold tracks the window     |
-| Curve       | `compactAfterPreset`                                                               | when shape = preset (default)           |
-| Value       | `compactAfterRatio` (percent) / `compactAfterTokens` / `compactAfterReserveTokens` | when shape = percent / tokens / reserve |
-| Floor       | `compactAfterMinTokens` _(new)_                                                    | never compact below N                   |
-| Ceiling     | `compactAfterMaxTokens` _(new)_                                                    | never wait past N                       |
-| Definitions | `compactAfterPresets`                                                              | expert curve editing                    |
+| Control     | Key                                                                           | Role                                    |
+| ----------- | ----------------------------------------------------------------------------- | --------------------------------------- |
+| Shape       | `compactAfterBy`: `preset` / `percent` / `tokens` / `reserve`                 | how the threshold tracks the window     |
+| Curve       | `compactAfterPreset`                                                          | when shape = preset (default)           |
+| Value       | `compactAfterRatio` (percent) / `compactAfterTokens` / `compactReserveTokens` | when shape = percent / tokens / reserve |
+| Floor       | `compactAfterMinTokens` _(new)_                                               | never compact below N                   |
+| Ceiling     | `compactAfterMaxTokens` _(new)_                                               | never wait past N                       |
+| Definitions | `compactAfterPresets`                                                         | expert curve editing                    |
 
 `effective = clamp(shape(window), minTokens, maxTokens)`.
 
@@ -628,21 +628,21 @@ _introduce one key for the merged concept_.
 
 Per group:
 
-| Folded group                                                | Surviving key                            | New key?                                             | Readers to update                                                                                   |
-| ----------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `compaction` + `compactionEngine`                           | `compaction` (values reworked)           | no                                                   | `compaction-trigger`, `before-compact`, `compact-failed`, `consolidation`, `isManualMode`, commands |
-| `compactAfterTokens`+`Ratio`+`Reserve`+`Preset`             | shape selector + value + floor + ceiling | **yes** (selector + floor + ceiling); `Reserve` dead | `model-budget` resolver, `compaction-trigger`, `memory`, config plumbing, modal                     |
-| `reflectorInputMaxTokens` + `dropperInputMaxTokens`         | reuse one (UI "Memory read per job")     | no                                                   | `consolidation`                                                                                     |
-| `dropperPressureThreshold` + `dropperPoolFullnessThreshold` | `dropperPressureThreshold`               | no                                                   | `consolidation`, `progress`, `memory`                                                               |
-| `observationsPoolTargetTokens`, `observerPreambleMaxTokens` | — (delete)                               | n/a                                                  | config plumbing, modal, `memory`                                                                    |
-| `debug` + `debugLog`                                        | **not folded** (user decision)           | n/a                                                  | —                                                                                                   |
+| Folded group                                                | Surviving key                            | New key?                                                                                 | Readers to update                                                                                   |
+| ----------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `compaction` + `compactionEngine`                           | `compaction` (values reworked)           | no                                                                                       | `compaction-trigger`, `before-compact`, `compact-failed`, `consolidation`, `isManualMode`, commands |
+| `compactAfterTokens`+`Ratio`+`Reserve`+`Preset`             | shape selector + value + floor + ceiling | **yes** (selector + floor + ceiling); `compactReserveTokens` kept as the `reserve` value | `model-budget` resolver, `compaction-trigger`, `memory`, config plumbing, modal                     |
+| `reflectorInputMaxTokens` + `dropperInputMaxTokens`         | reuse one (UI "Memory read per job")     | no                                                                                       | `consolidation`                                                                                     |
+| `dropperPressureThreshold` + `dropperPoolFullnessThreshold` | `dropperPressureThreshold`               | no                                                                                       | `consolidation`, `progress`, `memory`                                                               |
+| `observationsPoolTargetTokens`, `observerPreambleMaxTokens` | — (delete)                               | n/a                                                                                      | config plumbing, modal, `memory`                                                                    |
+| `debug` + `debugLog`                                        | **not folded** (user decision)           | n/a                                                                                      | —                                                                                                   |
 
 Of the real folds, `compaction`+engine, the two input budgets, and the two
 dropper fractions each reuse an existing key. The threshold group is not a
 simple collapse — it is the shape+band rework in §3.2 (selector + floor +
-ceiling, with `compactReserveTokens` dead). The per-model threshold override
-that would handle same-window/different-operating-point cases is deliberately
-out of scope (§3.2, §8).
+ceiling, with `compactReserveTokens` kept as the `reserve` shape). The per-model
+threshold override that would handle same-window/different-operating-point cases
+is deliberately out of scope (§3.2, §8).
 
 This supersedes the earlier "presentation-only vs add-a-key" framing:
 presentation-only (keep all keys, merge only in the modal) is **rejected** — it
