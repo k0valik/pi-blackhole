@@ -84,7 +84,7 @@ export interface PresetAnchorDef {
 }
 
 export interface UnifiedConfig {
-  /** @deprecated Use compactionEngine instead. */
+  /** Legacy pre-0.6.0 key; folded into `compaction` + `tailBehavior`. */
   overrideDefaultCompaction?: boolean;
   /** Write debug snapshots to /tmp/pi-blackhole-debug.json. */
   debug: boolean;
@@ -123,7 +123,7 @@ export interface UnifiedConfig {
   /** How much recent transcript to keep visible after compaction.
    *  "pi-default" — use Pi's firstKeptEntryId (respects Pi's keepRecentTokens)
    *  "minimal"    — keep only last user message (current agressive pi-vcc behavior)
-   *  ONLY applies when compactionEngine: "blackhole" */
+   *  ONLY applies when compaction: "automatic" */
   tailBehavior: "pi-default" | "minimal";
 
   /** Show a display-only copy of the newest assistant output that the
