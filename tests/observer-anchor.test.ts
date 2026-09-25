@@ -61,6 +61,8 @@ const text = (sentinel: string) => `${sentinel} ${"x".repeat(1200)}`;
 function resolveModelOk() {
   return async () => ({
     ok: true as const,
+    source: "candidate" as const,
+    candidateConfig: { provider: "test", id: "m" },
     model: { provider: "test", id: "m", contextWindow: 100_000 },
     apiKey: "test",
   });

@@ -819,27 +819,32 @@ describe("Runtime — retry gating", () => {
   });
 });
 
-describe("Runtime — findCandidateConfig", () => {
-  it("finds matching candidate from stage model list", async () => {
-    writeConfig({
-      observerModel: { provider: "openrouter", id: "obs-primary:free" },
-    });
+describe("Runtime.resolveModel — resolution provenance", () => {
+  it("returns the exact selected stage candidate config", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
     runtime.ensureConfig(testDir);
+    const stageModel = {
+      provider: "openrouter",
+      id: "obs-primary:free",
+      cooldownHours: 0,
+    };
 
-    const resolved = makeModel("obs-primary:free", "openrouter");
-    const candidate = runtime.findCandidateConfig(resolved, {
+    const result = await runtime.resolveModel({
       model: undefined,
-      modelRegistry: makeRegistry([]),
+      modelRegistry: makeRegistry([makeModel(stageModel.id, stageModel.provider)]),
       hasUI: false,
-      stageModel: { provider: "openrouter", id: "obs-primary:free" },
+      stageModel,
     });
-    expect(candidate).toBeDefined();
-    expect(candidate!.id).toBe("obs-primary:free");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.source).toBe("candidate");
+      if (result.source === "candidate") expect(result.candidateConfig).toBe(stageModel);
+    }
   });
 
-  it("finds matching candidate from base config.model", async () => {
+  it("marks the base config model as a candidate", async () => {
     writeConfig({
       model: { provider: "openrouter", id: "base-fallback:free" },
     });
@@ -847,28 +852,41 @@ describe("Runtime — findCandidateConfig", () => {
     const runtime = new Runtime();
     runtime.ensureConfig(testDir);
 
-    const resolved = makeModel("base-fallback:free", "openrouter");
-    const candidate = runtime.findCandidateConfig(resolved, {
+    const result = await runtime.resolveModel({
       model: undefined,
-      modelRegistry: makeRegistry([]),
+      modelRegistry: makeRegistry([makeModel("base-fallback:free", "openrouter")]),
       hasUI: false,
     });
-    expect(candidate).toBeDefined();
-    expect(candidate!.id).toBe("base-fallback:free");
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.source).toBe("candidate");
+      if (result.source === "candidate") {
+        expect(result.candidateConfig).toMatchObject({
+          provider: "openrouter",
+          id: "base-fallback:free",
+        });
+      }
+    }
   });
 
-  it("returns undefined for session model", async () => {
+  it("marks the session fallback without a candidate config", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
     runtime.ensureConfig(testDir);
+    const sessionModel = makeModel("session-only", "openrouter");
 
-    const resolved = makeModel("session-only", "openrouter");
-    const candidate = runtime.findCandidateConfig(resolved, {
-      model: undefined,
+    const result = await runtime.resolveModel({
+      model: sessionModel,
       modelRegistry: makeRegistry([]),
       hasUI: false,
     });
-    expect(candidate).toBeUndefined();
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.source).toBe("session");
+      expect("candidateConfig" in result).toBe(false);
+    }
   });
 });
 

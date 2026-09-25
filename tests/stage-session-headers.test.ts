@@ -59,7 +59,13 @@ function makeRuntime(): Runtime {
 const text = (sentinel: string) => `${sentinel} ${"x".repeat(1200)}`;
 
 function resolveModelOk(model: { provider: string; id: string }, headers = {}) {
-  return async () => ({ ok: true as const, model, apiKey: "k", headers });
+  return async () => ({
+    ok: true as const,
+    source: "session" as const,
+    model,
+    apiKey: "k",
+    headers,
+  });
 }
 
 async function runStage(model: { provider: string; id: string }, headers = {}) {

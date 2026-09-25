@@ -1,8 +1,13 @@
 ## [Unreleased]
 
+### Added
+
+- **Hard elapsed timeout for background worker/model attempts.** Optional `workerAttemptTimeoutMs` bounds the complete Observer, Reflector, or Dropper agent loop for one selected model—including response-header waits, streamed heartbeats, tool turns, and final confirmation. Expiry aborts the attempt; configured candidates enter the normal cooldown and fallback chain, while the final session fallback is attempted once per stage without a persisted cooldown. Direct config and environment values above Node's 2,147,483,647 ms timer maximum are rejected. The setting persists through global, project, and session `/blackhole settings` saves and is also configurable via `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS`; foreground Pi chats are unaffected. This is separate from `providerIdleTimeoutMs`, which remains a response-body inactivity timeout and cannot guarantee wall-clock failover.
+
 ### Fixed
 
 - **Git status annotations no longer follow a leaked `GIT_DIR`.** `loadGitFileTags` spawned `git` with the inherited environment, so an exported `GIT_DIR`/`GIT_WORK_TREE` (common when the agent runs inside a worktree) made `rev-parse --show-toplevel` resolve `cwd` but `status` read the _other_ repo's index — wrong [Files And Changes] tags, and on the test side `git config` actually wrote `user.name`/`user.email` into the ambient repo. Both call sites now run with `gitEnv()`, which strips the repo-location variables so discovery is anchored to `cwd`.
+- **Global and project `/blackhole settings` saves now persist `providerIdleTimeoutMs`.** The key was missing from the default key set the settings modal iterates for those scopes, so edits were silently dropped; session saves already wrote the full config and were unaffected. The setting now round-trips through save and reload at every scope while still inheriting Pi's global provider timeout when unset.
 
 ---
 

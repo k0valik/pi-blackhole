@@ -220,6 +220,49 @@ describe("providerIdleTimeoutMs", () => {
   });
 });
 
+describe("workerAttemptTimeoutMs", () => {
+  it("leaves the hard deadline disabled when omitted", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+
+  it("accepts a positive hard deadline", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 15_000 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("accepts 0 as explicit disabled", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 0 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBe(0);
+  });
+
+  it("ignores negative hard deadlines", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: -100 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+
+  it("rejects a file value above Node's maximum timer delay", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 2_147_483_648 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+
+  it("accepts the maximum timer delay exactly", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 2_147_483_647 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBe(2_147_483_647);
+  });
+
+  it("rejects a non-integer value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 1.5 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+});
+
 describe("dropperPressureThreshold", () => {
   it("defaults to 0.70 when no config file exists", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
@@ -547,6 +590,7 @@ describe("Declarative env overrides apply at runtime", () => {
     delete process.env.PI_BLACKHOLE_DEBUG;
     delete process.env.PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD;
     delete process.env.PI_BLACKHOLE_OBSERVE_AFTER_TOKENS;
+    delete process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS;
   });
 
   it("int override wins over the file value (runtime path)", async () => {
@@ -563,6 +607,38 @@ describe("Declarative env overrides apply at runtime", () => {
     writeConfig({ debug: false });
     const config = loadUnifiedConfig(testDir);
     expect(config.debug).toBe(true);
+  });
+
+  it("worker attempt timeout env override wins over the file value", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "15000";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("worker attempt timeout env override accepts 0 as disabled", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "0";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(0);
+  });
+
+  it("invalid worker attempt timeout env override keeps the file value", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "soon";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(60_000);
+  });
+
+  it("env override above the timer maximum keeps the file value", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "2147483648";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(60_000);
   });
 
   it("invalid int falls back to the configured value", async () => {

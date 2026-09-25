@@ -18,6 +18,13 @@ export interface EnvParser {
   parse: (raw: string, current: unknown) => unknown;
 }
 
+/**
+ * Node's maximum safe setTimeout delay (2^31 − 1 ms ≈ 24.9 days). Larger
+ * values silently overflow the timer to ~1 ms, so direct file/env timer
+ * configuration is rejected above this bound.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export type EnvOverride = string | EnvParser;
 
 /**
@@ -148,6 +155,15 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
     parse: (raw: string) => {
       const n = Number(raw);
       return Number.isInteger(n) && n >= 0 ? n : undefined;
+    },
+  },
+  // Non-negative integer up to Node's timer maximum (0 = disabled, unset =
+  // no hard elapsed deadline)
+  workerAttemptTimeoutMs: {
+    var: "PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS",
+    parse: (raw: string) => {
+      const n = Number(raw);
+      return Number.isInteger(n) && n >= 0 && n <= MAX_TIMER_DELAY_MS ? n : undefined;
     },
   },
   // Float in (0, 1]

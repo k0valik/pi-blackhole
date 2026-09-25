@@ -60,7 +60,8 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "dropperPressureThreshold": 0.70, // Pool-pressure relief valve
   "dropperPoolFullnessThreshold": 0.10, // Min pool fullness before dropper runs
   "agentMaxTurns": 16,            // Max turns per memory agent
-  "providerIdleTimeoutMs": 0,     // Background provider idle timeout in ms (0 = disabled, unset = inherit pi default)
+  "providerIdleTimeoutMs": 0,     // Background provider body-idle timeout in ms (0 = disabled, unset = inherit pi default)
+  "workerAttemptTimeoutMs": 0,    // Hard elapsed deadline per worker/model attempt (0 or unset = disabled)
 
   // ── Model configs (edit by hand) ──
   "model": { "provider": "...", "id": "..." },
@@ -501,9 +502,24 @@ Body-idle timeout for background provider streams (observer/reflector/dropper wo
 
 - **unset** — inherit pi's global provider timeout (no wrapper applied).
 - **`0`** — explicitly disabled (no wrapper applied).
-- **`> 0`** — wait up to this many milliseconds for a response body after the request is sent.
+- **`> 0`** — allow at most this many milliseconds between response-body chunks.
+
+This is not a hard request deadline: waiting for response headers, streamed heartbeat bytes, and later agent-loop turns can keep a worker alive longer. Use `workerAttemptTimeoutMs` when fallback must happen by a wall-clock deadline.
 
 Accepted via plain config or `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS`. Negative values are rejected. WebSocket transports are not affected.
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | unset | `0` or positive integer |
+
+### `workerAttemptTimeoutMs`
+
+Hard elapsed deadline for one worker/model attempt. It covers the complete observer, reflector, or dropper agent loop for the selected model: response headers, streamed bodies and heartbeats, tool turns, and final confirmation. When the deadline expires, Blackhole aborts that attempt. If the model is a configured candidate, Blackhole records its cooldown and immediately resolves the next fallback, which gets a fresh deadline. The final session-model fallback behaves differently: it is attempted once per stage, and a timeout there records no cooldown and ends the stage's model search instead of retrying the same session model up to ten times.
+
+- **unset** or **`0`** — disabled.
+- **`> 0`** — abort one model attempt after this many milliseconds.
+
+Accepted via plain config, `/blackhole settings`, or `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS`. Settings-modal saves persist the key correctly at global, project, and session scope. Direct config and env values must not exceed 2,147,483,647 ms (Node's maximum timer delay); larger values are rejected. The settings UI caps edits at 3,600,000 ms. It only affects Blackhole workers, never foreground Pi chat requests.
 
 | Type | Default | Range |
 |------|---------|-------|
@@ -646,6 +662,7 @@ Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accept
 | `PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS` | `observerPreambleMaxTokens` |
 | `PI_BLACKHOLE_AGENT_MAX_TURNS` | `agentMaxTurns` |
 | `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS` | `providerIdleTimeoutMs` |
+| `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS` | `workerAttemptTimeoutMs` |
 
 Float fields (must be in `(0, 1]`):
 
