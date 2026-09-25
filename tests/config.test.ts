@@ -334,6 +334,27 @@ describe("cacheRetention", () => {
     expect(loadUnifiedConfig(testDir).cacheRetention).toBeUndefined();
   });
 
+  it("normalizes letter case from the file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ cacheRetention: "LONG" });
+    expect(loadUnifiedConfig(testDir).cacheRetention).toBe("long");
+  });
+
+  it("normalizes letter case from the env var", async () => {
+    process.env[envKey] = "LoNg";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ cacheRetention: "none" });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe("long");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("normalizes letter case on the settings-modal loader too", async () => {
+    expect(await modalCacheRetention({ cacheRetention: "SHORT" })).toBe("short");
+  });
+
   it("env override wins over the file value", async () => {
     process.env[envKey] = "long";
     try {

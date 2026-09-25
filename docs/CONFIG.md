@@ -507,7 +507,7 @@ Provider-neutral prompt-cache retention preference forwarded to the observer, re
 - **`short`** — short-lived retention, pi's provider default.
 - **`long`** — extended retention where supported.
 
-Accepted via plain config, `/blackhole settings`, or `PI_BLACKHOLE_CACHE_RETENTION`. The settings modal shows an explicit `unset` option so an untouched field never pins a value; invalid file or env values are dropped at load and the previous value stays. The setting only affects memory workers, never foreground Pi chat requests.
+Accepted via plain config, `/blackhole settings`, or `PI_BLACKHOLE_CACHE_RETENTION`; values are case-insensitive on every path, so `"LONG"` resolves to `long`. The settings modal shows an explicit `unset` option so an untouched field never pins a value, and switching back to `unset` removes a stored value from the file; invalid file or env values are dropped at load and the previous value stays. The setting only affects memory workers, never foreground Pi chat requests.
 
 | Type | Default | Values |
 |------|---------|--------|
@@ -706,7 +706,7 @@ Preset-name field (non-empty string):
 |----------|-----------|
 | `PI_BLACKHOLE_COMPACT_AFTER_PRESET` | `compactAfterPreset` |
 
-Enum fields (invalid values keep the file value):
+Enum fields (invalid values keep the file value; matching is case-insensitive):
 
 | Variable | Overrides |
 |----------|-----------|

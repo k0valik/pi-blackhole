@@ -11,11 +11,11 @@ import {
   applyEnvOverrides,
   CACHE_RETENTION_VALUES,
   DECLARATIVE_ENV_OVERRIDES,
-  isCacheRetention,
   MAX_TIMER_DELAY_MS,
+  normalizeCacheRetention,
 } from "./config-env.js";
 
-export { CACHE_RETENTION_VALUES, isCacheRetention };
+export { CACHE_RETENTION_VALUES, normalizeCacheRetention };
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
 import type { CacheRetention, ModelThinkingLevel } from "@earendil-works/pi-ai";
 
@@ -559,7 +559,10 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
   if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
-  if (isCacheRetention(raw.cacheRetention)) c.cacheRetention = raw.cacheRetention;
+  // cacheRetention is the one string enum that canonicalizes: the raw value is
+  // normalized so a hand-edited "LONG" resolves the same as the env var's.
+  const cacheRetention = normalizeCacheRetention(raw.cacheRetention);
+  if (cacheRetention) c.cacheRetention = cacheRetention;
 
   // Threshold knobs (compactAfterTokens / Ratio / Reserve / Preset /
   // Presets / providerIdleTimeoutMs / workerAttemptTimeoutMs) — copied bluntly, then scrubbed by the

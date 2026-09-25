@@ -181,6 +181,21 @@ describe("runObserver", () => {
     expect(description).toContain("Incomplete or rejected work stays open.");
   });
 
+  it("documents the empty complete batch as the nothing-new close", async () => {
+    let batchDescription = "";
+    const loop = fakeAgentLoop((_prompts, context) => {
+      batchDescription = (
+        context.tools[0].parameters as { properties: { observations: { description: string } } }
+      ).properties.observations.description;
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(batchDescription).toContain(
+      "May be empty only if the tool is not called at all, or with complete=true to close a run that found nothing new.",
+    );
+  });
+
   it("derives timestamps programmatically from cited source entries, not tool args", async () => {
     const content = "User asked for a memory update.";
     const loop = fakeAgentLoop(async (_prompts, context) => {
@@ -593,6 +608,56 @@ describe("runObserver", () => {
     const loop = fakeAgentLoop(() => {});
     const result = await runObserver({ ...baseArgs, agentLoop: loop });
     expect(result.observations).toBeUndefined();
+  });
+
+  it("reports no_new_content when a complete batch closes the run with nothing recorded", async () => {
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", { observations: [], complete: true });
+    });
+
+    const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+    // A model that flags the chunk fully covered and proposes nothing is
+    // behaving correctly; an empty_array warning would be a false alarm.
+    expect(result.observations).toBeUndefined();
+    expect(result.emptyReason).toEqual({ kind: "no_new_content" });
+  });
+
+  it("reports empty_array for an unflagged empty batch", async () => {
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", { observations: [] });
+    });
+
+    const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(result.observations).toBeUndefined();
+    expect(result.emptyReason).toEqual({ kind: "empty_array", count: 0 });
+  });
+
+  it("keeps all_rejected when a complete empty batch follows a rejected one", async () => {
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", {
+        observations: [{ content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] }],
+        complete: false,
+      });
+      await context.tools[0].execute("tool-2", { observations: [], complete: true });
+    });
+
+    const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+    // The closing flag must not erase the outstanding rejection from the label.
+    expect(result.emptyReason).toEqual({ kind: "all_rejected", count: 1 });
+  });
+
+  it("lets a complete empty batch end the run", async () => {
+    let toolResult: CapturedToolResult | undefined;
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      toolResult = await context.tools[0].execute("tool-1", { observations: [], complete: true });
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(toolResult?.terminate).toBe(true);
   });
 
   it("caps observer turns through the 0.86 shouldStopAfterTurn hook", async () => {

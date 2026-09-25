@@ -224,7 +224,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
     ? `EXISTING OBSERVATIONS (for context only — do NOT re-process these):\n${args.existingObservationsSummary}\n\n`
     : "";
 
-  const userText = `${existingReflectionsContext}${existingObservationsContext}NEW REFLECTIONS TO PROCESS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\nNEW OBSERVATIONS TO PROCESS:\n${joinOrEmpty(observations.map(observationToSummaryLine))}\n\nCrystallize any missing durable facts or patterns into new reflections. If nothing is stable enough, do not call the tool.`;
+  const userText = `${existingReflectionsContext}${existingObservationsContext}NEW REFLECTIONS TO PROCESS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\nNEW OBSERVATIONS TO PROCESS:\n${joinOrEmpty(observations.map(observationToSummaryLine))}\n\nCrystallize any missing durable facts or patterns into new reflections. Use complete=false for a partial batch or a correction, and use complete=true only on the final valid batch once every active observation has been reviewed. If nothing is stable enough, do not call the tool.`;
   const prompts: Message[] = [
     {
       role: "user",

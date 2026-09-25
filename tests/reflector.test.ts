@@ -236,6 +236,19 @@ describe("V3 reflector agent", () => {
     expect(userText).not.toContain("drop-resistance");
   });
 
+  it("instructs complete=false for a partial batch and complete=true only on the final batch", async () => {
+    let userText = "";
+    const loop = fakeAgentLoop((prompts) => {
+      userText = prompts[0].content[0].text;
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(userText).toContain(
+      "Use complete=false for a partial batch or a correction, and use complete=true only on the final valid batch once every active observation has been reviewed.",
+    );
+  });
+
   it("renders reflector observation lines with coverage evidence only", () => {
     const line = observationToReflectorLine(
       observation("aaaaaaaaaaaa", {

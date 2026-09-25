@@ -27,8 +27,18 @@ export interface EnvParser {
  */
 export const CACHE_RETENTION_VALUES: readonly CacheRetention[] = ["none", "short", "long"];
 
-export function isCacheRetention(v: unknown): v is CacheRetention {
-  return typeof v === "string" && (CACHE_RETENTION_VALUES as readonly string[]).includes(v);
+/**
+ * Canonicalize a raw retention value, or `undefined` when it is not one.
+ * Case and surrounding whitespace are normalized so all three entry points
+ * (file, env var, settings modal) resolve `"LONG"` the same way instead of the
+ * env var accepting it while the file silently drops it.
+ */
+export function normalizeCacheRetention(v: unknown): CacheRetention | undefined {
+  if (typeof v !== "string") return undefined;
+  const canonical = v.trim().toLowerCase();
+  return (CACHE_RETENTION_VALUES as readonly string[]).includes(canonical)
+    ? (canonical as CacheRetention)
+    : undefined;
 }
 
 /**
@@ -247,9 +257,6 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   // value leaves the file value (or pi's effective setting) in place.
   cacheRetention: {
     var: "PI_BLACKHOLE_CACHE_RETENTION",
-    parse: (raw: string) => {
-      const trimmed = raw.trim().toLowerCase();
-      return isCacheRetention(trimmed) ? trimmed : undefined;
-    },
+    parse: (raw: string) => normalizeCacheRetention(raw),
   },
 };

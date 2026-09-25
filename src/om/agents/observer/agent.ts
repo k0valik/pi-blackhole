@@ -89,7 +89,9 @@ const RecordObservationsSchema = Type.Object({
       }),
     }),
     {
-      description: "Batch of new observations. May be empty only if the tool is not called at all.",
+      description:
+        "Batch of new observations. May be empty only if the tool is not called at all, " +
+        "or with complete=true to close a run that found nothing new.",
     },
   ),
   // Optional on purpose: a model that omits the flag must lose only the
@@ -190,6 +192,10 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
   let totalDuplicates = 0;
   let totalRejected = 0;
   let totalProposed = 0;
+  // Whether the most recent batch carried complete=true. An empty complete batch
+  // is the model closing a covered chunk that yielded nothing, which is a
+  // no_new_content outcome, not the empty_array protocol slip the kind implies.
+  let lastBatchComplete = false;
 
   const recordObservations: AgentTool<typeof RecordObservationsSchema> = {
     name: "record_observations",
@@ -201,6 +207,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
     parameters: RecordObservationsSchema,
     execute: async (_id, params: RecordObservationsArgs) => {
       toolCalled = true;
+      lastBatchComplete = params.complete === true;
       let added = 0;
       let duplicates = 0;
       let rejected = 0;
@@ -273,8 +280,10 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
     },
   };
 
-  // Append-stable memory first, per-run values (chunk) last, so prefix caches
-  // can reuse the reflection/observation preamble across observer runs.
+  // The system prompt (OBSERVER_SYSTEM) is the append-stable prefix every
+  // observer run shares, so prompt-cache retention only pays off if nothing
+  // before the per-run chunk varies. The ledger blocks below it do change on
+  // every run, and the chunk is per-run by definition — hence the ordering.
   const userText = `CURRENT REFLECTIONS:
 ${joinOrEmpty(priorReflections)}
 
@@ -354,7 +363,13 @@ ${conversation}`;
     } else if (totalDuplicates > 0 && totalAdded === 0) {
       emptyReason = { kind: "all_duplicates", count: totalDuplicates };
     } else if (totalProposed === 0) {
-      emptyReason = { kind: "empty_array", count: 0 };
+      // An empty batch flagged complete is the sanctioned "covered, nothing new"
+      // close, so it reports as no_new_content (info) rather than the warning an
+      // unflagged empty batch earns. The rejected/duplicate branches above keep
+      // priority, so an outstanding rejection is never masked by the close.
+      emptyReason = lastBatchComplete
+        ? { kind: "no_new_content" }
+        : { kind: "empty_array", count: 0 };
     } else {
       emptyReason = { kind: "no_new_content" };
     }

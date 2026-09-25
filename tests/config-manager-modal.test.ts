@@ -468,6 +468,57 @@ describe("modal save preserves hand-edited configs (models, unknown keys, preset
   });
 });
 
+describe("modal save for cacheRetention", () => {
+  /**
+   * Drive the real modal flow for one scope: read the layer, apply the user's
+   * field edits, validate, save. `configDir` is isolated per case so the global
+   * file the other suites share is never touched.
+   */
+  async function saveFromModal(
+    dir: string,
+    edits: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { readFileSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    const layer = config.layerValues("global", undefined, dir) as Record<string, unknown>;
+    const validate = config.opts.validate as (
+      r: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    config.save(validate({ ...layer, ...edits }) as never, "global", undefined, dir);
+    return JSON.parse(readFileSync(join(dir, "pi-blackhole-config.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it("writes a chosen retention value", async () => {
+    const written = await saveFromModal(join(testDir, "cr-choose"), { cacheRetention: "long" });
+    expect(written.cacheRetention).toBe("long");
+  });
+
+  it("keeps the file clean when the field is never touched", async () => {
+    const written = await saveFromModal(join(testDir, "cr-untouched"), {});
+    // The modal sentinel must not reach the file: an untouched field pins nothing.
+    expect("cacheRetention" in written).toBe(false);
+  });
+
+  it("removes an existing value when the field is set back to unset", async () => {
+    const dir = join(testDir, "cr-unset");
+    const { writeFileSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "pi-blackhole-config.json"),
+      JSON.stringify({ cacheRetention: "long", customHandKey: { foo: 1 } }, null, 2),
+    );
+
+    const written = await saveFromModal(dir, { cacheRetention: "unset" });
+
+    expect("cacheRetention" in written).toBe(false);
+    expect(written.customHandKey).toEqual({ foo: 1 });
+  });
+});
+
 it("reflection row is keyboard-editable and readable at narrow/normal/wide widths", async () => {
   const { openBlackholeSettings } = await import("../src/pi-base/blackhole-settings.js");
   const { createSettingsModalBody } = await import("../src/pi-base/settings/body.js");

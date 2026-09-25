@@ -21,7 +21,7 @@ import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import {
   CACHE_RETENTION_VALUES,
   DEFAULTS,
-  isCacheRetention,
+  normalizeCacheRetention,
   normalizeThresholdKnobs,
   type UnifiedConfig,
 } from "../core/unified-config.js";
@@ -522,8 +522,13 @@ export const config = new ConfigManager<UnifiedConfig>({
 
     // ── cacheRetention: drop the modal "unset" sentinel and any unsupported value ──
     // Keeps the modal path in lockstep with loadUnifiedConfig's parseConfig,
-    // which only accepts none|short|long.
-    if (parsed.cacheRetention !== undefined && !isCacheRetention(parsed.cacheRetention)) {
+    // which only accepts none|short|long (case-insensitively, via the same
+    // normalizer). Deleting here is also how the modal clears a stored value:
+    // the save diff carries the key as undefined, so the key leaves the file.
+    const cacheRetention = normalizeCacheRetention(parsed.cacheRetention);
+    if (cacheRetention) {
+      parsed.cacheRetention = cacheRetention;
+    } else {
       delete parsed.cacheRetention;
     }
 
