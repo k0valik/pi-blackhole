@@ -74,18 +74,18 @@ export interface CompactionStats {
 /**
  * Format compaction stats for user-visible notification.
  * Example output:
- *   blackhole: 6 source entries processed; tail kept 1/4 user turns (~0.5k tok).
+ *   blackhole: compacted 6 conversation entries; kept the last 1 of 4 turns (~0.5k tokens).
  */
 export const formatCompactionStats = (stats: CompactionStats): string => {
-  const parts: string[] = [`${stats.summarized} source entries processed`];
-  parts.push(`tail kept ${stats.keptUserTurns}/${stats.totalUserTurns} user turns`);
+  const parts: string[] = [`compacted ${stats.summarized} conversation entries`];
+  parts.push(`kept the last ${stats.keptUserTurns} of ${stats.totalUserTurns} turns`);
   if (stats.smartKeepAdjusted) {
-    parts.push(`smart keep:${stats.smartFromKeep}→${stats.keptUserTurns}`);
+    parts.push(`adjusted keep:${stats.smartFromKeep}→${stats.keptUserTurns}`);
   }
   if (stats.keepFallbackToCompactAll) {
     parts.push(`compact-all`);
   }
-  return `blackhole: ${parts.join("; ")} (~${formatTokens(stats.keptTokensEst)} tok).`;
+  return `blackhole: ${parts.join("; ")} (~${formatTokens(stats.keptTokensEst)} tokens).`;
 };
 
 const dbg = (debug: boolean, data: Record<string, unknown>) => {
@@ -293,9 +293,9 @@ export function buildOwnCut(
 }
 
 const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
-  no_live_messages: "blackhole: Nothing to compact (no live messages)",
+  no_live_messages: "blackhole: nothing to compact",
   too_few_live_messages:
-    'blackhole: Too few live messages — Pi\'s default logic preserves visible context. Set tailBehavior to "minimal" in config to force compaction with fewer messages.',
+    "blackhole: too few messages to compact — Pi keeps a larger recent window; choose a smaller 'Recent messages kept visible' to force it",
 };
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {

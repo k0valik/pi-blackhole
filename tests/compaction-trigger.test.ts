@@ -207,7 +207,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 
     expect(ctx.compact).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Observational memory: compaction threshold reached (~3 tokens); triggering compaction",
+      "blackhole: context is ~3 tokens full — compacting",
       "info",
     );
   });
@@ -314,7 +314,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     // (ui also received the info-level threshold notice; only one warning)
     const warns = ctx.ui.notify.mock.calls.filter((call) => call[1] === "warning");
     expect(warns).toHaveLength(1);
-    expect(warns[0][0]).toContain("auto-compaction skipped");
+    expect(warns[0][0]).toContain("skipped auto-compaction");
   });
 
   describe("stale-ctx skip surfacing (issue #92)", () => {
@@ -397,7 +397,7 @@ describe("V3 compaction trigger (blackhole)", () => {
         expect(runtime.staleCtxSkippedCompactions).toBe(1);
         expect((ctx.ui as any).notify).not.toHaveBeenCalled();
         expect(warnSpy).toHaveBeenCalledTimes(1);
-        expect(warnSpy.mock.calls[0][0]).toContain("auto-compaction skipped");
+        expect(warnSpy.mock.calls[0][0]).toContain("skipped auto-compaction");
       } finally {
         warnSpy.mockRestore();
       }
@@ -444,7 +444,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(runtime.autoCompactionController).toBeNull();
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Observational memory: compaction cancelled — session changed before compaction",
+      "blackhole: compaction cancelled — the session changed",
       "info",
     );
   });
@@ -529,7 +529,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(runtime.compactInFlight).toBe(false);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Observational memory: compaction skipped — another compaction already ran before deferred compaction",
+      "blackhole: skipped compaction — another compaction already ran",
       "info",
     );
   });
@@ -1667,9 +1667,7 @@ describe("Eligibility guard (proactive auto-compaction Nothing to compact / sess
 
     expect(ctx.compact).not.toHaveBeenCalled();
     const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
-    expect(
-      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached")),
-    ).toBe(false);
+    expect(infoNotices.some((call) => String(call[0]).includes("tokens full"))).toBe(false);
   });
 
   it("deferred recheck skips compaction when session becomes ineligible before agent settles", async () => {
@@ -1750,7 +1748,7 @@ describe("Eligibility guard (proactive auto-compaction Nothing to compact / sess
     expect(runtime.midRunCompactionRetry.failures).toBe(0);
     const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
     expect(
-      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached mid-run")),
+      infoNotices.some((call) => String(call[0]).includes("tokens full — compacting mid-run")),
     ).toBe(false);
   });
 
@@ -1767,7 +1765,7 @@ describe("Eligibility guard (proactive auto-compaction Nothing to compact / sess
     expect(runtime.midRunCompactionRetry.failures).toBe(0);
     const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
     expect(
-      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached mid-run")),
+      infoNotices.some((call) => String(call[0]).includes("tokens full — compacting mid-run")),
     ).toBe(false);
   });
 

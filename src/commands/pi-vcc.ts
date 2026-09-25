@@ -175,7 +175,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
         }
         clearPendingState(sessionId);
-        ctx.ui.notify("Observational memory: pending entries flushed", "info");
+        ctx.ui.notify("blackhole: pending memory flushed", "info");
       }
 
       ctx.compact({
@@ -185,7 +185,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           if (stats) {
             ctx.ui.notify(formatCompactionStats(stats), "info");
           } else {
-            ctx.ui.notify("Compacted with blackhole", "info");
+            ctx.ui.notify("blackhole: compacted", "info");
           }
           notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level as any));
 
@@ -198,9 +198,9 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
         },
         onError: (err) => {
           if (err.message === "Compaction cancelled" || err.message === "Already compacted") {
-            ctx.ui.notify("Nothing to compact", "warning");
+            ctx.ui.notify("blackhole: nothing to compact", "warning");
           } else {
-            ctx.ui.notify(`Compaction failed: ${err.message}`, "error");
+            ctx.ui.notify(`blackhole: compaction failed — ${err.message}`, "error");
           }
         },
       });

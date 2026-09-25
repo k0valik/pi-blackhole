@@ -198,15 +198,13 @@ describe("/blackhole-memory command", () => {
     expect(ui.notify).toHaveBeenCalledTimes(1);
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("Memory");
-    expect(msg).toContain("Observations:");
-    expect(msg).toContain("Reflections:");
-    expect(msg).toContain("Observer:");
-    expect(msg).toContain("Reflector:");
-    expect(msg).toContain("Dropper:");
+    expect(msg).toContain("Notes:");
+    expect(msg).toContain("Insights:");
+    expect(msg).toContain("Pruning:");
     expect(msg).toContain("eligible at ≥10% with new data; pressure at ≥70% pool");
     expect(msg).toContain("Compaction:");
-    expect(msg).toContain("Obs pool:");
-    expect(msg).toContain("Reflect pool:");
+    expect(msg).toContain("Note memory:");
+    expect(msg).toContain("Insight memory:");
   });
 
   it("status shows recorded / dropped / visible counts", async () => {
@@ -313,7 +311,7 @@ describe("/blackhole-memory command", () => {
 
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("In flight");
-    expect(msg).toContain("Consolidation: running");
+    expect(msg).toContain("Memory update: running");
     expect(msg).toContain("Auto-compaction: running");
   });
 
@@ -336,8 +334,8 @@ describe("/blackhole-memory command", () => {
 
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("Last error");
-    expect(msg).toContain("Observer: Model unavailable");
-    expect(msg).toContain("Dropper: Budget exceeded");
+    expect(msg).toContain("Note-taking: Model unavailable");
+    expect(msg).toContain("Pruning: Budget exceeded");
   });
 
   it("view mode renders visible observations and reflections", async () => {

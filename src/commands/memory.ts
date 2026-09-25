@@ -213,14 +213,14 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
           : "";
       const visibleReflectionTokens = tokenSum(visible.reflections);
       const observationLine = appendSuffixes(
-        `Observations: ${folded.observations.length} recorded / ${folded.droppedObservationIds.size} dropped / ${visible.observations.length} visible`,
+        `Notes:     ${folded.observations.length} recorded / ${folded.droppedObservationIds.size} dropped / ${visible.observations.length} visible`,
         [
           addedSuffix(drift.observationsOnlyInFull.length),
           removedSuffix(drift.droppedOnlyInFull.length),
         ],
       );
       const reflectionLine = appendSuffixes(
-        `Reflections:  ${folded.reflections.length} recorded / ${visible.reflections.length} visible`,
+        `Insights:  ${folded.reflections.length} recorded / ${visible.reflections.length} visible`,
         [addedSuffix(drift.reflectionsOnlyInFull.length)],
       );
       let obsProgress = rawTokensSinceObservationCoverage(entries);
@@ -257,16 +257,16 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         reflectionLine,
         "",
         "── Pipeline ──",
-        "Transcript accumulated since last run. Triggers when exceeding threshold.",
-        `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
-        `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
-        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(DROPPER_NEWDATA_FLOOR * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
+        "New conversation since the last memory update. A run starts once it passes the threshold.",
+        `Notes:          ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
+        `Insights:       ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
+        `Pruning:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(DROPPER_NEWDATA_FLOOR * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"
             : ` (triggers at ${autoCompactThreshold(runtime.config, ctx.model).toLocaleString()}${compactThresholdSuffix(runtime.config, sessionContextWindow(ctx.model, runtime.config))})`),
-        `Obs pool:       ~${poolTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}%)${poolScopeSuffix}`,
-        `Reflect pool:   ~${visibleReflectionTokens.toLocaleString()} tokens`,
+        `Note memory:    ~${poolTokens.toLocaleString()} / ${runtime.config.observationsPoolMaxTokens.toLocaleString()} tokens (${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}%)${poolScopeSuffix}`,
+        `Insight memory: ~${visibleReflectionTokens.toLocaleString()} tokens`,
       ];
 
       // Show pending data when manual mode is active
@@ -276,12 +276,12 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         const hasDrop = !!pending.dropped;
         if (hasObs || hasRef || hasDrop) {
           lines.push("", "── Pending (manual mode) ──");
-          if (hasObs) lines.push("Observation:  waiting in pending.json");
-          if (hasRef) lines.push("Reflection:   waiting in pending.json");
-          if (hasDrop) lines.push("Dropper:      waiting in pending.json");
+          if (hasObs) lines.push("Notes:        waiting in pending.json");
+          if (hasRef) lines.push("Insights:     waiting in pending.json");
+          if (hasDrop) lines.push("Pruning:      waiting in pending.json");
           const preambleCap = Math.round(runtime.config.observerChunkMaxTokens * 0.3);
           lines.push(
-            `Preamble cap: ${preambleCap.toLocaleString()} tokens per section (observations, reflections) (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`,
+            `Existing memory cap: ${preambleCap.toLocaleString()} tokens per section (notes, insights) (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`,
           );
           lines.push("Run /blackhole to flush and compact.");
         }
@@ -290,8 +290,15 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
       if (runtime.consolidationInFlight || runtime.compactInFlight || runtime.compactHookInFlight) {
         lines.push("", "── In flight ──");
         if (runtime.consolidationInFlight) {
-          const phase = runtime.consolidationPhase ? ` (${runtime.consolidationPhase})` : "";
-          lines.push(`Consolidation: running${phase}`);
+          const phaseNames: Record<string, string> = {
+            observer: "reading notes",
+            reflector: "building insights",
+            dropper: "pruning",
+          };
+          const phase = runtime.consolidationPhase
+            ? ` (${phaseNames[runtime.consolidationPhase] ?? runtime.consolidationPhase})`
+            : "";
+          lines.push(`Memory update: running${phase}`);
         }
         if (runtime.compactInFlight) lines.push("Auto-compaction: running");
         if (runtime.compactHookInFlight) lines.push("Compaction hook: running");
@@ -309,9 +316,10 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
 
       if (runtime.lastObserverError || runtime.lastReflectorError || runtime.lastDropperError) {
         lines.push("", "── Last error ──");
-        if (runtime.lastObserverError) lines.push(`Observer: ${runtime.lastObserverError}`);
-        if (runtime.lastReflectorError) lines.push(`Reflector: ${runtime.lastReflectorError}`);
-        if (runtime.lastDropperError) lines.push(`Dropper: ${runtime.lastDropperError}`);
+        if (runtime.lastObserverError) lines.push(`Note-taking: ${runtime.lastObserverError}`);
+        if (runtime.lastReflectorError)
+          lines.push(`Insight-building: ${runtime.lastReflectorError}`);
+        if (runtime.lastDropperError) lines.push(`Pruning: ${runtime.lastDropperError}`);
       }
 
       ctx.ui.notify(lines.join("\n"), "info");

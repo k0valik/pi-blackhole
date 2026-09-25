@@ -1059,7 +1059,10 @@ describe("Runtime — sessionFallback notification", () => {
     // The first info notification fires ("failed this cycle"), the
     // second ("sessionFallback disabled") is gated by tryEmitInfo
     expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0]).toEqual([expect.stringContaining("failed this cycle"), "info"]);
+    expect(notify.mock.calls[0]).toEqual([
+      expect.stringContaining("failed earlier in this cycle"),
+      "info",
+    ]);
   });
 });
 

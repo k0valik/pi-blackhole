@@ -12,7 +12,12 @@ import { matchesSkippedProvider } from "../core/provider-skip.js";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConfiguredModel } from "./config.js";
 import { debugLog, withDebugLogContext } from "./debug-log.js";
-import { type ResolveResult, type Runtime, type RuntimeGeneration } from "./runtime.js";
+import {
+  type ResolveResult,
+  type Runtime,
+  type RuntimeGeneration,
+  stageOutcome,
+} from "./runtime.js";
 import { withProviderAttributionHeaders } from "./provider-stream.js";
 import { runWorkerAttempt, WorkerAttemptTimeoutError } from "./worker-attempt.js";
 import {
@@ -431,10 +436,10 @@ export function makeModelResolver(
         runtime.tryEmitInfo(
           true,
           ctx.ui,
-          `Observational memory: ${stage} skipped — model unavailable (cooldown set to 0, ${fallbackMsg}, will retry next run)`,
+          `blackhole: skipping ${stageOutcome(stage)} — model unavailable (cooldown set to 0, ${fallbackMsg}, will retry next run)`,
         );
       } else {
-        ctx.ui.notify(`Observational memory: ${stage} skipped — ${resolved.reason}`, "warning");
+        ctx.ui.notify(`blackhole: skipping ${stageOutcome(stage)} — ${resolved.reason}`, "warning");
       }
       runtime.resolveFailureNotified = true;
     }
@@ -805,7 +810,7 @@ export async function runObserverStage(
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: observer running on ~${chunkTokens.toLocaleString()}-token chunk (of ${effectiveTokens.toLocaleString()} accumulated)`,
+      `blackhole: reading recent conversation for notes (~${chunkTokens.toLocaleString()} of ${effectiveTokens.toLocaleString()} new tokens)`,
     );
     debugLog("observer.start", {
       tokens,
@@ -852,7 +857,7 @@ export async function runObserverStage(
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
-        `Observational memory: observer skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveObsCtx.toLocaleString()} too small for ~${observerEstimatedInput.toLocaleString()}-token input)`,
+        `blackhole: skipping note-taking on ${(resolved.model as any).provider}/${(resolved.model as any).id} — its context window (${effectiveObsCtx.toLocaleString()}) is too small for the ~${observerEstimatedInput.toLocaleString()}-token batch`,
       );
       continue;
     }
@@ -918,7 +923,7 @@ export async function runObserverStage(
         runtime.tryEmitWorkerInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`,
+          `blackhole: saved ${result.observations.length} note${result.observations.length === 1 ? "" : "s"}`,
         );
         return "continue";
       }
@@ -927,13 +932,13 @@ export async function runObserverStage(
       const reason = result.emptyReason;
       const reasonLabel = reason
         ? reason.kind === "tool_not_called"
-          ? "model did not call the observation tool"
+          ? "the model returned nothing usable"
           : reason.kind === "all_rejected"
-            ? `${reason.count} observation(s) rejected for invalid sourceEntryIds`
+            ? `${reason.count} note(s) referenced unknown conversation entries`
             : reason.kind === "all_duplicates"
-              ? `${reason.count} observation(s) were duplicates of already-recorded entries`
+              ? `${reason.count} note(s) were already saved`
               : reason.kind === "empty_array"
-                ? "model called the tool but submitted an empty observations array"
+                ? "the model submitted an empty notes list"
                 : "nothing new to record"
         : "unknown reason";
       const reasonLevel: "info" | "warning" = reason
@@ -944,14 +949,9 @@ export async function runObserverStage(
       debugLog("observer.empty", { coversUpToId, reason: reason?.kind });
       runtime.advanceCursor("observer", coversUpToId, "empty");
       if (reasonLevel === "warning") {
-        if (ctx.hasUI)
-          ctx.ui?.notify(`Observational memory: no observations — ${reasonLabel}`, "warning");
+        if (ctx.hasUI) ctx.ui?.notify(`blackhole: no new notes — ${reasonLabel}`, "warning");
       } else {
-        runtime.tryEmitWorkerInfo(
-          ctx.hasUI,
-          ctx.ui,
-          `Observational memory: no observations — ${reasonLabel}`,
-        );
+        runtime.tryEmitWorkerInfo(ctx.hasUI, ctx.ui, `blackhole: no new notes — ${reasonLabel}`);
       }
       return "continue";
     } catch (error) {
@@ -1099,7 +1099,7 @@ async function runReflectorStage(
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`,
+      `blackhole: building insights from saved notes (~${reflectorInputTokens.toLocaleString()} tokens in)`,
     );
 
     // Candidate provenance is captured during resolution so a settings reload
@@ -1127,7 +1127,7 @@ async function runReflectorStage(
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
-        `Observational memory: reflector skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveRefCtx.toLocaleString()} too small for ~${reflectorEstimatedInput.toLocaleString()}-token input)`,
+        `blackhole: skipping insight-building on ${(resolved.model as any).provider}/${(resolved.model as any).id} — its context window (${effectiveRefCtx.toLocaleString()}) is too small for the ~${reflectorEstimatedInput.toLocaleString()}-token batch`,
       );
       continue;
     }
@@ -1389,7 +1389,7 @@ async function runDropperStage(
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: dropper running (~${effectiveDropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`,
+      `blackhole: pruning low-value notes (~${dropperInputTokens.toLocaleString()} tokens in; ${effectiveDropTokens.toLocaleString()} new since the last prune)`,
     );
 
     // Candidate provenance is captured during resolution so a settings reload
@@ -1446,7 +1446,7 @@ async function runDropperStage(
         runtime.tryEmitInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: dropper skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveDropCtx.toLocaleString()} too small for ~${dropperEstimatedInput.toLocaleString()}-token input)`,
+          `blackhole: skipping pruning on ${(resolved.model as any).provider}/${(resolved.model as any).id} — its context window (${effectiveDropCtx.toLocaleString()}) is too small for the ~${dropperEstimatedInput.toLocaleString()}-token batch`,
         );
         continue;
       }

@@ -59,8 +59,8 @@ export function recordStaleCtxSkip(
   if (warned.size >= STALE_SKIP_WARN_MAX_SESSIONS) warned.clear();
   warned.add(sessionId);
   const message =
-    `Observational memory: auto-compaction skipped — the extension ctx went stale before the deferred ` +
-    `compaction ran (in-memory sessions disposed right after agent_end lose this race); ` +
+    `blackhole: skipped auto-compaction — the session changed before it ran ` +
+    `(in-memory sessions disposed right after agent_end lose this race); ` +
     `see /blackhole-memory status`;
   notifySafely(hasUI, ui, message, "warning");
   if (!hasUI) console.warn(message);
@@ -161,7 +161,7 @@ export function registerCompactionTrigger(
       notifySafely(
         ctx?.hasUI ?? false,
         ctx?.ui,
-        `Observational memory: mid-run inline compaction unavailable: ${runtime.inlineCompactionAdapterStatus.reason}${adapterFallbackNote(ctx?.sessionManager)}`,
+        `blackhole: mid-run compaction unavailable — ${runtime.inlineCompactionAdapterStatus.reason}${adapterFallbackNote(ctx?.sessionManager)}`,
         "warning",
       );
     }
@@ -285,7 +285,7 @@ async function handleTurnEnd(
   runtime.tryEmitInfo(
     hasUI,
     ui,
-    `Observational memory: compaction threshold reached mid-run (~${tokens.toLocaleString()} tokens); compacting${inlineMode ? " inline" : " and pausing"}`,
+    `blackhole: context is ~${tokens.toLocaleString()} tokens full — compacting mid-run${inlineMode ? " inline" : " and pausing"}`,
   );
 
   runtime.compactInFlight = true;
@@ -295,11 +295,7 @@ async function handleTurnEnd(
       await inlineCompact(ctx.sessionManager);
       resetMidRunRetry(runtime);
       dbg("compaction_trigger.turn_end.inline_complete");
-      runtime.tryEmitInfo(
-        hasUI,
-        ui,
-        "Observational memory: transparent mid-run compaction complete",
-      );
+      runtime.tryEmitInfo(hasUI, ui, "blackhole: mid-run compaction complete");
     } catch (error) {
       if (isStaleExtensionContextError(error)) throw error;
       const message = getErrorMessage(error);
@@ -318,7 +314,7 @@ async function handleTurnEnd(
           notifySafely(
             hasUI,
             ui,
-            `Observational memory: ${message}${adapterFallbackNote(ctx.sessionManager)}`,
+            `blackhole: ${message}${adapterFallbackNote(ctx.sessionManager)}`,
             "warning",
           );
         }
@@ -334,7 +330,7 @@ async function handleTurnEnd(
         notifySafely(
           hasUI,
           ui,
-          `Observational memory: transparent mid-run compaction failed: ${message}${retryInSeconds(delay)}`,
+          `blackhole: mid-run compaction failed — ${message}${retryInSeconds(delay)}`,
           "error",
         );
       }
@@ -355,11 +351,7 @@ async function handleTurnEnd(
       runtime.compactInFlight = false;
       resetMidRunRetry(runtime);
       dbg("compaction_trigger.turn_end.pause_complete");
-      runtime.tryEmitInfo(
-        hasUI,
-        ui,
-        "Observational memory: mid-run compaction complete; agent paused",
-      );
+      runtime.tryEmitInfo(hasUI, ui, "blackhole: mid-run compaction complete; ask me to continue");
     },
     onError: (error: { message: string }) => {
       runtime.compactInFlight = false;
@@ -374,7 +366,7 @@ async function handleTurnEnd(
         notifySafely(
           hasUI,
           ui,
-          `Observational memory: mid-run compaction failed: ${message}${retryInSeconds(delay)}`,
+          `blackhole: mid-run compaction failed — ${message}${retryInSeconds(delay)}`,
           "error",
         );
       }
@@ -497,7 +489,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   runtime.tryEmitInfo(
     hasUI,
     ui,
-    `Observational memory: compaction threshold reached (~${tokens.toLocaleString()} tokens); triggering compaction`,
+    `blackhole: context is ~${tokens.toLocaleString()} tokens full — compacting`,
   );
 
   runtime.compactInFlight = true;
@@ -557,11 +549,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
           dbg("compaction_trigger.microtask.bail", {
             reason: "session_changed",
           });
-          runtime.tryEmitInfo(
-            hasUI,
-            ui,
-            "Observational memory: compaction cancelled — session changed before compaction",
-          );
+          runtime.tryEmitInfo(hasUI, ui, "blackhole: compaction cancelled — the session changed");
           return;
         }
 
@@ -611,7 +599,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         runtime.tryEmitInfo(
           hasUI,
           ui,
-          "Observational memory: compaction skipped — another compaction already ran before deferred compaction",
+          "blackhole: skipped compaction — another compaction already ran",
         );
         return;
       }
@@ -635,7 +623,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         onComplete: (result: any) => {
           runtime.compactInFlight = false;
           dbg("compaction_trigger.onComplete", { result: !!result });
-          runtime.tryEmitInfo(hasUI, ui, "Observational memory: compaction complete");
+          runtime.tryEmitInfo(hasUI, ui, "blackhole: compaction complete");
         },
         onError: (error: { message: string }) => {
           runtime.compactInFlight = false;
@@ -646,7 +634,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
             // We already notified the user with the real reason before returning { cancel: true }.
             return;
           }
-          notifySafely(hasUI, ui, `Observational memory: ${error.message}`, "error");
+          notifySafely(hasUI, ui, `blackhole: compaction failed — ${error.message}`, "error");
         },
       });
     } catch (error) {
@@ -662,7 +650,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         return;
       }
       dbg("compaction_trigger.microtask.error", { message: msg });
-      notifySafely(hasUI, ui, `Observational memory: compact threw: ${msg}`, "error");
+      notifySafely(hasUI, ui, `blackhole: compaction error — ${msg}`, "error");
     }
   })();
 }

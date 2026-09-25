@@ -107,7 +107,7 @@ describe("makeModelResolver — per-stage failure notifications", () => {
     const observerResult = await resolver("observer");
     expect(observerResult).toBeUndefined();
     expect(notifyCalls.length).toBe(1);
-    expect(notifyCalls[0]!.message).toContain("observer skipped");
+    expect(notifyCalls[0]!.message).toContain("skipping note-taking");
 
     // Pipeline resets the flag at each stage boundary
     runtime.resolveFailureNotified = false;
@@ -117,7 +117,7 @@ describe("makeModelResolver — per-stage failure notifications", () => {
     const reflectorResult = await resolver("reflector");
     expect(reflectorResult).toBeUndefined();
     expect(notifyCalls.length).toBe(2);
-    expect(notifyCalls[1]!.message).toContain("reflector skipped");
+    expect(notifyCalls[1]!.message).toContain("skipping insight-building");
   });
 });
 
@@ -1860,7 +1860,7 @@ describe("showWorkerNotifications", () => {
 
     expect(agents.runObserver).toHaveBeenCalledOnce();
     expect(infoCalls(notify).map(([message]) => message)).toEqual([
-      expect.stringContaining("Observational memory: observer running on ~"),
+      expect.stringContaining("blackhole: reading recent conversation for notes (~"),
     ]);
   });
 
@@ -1887,7 +1887,7 @@ describe("showWorkerNotifications", () => {
     await fixture.run();
 
     expect(notify).toHaveBeenCalledWith(
-      "Observational memory: no observations — 2 observation(s) rejected for invalid sourceEntryIds",
+      "blackhole: no new notes — 2 note(s) referenced unknown conversation entries",
       "warning",
     );
   });
@@ -1902,7 +1902,7 @@ describe("showWorkerNotifications", () => {
     expect(agents.runObserver).not.toHaveBeenCalled();
     expect(agents.runReflector).toHaveBeenCalledOnce();
     expect(infoCalls(notify).map(([message]) => message)).toEqual([
-      expect.stringContaining("Observational memory: reflector running (~"),
+      expect.stringContaining("blackhole: building insights from saved notes (~"),
     ]);
   });
 
@@ -1929,7 +1929,7 @@ describe("showWorkerNotifications", () => {
     expect(agents.runReflector).not.toHaveBeenCalled();
     expect(agents.runDropper).toHaveBeenCalledOnce();
     expect(infoCalls(notify).map(([message]) => message)).toEqual([
-      expect.stringContaining("Observational memory: dropper running (~"),
+      expect.stringContaining("blackhole: pruning low-value notes (~"),
     ]);
   });
 
