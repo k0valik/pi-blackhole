@@ -883,6 +883,8 @@ function makePipelineFixture(options: {
   modelRegistry?: ConsolidationCtx["modelRegistry"];
   useRuntimeModelResolver?: boolean;
   sessionModel?: ConsolidationCtx["model"];
+  /** When set, the ctx exposes a UI so notifications are collected here. */
+  notify?: (message: string, level?: string) => void;
 }): PipelineFixture {
   const runtime = options.runtime ?? new Runtime();
   runtime.configLoaded = true;
@@ -913,7 +915,8 @@ function makePipelineFixture(options: {
   });
   const ctx = {
     cwd: "/tmp",
-    hasUI: false,
+    hasUI: options.notify !== undefined,
+    ui: options.notify ? { notify: options.notify } : undefined,
     model: options.sessionModel,
     modelRegistry: options.modelRegistry ?? {},
     sessionManager: { getBranch: () => entries, getSessionId: () => "cursor-session" },
@@ -1801,5 +1804,156 @@ describe("dropper pressure valve", () => {
     });
     await fixture.run();
     expect(agents.runDropper).toHaveBeenCalledOnce();
+  });
+});
+
+// ── showWorkerNotifications — routine worker progress toasts ────────────────
+
+/** Every info-level toast collected from the fixture's UI notify spy. */
+function infoCalls(notify: ReturnType<typeof vi.fn>): unknown[][] {
+  return notify.mock.calls.filter(([, level]) => level === "info");
+}
+
+describe("showWorkerNotifications", () => {
+  function observerFixture(notify: (message: string, level?: string) => void): PipelineFixture {
+    const fixture = makePipelineFixture({ observeAfterTokens: 5_000, notify });
+    fixture.entries.push(rawMessage("big-1", `BIG-1 ${"y".repeat(40_000)}`));
+    return fixture;
+  }
+
+  /** Reflector due, observer not due: the reflector toast is the first info. */
+  function reflectorFixture(notify: (message: string, level?: string) => void): PipelineFixture {
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100_000,
+      notify,
+      entries: [
+        rawMessage("big-1", `BIG-1 ${"y".repeat(40_000)}`),
+        observationsRecordedEntry("obs-1", {
+          coversUpToId: "big-1",
+          observations: [
+            observation("aaaaaaaaaaaa", { tokenCount: 25, sourceEntryIds: ["big-1"] }),
+          ],
+        }),
+      ],
+    });
+    fixture.runtime.config.reflectAfterTokens = 100;
+    return fixture;
+  }
+
+  /** Dropper due via pool pressure; observer and reflector both not due. */
+  function dropperFixture(notify: (message: string, level?: string) => void): PipelineFixture {
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 1_000_000,
+      notify,
+      entries: [
+        rawMessage("big-1", "x".repeat(400)),
+        observationsRecordedEntry("obs-1", {
+          coversUpToId: "big-1",
+          observations: [
+            observation("aaaaaaaaaaaa", { tokenCount: 800, sourceEntryIds: ["big-1"] }),
+            observation("bbbbbbbbbbbb", { tokenCount: 200, sourceEntryIds: ["big-1"] }),
+          ],
+        }),
+      ],
+    });
+    fixture.runtime.config.reflectAfterTokens = 1_000_000;
+    fixture.runtime.config.observationsPoolMaxTokens = 1_000;
+    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
+    fixture.runtime.config.dropperPressureThreshold = 0.7;
+    fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
+    return fixture;
+  }
+
+  test("emits the observer progress toast by default", async () => {
+    const notify = vi.fn();
+    const fixture = observerFixture(notify);
+
+    await fixture.run();
+
+    expect(agents.runObserver).toHaveBeenCalledOnce();
+    expect(infoCalls(notify).map(([message]) => message)).toEqual([
+      expect.stringContaining("Observational memory: observer running on ~"),
+    ]);
+  });
+
+  test("suppresses the observer progress toast when disabled, without skipping the worker", async () => {
+    const notify = vi.fn();
+    const fixture = observerFixture(notify);
+    fixture.runtime.config.showWorkerNotifications = false;
+
+    await fixture.run();
+
+    expect(agents.runObserver).toHaveBeenCalledOnce();
+    expect(infoCalls(notify)).toEqual([]);
+  });
+
+  test("keeps warning-level worker notices visible when disabled", async () => {
+    const notify = vi.fn();
+    const fixture = observerFixture(notify);
+    fixture.runtime.config.showWorkerNotifications = false;
+    agents.runObserver.mockResolvedValue({
+      observations: [],
+      emptyReason: { kind: "all_rejected" as const, count: 2 },
+    });
+
+    await fixture.run();
+
+    expect(notify).toHaveBeenCalledWith(
+      "Observational memory: no observations — 2 observation(s) rejected for invalid sourceEntryIds",
+      "warning",
+    );
+  });
+
+  test("emits the reflector progress toast by default", async () => {
+    const notify = vi.fn();
+    const fixture = reflectorFixture(notify);
+    agents.runReflector.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect(agents.runObserver).not.toHaveBeenCalled();
+    expect(agents.runReflector).toHaveBeenCalledOnce();
+    expect(infoCalls(notify).map(([message]) => message)).toEqual([
+      expect.stringContaining("Observational memory: reflector running (~"),
+    ]);
+  });
+
+  test("suppresses the reflector progress toast when disabled", async () => {
+    const notify = vi.fn();
+    const fixture = reflectorFixture(notify);
+    fixture.runtime.config.showWorkerNotifications = false;
+    agents.runReflector.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect(agents.runReflector).toHaveBeenCalledOnce();
+    expect(infoCalls(notify)).toEqual([]);
+  });
+
+  test("emits the dropper progress toast by default", async () => {
+    const notify = vi.fn();
+    const fixture = dropperFixture(notify);
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect(agents.runObserver).not.toHaveBeenCalled();
+    expect(agents.runReflector).not.toHaveBeenCalled();
+    expect(agents.runDropper).toHaveBeenCalledOnce();
+    expect(infoCalls(notify).map(([message]) => message)).toEqual([
+      expect.stringContaining("Observational memory: dropper running (~"),
+    ]);
+  });
+
+  test("suppresses the dropper progress toast when disabled", async () => {
+    const notify = vi.fn();
+    const fixture = dropperFixture(notify);
+    fixture.runtime.config.showWorkerNotifications = false;
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect(agents.runDropper).toHaveBeenCalledOnce();
+    expect(infoCalls(notify)).toEqual([]);
   });
 });

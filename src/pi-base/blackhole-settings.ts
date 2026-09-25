@@ -1,9 +1,9 @@
 /**
  * Blackhole settings — modal-based configuration via ConfigManager.
  *
- * Replaces the hand-rolled configure overlay (src/om/configure-overlay.ts)
- * with pi-base's ConfigManager + openConfigFlow (scope-selector →
- * edit/display-all modal).
+ * The single config UI: pi-base's ConfigManager + openConfigFlow
+ * (scope-selector → edit/display-all modal). `/blackhole configure` is a
+ * hidden alias for `/blackhole settings` and opens this modal.
  *
  * Env-var overrides are applied by ConfigManager after load + validate,
  * so they take effect for both the runtime path (loadUnifiedConfig) and
@@ -369,6 +369,18 @@ export const config = new ConfigManager<UnifiedConfig>({
       label: "Footer status bar",
       description: "Show token gauges (O/P/X) and worker events in the footer",
       value: cfg.statusBar,
+    },
+    {
+      key: "showWorkerNotifications",
+      type: "boolean",
+      label: "Worker notifications",
+      description:
+        "Show routine observer/reflector/dropper progress toasts; warnings, errors and compaction notices always show",
+      value: cfg.showWorkerNotifications,
+      valueDescriptions: {
+        on: "On — routine worker progress toasts shown",
+        off: "Off — quiet; warnings/errors only",
+      },
     },
 
     // ── Debug ──

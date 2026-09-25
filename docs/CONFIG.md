@@ -4,15 +4,15 @@ Pi-blackhole's configuration lives at `~/.pi/agent/pi-blackhole/pi-blackhole-con
 
 ## Config file safety
 
-The config file must contain **valid JSON**. A trailing comma, partial write, or sync-conflict copy will cause the entire file to be rejected — and previously, the overlay would silently fall back to defaults and then overwrite your model configs on save.
+The config file must contain **valid JSON**. A trailing comma, partial write, or sync-conflict copy will cause the entire file to be rejected — the loader reports the failure instead of silently replacing your config with defaults.
 
 **Current behavior:**
-- Invalid JSON is logged as a warning and surfaced as a yellow notification in the TUI
-- The `/blackhole configure` overlay shows a red error banner and **blocks Ctrl+S** until the file is fixed
-- The overlay preserves unknown keys (e.g. `observerModel`, `reflectorModel`) on valid files — only keys in the overlay's field list are managed there
-- Changes made via the overlay take effect **immediately** — no session restart needed (the runtime reloads config from disk after save)
+- Invalid JSON is surfaced as a yellow TUI warning — `Config file "pi-blackhole-config.json" is Invalid JSON: <parse error>. Using defaults.`
+- `/blackhole settings` (alias `/blackhole configure`) still opens and shows defaults for the unreadable file — the modal does not block on the parse error
+- Saves are diff-based against the file: only fields you actually changed are written, and unknown keys outside the schema (hand-edited extras) are preserved
+- Changes take effect **immediately** — no session restart needed (the runtime reloads config from disk after save)
 
-**If your config gets corrupted:** fix the JSON syntax directly in the file, then reopen the overlay.
+**If your config gets corrupted:** fix the JSON syntax directly in the file *before* saving from the modal. An unreadable file reads back as empty, so a `global`/`project` save has nothing to diff against and rewrites the file with exactly what the modal is showing (defaults, plus any env overrides) — everything the broken file held is gone. A `session`-scope save writes the session JSONL instead and leaves the file untouched.
 
 ## Quick Reference
 
@@ -48,6 +48,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "sessionFallback": true,        // Fall back to session model when OM models fail
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
   "statusBar": true,              // Footer token gauges (O/P/X) + worker events
+  "showWorkerNotifications": true, // Routine observer/reflector/dropper progress toasts
   "observeAfterTokens": 15000,    // Token threshold for observer runs
   "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
   "observationsPoolMaxTokens": 20000, // Full-fold pressure + rendered observation-line cap
@@ -585,6 +586,16 @@ Show the footer status bar: three token gauges — O (transcript since last obse
 |------|---------|
 | boolean | `true` |
 
+### `showWorkerNotifications`
+
+Routine observer, reflector, and dropper progress toasts — `observer running on ~N-token chunk`, `N observations recorded`, `reflector running`, `dropper running`, and the info-level `no observations` notice. Set to `false` for quiet sessions.
+
+Warnings and errors are unaffected: model fallback/unavailability, context-window skips, no-output warnings, worker failures, compaction notifications, and explicit `/blackhole*` command output all stay visible.
+
+| Type | Default |
+|------|---------|
+| boolean | `true` |
+
 ## Debug Section
 
 ### `debug` / `debugLog`
@@ -642,6 +653,7 @@ Boolean fields:
 | `PI_BLACKHOLE_SESSION_FALLBACK` | `sessionFallback` |
 | `PI_BLACKHOLE_FULL_FOLD_ALWAYS` | `fullFoldAlways` |
 | `PI_BLACKHOLE_STATUSBAR` | `statusBar` |
+| `PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS` | `showWorkerNotifications` |
 
 Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accepts `0` to disable its cap):
 

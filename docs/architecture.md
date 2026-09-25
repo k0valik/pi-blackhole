@@ -85,9 +85,7 @@ src/
     tokens.ts                 # Token counting
     ids.ts                    # ID generation
     clipboard.ts              # Clipboard helpers
-    configure-overlay.ts      # Interactive config overlay TUI
-    status-overlay.ts         # Status display overlay TUI
-    key-matcher.ts            # Key matching for overlay
+    key-matcher.ts            # visibleWidth + key matching helpers
     debug-log.ts              # JSONL debug logging
     agents/
       observer/               # Observer agent (agent.ts, prompts.ts)

@@ -57,7 +57,6 @@ src/
 │   ├── runtime.ts             # Model resolution, cooldown integration, pipeline cursors, retry gate
 │   ├── cooldown.ts            # Cooldown persistence and expiry logic
 │   ├── pending.ts             # Per-session pending file management (manual compaction mode)
-│   ├── configure-overlay.ts   # The /blackhole configure TUI overlay — shows which keys are editable
 │   ├── model-budget.ts        # effectiveContextWindow() — context window override resolution order
 │   ├── debug-log.ts           # Debug logging (rotation, format)
 │   ├── retryable-error.ts     # Regex patterns for retryable error detection
@@ -281,6 +280,7 @@ Based on interview answers, build the config object. Write it to:
   "sessionFallback": true,        // false = skip worker when all configured models fail, don't use main model
   "fullFoldAlways": true,         // false = early reflections/drops don't survive first compaction until pool fills
   "statusBar": true,              // false = hide footer token gauges (O/P/X) + worker events
+  "showWorkerNotifications": true, // false = quiet: hide routine observer/reflector/dropper progress toasts (warnings, errors and compaction notices always show)
 
   // ── Base model (shared fallback for all workers) ──
   "model": { "provider": "...", "id": "..." },

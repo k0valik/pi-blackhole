@@ -804,7 +804,7 @@ export async function runObserverStage(
         if (idx >= 0) effectiveTokens = rawTokensAfterIndex(entries, idx);
       }
     }
-    runtime.tryEmitInfo(
+    runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
       `Observational memory: observer running on ~${chunkTokens.toLocaleString()}-token chunk (of ${effectiveTokens.toLocaleString()} accumulated)`,
@@ -916,7 +916,7 @@ export async function runObserverStage(
           });
         }
         runtime.advanceCursor("observer", coversUpToId, "recorded");
-        runtime.tryEmitInfo(
+        runtime.tryEmitWorkerInfo(
           ctx.hasUI,
           ctx.ui,
           `Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`,
@@ -948,7 +948,7 @@ export async function runObserverStage(
         if (ctx.hasUI)
           ctx.ui?.notify(`Observational memory: no observations — ${reasonLabel}`, "warning");
       } else {
-        runtime.tryEmitInfo(
+        runtime.tryEmitWorkerInfo(
           ctx.hasUI,
           ctx.ui,
           `Observational memory: no observations — ${reasonLabel}`,
@@ -1097,7 +1097,7 @@ async function runReflectorStage(
       newObsCount: newObservations.length,
       newRefCount: newReflections.length,
     });
-    runtime.tryEmitInfo(
+    runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
       `Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`,
@@ -1385,7 +1385,7 @@ async function runDropperStage(
         if (idx >= 0) effectiveDropTokens = rawTokensAfterIndex(entries, idx);
       }
     }
-    runtime.tryEmitInfo(
+    runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
       `Observational memory: dropper running (~${effectiveDropTokens.toLocaleString()} tokens accumulated, ~${dropperInputTokens.toLocaleString()}-token input)`,

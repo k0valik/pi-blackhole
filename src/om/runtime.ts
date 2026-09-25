@@ -335,6 +335,20 @@ export class Runtime {
     this.hasEmittedInfoThisTurn = false;
   }
 
+  /**
+   * Emit a routine observer/reflector/dropper progress toast, unless the user
+   * turned worker notifications off (`showWorkerNotifications: false`).
+   *
+   * Only routine progress goes through here — model fallback/unavailability,
+   * no-output warnings, worker failures and compaction notices keep using
+   * `tryEmitInfo` / `ui.notify` directly so they stay visible when the knob is
+   * off.
+   */
+  tryEmitWorkerInfo(hasUI: boolean, ui: { notify: Notify } | undefined, message: string): boolean {
+    if (this.config.showWorkerNotifications === false) return false;
+    return this.tryEmitInfo(hasUI, ui, message);
+  }
+
   ensureConfig(cwd: string, warn?: (message: string) => void): void {
     if (this.configLoaded) return;
     this.config = loadConfig(cwd, warn);

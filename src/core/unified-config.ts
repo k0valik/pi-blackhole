@@ -260,6 +260,10 @@ export interface UnifiedConfig {
   debugLog: boolean;
   /** Show the blackhole footer status bar (token gauges + worker events). */
   statusBar: boolean;
+  /** Show routine observer/reflector/dropper progress toasts. Warnings,
+   *  errors, model fallback/unavailability and compaction notices are
+   *  unaffected. */
+  showWorkerNotifications: boolean;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
@@ -317,6 +321,7 @@ export const DEFAULTS: UnifiedConfig = {
   memory: true,
   debugLog: false,
   statusBar: true,
+  showWorkerNotifications: true,
 };
 
 /**
@@ -581,6 +586,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (typeof raw.fullFoldAlways === "boolean") c.fullFoldAlways = raw.fullFoldAlways;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
   if (typeof raw.statusBar === "boolean") c.statusBar = raw.statusBar;
+  if (typeof raw.showWorkerNotifications === "boolean")
+    c.showWorkerNotifications = raw.showWorkerNotifications;
 
   // Numeric fields — use nonNegativeInt for keys where 0 is meaningful
   // (observerPreambleMaxTokens 0 = auto, retainedToolOutputMaxTokens 0 = disabled)

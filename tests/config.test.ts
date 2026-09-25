@@ -61,6 +61,7 @@ describe("Config defaults", () => {
     expect(config.agentMaxTurns).toBe(16);
     expect(config.memory).toBe(true);
     expect(config.debugLog).toBe(false);
+    expect(config.showWorkerNotifications).toBe(true);
     expect(config.model).toBeUndefined();
     expect(config.observerModel).toBeUndefined();
     expect(config.reflectorModel).toBeUndefined();
@@ -260,6 +261,36 @@ describe("workerAttemptTimeoutMs", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ workerAttemptTimeoutMs: 1.5 });
     expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+});
+
+describe("showWorkerNotifications", () => {
+  it("defaults to true when no config file exists", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(true);
+  });
+
+  it("honors an explicit false from the config file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showWorkerNotifications: false });
+    expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(false);
+  });
+
+  it("ignores a non-boolean file value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showWorkerNotifications: "no" });
+    expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(true);
+  });
+
+  it("env override wins over the file value", async () => {
+    process.env.PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS = "false";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ showWorkerNotifications: true });
+      expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(false);
+    } finally {
+      delete process.env.PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS;
+    }
   });
 });
 
