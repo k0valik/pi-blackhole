@@ -200,16 +200,6 @@ export interface UnifiedConfig {
   /** Treat every compaction as a full-fold boundary so early reflections/drops
    *  survive the first compaction in a fresh session. Default true. */
   fullFoldAlways: boolean;
-  /** Target token budget for the observation pool (dropper aims here).
-   *  Optional; defaults to half of observationsPoolMaxTokens when unset.
-   *  Must be less than observationsPoolMaxTokens.
-   *
-   *  NOTE: Ported from upstream as forward-compat (no-op in our pool algorithm).
-   *  Upstream renamed budgetTokens→targetTokens (52b5844) and uses this
-   *  for their tokensOverTarget / avgTokensPerObservation drop calculation.
-   *  We keep our ratio-based urgency algorithm; this knob exists so future
-   *  lockstep iterations don't diverge on the config shape. */
-  observationsPoolTargetTokens: number;
   /** Max prompt tokens for reflector model input (rolling window cap). */
   reflectorInputMaxTokens: number;
   /** Max prompt tokens for dropper model input (rolling window cap). */
@@ -224,11 +214,6 @@ export interface UnifiedConfig {
   dropperPoolFullnessThreshold: number;
   /** Max source entries tokens sent to observer per chunk. */
   observerChunkMaxTokens: number;
-  /** Max preamble tokens (CURRENT REFLECTIONS / OBSERVATIONS) in the observer prompt.
-   *  Default 0 means auto-compute from observerChunkMaxTokens (30%). Only applied in
-   *  noAutoCompact mode where accumulated batch history can grow unbounded.
-   *  Set to an explicit value to override the auto-computed budget. */
-  observerPreambleMaxTokens: number;
   /** Shared turn cap for background memory agents. */
   agentMaxTurns: number;
   /** Body-idle timeout for background provider streams. Uses pi's default when unset;
@@ -317,13 +302,11 @@ export const DEFAULTS: UnifiedConfig = {
   observationsPoolMaxTokens: 20_000,
   reflectionsPoolMaxTokens: 8_000,
   fullFoldAlways: true,
-  observationsPoolTargetTokens: 10_000,
   reflectorInputMaxTokens: 80_000,
   dropperInputMaxTokens: 80_000,
   dropperPressureThreshold: 0.7,
   dropperPoolFullnessThreshold: 0.1,
   observerChunkMaxTokens: 40_000,
-  observerPreambleMaxTokens: 0,
   agentMaxTurns: 16,
   // Optional knobs must still be DEFAULTS members (as undefined) or
   // ConfigManager.save() — which diffs against Object.keys(DEFAULTS) —
@@ -616,11 +599,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "recallResponseMaxChars",
     "observationsPoolMaxTokens",
     "reflectionsPoolMaxTokens",
-    "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
     "dropperInputMaxTokens",
     "observerChunkMaxTokens",
-    "observerPreambleMaxTokens",
     "agentMaxTurns",
     "providerIdleTimeoutMs",
   ] as const;
@@ -647,10 +628,9 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     if (raw[k] !== undefined) (c as Record<string, unknown>)[k] = raw[k];
   }
   for (const k of numKeys) {
-    // observerPreambleMaxTokens and timeout fields accept 0 (disabled/inherit);
+    // The timeout fields and 0-meaningful budgets accept 0 (disabled/inherit);
     // everything else must be > 0.
     const validator =
-      k === "observerPreambleMaxTokens" ||
       k === "providerIdleTimeoutMs" ||
       k === "retainedToolOutputMaxTokens" || // 0 = disabled (opt-in)
       k === "recallResponseMaxChars" || // 0 = unbounded (opt-out)

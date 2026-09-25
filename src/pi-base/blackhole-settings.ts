@@ -256,16 +256,6 @@ export const config = new ConfigManager<UnifiedConfig>({
       step: 1_000,
     },
     {
-      key: "observationsPoolTargetTokens",
-      type: "number",
-      label: "Observation pool target",
-      description: "Target tokens after dropper prunes (defaults to half of pool max)",
-      value: cfg.observationsPoolTargetTokens,
-      min: 500,
-      max: 200_000,
-      step: 500,
-    },
-    {
       key: "reflectorInputMaxTokens",
       type: "number",
       label: "Reflector input max",
@@ -294,16 +284,6 @@ export const config = new ConfigManager<UnifiedConfig>({
       min: 1_000,
       max: 200_000,
       step: 1_000,
-    },
-    {
-      key: "observerPreambleMaxTokens",
-      type: "number",
-      label: "Observer preamble max",
-      description: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
-      value: cfg.observerPreambleMaxTokens,
-      min: 0,
-      max: 100_000,
-      step: 500,
     },
     {
       key: "dropperPressureThreshold",
@@ -542,18 +522,16 @@ export const config = new ConfigManager<UnifiedConfig>({
       "retainedToolOutputMaxTokens",
       "observationsPoolMaxTokens",
       "reflectionsPoolMaxTokens",
-      "observationsPoolTargetTokens",
       "reflectorInputMaxTokens",
       "dropperInputMaxTokens",
       "observerChunkMaxTokens",
-      "observerPreambleMaxTokens",
       "agentMaxTurns",
     ];
     for (const k of REQUIRED_NUMERIC_KEYS) {
       // SAFETY: merged is a plain config object; indexing by dynamic key needs
       // the Record view to read/write numeric fields uniformly.
       const v = (merged as unknown as Record<string, unknown>)[k];
-      const minVal = k === "observerPreambleMaxTokens" || k === "reflectionsPoolMaxTokens" ? 0 : 1;
+      const minVal = k === "reflectionsPoolMaxTokens" ? 0 : 1;
       if (
         typeof v !== "number" ||
         !Number.isFinite(v) ||
@@ -577,14 +555,6 @@ export const config = new ConfigManager<UnifiedConfig>({
     const dpf = merged.dropperPoolFullnessThreshold;
     if (typeof dpf !== "number" || !Number.isFinite(dpf) || dpf <= 0 || dpf > 1) {
       merged.dropperPoolFullnessThreshold = DEFAULTS.dropperPoolFullnessThreshold;
-    }
-
-    // observationsPoolTargetTokens — must be < max
-    if (
-      merged.observationsPoolTargetTokens === undefined ||
-      merged.observationsPoolTargetTokens >= merged.observationsPoolMaxTokens
-    ) {
-      merged.observationsPoolTargetTokens = Math.floor(merged.observationsPoolMaxTokens / 2);
     }
 
     return merged;

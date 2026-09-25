@@ -250,16 +250,9 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
           if (hasObs) lines.push("Observation:  waiting in pending.json");
           if (hasRef) lines.push("Reflection:   waiting in pending.json");
           if (hasDrop) lines.push("Dropper:      waiting in pending.json");
-          const preambleCap =
-            runtime.config.observerPreambleMaxTokens > 0
-              ? runtime.config.observerPreambleMaxTokens
-              : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
-          const pctNote =
-            runtime.config.observerPreambleMaxTokens > 0
-              ? ""
-              : ` (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`;
+          const preambleCap = Math.round(runtime.config.observerChunkMaxTokens * 0.3);
           lines.push(
-            `Preamble cap: ${preambleCap.toLocaleString()} tokens per section (observations, reflections)${pctNote}`,
+            `Preamble cap: ${preambleCap.toLocaleString()} tokens per section (observations, reflections) (30% of ${runtime.config.observerChunkMaxTokens.toLocaleString()} chunk)`,
           );
           lines.push("Run /blackhole to flush and compact.");
         }

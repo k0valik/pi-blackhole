@@ -81,7 +81,6 @@ function baseConfig(overrides: Record<string, unknown> = {}) {
     dropperPoolFullnessThreshold: 0.4,
     reflectorInputMaxTokens: 1_000_000,
     observerChunkMaxTokens: 40_000,
-    observerPreambleMaxTokens: 0,
     passive: false,
     noAutoCompact: false,
     ...overrides,

@@ -740,16 +740,13 @@ export async function runObserverStage(
 
   const memory = fullProjection(entries);
 
-  // The preamble is capped via observerPreambleMaxTokens so accumulated
-  // memory doesn't grow unbounded across turns. Each section gets up to the
-  // full budget: observations relevance-ranked, reflections newest-first.
-  // In manual mode, append accumulated batch history to whatever
-  // fullProjection found in the branch (preserving pre-switch markers when
-  // transitioning from autoCompact to manual mode mid-session).
-  const preambleMaxTokens =
-    runtime.config.observerPreambleMaxTokens > 0
-      ? runtime.config.observerPreambleMaxTokens
-      : Math.round(runtime.config.observerChunkMaxTokens * 0.3);
+  // The preamble is a fixed 30% of the reading batch (plan-09 §3.4) — derived,
+  // not a knob — so accumulated memory can't grow unbounded across turns.
+  // Each section gets up to the full budget: observations relevance-ranked,
+  // reflections newest-first. In manual mode, append accumulated batch history
+  // to whatever fullProjection found in the branch (preserving pre-switch
+  // markers when transitioning from autoCompact to manual mode mid-session).
+  const preambleMaxTokens = Math.round(runtime.config.observerChunkMaxTokens * 0.3);
   let priorReflections = selectPriorReflections(memory.reflections, preambleMaxTokens).map(
     reflectionToSummaryLine,
   );

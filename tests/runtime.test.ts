@@ -620,7 +620,6 @@ describe("Consolidation trigger — guards with new config keys", () => {
         noAutoCompact: false,
         debugLog: true,
         observerChunkMaxTokens: 10000,
-        observerPreambleMaxTokens: 500,
         observationsPoolMaxTokens: 50000,
         reflectorInputMaxTokens: 10000,
         dropperInputMaxTokens: 10000,
