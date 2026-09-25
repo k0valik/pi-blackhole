@@ -304,7 +304,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "number",
       label: "Dropper pressure threshold",
       description:
-        "Fraction of reflectorInputMaxTokens that triggers pressure-driven dropper (0-1, default 0.70)",
+        "Fraction of observationsPoolMaxTokens that triggers pressure-driven dropper (1 disables)",
       value: cfg.dropperPressureThreshold,
       min: 0.01,
       max: 1,

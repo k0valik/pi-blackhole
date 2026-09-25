@@ -206,9 +206,8 @@ export interface UnifiedConfig {
   reflectorInputMaxTokens: number;
   /** Max prompt tokens for dropper model input (rolling window cap). */
   dropperInputMaxTokens: number;
-  /** Pressure threshold for dropper.  When active observation pool tokens exceed
-   *  this fraction of reflectorInputMaxTokens, the dropper runs even without new
-   *  observations/reflections (to keep the pool pruned).
+  /** Fraction of observationsPoolMaxTokens that triggers pressure-driven
+   *  dropping without new data. A value of 1 disables pressure.
    *  Default 0.70 (70%). Must be in range (0, 1]. */
   dropperPressureThreshold: number;
   /** Minimum observation-pool fullness (fraction of observationsPoolMaxTokens)

@@ -54,6 +54,7 @@ import {
   isSourceEntry,
   latestCoverageIndex,
   latestCoverageMarkerId,
+  livePoolObservations,
   observationsCreatedAfterIndex,
   observationPoolTokens,
   observationToSummaryLine,
@@ -176,6 +177,55 @@ function pendingObservationsCreatedAfter(
   return newObs;
 }
 
+/**
+ * Pressure gate for the dropper: the pool is full enough that it should be
+ * pruned even though no new observation or reflection data has arrived.
+ *
+ * The basis is `observationsPoolMaxTokens` — the same maximum the footer
+ * P gauge and `/blackhole-memory` divide by — not `reflectorInputMaxTokens`,
+ * which only sizes reflector/dropper prompts. Both configured fractions have to
+ * clear, so the effective trigger is
+ * `max(dropperPressureThreshold, dropperPoolFullnessThreshold) × pool max`.
+ * A threshold of `1.0` (the documented "off" value), or a non-positive pool
+ * max, disables pressure entirely; the ordinary new-data trigger is
+ * unaffected.
+ */
+function dropperPressureReached(config: Runtime["config"], poolTokens: number): boolean {
+  const poolMax = config.observationsPoolMaxTokens;
+  if (poolMax <= 0 || config.dropperPressureThreshold >= 1) return false;
+  return (
+    poolTokens / poolMax >= (config.dropperPoolFullnessThreshold ?? 0.1) &&
+    poolTokens >= config.dropperPressureThreshold * poolMax
+  );
+}
+
+/**
+ * Identity of the live pool: its observation ids, sorted so the key does not
+ * depend on branch order or on where an observation came from. Ids are assigned
+ * once at write time and never rewritten, so the id set changing is the only
+ * way the pool's contents can change — which is exactly what the pressure
+ * retry guard needs to notice.
+ */
+function activePoolSignature(entries: Entry[], pending?: PendingOMState): string {
+  const observationIds = livePoolObservations(entries, pending)
+    .map((observation) => observation.id)
+    .sort();
+  return JSON.stringify(observationIds);
+}
+
+/**
+ * True when this exact pool has already been pressure-pruned and came back
+ * empty: `runDropperStage` binds the signature to the `"empty"` dropper cursor
+ * precisely so repeated due-checks cannot re-issue the same model call against
+ * a pool the dropper just declined to touch. Any pool change — a new
+ * observation, or a drop from a cadence run — yields a different signature and
+ * re-arms pressure.
+ */
+function matchesEmptyPressurePool(runtime: Runtime, poolSignature: string): boolean {
+  const cursor = runtime.cursors?.dropper;
+  return cursor?.state === "empty" && cursor.activePoolSignature === poolSignature;
+}
+
 /** Cursor-aware stage-due check.  Uses cursors when available; falls back to
  *  legacy coverage markers when cursors are absent (cold start, fork recovery).
  *
@@ -258,10 +308,14 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
           // Must have at least dropperPoolFullnessThreshold fullness to consider dropper
           if (fullnessVsPool < (config.dropperPoolFullnessThreshold ?? 0.1)) return false;
 
-          // Pressure check: pool ≥ threshold × reflectorInputMaxTokens
-          const pressure =
-            poolTokens >= config.dropperPressureThreshold * config.reflectorInputMaxTokens;
-          if (pressure) return true;
+          // Pressure check: pool ≥ max(pressure, fullness) fraction of
+          // observationsPoolMaxTokens — and not for a pool the dropper has
+          // already evaluated and left untouched.
+          if (
+            dropperPressureReached(config, poolTokens) &&
+            !matchesEmptyPressurePool(runtime, activePoolSignature(entries, pending))
+          )
+            return true;
 
           // New data check: new obs or ref batches after dropper cursor
           const cursor = cursors.dropper;
@@ -1229,28 +1283,49 @@ async function runDropperStage(
   }
   let dropTokens = 0;
   let observationCoverageId: string | undefined;
+  // One pressure snapshot, taken before the mode-specific gates below and reused
+  // by the candidate selection, so the due-check the cursor records and the pool
+  // the dropper actually sees all describe the same pool. Manual mode reads the
+  // pending file once here and shares it with the gate below.
+  const pressurePending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
+  const pressurePoolSignature = activePoolSignature(entries, pressurePending);
+  const pressureReached = dropperPressureReached(
+    runtime.config,
+    observationPoolTokens(entries, pressurePending).tokens,
+  );
+  const pressureAlreadyChecked =
+    pressureReached && matchesEmptyPressurePool(runtime, pressurePoolSignature);
+  // Pressure bypasses the cadence and new-data gates only while this pool has
+  // not already been evaluated under pressure and left unchanged.
+  const pressureRun = pressureReached && !pressureAlreadyChecked;
+  // Advancing to "skipped"/"not_due" would replace the empty cursor and its
+  // signature, re-arming pressure against a pool the dropper already declined —
+  // so a pending pressure binding wins over bookkeeping advances.
+  const advanceDropperCursor = (entryId: string, state: "skipped" | "not_due"): void => {
+    if (!pressureAlreadyChecked) runtime.advanceCursor("dropper", entryId, state);
+  };
   if (isManualMode(runtime.config)) {
-    const pending = readPendingState(sessionId);
+    const pending = pressurePending ?? readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
     const hasPendingObs = (pending.observationBatches ?? []).some(
       (b: any) => (b.data as any)?.observations?.length,
     );
-    if (!hasPendingObs) {
-      runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped");
+    if (!hasPendingObs && !pressureRun) {
+      advanceDropperCursor(entries.at(-1)?.id ?? "unknown", "skipped");
       return "continue";
     }
     observationCoverageId = pending.observation?.coversUpToId;
     if (pending.dropped?.coversUpToId) {
       const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
       const dropIdx = entryIndexForId(entries, pending.dropped.coversUpToId);
-      if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx) {
-        runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "skipped");
+      if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx && !pressureRun) {
+        advanceDropperCursor(pending.dropped.coversUpToId, "skipped");
         return "continue";
       }
       if (dropIdx >= 0) {
         dropTokens = rawTokensAfterIndex(entries, dropIdx);
-        if (dropTokens < runtime.config.reflectAfterTokens) {
-          runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "not_due");
+        if (dropTokens < runtime.config.reflectAfterTokens && !pressureRun) {
+          advanceDropperCursor(pending.dropped.coversUpToId, "not_due");
           return "continue";
         }
       } else {
@@ -1261,16 +1336,20 @@ async function runDropperStage(
     }
   } else {
     dropTokens = rawTokensSinceDropCoverage(entries);
-    if (dropTokens < runtime.config.reflectAfterTokens) {
-      runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "not_due");
+    if (dropTokens < runtime.config.reflectAfterTokens && !pressureRun) {
+      advanceDropperCursor(entries.at(-1)?.id ?? "unknown", "not_due");
       return "continue";
     }
     observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
-    if (!observationCoverageId) {
-      runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped");
+    if (!observationCoverageId && !pressureRun) {
+      advanceDropperCursor(entries.at(-1)?.id ?? "unknown", "skipped");
       return "continue";
     }
   }
+  // A pressure run must still be able to write its drop result somewhere: with
+  // the coverage gates bypassed there may be no observation marker to cover,
+  // so fall back to the branch tip rather than skipping the run.
+  if (!observationCoverageId) observationCoverageId = entries.at(-1)?.id ?? "unknown";
 
   for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
     const resolved = await resolveModel("dropper");
@@ -1280,17 +1359,24 @@ async function runDropperStage(
     const folded = foldLedger(entries);
     const pending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
     const lastDropIdx = pending ? -1 : latestCoverageIndex(entries, OM_OBSERVATIONS_DROPPED);
-    const newObservations = pending
-      ? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
-      : observationsCreatedAfterIndex(entries, lastDropIdx);
+    // Candidate scope: a pressure run gets the whole live pool (with an empty
+    // post-drop delta there is nothing else to prune), cadence runs keep the
+    // post-last-drop delta — pending batches in manual mode, branch markers
+    // otherwise.
+    const newObservations = pressureRun
+      ? livePoolObservations(entries, pending)
+      : pending
+        ? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
+        : observationsCreatedAfterIndex(entries, lastDropIdx);
     const dropperNewObsTokens = Math.ceil(
       newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4,
     );
     const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
-    const dropperInputTokens = Math.min(
-      dropperNewObsTokens + dropperSummaryBudget,
-      runtime.config.dropperInputMaxTokens,
-    );
+    // Deliberately uncapped: the prompt carries every candidate observation, so
+    // this has to be the size that will actually be sent — capping it at
+    // dropperInputMaxTokens would hide an oversized pressure prompt from the
+    // context-window check below and hand it to a model that cannot hold it.
+    const dropperInputTokens = dropperNewObsTokens + dropperSummaryBudget;
     // Adjust accumulated for pending coverage in manual mode
     let effectiveDropTokens = dropTokens;
     if (isManualMode(runtime.config)) {
@@ -1415,11 +1501,18 @@ async function runDropperStage(
         }
         runtime.advanceCursor("dropper", coversUpToId, "recorded");
       } else {
-        // No drops selected (maxDropsAllowed=0 or LLM returned no candidates)
+        // No drops selected (maxDropsAllowed=0 or the model returned no
+        // candidates). Under pressure, bind that empty result to the branch tip
+        // and to this pool's id signature, so the next due-check skips an
+        // unchanged pool instead of repeating the same model call — a pool
+        // change rewrites the signature and re-arms pressure.
         runtime.advanceCursor(
           "dropper",
-          coversUpToId ?? observationCoverageId ?? entries.at(-1)?.id ?? "unknown",
+          pressureReached
+            ? (entries.at(-1)?.id ?? "unknown")
+            : (coversUpToId ?? observationCoverageId ?? entries.at(-1)?.id ?? "unknown"),
           "empty",
+          pressureReached ? pressurePoolSignature : undefined,
         );
       }
       return "continue";

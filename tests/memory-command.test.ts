@@ -53,6 +53,8 @@ function createMockEnvironment() {
       reflectAfterTokens: 25_000,
       compactAfterTokens: 81_000,
       observationsPoolMaxTokens: 20_000,
+      dropperPoolFullnessThreshold: 0.1,
+      dropperPressureThreshold: 0.7,
       observerChunkMaxTokens: 40_000,
       observerPreambleMaxTokens: 0,
       passive: false,
@@ -203,6 +205,7 @@ describe("/blackhole-memory command", () => {
     expect(msg).toContain("Observer:");
     expect(msg).toContain("Reflector:");
     expect(msg).toContain("Dropper:");
+    expect(msg).toContain("eligible at ≥10% with new data; pressure at ≥70% pool");
     expect(msg).toContain("Compaction:");
     expect(msg).toContain("Obs pool:");
     expect(msg).toContain("Reflect pool:");

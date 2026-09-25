@@ -54,6 +54,15 @@ function pct(current: number, total: number): number {
   return total > 0 ? Math.round((current / total) * 100) : 0;
 }
 
+function pressureHint(config: {
+  dropperPressureThreshold: number;
+  dropperPoolFullnessThreshold: number;
+}): string {
+  if (config.dropperPressureThreshold >= 1) return "pressure off";
+  const threshold = Math.max(config.dropperPressureThreshold, config.dropperPoolFullnessThreshold);
+  return `pressure at ≥${Math.round(threshold * 100)}% pool`;
+}
+
 /**
  * Basis suffix for the auto-compaction threshold line. Empty for an explicit
  * fixed token threshold; describes the window-derived basis otherwise
@@ -222,7 +231,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         "Transcript accumulated since last run. Triggers when exceeding threshold.",
         `Observer:       ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
         `Reflector:      ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
-        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — prunes at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% pool (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
+        `Dropper:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(runtime.config.dropperPoolFullnessThreshold * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"

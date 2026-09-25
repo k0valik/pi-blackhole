@@ -142,18 +142,79 @@ export function rawTokensSinceDropCoverage(entries: Entry[]): number {
 }
 
 /**
- * Canonical observation-pool measurement shared by the dropper trigger and
- * the user-facing pool displays.
+ * The live observation pool: every recorded observation that still counts
+ * against the pool budget.
  *
- * Measures the live active pool — `foldLedger(entries).activeObservations`,
- * every recorded observation not tombstoned by a drop — plus, when `pending`
- * is supplied (manual mode, where records live in pending.json instead of the
- * branch), every observation in `pending.observationBatches`.
+ * Starts from `foldLedger(entries).activeObservations` (branch records minus
+ * drop tombstones) and then folds in `pending.observationBatches`, which is
+ * where manual mode keeps records instead of the branch. Two rules keep the
+ * merged set honest:
+ *
+ * - dedup by id, branch first: an observation that exists in both universes
+ *   counts once, and pending records the ledger already tombstoned are never
+ *   restored;
+ * - pending drop results (`pending.droppedBatches`, or `pending.dropped` for
+ *   files written before batches existed) tombstone whatever they name,
+ *   pending or branch.
+ *
+ * Pending records missing `id`/`content`/`tokenCount` are skipped rather than
+ * coerced, so a hand-edited or half-written pending file cannot corrupt a
+ * token sum.
+ *
+ * Scope is the caller's decision, not this helper's: a pressure-triggered run
+ * hands the whole set to the dropper, while a cadence-triggered run narrows to
+ * the post-last-drop delta at the call site (see `runDropperStage`).
+ */
+export function livePoolObservations(entries: Entry[], pending?: PendingOMState): Observation[] {
+  const folded = foldLedger(entries);
+  const pool = new Map(
+    folded.activeObservations.map((observation) => [observation.id, observation]),
+  );
+  for (const batch of pending?.observationBatches ?? []) {
+    const data = batch.data as { observations?: unknown } | undefined;
+    if (!Array.isArray(data?.observations)) continue;
+    for (const value of data.observations) {
+      if (typeof value !== "object" || value === null) continue;
+      const observation = value as Partial<Observation>;
+      if (
+        typeof observation.id !== "string" ||
+        typeof observation.content !== "string" ||
+        typeof observation.tokenCount !== "number" ||
+        folded.droppedObservationIds.has(observation.id) ||
+        pool.has(observation.id)
+      ) {
+        continue;
+      }
+      pool.set(observation.id, observation as Observation);
+    }
+  }
+
+  const dropped = pending?.droppedBatches?.length
+    ? pending.droppedBatches
+    : pending?.dropped
+      ? [pending.dropped]
+      : [];
+  for (const batch of dropped) {
+    const data = batch.data as { observationIds?: unknown } | undefined;
+    if (!Array.isArray(data?.observationIds)) continue;
+    for (const id of data.observationIds) {
+      if (typeof id === "string") pool.delete(id);
+    }
+  }
+  return [...pool.values()];
+}
+
+/**
+ * Canonical observation-pool measurement shared by the dropper trigger — both
+ * the `dropperPoolFullnessThreshold` gate and the `dropperPressureThreshold`
+ * pressure basis — and the user-facing pool displays (`/blackhole-memory`,
+ * the footer P gauge). All of them sum the same `livePoolObservations` set, so
+ * no surface can drift onto a different token basis or dedup rule.
  *
  * `pending` is explicit at every call site so a caller cannot obtain the
- * number without stating which universe it means. This helper only measures;
- * it does not select dropper candidates — the dropper deliberately ranges
- * over a narrower delta (see `agents/dropper/agent.ts`).
+ * number without stating which universe it means: the trigger and the memory
+ * command pass pending in manual mode, while the footer P gauge deliberately
+ * measures the branch alone (#120).
  *
  * Sums the stored `tokenCount` (content-only, recorded at write time with the
  * CJK-aware `estimateStringTokens`, #106) so all callers move together if that
@@ -163,27 +224,11 @@ export function observationPoolTokens(
   entries: Entry[],
   pending?: PendingOMState,
 ): { tokens: number; count: number } {
-  const { activeObservations } = foldLedger(entries);
-  let tokens = activeObservations.reduce(
-    (sum, observation) => sum + (observation.tokenCount ?? 0),
-    0,
-  );
-  let count = activeObservations.length;
-
-  for (const batch of pending?.observationBatches ?? []) {
-    const data = batch.data;
-    if (typeof data !== "object" || data === null) continue;
-    const observations = (data as { observations?: unknown }).observations;
-    if (!Array.isArray(observations)) continue;
-    for (const observation of observations) {
-      count += 1;
-      if (typeof observation !== "object" || observation === null) continue;
-      const tokenCount = (observation as { tokenCount?: unknown }).tokenCount;
-      if (typeof tokenCount === "number") tokens += tokenCount;
-    }
-  }
-
-  return { tokens, count };
+  const pool = livePoolObservations(entries, pending);
+  return {
+    tokens: pool.reduce((sum, observation) => sum + observation.tokenCount, 0),
+    count: pool.length,
+  };
 }
 
 export function findLastCompactionIndex(entries: Entry[]): number {

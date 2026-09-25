@@ -136,7 +136,7 @@
     "  observationsPoolMaxTokens / reflectionsPoolMaxTokens — rendered-line caps including IDs and separators; headings/footer extra; source history retained",
     "  append rebase — pressure plus useful saving at existing compactions; cadence unchanged",
     "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
-    "  dropperPressureThreshold (0-1, default 0.70) — pressure relief valve: fraction of reflectorInputMaxTokens where dropper fires even without new data",
+    "  dropperPressureThreshold (0-1, default 0.70) — fraction of observationsPoolMaxTokens where dropper fires without new data (1 disables)",
     "  providerIdleTimeoutMs (ms, 0=disabled, unset=inherit pi default) — body-idle timeout for background provider streams",
     "  workerAttemptTimeoutMs (ms, 0/unset=disabled, max 2147483647) — hard elapsed deadline per worker/model attempt; a configured candidate's timeout engages its cooldown + the next fallback; the session fallback is tried once per stage, with no cooldown",
     "  compactAfterPreset / compactAfterPresets — auto-compaction preset curve selection + definitions (default curve 0.90@32k → 0.40@1M); replaces the flat 81000 default — a file compactAfterTokens of exactly 81000 is legacy residue and is dropped",
