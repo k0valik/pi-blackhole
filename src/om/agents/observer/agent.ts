@@ -239,13 +239,15 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
         params.complete === true && rejected > 0
           ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with sourceEntryIds copied from the chunk; anything not re-submitted is discarded and will not be recorded.`
           : "";
-      // The run totals are cumulative history, not pending work: they let the
-      // model reconcile proposals it already sent without implying an
-      // outstanding obligation on a batch that is closing the run.
+      // The run totals are counter semantics, not a claim about this receipt:
+      // stated as what the number means, they stay true on the batch that
+      // creates the count as well as on later ones, and they tell the model not
+      // to re-propose against a count it already corrected.
       const totals =
         ` Run totals: ${accumulated.size} recorded, ` +
         `${totalDuplicates} duplicate${totalDuplicates === 1 ? "" : "s"} skipped, ` +
-        `${totalRejected} rejected cumulatively (includes entries the model corrected in a later batch).`;
+        `${totalRejected} rejected cumulatively across this run ` +
+        `(a count above zero does not mean corrections are still owed).`;
       const guidance = terminates
         ? ""
         : ` Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.`;

@@ -461,8 +461,55 @@ describe("V3 reflector agent", () => {
 
     expect(results).toHaveLength(2);
     expect(results[1].content?.[0]?.text).toContain(
-      "Run totals: 1 recorded, 1 rejected cumulatively",
+      "Run totals: 1 recorded, 0 duplicates skipped, 1 rejected cumulatively across this run",
     );
+    // Explained as counter semantics on the receipt that creates the count.
+    expect(results[0].content?.[0]?.text).toContain("does not mean corrections are still owed");
+  });
+
+  it("surfaces cumulative duplicates when a reflection is re-proposed", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: false,
+        }),
+      );
+      results.push(
+        await context.tools[0].execute("tool-2", {
+          reflections: [{ content: "Durable fact.", supportingObservationIds: ["aaaaaaaaaaaa"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(2);
+    // The re-proposal is deduplicated; the cumulative duplicate count has to
+    // survive into batch 2 or recorded + duplicates + rejected stops reconciling.
+    expect(results[1].content?.[0]?.text).toContain(
+      "Run totals: 1 recorded, 1 duplicate skipped, 0 rejected cumulatively across this run",
+    );
+  });
+
+  it("never tells the model a refused complete batch ends the review", async () => {
+    const results: CapturedToolResult[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      results.push(
+        await context.tools[0].execute("tool-1", {
+          reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
+          complete: true,
+        }),
+      );
+    });
+
+    await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].content?.[0]?.text).toContain("complete=true was not honored");
+    expect(results[0].content?.[0]?.text).not.toContain("complete=true ends the review");
   });
 
   it("terminates on a clean complete batch after an earlier rejection", async () => {
@@ -484,6 +531,7 @@ describe("V3 reflector agent", () => {
 
     await runReflector({ ...baseArgs, agentLoop: loop });
 
+    expect(results).toHaveLength(2);
     // The cumulative count is history, not a pending obligation, so the
     // corrected batch can still close the run.
     expect(results[1].terminate).toBe(true);
@@ -502,6 +550,7 @@ describe("V3 reflector agent", () => {
 
     await runReflector({ ...baseArgs, agentLoop: loop });
 
+    expect(results).toHaveLength(1);
     expect(results[0].content?.[0]?.text).not.toContain("complete=false asks for another batch");
   });
 

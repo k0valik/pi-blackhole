@@ -8,11 +8,19 @@
  * so the run would hang until the vitest timeout instead of failing fast.
  */
 
-import type { Message } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  JsonObject,
+  StopReason,
+  TextContent,
+  ToolCall,
+  Usage,
+} from "@earendil-works/pi-ai";
 
-// pi-ai's real Usage shape; the loop forwards it to consumers that account for
-// tokens, so the fixture must not carry a renamed/partial variant.
-const ZERO_USAGE = {
+// pi-ai's declared Usage shape (types.d.ts) with every required field present,
+// so a rename or a newly required key becomes a compile error here instead of
+// silently reaching the loop that forwards usage to consumers.
+const ZERO_USAGE: Usage = {
   input: 0,
   output: 0,
   cacheRead: 0,
@@ -22,21 +30,21 @@ const ZERO_USAGE = {
 };
 
 function assistantMessage(
-  content: unknown[],
-  stopReason: string,
+  content: (TextContent | ToolCall)[],
+  stopReason: StopReason,
   errorMessage?: string,
-): Message {
+): AssistantMessage {
   return {
     role: "assistant",
     api: "openai-completions",
     provider: "openai",
     model: "scripted",
-    usage: { ...ZERO_USAGE },
+    usage: ZERO_USAGE,
     timestamp: Date.now(),
     content,
     stopReason,
     ...(errorMessage ? { errorMessage } : {}),
-  } as unknown as Message;
+  };
 }
 
 /**
@@ -46,7 +54,7 @@ function assistantMessage(
  * unexpected extra turn is visible to the caller.
  */
 export function createScriptedStream(toolName: string) {
-  const toolCallTurn = (args: Record<string, unknown>) =>
+  const toolCallTurn = (args: JsonObject) =>
     assistantMessage(
       [{ type: "toolCall", id: "call-1", name: toolName, arguments: args }],
       "toolUse",
@@ -55,7 +63,7 @@ export function createScriptedStream(toolName: string) {
   const textTurn = (text = "run complete") =>
     assistantMessage([{ type: "text", text }], "stop");
 
-  const stream = (script: ReadonlyArray<Message>) => {
+  const stream = (script: ReadonlyArray<AssistantMessage>) => {
     let invocations = 0;
     const streamFn = async () => {
       const turnNumber = invocations++;

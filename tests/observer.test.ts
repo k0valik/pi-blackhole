@@ -472,7 +472,7 @@ describe("runObserver", () => {
 
     expect(results).toHaveLength(2);
     expect(results[1].content?.[0]?.text).toContain(
-      "Run totals: 1 recorded, 0 duplicates skipped, 1 rejected cumulatively",
+      "Run totals: 1 recorded, 0 duplicates skipped, 1 rejected cumulatively across this run",
     );
   });
 
@@ -503,7 +503,9 @@ describe("runObserver", () => {
     // The corrected run still terminates: a historical count must not read as a
     // pending obligation on the turn that closes the run.
     expect(results[1].terminate).toBe(true);
-    expect(results[1].content?.[0]?.text).toContain("includes entries the model corrected");
+    // The count is explained as counter semantics on the receipt that creates
+    // it, not as a claim about corrections that have not happened yet.
+    expect(results[0].content?.[0]?.text).toContain("does not mean corrections are still owed");
   });
 
   it("omits the continue-the-run guidance on a batch that terminates", async () => {

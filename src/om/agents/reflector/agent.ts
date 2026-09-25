@@ -127,10 +127,11 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
   const allowedObservationIds = observations.map((observation) => observation.id);
   const existingReflectionIds = new Set(reflections.map((reflection) => reflection.id));
   const accumulated = new Map<string, Reflection>();
-  // Cumulative rejections for this run, including reflections the model
-  // corrected in a later batch. Reported so the model can reconcile what it
-  // already sent — it is history, not a count of corrections still owed.
+  // Cumulative counts for this run, including reflections the model corrected
+  // or re-proposed in a later batch. Reported so the model can reconcile what
+  // it already sent — they are counter semantics, not work still owed.
   let runRejected = 0;
+  let runDuplicates = 0;
 
   const recordReflections: AgentTool<typeof RecordReflectionsSchema> = {
     name: "record_reflections",
@@ -168,6 +169,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
         added++;
       }
       runRejected += rejected;
+      runDuplicates += duplicates;
       const terminates = params.complete === true && rejected === 0;
       const rejectionReason =
         rejected > 0 ? " (invalid content or unknown supporting observation ids)" : "";
@@ -175,14 +177,22 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
         params.complete === true && rejected > 0
           ? ` complete=true was not honored: ${rejected} reflection${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with supportingObservationIds copied from the observation lines; anything not re-submitted is discarded and will not be recorded.`
           : "";
-      // Cumulative history, not pending work: a corrected batch must not read
-      // as carrying an outstanding obligation while it closes the run.
+      // Counter semantics rather than a claim about this receipt, so the
+      // sentence stays true on the batch that creates the count. Mirrors the
+      // observer's three-way reconciliation: proposals = recorded + duplicates
+      // + rejected.
       const totals =
         ` Run totals: ${accumulated.size} recorded, ` +
-        `${runRejected} rejected cumulatively (includes reflections the model corrected in a later batch).`;
-      const guidance = terminates
-        ? ""
-        : ` complete=true ends the review; complete=false asks for another batch.`;
+        `${runDuplicates} duplicate${runDuplicates === 1 ? "" : "s"} skipped, ` +
+        `${runRejected} rejected cumulatively across this run ` +
+        `(a count above zero does not mean corrections are still owed).`;
+      // Suppressed on a refused complete batch: telling the model that
+      // complete=true ends the review one sentence before saying complete=true
+      // was not honored is the contradiction this branch must never emit.
+      const guidance =
+        terminates || refusal
+          ? ""
+          : ` complete=true ends the review; complete=false asks for another batch.`;
       return {
         content: [
           {
