@@ -172,7 +172,7 @@ The module exports pure functions over the current reflection and observation se
 
 Without coverage evidence the dropper must guess whether an observation's meaning survives elsewhere. Coverage provides a deterministic signal: strongly-covered observations are likely redundant, while uncovered high/critical ones are load-bearing.
 
-This is what lets the pool be pruned toward `observationsPoolTargetTokens` without silently losing durable facts.
+This is what lets the pruner remove redundant notes without silently losing durable facts.
 
 ### Invariants and edge cases
 
@@ -194,7 +194,7 @@ The consolidation pipeline runs Observer → Reflector → Dropper on `agent_sta
 
 - **Observer due**: Tokens since last observation coverage ≥ `observeAfterTokens`
 - **Reflector due**: Tokens since last reflection coverage ≥ `reflectAfterTokens` AND new observations exist
-- **Dropper due**: Pool ≥ `max(dropperPressureThreshold, dropperPoolFullnessThreshold) × observationsPoolMaxTokens` OR (new data exists AND pool fullness ≥ `dropperPoolFullnessThreshold`, 10% by default)
+- **Dropper due**: Pool fullness ≥ `dropperPressureThreshold × observationsPoolMaxTokens` OR (new data exists AND pool fullness ≥ the constant new-data floor, `0.10`)
 
 In manual mode (`compaction: "manual"`), the branch has no OM markers — pending state provides pool fullness and new-data visibility.
 
@@ -264,7 +264,7 @@ A single regex in [[src/om/retryable-error.ts]] matches: HTTP 429, 5xx, rate lim
 
 ## Compaction trigger
 
-Auto-compaction fires on `agent_end` when tokens exceed the effective threshold — `compactAfterTokens`, or a window-derived `compactAfterRatio` / `compactReserveTokens` value (see `docs/CONFIG.md`). Defined in [[src/om/compaction-trigger.ts]].
+Auto-compaction fires on `agent_end` when tokens exceed the effective threshold — the `compactAfterBy` shape (`preset` / `percent` / `tokens` / `reserve`) clamped to `compactAfterMinTokens` / `compactAfterMaxTokens` (see `docs/CONFIG.md`). Defined in [[src/om/compaction-trigger.ts]].
 
 ### Guards
 
@@ -272,7 +272,6 @@ Conditions checked before auto-compaction fires.
 
 - `compaction: "off"` → Skip entirely
 - `compaction: "manual"` → Skip auto-trigger
-- `compactionEngine: "pi-default"` → Skip (Pi handles timing)
 - `memory: false` → No longer blocks compaction (orthogonal)
 - Agent retrying (`stopReason: "error"` with retryable error) → Skip (agent hasn't truly finished)
 
@@ -301,7 +300,7 @@ Before this hook, failure coverage was fragmented: `/blackhole` and the auto-tri
 1. **Structured trace log** — `compact_failed.received` records reason, aborted, willRetry, fromExtension, errorMessage, and session id.
 2. **Defensive `compactInFlight` guard** — on abort or error, aborts any pending idle-wait controller before clearing its reference, then resets `compactInFlight`. This prevents an orphaned wait from launching a second compaction after a later turn.
 3. **Overflow-retry visibility** — `reason: "overflow"` + `aborted` + `willRetry` notifies `"blackhole: overflow compaction aborted, retrying turn"` (info).
-4. **pi-default noise filter** — failures under `compactionEngine: "pi-default"` that are not ours get only a light `compact_failed.skipped_pi_default` trace; error notifications fire only for failures attributed to blackhole.
+4. **off-mode noise filter** — failures under `compaction: "off"` that are not ours get only a light `compact_failed.skipped_pi_default` trace; error notifications fire only for failures attributed to blackhole.
 
 #### Attribution fix
 

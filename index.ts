@@ -47,27 +47,6 @@ export default async (pi: ExtensionAPI) => {
     captureRegisteredProviderStreams(ctx.modelRegistry, providerStreams);
   });
 
-  // 0.5.2 migration notice: nudge pinned-threshold users toward the
-  // context-window preset curve (see src/changelog/migration-notice.ts).
-  // TODO(0.5.3): remove together with the module + tests.
-  //
-  // The dynamic import defers this work to a later tick, by which time the
-  // session may already be gone (quit, /reload, /new right after startup).
-  // Pi's ctx accessors throw on a stale ctx, so the `.then()` body must be
-  // both guarded and catch-terminated — otherwise the throw escapes as an
-  // *unhandled rejection* and terminates the pi process.
-  pi.on("session_start", (_event: unknown, ctx: any) => {
-    void import("./src/changelog/migration-notice.js")
-      .then(({ maybeNotifyThresholdMigration }) => {
-        omRuntime.ensureConfig(ctx.cwd, (msg: string) => ctx.ui?.notify?.(msg, "warning"));
-        maybeNotifyThresholdMigration(ctx, omRuntime.config);
-      })
-      .catch(() => {
-        // Session replaced/disposed while the notice module was loading, or the
-        // config read failed. A migration nudge is best-effort — never fatal.
-      });
-  });
-
   scaffoldSettings();
 
   // Config-file migration (plan-10): rewrite the global and project config
@@ -75,10 +54,21 @@ export default async (pi: ExtensionAPI) => {
   // or the runtime loads them the keys on disk match the keys the code reads.
   // Best-effort: read-only installs and stale ctx must never be fatal (the
   // loader also migrates in memory, so behavior is correct even if this skips).
+  // When a migration actually ran, emit the once-per-process release notice
+  // (version-gated in src/changelog/migration-notice.ts).
   pi.on("session_start", (_event: unknown, ctx: any) => {
-    void migrateConfigFiles(ctx.cwd).catch(() => {
-      /* migration is best-effort — never fatal */
-    });
+    void (async () => {
+      try {
+        const results = await migrateConfigFiles(ctx.cwd);
+        if (results.some((r) => r.changed)) {
+          const { maybeNotifyConfigMigration } =
+            await import("./src/changelog/migration-notice.js");
+          maybeNotifyConfigMigration(ctx, true);
+        }
+      } catch {
+        /* migration + notice are best-effort — never fatal */
+      }
+    })();
   });
 
   const omRuntime = new Runtime();

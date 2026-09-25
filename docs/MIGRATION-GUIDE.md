@@ -1,185 +1,172 @@
-# Migration Guide — Old Config to New Config
+# Upgrade guide — config surface reorg
 
-This document explains how to migrate from the legacy pi-vcc config keys to the new unified config surface. Migration is **automatic** — old config files continue to work without changes. This document covers what changed and how to update existing configs explicitly.
+This release gives the settings surface outcome-level labels and folds several
+redundant or dead keys. It is a **config-schema change**, not a rewrite of
+blackhole's behavior: the defaults and the pipeline are unchanged, and existing
+files are **migrated on disk automatically** at startup. This document lists
+what moved, what was removed, and how the automatic migration works.
 
-## What Changed
+> If you only ever used the modal (`/blackhole settings`) and never hand-edited
+> the JSON, you need to do nothing — the migration runs before the modal reads
+> the file. Open the settings once after upgrading to review the new labels.
 
-### Key Replacements
+## TL;DR
 
-| Old Key | New Key(s) | Why |
-|---------|-----------|-----|
-| `overrideDefaultCompaction` | `compactionEngine` | "Override" was misleading. The new name says what it does: choose the engine |
-| `noAutoCompact` | `compaction` | Double-negative removed. Set `compaction: "manual"` instead |
-| `passive` | `compaction` + `memory` | Nuclear switch split into independent concerns |
-| (implicit) | `tailBehavior` | Brand new — controls visible transcript length after compaction |
+| You had…                                    | It becomes…                                              |
+| ------------------------------------------- | -------------------------------------------------------- |
+| `compactionEngine: "blackhole"`             | `compaction: "automatic"`                                |
+| `compactionEngine: "pi-default"`            | `compaction: "off"`                                      |
+| `compaction: "auto"`                        | `compaction: "automatic"`                                |
+| `compaction: "manual"` / `"off"`            | unchanged                                                |
+| `compactionAfterRatio: 0.46` (a fraction)   | `compactAfterRatio: 46` (a percent) + `compactAfterBy: "percent"` |
+| `compactAfterTokens: 120000`                | unchanged + `compactAfterBy: "tokens"`                   |
+| `compactReserveTokens: 32768`               | unchanged + `compactAfterBy: "reserve"`                  |
+| `dropperPoolFullnessThreshold` + `dropperPressureThreshold` | one `dropperPressureThreshold = max(...)` |
+| `dropperInputMaxTokens` + `reflectorInputMaxTokens` | one `reflectorInputMaxTokens`                  |
+| `observationsPoolTargetTokens`              | removed (it had no effect)                               |
+| `observerPreambleMaxTokens`                 | removed (the 30% of the reading batch is now a constant) |
 
-### Semantic Changes
+`compactAfterMinTokens` and `compactAfterMaxTokens` are **new**, optional keys —
+see [The shape-plus-band threshold](#the-shape-plus-band-threshold).
 
-**`memory: false` no longer blocks auto-compaction.** In the old config, `memory: false` was a double gate: it disabled OM workers AND blocked auto-compaction entirely. In the new config, these are independent:
+## Automatic on-disk migration
+
+Starting at the first session after the upgrade, blackhole migrates the two
+config files it owns, independently:
+
+- the global file `~/.pi/agent/pi-blackhole/pi-blackhole-config.json`
+- the project file `<cwd>/.pi/pi-blackhole-config.json` (only if it exists)
+
+The per-file algorithm is **two-phase and verified**:
+
+1. Read and parse the file. Invalid JSON or a non-object is left untouched
+   (a warning is printed; the file is never rewritten).
+2. Project the migration in memory. A recognized key with an unrecognized value
+   aborts the whole file — nothing is written or deleted.
+3. If the file has no legacy keys, it is a no-op. Blackhole does not silently
+   rewrite unrelated files.
+4. **Phase 1:** back up the file once as `<file>.bak`, then atomically
+   (temp file + rename) write the migration with the new keys **and the old
+   keys still present**, plus a `"configVersion": 1` stamp. The file is then
+   re-read and every changed key is verified.
+5. **Phase 2:** only after that verification passes, atomically write the file
+   again with the consumed legacy keys deleted.
+
+Consequences worth knowing:
+
+- **Nothing is deleted before it is confirmed on disk.** If the process crashes
+  between phases, the next load sees new + old keys and takes the remove-only
+  path.
+- **Unknown keys are preserved** verbatim. Blackhole only touches keys it owns.
+- **Read-only filesystems** (Nix, managed dotfiles): the write throws, a warning
+  is printed, the old keys are kept, and the current session still behaves as if
+  the migration had run. The migration is retried on the next load.
+- **Exactly one `.bak`** is written, before the first write. The migrated files
+  are not version-controlled by blackhole; if your project config is tracked by
+  git, commit the migration yourself.
+
+## Removed keys
+
+| Key | Why | What to do instead |
+| --- | --- | --- |
+| `compactionEngine` | `"blackhole"` and `"pi-default"` were the same as `compaction: "automatic"` and `"off"`. | Use `compaction`. |
+| `observationsPoolTargetTokens` | No runtime reader — it never did anything. | Nothing; it is deleted. |
+| `observerPreambleMaxTokens` | It only overrode 30% of the reading batch, which is now a constant. | Nothing; it is deleted. |
+| `dropperPoolFullnessThreshold` | Merged into `dropperPressureThreshold` (see below). | `dropperPressureThreshold`. |
+| `dropperInputMaxTokens` | Merged into `reflectorInputMaxTokens`. | `reflectorInputMaxTokens`. |
+
+### Dropper merge — one residual divergence
+
+`dropperPressureThreshold` (UI: **Prune memory when**) survives. The old
+new-data floor is now the constant `0.10`. Migration sets
+`dropperPressureThreshold = max(oldPressure, oldFullness)`.
+
+This is **exact** for every config whose floor was the default `0.10` — the
+overwhelming majority — at any pressure value. It only differs for a config
+that set `fullness` **above 0.10 and above `pressure`**: that config loses its
+custom new-data floor in favor of the constant. No single-knob formulation can
+preserve two independent numbers, so this is the one accepted divergence.
+
+### Input-budget merge
+
+`reflectorInputMaxTokens` (UI: **Memory read per job**) survives.
+`dropperInputMaxTokens` is dropped. If only the dropper key was set, its value
+becomes the survivor; if only the reflector key was set, nothing changes; if
+both were set, the explicit `reflectorInputMaxTokens` wins. The merge changes
+behavior only for configs that deliberately tuned the two differently.
+
+## The shape-plus-band threshold
+
+The auto-compaction point is now one **shape** plus an optional **band**:
 
 ```
-Old: memory:false → no OM workers + no auto-compaction
-New: memory:false → no OM workers only (compaction still runs)
-New: compaction:"manual" → no auto-compaction (memory independent)
-New: compaction:"off" → blackhole skips auto, but explicit /blackhole still uses blackhole pipeline
+effective = clamp(shape(window), compactAfterMinTokens, compactAfterMaxTokens)
 ```
 
-If you had `memory: false` and depended on it blocking auto-compaction, you should set `compaction: "manual"` in the new config.
+| Key | Role | Notes |
+| --- | --- | --- |
+| `compactAfterBy` | shape selector: `preset` \| `percent` \| `tokens` \| `reserve` | new; migration records the shape your old keys implied |
+| `compactAfterPreset` | the curve when shape = `preset` | unchanged |
+| `compactAfterRatio` | value when shape = `percent` | **now a percent in (0, 100]** — was a fraction |
+| `compactAfterTokens` | value when shape = `tokens` | unchanged |
+| `compactReserveTokens` | value when shape = `reserve` | unchanged |
+| `compactAfterMinTokens` | floor (never compact below N) | **new**; `0`/absent = no floor |
+| `compactAfterMaxTokens` | ceiling (never wait past N) | **new**; `0`/absent = no ceiling |
+| `compactAfterPresets` | expert curve definitions | unchanged, file-only |
 
-**Tail behavior changed for `overrideDefaultCompaction: true` users.** In the old config, enabling blackhole's compaction (`overrideDefaultCompaction: true`) gave you the aggressive pi-vcc cut (last user message only). In the new config, the default tail behavior for auto-triggered compaction is `"pi-default"` (Pi's gentler ~20k tokens). Migration preserves the aggressive cut for existing users — see the migration table below.
+Why a band rather than a single number: a flat threshold cannot serve a 1M
+model and a 256k model in the same session. `by: "percent", ratio: 46,
+maxTokens: 180000` gives ~120k on a 256k window and 180k on a 1M window.
 
-## Migration Mapping
+A literal `compactAfterTokens: 81000` was scaffold residue from older versions,
+never a deliberate pin. Migration drops it so the selected shape governs. Any
+other value is treated as a real pin.
 
-### When migration happens
+## What did **not** change
 
-Migration runs **in memory at config load time**. The on-disk file is never mutated. This means:
+- **No JSON key or environment-variable renames.** Every surviving key keeps its
+  exact name; only the modal *labels* and descriptions changed. The modal shows
+  a `key:` line under each focused field so you can map a label to the file.
+- **No behavior change in the default configuration.** A fresh install behaves
+  exactly as before; only the on-disk starter file is smaller (see below).
+- **Env overrides are not migrated.** `PI_BLACKHOLE_*` variables are read at
+  load and are never written to disk. `PI_BLACKHOLE_COMPACTION_ENGINE` is gone,
+  and `PI_BLACKHOLE_COMPACTION` still accepts `auto` as an alias for
+  `automatic`.
 
-- Old config files continue to work unchanged
-- Migration is idempotent (old keys are removed from the parsed object, so it only runs once)
-- NixOS / read-only config files are unaffected
+## New-install starter file
 
-### Mapping Table
+A fresh install now writes a small, curated subset of keys
+(`compaction`, `compactionSummaryMode`, `tailBehavior`,
+`showPreCompactionMessage`, `compactAfterBy`, `retainedToolOutputMaxTokens`,
+`memory`, `observeAfterTokens`, `reflectAfterTokens`,
+`observationsPoolMaxTokens`, `reflectionsPoolMaxTokens`, `statusBar`) instead of
+dumping every default. Absent keys are filled from the built-in defaults at read
+time, so this is purely about a readable starter file — not about changing
+behavior.
 
-| Old Config | Migration Result | Notes |
-|-----------|-----------------|-------|
-| `{}` (empty / no file) | `compaction: "auto"`, `compactionEngine: "blackhole"`, `tailBehavior: "minimal"` | New defaults for fresh installs |
-| `{ "overrideDefaultCompaction": true }` | `compactionEngine: "blackhole"`, `tailBehavior: "minimal"` | Preserves aggressive cut for existing users |
-| `{ "noAutoCompact": true }` | `compaction: "manual"` | `/blackhole` still works |
-| `{ "passive": true }` | `compaction: "off"`, `memory: false` | Blackhole disabled; Pi handles compaction normally. Was a nuclear switch in old config |
-| `{ "memory": false }` | `memory: false` only | Compaction NOT blocked — add `compaction: "manual"` if needed |
-| `{ "overrideDefaultCompaction": true, "noAutoCompact": true }` | `compactionEngine: "blackhole"`, `compaction: "manual"`, `tailBehavior: "minimal"` | Combined migration |
-| `{ "overrideDefaultCompaction": true, "passive": true }` | `compactionEngine: "blackhole"`, `compaction: "off"`, `memory: false` | Passive wins for compaction |
+## Label ↔ key mapping
 
-### When migration does NOT happen
+The labels changed; the keys did not. The modal renders the key under the
+focused field, and the full mapping lives in
+[`docs/CONFIG.md`](CONFIG.md#label--key-mapping).
 
-If new keys are present in the config file, no migration runs. New keys take priority.
+## Manual migration (optional)
 
-```jsonc
-// Mixed: new keys win, old keys ignored
-{
-  "overrideDefaultCompaction": true,  // ignored
-  "compaction": "manual"              // wins
-}
-```
+If you prefer to edit the file yourself before it is auto-migrated, apply the
+mapping in [TL;DR](#tldr). Nothing breaks if you do not: the loader also folds
+legacy keys in memory, so a file with `compactionEngine` or `compaction: "auto"`
+still works even if the on-disk rewrite is skipped (for example on a read-only
+filesystem).
 
-## Step-by-Step Migration
-
-### Step 1: Check your current config
+## Verify
 
 ```bash
 cat ~/.pi/agent/pi-blackhole/pi-blackhole-config.json
 ```
 
-If you have old keys like `overrideDefaultCompaction`, `noAutoCompact`, or `passive`, migration will handle them automatically. You don't need to change anything.
-
-### Step 2: Optional — Update to new keys
-
-To explicitly adopt the new config, replace old keys with new ones using the mapping table above.
-
-**Before (old config):**
-```json
-{
-  "overrideDefaultCompaction": true,
-  "noAutoCompact": false,
-  "passive": false,
-  "memory": true,
-  "compactAfterTokens": 95000
-}
-```
-
-**After (new config) — same behavior:**
-```json
-{
-  "compaction": "auto",
-  "compactionEngine": "blackhole",
-  "tailBehavior": "minimal",
-  "memory": true,
-  "compactAfterTokens": 95000
-}
-```
-
-Note `tailBehavior: "minimal"` — this preserves the aggressive cut you had before.
-
-### Step 3: Optional — Switch to Pi's gentler cut
-
-If you prefer Pi's default behavior (keep ~20k tokens visible), change `tailBehavior`:
-
-```json
-{
-  "compaction": "auto",
-  "compactionEngine": "blackhole",
-  "tailBehavior": "pi-default",
-  "memory": true
-}
-```
-
-### Step 4: Verify
-
-Open the config overlay to see your current settings:
-
-```
-/blackhole configure
-```
-
-Or check the status overlay:
-
-```
-/blackhole-memory
-```
-
-## Common Scenarios
-
-### "I had `overrideDefaultCompaction: true` and want the same behavior"
-
-Migration handles this: `compactionEngine: "blackhole"`, `tailBehavior: "minimal"`. Your aggressive cut is preserved.
-
-To explicitly confirm in config:
-```json
-{ "compactionEngine": "blackhole", "tailBehavior": "minimal" }
-```
-
-### "I had `memory: false` and want NO auto-compaction"
-
-Old behavior: `memory: false` blocked auto-compaction *and* disabled OM.
-
-New config to match:
-```json
-{ "memory": false, "compaction": "manual" }
-```
-
-Or if you want truly no compaction at all:
-```json
-{ "memory": false, "compaction": "off" }
-```
-
-### "I want Pi's default compaction back (no blackhole)"
-
-```json
-{ "compactionEngine": "pi-default" }
-```
-
-Blackhole's auto-trigger will return early and let Pi handle compaction. If you also want the trigger disabled:
-```json
-{ "compaction": "manual", "compactionEngine": "pi-default" }
-```
-
-### "I want the aggressive pi-vcc cut for /blackhole but gentle Pi cut for auto"
-
-This is the current default. Both auto-triggered and `/blackhole` use `"minimal"`:
-- Auto-triggered → `tailBehavior: "minimal"` (always aggressive)
-- `/blackhole` → `tailBehavior: "minimal"` (aggressive)
-
-### "I want backup before migrating"
-
-Config files are never mutated by migration. Migration runs on the **in-memory parsed object**. Your on-disk config file is untouched. To be extra safe:
-
-```bash
-cp ~/.pi/agent/pi-blackhole/pi-blackhole-config.json ~/.pi/agent/pi-blackhole/pi-blackhole-config.json.bak
-```
-
-## NixOS / Read-Only Filesystem Notes
-
-- Migration is purely in-memory — no writes to disk
-- The old config file remains exactly as-is on disk
-- Environment variables can override the new keys without touching the file
-- The `/blackhole om-off` / `om-on` subcommands try to save but handle failure gracefully
+Expect: no `compactionEngine`, no `observationsPoolTargetTokens`, no
+`observerPreambleMaxTokens`, no `dropperInputMaxTokens`, no
+`dropperPoolFullnessThreshold`; a `"configVersion": 1`; and the new threshold
+keys if you had a numeric threshold. Then open `/blackhole settings` to review
+the new labels, or `/blackhole-memory` for runtime status.

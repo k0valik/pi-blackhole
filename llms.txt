@@ -200,7 +200,7 @@ After user chooses, examine what's available and propose specific models. The ta
 
 ### Question 3: Context size
 
-**Agent context:** The context window matters for (1) the auto-compaction trigger and (2) optional manual sizing. Out of the box the trigger follows the built-in `default` preset curve and needs **no numeric config key**: it fires at `floor(window × ratio)` — 0.90 of a 32,768-token window, 0.80 at 131,072, 0.70 at 262,144, 0.40 at 1,048,576 (piecewise-linear between anchors; 32k → ~29,491, 128k → ~104,857). The OM worker thresholds (`observeAfterTokens`, `reflectAfterTokens`, `observerChunkMaxTokens`, `observationsPoolMaxTokens`, `reflectorInputMaxTokens`, `dropperInputMaxTokens`) are independent **fixed defaults** (below) and do NOT auto-scale with the window.
+**Agent context:** The context window matters for (1) the auto-compaction trigger and (2) optional manual sizing. Out of the box the trigger follows the built-in `default` preset curve and needs **no numeric config key**: it fires at `floor(window × ratio)` — 0.90 of a 32,768-token window, 0.80 at 131,072, 0.70 at 262,144, 0.40 at 1,048,576 (piecewise-linear between anchors; 32k → ~29,491, 128k → ~104,857). The OM worker thresholds (`observeAfterTokens`, `reflectAfterTokens`, `observerChunkMaxTokens`, `observationsPoolMaxTokens`, `reflectorInputMaxTokens`) are independent **fixed defaults** (below) and do NOT auto-scale with the window.
 
 The window must be *known* for any window-derived behavior to target reality: resolution order is per-model `contextWindow` override → Pi's model registry → 128k fallback. If the user's main model is a local/custom provider Pi's registry may not know, capture the window here so the config carries a `contextWindow` override on the matching model entry — otherwise the curve/ratio resolves against 128k and may never fire on a small window.
 
@@ -221,17 +221,16 @@ The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens 
 
 ### Question 4 (optional): Compaction engine behavior
 
-**Agent context:** `compactionEngine` controls *who* handles the compaction *content* and *timing*. Only matters when `compaction: "auto"`. For `"manual"`/`"off"`, the engine field is irrelevant because blackhole's hook lets Pi handle everything except `/blackhole`.
+**Agent context:** `compaction` controls *who* handles the compaction *content* and *timing*. `compactionEngine` no longer exists — it was folded in (0.6.0): `"blackhole"` became `"automatic"`, `"pi-default"` became `"off"`. `"auto"` is still accepted as an alias for `"automatic"`.
 
 The interaction matrix:
-| `compaction` | `compactionEngine` | Auto-trigger | `/compact` | `/blackhole` |
-|---|---|---|---|---|
-| auto | blackhole | blackhole fires at threshold | blackhole handles | blackhole handles |
-| auto | pi-default | trigger skips (Pi decides when) | Pi handles | blackhole handles |
-| manual | (any) | skipped | Pi handles | blackhole handles |
-| off | (any) | skipped | Pi handles | blackhole handles |
+| `compaction` | Auto-trigger | `/compact` | `/blackhole` |
+|---|---|---|---|
+| automatic | blackhole fires at threshold | blackhole handles | blackhole handles |
+| manual | skipped | Pi handles | blackhole handles |
+| off | skipped | Pi handles | blackhole handles |
 
-`tailBehavior` controls how much stays visible after compaction. Only applies when `compactionEngine: "blackhole"`:
+`tailBehavior` controls how much stays visible after compaction. Only applies when `compaction: "automatic"`:
 - `"minimal"` (default) — aggressive: keep only the last user message. Everything before gets compiled and removed from view.
 - `"pi-default"` — gentle: use Pi's `firstKeptEntryId`, respects Pi's `keepRecentTokens` (~20k tokens kept visible).
 
@@ -265,15 +264,18 @@ Based on interview answers, build the config object. Write it to:
 ```jsonc
 {
   // ── Compaction mode ──
-  "compaction": "auto",           // "auto" | "manual" | "off"
-  "compactionEngine": "blackhole", // "blackhole" | "pi-default" — irrelevant for manual/off
+  "compaction": "automatic",      // "automatic" | "manual" | "off" ("auto" accepted as an alias)
   "tailBehavior": "minimal",      // "minimal" (last user msg only, default) | "pi-default" (Pi's gentler cut)
   "showPreCompactionMessage": true, // display-only copy of the newest dropped assistant output (16 KiB cap); never enters context or memory
   "retainedToolOutputMaxTokens": 20000, // 0 = disabled
   "recallResponseMaxChars": 48000,      // recall response cap in chars (~12k tokens); 0 = unbounded
-  "compactAfterPreset": "default", // auto-compaction threshold curve: fires at floor(window × ratio), 0.90 @ 32k → 0.40 @ 1M. No numeric threshold key is needed out of the box
-  // Optional numeric pins instead of the curve: "compactAfterRatio": 0.65 or "compactReserveTokens": 32768,
-  // or "compactAfterTokens": <fixed value> — any explicit value except exactly 81000 (that is legacy residue and is dropped)
+  // Auto-compaction threshold = one shape + an optional floor/ceiling band:
+  "compactAfterBy": "preset",     // "preset" | "percent" | "tokens" | "reserve"
+  "compactAfterPreset": "default", // curve when by="preset": floor(window × ratio), 0.90 @ 32k → 0.40 @ 1M
+  // Other shapes: "compactAfterRatio": 46 (a PERCENT in (0,100]), "compactReserveTokens": 32768, "compactAfterTokens": <fixed>
+  "compactAfterMinTokens": 0,     // floor: never compact below N (0 = no floor)
+  "compactAfterMaxTokens": 0,     // ceiling: never wait past N (0 = no ceiling)
+  // Any explicit compactAfterTokens except exactly 81000 (legacy residue, dropped)
 
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
@@ -299,14 +301,11 @@ Based on interview answers, build the config object. Write it to:
   "observeAfterTokens": 15000,         // observer cadence (default)
   "reflectAfterTokens": 25000,         // reflector + dropper cadence (default)
   "observerChunkMaxTokens": 40000,     // max conversation chunk sent to observer per run
-  "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
-  "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
-  "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
-  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
+  "observationsPoolMaxTokens": 20000,  // memory maintenance trigger + rendered note-line cap
+  "reflectionsPoolMaxTokens": 8000,   // max rendered insight tokens in compaction output, newest first (0 = uncapped)
   "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
-  "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647); configured candidates: cooldown + fallback; session fallback: once per stage, no cooldown
-  "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
-  "dropperInputMaxTokens": 80000,      // dropper prompt token cap
+  "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647)
+  "reflectorInputMaxTokens": 80000,    // largest memory snapshot an insight/prune job reads (shared)
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
   // "cacheRetention": "long",     // optional worker prompt cache: "none" | "short" | "long" (omit = inherit pi's effective setting)
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
@@ -344,7 +343,6 @@ The default setup needs none of this: auto-compaction's preset curve scales the 
 | `observerChunkMaxTokens` | 40000 | 15000 | 80000 |
 | `observationsPoolMaxTokens` | 20000 | 8000 | 40000 |
 | `reflectorInputMaxTokens` | 80000 | 30000 | 160000 |
-| `dropperInputMaxTokens` | 80000 | 30000 | 160000 |
 
 Sizing formula (for non-standard context windows — fixed pins only):
 ```
@@ -354,7 +352,6 @@ reflectAfterTokens:        round(compactAfterTokens / 3.2, nearest_1000)
 observerChunkMaxTokens:    round(compactAfterTokens / 2,   nearest_1000)
 observationsPoolMaxTokens: round(compactAfterTokens / 4,   nearest_1000)
 reflectorInputMaxTokens:   round(compactAfterTokens,       nearest_1000)
-dropperInputMaxTokens:     round(compactAfterTokens,       nearest_1000)
 ```
 
 The ratios are the same as the default 128k presets — scale linearly. The default presets are slightly hand-tuned from pure math for cost-efficiency (observer threshold is raised a bit, reflector similarly). For custom sizes, the formulas above are a good starting point; the user can tune from there.
@@ -393,8 +390,7 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
 
 ```json
 {
-  "compaction": "auto",
-  "compactionEngine": "blackhole",
+  "compaction": "automatic",
   "tailBehavior": "minimal",
   "showPreCompactionMessage": true,
   "memory": true,
@@ -405,8 +401,7 @@ If the user doesn't want per-worker tuning, just set `model` — all workers fal
   "observerChunkMaxTokens": 40000,
   "observationsPoolMaxTokens": 20000,
   "reflectionsPoolMaxTokens": 8000,
-  "reflectorInputMaxTokens": 80000,
-  "dropperInputMaxTokens": 80000
+  "reflectorInputMaxTokens": 80000
 }
 ```
 
@@ -454,12 +449,23 @@ The overlay only manages the keys it knows about (compaction, engine, tail behav
 If the user has an old config from pi-vcc or pi-observational-memory, it's auto-migrated at load time:
 
 | Old key | Migrates to |
-|---------|-------------|
-| `overrideDefaultCompaction: true` | `compactionEngine: "blackhole"` + `tailBehavior: "minimal"` |
+| --- | --- |
+| `compactionEngine: "blackhole"` | `compaction: "automatic"` |
+| `compactionEngine: "pi-default"` | `compaction: "off"` |
+| `compaction: "auto"` | `compaction: "automatic"` |
+| `overrideDefaultCompaction: true` | `compaction: "automatic"` + `tailBehavior: "minimal"` |
 | `noAutoCompact: true` | `compaction: "manual"` |
 | `passive: true` | `compaction: "off"` + `memory: false` |
+| `compactAfterRatio: 0.46` | `compactAfterRatio: 46` + `compactAfterBy: "percent"` |
+| `compactAfterTokens` / `compactReserveTokens` | same + `compactAfterBy: "tokens"` / `"reserve"` |
+| `dropperPoolFullnessThreshold` | merged into `dropperPressureThreshold` (`max`) |
+| `dropperInputMaxTokens` | merged into `reflectorInputMaxTokens` |
+| `observationsPoolTargetTokens`, `observerPreambleMaxTokens` | removed (no effect / derived) |
 
-Old keys are **removed from the in-memory copy** after migration. The on-disk file is unchanged until you write a new config. A migration reminder notification appears (max 2 times per session) until the user saves with the new keys via `/blackhole configure`.
+Old keys are deleted from the on-disk file by the two-phase, verified migration
+(global + project): new keys are written and verified first, then the old ones
+removed; a one-time `.bak` is written; unknown keys are preserved; read-only
+filesystems warn and keep working in memory. See `docs/MIGRATION-GUIDE.md`.
 
 **Legacy fallback sources** (checked when the unified config file doesn't exist, in order):
 - `~/.pi/agent/pi-vcc-config.json` — old pi-vcc standalone config
@@ -503,7 +509,7 @@ These affect behavior but aren't user-configurable. Useful for diagnosis:
 | Stage attempts | 10 | `consolidation.ts:85` | Max model resolution attempts per stage before giving up entirely |
 | Context reserve | 8k tokens | `consolidation.ts:35` | Fixed overhead reserved for system prompt + tool definitions in context window pre-check |
 | Agent loop max | 32k tokens | `model-budget.ts:4` | Max tokens the agent can generate per worker invocation (capped by model's own maxTokens too) |
-| Dropper summary | 20% | `consolidation.ts` (computed) | Fraction of `dropperInputMaxTokens` allocated for existing observation summaries |
+| Dropper summary | 20% | `consolidation.ts` (computed) | Fraction of `reflectorInputMaxTokens` allocated for existing note summaries |
 | Reflector summary | 15% x2 | `consolidation.ts` (computed) | Fraction of `reflectorInputMaxTokens` for existing reflection + observation summaries (each) |
 
 ### `_notes` and `_comment` fields
@@ -536,11 +542,15 @@ These override config file values at load time, applied AFTER config is parsed. 
 | Variable | Effect | Accepted values |
 |----------|--------|-----------------|
 | `PI_BLACKHOLE_PASSIVE` | Sets `compaction: "off"` + `memory: false` | `1`, `true`, `yes`, `on` |
-| `PI_BLACKHOLE_COMPACTION` | Overrides `compaction` | `auto`, `manual`, `off` |
-| `PI_BLACKHOLE_COMPACTION_ENGINE` | Overrides `compactionEngine` | `blackhole`, `pi-default` |
+| `PI_BLACKHOLE_COMPACTION` | Overrides `compaction` | `automatic`, `manual`, `off` (`auto` alias) |
 | `PI_BLACKHOLE_CACHE_RETENTION` | Overrides `cacheRetention` (worker prompt cache) | `none`, `short`, `long` |
 
 Legacy aliases (still work): `PI_VCC_OM_PASSIVE`, `PI_OBSERVATIONAL_MEMORY_PASSIVE`.
+
+`PI_BLACKHOLE_COMPACTION_ENGINE` was removed. The `compactAfter*` value
+variables also force the matching `compactAfterBy` shape
+(`…_COMPACT_AFTER_TOKENS` → `tokens`, `…_RATIO` → `percent`,
+`…_RESERVE_TOKENS` → `reserve`).
 
 These are processed in `loadUnifiedConfig()` in `unified-config.ts`. The passive env var is checked first (overrides both keys), then the individual overrides are applied on top.
 

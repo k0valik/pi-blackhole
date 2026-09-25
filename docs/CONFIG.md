@@ -19,16 +19,19 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
 ```jsonc
 {
   // ── Compaction ──
-  "compaction": "auto",           // "auto" | "manual" | "off"
-  "compactionEngine": "blackhole", // "blackhole" | "pi-default"
+  "compaction": "automatic",      // "automatic" | "manual" | "off"
   "tailBehavior": "minimal",   // "pi-default" | "minimal"
   "showPreCompactionMessage": true, // Display-only copy of the newest dropped assistant output (max 16 KiB)
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
-  "compactAfterTokens": 0,        // Explicit fixed threshold. 0 = not set (a ratio, reserve, or preset curve governs). Never exactly 81000 (legacy residue — dropped)
-  "compactAfterRatio": 0,         // OPT-IN: compact at this fraction of the active model's context window (0 = not set)
-  "compactReserveTokens": 0,      // OPT-IN: compact when this many tokens of window headroom remain (0 = not set)
-  "compactAfterPreset": "default",// Preset-curve selection knob (default "default" — 0.90 @32k → 0.40 @1M). Governs when no numeric threshold key is set
+  // ── Auto-compaction threshold: one shape + an optional floor/ceiling band ──
+  "compactAfterBy": "preset",      // "preset" | "percent" | "tokens" | "reserve"
+  "compactAfterTokens": 0,        // value when by="tokens". 0 = not set. Never exactly 81000 (legacy residue — dropped)
+  "compactAfterRatio": 0,         // value when by="percent" — a PERCENT in (0,100]. 0 = not set
+  "compactReserveTokens": 0,      // value when by="reserve". 0 = not set
+  "compactAfterPreset": "default",// curve when by="preset" (default "default" — 0.90 @32k → 0.40 @1M)
+  "compactAfterMinTokens": 0,     // floor: never compact below N (0 = no floor)
+  "compactAfterMaxTokens": 0,     // ceiling: never wait past N (0 = no ceiling)
   "compactAfterPresets": {        // Hand-edited preset DEFINITIONS (name → window/ratio anchors) — NOT a settings-modal field
     "default": [                  // Same-name entries override the built-in curve; shown here for reference
       { "window": 32768, "ratio": 0.9 },
@@ -48,18 +51,14 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "sessionFallback": true,        // Fall back to session model when OM models fail
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
   "statusBar": true,              // Footer token gauges (O/P/X) + worker events
-  "showWorkerNotifications": true, // Routine observer/reflector/dropper progress toasts
+  "showWorkerNotifications": true, // Routine memory-job progress toasts
   "observeAfterTokens": 15000,    // Token threshold for observer runs
   "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
-  "observationsPoolMaxTokens": 20000, // Full-fold pressure + rendered observation-line cap
-  "reflectionsPoolMaxTokens": 8000, // Rendered reflection-line cap
-  "observationsPoolTargetTokens": 10000, // Target after dropper prune (no-op)
-  "reflectorInputMaxTokens": 80000, // Reflector prompt token cap
-  "dropperInputMaxTokens": 80000,  // Dropper prompt token cap
-  "observerChunkMaxTokens": 40000, // Max source tokens per observer chunk
-  "observerPreambleMaxTokens": 0,  // Preamble budget (0 = auto 30% of chunk)
-  "dropperPressureThreshold": 0.70, // Pool-pressure relief valve
-  "dropperPoolFullnessThreshold": 0.10, // Min pool fullness before dropper runs
+  "observationsPoolMaxTokens": 20000, // Memory maintenance trigger + rendered note-line cap
+  "reflectionsPoolMaxTokens": 8000, // Rendered insight-line cap
+  "reflectorInputMaxTokens": 80000, // Largest memory snapshot an insight/prune job reads (shared)
+  "observerChunkMaxTokens": 40000, // Max conversation tokens per note-taking pass
+  "dropperPressureThreshold": 0.70, // Prune memory when note memory is this fraction full
   "agentMaxTurns": 16,            // Max turns per memory agent
   "providerIdleTimeoutMs": 0,     // Background provider body-idle timeout in ms (0 = disabled, unset = inherit pi default)
   "workerAttemptTimeoutMs": 0,    // Hard elapsed deadline per worker/model attempt (0 or unset = disabled)
@@ -88,7 +87,7 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 
 | Value | Auto-trigger | `/compact` (Pi built-in) | `/blackhole` |
 |-------|:---:|:---:|:---:|
-| `"auto"` | blackhole fires at the auto-compaction threshold ✓ | blackhole handles | blackhole handles |
+| `"automatic"` | blackhole fires at the auto-compaction threshold ✓ | blackhole handles | blackhole handles |
 | `"manual"` | skipped | Pi handles ✓ | blackhole handles |
 | `"off"` | skipped (Pi handles) | Pi handles ✓ | blackhole handles |
 
@@ -96,7 +95,7 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 
 ```jsonc
 // Auto-compact (default)
-{ "compaction": "auto" }
+{ "compaction": "automatic" }
 
 // Manual only — /compact falls through to Pi, /blackhole uses blackhole pipeline
 { "compaction": "manual" }
@@ -105,29 +104,21 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 { "compaction": "off" }
 ```
 
-### `compactionEngine`
+> **Upgrade note.** `compactionEngine` was folded into `compaction` (0.6.0).
+> `"blackhole"` meant `compaction: "automatic"`; `"pi-default"` meant
+> `compaction: "off"`. The old value `"auto"` is still accepted as an alias
+> for `"automatic"`. Existing files are migrated on disk automatically — see
+> [MIGRATION-GUIDE.md](MIGRATION-GUIDE.md).
 
-Controls which engine generates compaction summaries. Only meaningful when `compaction: "auto"` — for `"manual"`/`"off"` the engine is irrelevant because blackhole's hook lets Pi handle everything except `/blackhole`.
+### `compaction` values, engine note
 
-Replaces the old `overrideDefaultCompaction`.
-
-| Value | Behavior |
-|-------|----------|
-| `"blackhole"` | Blackhole's `compile()` generates a structured summary and injects OM content (default). |
-| `"pi-default"` | Pi handles ALL compaction (timing + execution). Blackhole's trigger skips entirely. Blackhole only activates for `/blackhole` command. |
-
-**Interaction matrix:**
-
-| `compaction` | `compactionEngine` | Auto-trigger | `/compact` | `/blackhole` |
-|:---:|:---:|---|---|---|
-| auto | blackhole | blackhole fires at the auto-compaction threshold ✓ | blackhole handles | blackhole handles |
-| auto | pi-default | trigger skips (Pi decides when) | Pi handles | blackhole handles |
-| manual | (any) | skipped | Pi handles ✓ | blackhole handles |
-| off | (any) | skipped | Pi handles ✓ | blackhole handles |
+The `compactionEngine` key no longer exists. Its two meaningful values are the
+`"automatic"` and `"off"` rows of the matrix above; there is no longer a
+redundant `auto + pi-default` combination to express.
 
 ### `tailBehavior`
 
-Controls how much of the recent transcript stays *visible* after compaction. Only applies when `compactionEngine: "blackhole"`.
+Controls how much of the recent transcript stays *visible* after compaction. Only applies when `compaction: "automatic"`.
 
 | Value | Behavior |
 |-------|----------|
@@ -194,7 +185,7 @@ Things that stay out of the copy: tool output, thinking blocks, images, and exac
 
 Controls the **mid-run** auto-compaction trigger. Pi's `agent_end` event only fires when a run exits — during long tool loops (agent calling tools turn after turn) the threshold would otherwise never be evaluated, and accumulated tokens could blow far past the auto-compaction threshold before compaction had any chance to run. This trigger evaluates the threshold at every `turn_end` (after each assistant message + tool executions) while the agent is still working.
 
-Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`.
+Only applies when `compaction: "automatic"`.
 
 Full mechanism, history, and debugging guide: [mid-run-compaction.md](mid-run-compaction.md).
 
@@ -225,12 +216,43 @@ Full mechanism, history, and debugging guide: [mid-run-compaction.md](mid-run-co
 { "midRunCompaction": "pause" }
 ```
 
-### `compactAfterTokens`
+### The auto-compaction threshold: shape + band
 
-Explicit fixed token threshold for auto-compaction. Optional — unset (or `0`) by default. When set to any value other than the reserved legacy `81000` (see below), it **always wins** over `compactAfterRatio`, `compactReserveTokens`, and the selected preset curve. When `compaction: "auto"` and the measured context since the last compaction reaches the effective threshold, compaction triggers automatically — both mid-run (see `midRunCompaction`) and when the agent finishes a run. If the engine is `pi-default`, blackhole's trigger returns early before checking tokens.
+The threshold is one **shape** plus an optional **band**:
+
+`effective = clamp(shape(window), compactAfterMinTokens, compactAfterMaxTokens)`
+
+`compactAfterBy` selects exactly one shape; the floor/ceiling always apply on
+top of it. Every numeric threshold key uses `0`/absent to mean *not set*.
+
+| Shape (`compactAfterBy`) | Value key | Rule |
+| --- | --- | --- |
+| `"preset"` (default) | `compactAfterPreset` | a window-scaled curve |
+| `"percent"` | `compactAfterRatio` | `floor(window × percent / 100)` |
+| `"tokens"` | `compactAfterTokens` | a flat token count on every model |
+| `"reserve"` | `compactReserveTokens` | `window − reserve` (clamped ≥ 1) |
+
+| Band key | Role | Default |
+| --- | --- | --- |
+| `compactAfterMinTokens` | never compact below N | unset (`0` = no floor) |
+| `compactAfterMaxTokens` | never wait past N | unset (`0` = no ceiling) |
+
+**Why a band.** A flat threshold cannot serve a 1M model and a 256k model in
+the same session. `by: "percent", ratio: 46, maxTokens: 180000` gives ~120k on a
+256k window and 180k on a 1M window.
+
+When `compaction: "automatic"` and the measured context since the last
+compaction reaches the effective threshold, compaction triggers automatically —
+both mid-run (see `midRunCompaction`) and when the agent finishes a run. In
+`"manual"`/`"off"` the trigger does not run.
+
+### `compactAfterTokens` *(shape = tokens)*
+
+Flat token count: the same threshold on every model. Used when
+`compactAfterBy: "tokens"`.
 
 | Type | Default |
-|------|---------|
+| --- | --- |
 | number | unset (`0` = not set) |
 
 **Legacy `81000` residue (migration):** Configs scaffolded by earlier versions, or written by the settings modal before the preset-curve release, literally contain `"compactAfterTokens": 81000` — the old fixed default posture, never a deliberate user pin. The loader treats exactly `81000` as that residue and drops it, so the selected preset curve (or a window-derived knob) governs. The drop does **not** apply to a value set via the `PI_BLACKHOLE_COMPACT_AFTER_TOKENS` env var — env overrides are always explicit. To pin a fixed threshold, set any *other* value (e.g. `80000` or `180000`); the flat-81k behavior can no longer be reproduced by writing exactly `81000`.
@@ -266,54 +288,74 @@ Session JSONL and the complete stored content are never modified — only what a
 |------|---------|-------|
 | number | 48000 | `0` (unbounded) or positive integer |
 
-### `compactAfterRatio` *(context-window-aware threshold, opt-in)*
+### `compactAfterRatio` *(shape = percent)*
 
-Instead of a fixed token count, derive the auto-compaction threshold from the **active session model's context window**: blackhole compacts when the context reaches `floor(contextWindow × compactAfterRatio)`. The threshold is re-derived on every evaluation, so switching models mid-session (`/model`) takes effect on the next check automatically.
+A **percentage** of the active session model's context window: blackhole
+compacts when the context reaches `floor(window × percent / 100)`. Used when
+`compactAfterBy: "percent"`. The threshold is re-derived on every evaluation, so
+switching models mid-session (`/model`) takes effect on the next check.
 
 | Type | Default |
-|------|---------|
-| number (0, 1] | unset |
+| --- | --- |
+| number, percent in (0, 100] | unset (`0` = not set) |
 
-Examples on common windows at `0.65`:
+Examples on common windows at `46`:
 
 ```text
-128k model → ~83k   200k model → ~130k   1M model → ~650k
+128k model → ~59k   256k model → ~118k   1M model → ~482k
 ```
+
+> **Upgrade note.** The key was a fraction (0.46) in earlier releases; it is now
+> a percent (46). Migration converts existing fractions automatically.
 
 **How the window is resolved** (see `model.contextWindow` below): per-model config override → Pi's model registry → 128k fallback. If Pi doesn't know your custom-provider model's window, set `contextWindow` on its model entry in this config so the ratio targets the real window.
 
-### `compactReserveTokens` *(context-window-aware threshold, opt-in)*
+### `compactReserveTokens` *(shape = reserve)*
 
-Alternative derivation that keeps constant headroom: blackhole compacts when only `compactReserveTokens` of window remain — threshold `= contextWindow − compactReserveTokens` (clamped to ≥ 1).
+Keep a constant amount of headroom: blackhole compacts when only
+`compactReserveTokens` of window remain — threshold `= window − reserve`
+(clamped ≥ 1). Used when `compactAfterBy: "reserve"`.
 
 | Type | Default |
-|------|---------|
-| positive integer | unset |
+| --- | --- |
+| positive integer | unset (`0` = not set) |
 
 ```text
 200k window − 32k reserve → ~168k    1M window − 32k reserve → ~968k
 ```
 
-**Precedence & enabling:** when several knobs are set, the effective threshold is decided in this order: explicit `compactAfterTokens` > `compactAfterRatio` (`floor(window × ratio)`) > `compactReserveTokens` (`window − reserve`) > the selected preset curve (default: the built-in `default` preset). An explicit file/env `compactAfterTokens` always wins; the one exception is a file value of exactly `81000`, which is legacy scaffold residue and is dropped so a derived knob or the preset curve governs (see `compactAfterTokens`). Remove all derived keys to fall back to the selected preset curve.
+**Upgrade from the old precedence.** `compactAfterBy` does not exist in
+pre-0.6.0 files. Migration records the shape the old keys implied: explicit
+`compactAfterTokens` > `compactAfterRatio` > `compactReserveTokens` > the
+preset curve. A file value of exactly `81000` is legacy scaffold residue and is
+dropped (see `compactAfterTokens`).
 
-**Settings modal:** the numeric knobs appear under **Compaction** in `/blackhole settings` and are always visible — they use `0` to mean *not set*. Type a real value (e.g. `0.65`, `32768`) to engage the knob; set it back to `0` to disable. The **Compaction threshold preset** select sits alongside them and picks the curve that governs when no numeric key is set. The loader treats a file value of `0` exactly like an absent key.
+**Settings modal:** the shape selector **Auto-compact when** sits above a
+`depth: 1` group — the value field for the chosen shape, the preset picker, and
+the always-visible **Never compact below** / **Never compact later than** band.
+`0` means *not set*. The loader treats a file value of `0` exactly like an
+absent key.
 
-**Example:**
+**Examples:**
 
 ```jsonc
-// Compact at ~65% of whatever model is active (128k → 83k, 200k → 130k, 1M → 650k)
-{ "compactAfterRatio": 0.65 }
+// ~46% of the active model, capped at 180k on huge windows
+{ "compactAfterBy": "percent", "compactAfterRatio": 46, "compactAfterMaxTokens": 180000 }
 
-// Keep at least 32k tokens of headroom free, regardless of window size
-{ "compactReserveTokens": 32768 }
+// Never compact below 150k, whatever the shape computes
+{ "compactAfterBy": "percent", "compactAfterRatio": 40, "compactAfterMinTokens": 150000 }
 
-// Explicit tokens still win when set deliberately
-{ "compactAfterTokens": 180000, "compactAfterRatio": 0.65 }
+// Keep at least 32k tokens of headroom free
+{ "compactAfterBy": "reserve", "compactReserveTokens": 32768 }
 ```
 
-### `compactAfterPreset` *(preset-curve selection knob)*
+### `compactAfterPreset` *(preset curve when shape = preset)*
 
-Names which curve in the effective preset table applies when **no numeric key** is set (`compactAfterTokens`, `compactAfterRatio`, or `compactReserveTokens`). Options = the built-in `default` curve plus any names you added in `compactAfterPresets`; the **Compaction threshold preset** select in `/blackhole settings` lists exactly those names, so the options and runtime resolution cannot disagree.
+Names which curve in the effective preset table applies when
+`compactAfterBy: "preset"`. Options = the built-in `default` curve plus any
+names you added in `compactAfterPresets`; the **Preset** select in
+`/blackhole settings` lists exactly those names, so the options and runtime
+resolution cannot disagree.
 
 | Type | Default |
 |------|---------|
@@ -383,7 +425,7 @@ Controls whether observational memory workers run and whether OM content is inje
 { "memory": true }
 
 // Compaction only, no OM workers
-{ "memory": false, "compaction": "auto", "compactionEngine": "blackhole" }
+{ "memory": false, "compaction": "automatic" }
 ```
 
 ### `sessionFallback`
@@ -429,66 +471,49 @@ Hard cap on estimated rendered reflection lines in compaction output. Selects ne
 
 Both output budgets use the project's chars/4 estimate, not an exact provider tokenizer. Section headings, recall note and footer add tokens outside these line budgets; total trailing memory is not exactly 28,000 tokens. Compact-all retains eligible bounded memory and applies recorded drops.
 
-### `observationsPoolTargetTokens`
+### `reflectorInputMaxTokens` *(Memory read per job)*
 
-Target token budget the dropper aims for after pruning. **Currently a no-op** in the pool algorithm. If unset or `>= observationsPoolMaxTokens`, the loader silently resets it to `floor(observationsPoolMaxTokens / 2)`.
+Rolling window cap for a memory-snapshot prompt. Shared by the insight-building
+(reflector) and pruning (dropper) jobs — they read the same data. The reflector
+sees **new** notes plus a summary budget, capped at this value.
 
-| Type | Default |
-|------|---------|
-| number | 10000 |
-
-### `reflectorInputMaxTokens`
-
-Rolling window cap for reflector prompt tokens. The reflector only sees **new** observations plus a summary budget, capped at this value.
-
-| Type | Default |
-|------|---------|
-| number | 80000 |
-
-### `dropperInputMaxTokens`
-
-Rolling window cap for dropper prompt tokens.
+> **Upgrade note.** `dropperInputMaxTokens` was merged into this key (0.6.0);
+the dropper's value becomes the survivor only when this key is unset. The
+unrelated `observationsPoolTargetTokens` and `observerPreambleMaxTokens` knobs
+were removed (they had no effect). The observer's existing-memory cap is now the
+fixed `30%` of `observerChunkMaxTokens`.
 
 | Type | Default |
-|------|---------|
+| --- | --- |
 | number | 80000 |
 
 ### `observerChunkMaxTokens`
 
-Max source-entry tokens sent to the observer per chunk.
+Max conversation tokens sent to the note-taker per reading pass.
 
 | Type | Default |
-|------|---------|
+| --- | --- |
 | number | 40000 |
 
-### `observerPreambleMaxTokens`
+### `dropperPressureThreshold` *(Prune memory when)*
 
-Max preamble tokens per section (`CURRENT REFLECTIONS` / `CURRENT OBSERVATIONS`) in the observer prompt. Default `0` means auto-compute from `observerChunkMaxTokens` (30%). Applied in both auto/manual compaction modes so the observer prompt does not grow without bound as the session accumulates memory: observations are relevance-ranked, reflections newest-first. The pre-flight context guard prices the full prompt (chunk + rendered preamble + system prompt), so an oversized prompt skips the model cleanly instead of failing every attempt with a provider 400.
+Fraction of `observationsPoolMaxTokens` at which low-value notes are pruned.
+The new-data floor is the constant `0.10`; `1.0` disables pressure-driven
+pruning.
 
-| Type | Default |
-|------|---------|
-| number | 0 |
-
-### `dropperPressureThreshold`
-
-Fraction of `observationsPoolMaxTokens` at which the dropper runs without new data. The pool must also clear `dropperPoolFullnessThreshold`; `1.0` disables pressure.
+> **Upgrade note.** `dropperPoolFullnessThreshold` was merged into this key
+> (0.6.0); migration sets `max(oldPressure, oldFullness)`. The old independent
+> new-data floor is now the constant `0.10`, so this is exact for every config
+> whose floor was the default and differs only for a custom floor above `0.10`.
 
 | Type | Default | Range |
-|------|---------|-------|
+| --- | --- | --- |
 | number | 0.70 | (0, 1] |
 
-### `dropperPoolFullnessThreshold`
-
-Minimum observation-pool fullness (fraction of `observationsPoolMaxTokens`) before the dropper may run. Prevents the dropper from churning a nearly empty pool. Once the pool passes this threshold, the dropper runs when enough new transcript accumulates (`reflectAfterTokens`) with new observations/reflections. Lower it (e.g. `0.05`) to have the dropper prune more eagerly on lean pools.
-
-| Type | Default | Range |
-|------|---------|-------|
-| number | 0.10 | (0, 1] |
-
-- **0.70** (default): pressure-driven dropper runs when the observation pool reaches 70% of `observationsPoolMaxTokens`
-- **Higher** (e.g. 0.90): waits until the observation pool is fuller before pressure-driven pruning
-- **Lower** (e.g. 0.50): starts pressure-driven pruning at lower observation-pool fullness
-- **1.0**: disable pressure-driven dropper entirely — dropper only runs when new observation/reflection data exists AND pool fullness reaches `dropperPoolFullnessThreshold` (10% by default)
+- **0.70** (default): pressure-driven pruning runs when note memory reaches 70% of the budget
+- **Higher** (e.g. 0.90): waits until memory is fuller before pruning
+- **Lower** (e.g. 0.50): prunes more eagerly
+- **1.0**: disables pressure-driven pruning — the pruner only runs when new notes/insights exist and the pool clears 10%
 
 ### `agentMaxTurns`
 
@@ -604,7 +629,7 @@ Show the footer status bar: three token gauges — O (transcript since last obse
 
 ### `showWorkerNotifications`
 
-Routine observer, reflector, and dropper progress toasts — `observer running on ~N-token chunk`, `N observations recorded`, `reflector running`, `dropper running`, and the info-level `no observations` notice. Set to `false` for quiet sessions.
+Routine memory-job progress toasts — e.g. `blackhole: reading recent conversation for notes`, `blackhole: saved N notes`, `blackhole: building insights`, `blackhole: pruning low-value notes`, and the info-level `blackhole: no new notes` notice. Set to `false` for quiet sessions.
 
 Warnings and errors are unaffected: model fallback/unavailability, context-window skips, no-output warnings, worker failures, compaction notifications, and explicit `/blackhole*` command output all stay visible.
 
@@ -626,10 +651,60 @@ Warnings and errors are unaffected: model fallback/unavailability, context-windo
 These keys are still accepted for backward compatibility but are silently migrated to the new surface on load. They are removed from the in-memory config object and not written back by the overlay.
 
 | Key | Replacement |
-|-----|-------------|
-| `overrideDefaultCompaction` | `compactionEngine` + `tailBehavior` |
+| --- | --- |
+| `overrideDefaultCompaction` | `compaction` + `tailBehavior` |
 | `noAutoCompact` | `compaction: "manual"` |
 | `passive` | `compaction: "off"` + `memory: false` |
+| `compactionEngine` | folded into `compaction` (`"blackhole"` → `"automatic"`, `"pi-default"` → `"off"`) |
+| `dropperPoolFullnessThreshold` | merged into `dropperPressureThreshold` (`max`) |
+| `dropperInputMaxTokens` | merged into `reflectorInputMaxTokens` |
+| `observationsPoolTargetTokens` | removed (no effect) |
+| `observerPreambleMaxTokens` | removed (30% of the reading batch is a constant) |
+
+These are rewritten on disk by the two-phase migration described in
+[MIGRATION-GUIDE.md](MIGRATION-GUIDE.md); they also keep working in memory if
+the rewrite is skipped (read-only filesystem).
+
+## Label ↔ key mapping
+
+The settings modal uses outcome-level labels; the JSON keys are unchanged. The
+modal also prints `key: <key>` under the focused field, so this table is a
+convenience, not the only bridge.
+
+| Modal section | Label | Key |
+| --- | --- | --- |
+| Compaction | When to compact | `compaction` |
+| Compaction | How summaries are kept | `compactionSummaryMode` |
+| Compaction | Recent messages kept visible | `tailBehavior` |
+| Compaction | Compacting during a long task | `midRunCompaction` |
+| Compaction | Keep the last answer visible | `showPreCompactionMessage` |
+| When to compact automatically | Auto-compact when | `compactAfterBy` |
+| When to compact automatically | Percent of context window | `compactAfterRatio` |
+| When to compact automatically | Fixed token count | `compactAfterTokens` |
+| When to compact automatically | Headroom reserve | `compactReserveTokens` |
+| When to compact automatically | Preset | `compactAfterPreset` |
+| When to compact automatically | Never compact below | `compactAfterMinTokens` |
+| When to compact automatically | Never compact later than | `compactAfterMaxTokens` |
+| Context budgets | Tool output kept | `retainedToolOutputMaxTokens` |
+| Context budgets | Recall answer size | `recallResponseMaxChars` |
+| Memory — behavior | Observational memory | `memory` |
+| Memory — behavior | Take notes every | `observeAfterTokens` |
+| Memory — behavior | Build insights every | `reflectAfterTokens` |
+| Memory — behavior | Prune memory when | `dropperPressureThreshold` |
+| Memory — sizes | Note memory budget | `observationsPoolMaxTokens` |
+| Memory — sizes | Insight memory budget | `reflectionsPoolMaxTokens` |
+| Memory — sizes | Conversation read per pass | `observerChunkMaxTokens` |
+| Memory — sizes | Memory read per job | `reflectorInputMaxTokens` |
+| Advanced | Fall back to session model | `sessionFallback` |
+| Advanced | Max steps per memory job | `agentMaxTurns` |
+| Advanced | Keep early notes through first compaction | `fullFoldAlways` |
+| Advanced | Memory job prompt caching | `cacheRetention` |
+| Advanced | Memory job idle timeout | `providerIdleTimeoutMs` |
+| Advanced | Memory job attempt timeout | `workerAttemptTimeoutMs` |
+| Advanced | Footer status bar | `statusBar` |
+| Advanced | Memory job notifications | `showWorkerNotifications` |
+| Advanced | Debug snapshots | `debug` |
+| Advanced | Debug JSONL logging | `debugLog` |
 
 ## Environment Variable Overrides
 
@@ -641,8 +716,7 @@ Boolean parsing accepts `1`, `true`, `yes`, `on` (and `0`, `false`, `no`, `off`)
 
 | Variable | Overrides | Example |
 |----------|-----------|---------|
-| `PI_BLACKHOLE_COMPACTION` | `compaction` (`auto` \| `manual` \| `off`) | `PI_BLACKHOLE_COMPACTION=manual` |
-| `PI_BLACKHOLE_COMPACTION_ENGINE` | `compactionEngine` (`blackhole` \| `pi-default`) | `PI_BLACKHOLE_COMPACTION_ENGINE=pi-default` |
+| `PI_BLACKHOLE_COMPACTION` | `compaction` (`automatic` \| `manual` \| `off`; `auto` is an accepted alias) | `PI_BLACKHOLE_COMPACTION=manual` |
 | `PI_BLACKHOLE_MID_RUN_COMPACTION` | `midRunCompaction` (`resume` \| `pause` \| `off`) | `PI_BLACKHOLE_MID_RUN_COMPACTION=resume` |
 | `PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE` | `showPreCompactionMessage` (`true` \| `false`) | `PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE=off` |
 | `PI_BLACKHOLE_COMPACTION_SUMMARY_MODE` | `compactionSummaryMode` (`default` \| `append`) | `PI_BLACKHOLE_COMPACTION_SUMMARY_MODE=append` |
@@ -682,12 +756,9 @@ Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accept
 | `PI_BLACKHOLE_OBSERVE_AFTER_TOKENS` | `observeAfterTokens` |
 | `PI_BLACKHOLE_REFLECT_AFTER_TOKENS` | `reflectAfterTokens` |
 | `PI_BLACKHOLE_OBSERVATIONS_POOL_MAX_TOKENS` | `observationsPoolMaxTokens` |
-| `PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS` | `observationsPoolTargetTokens` |
 | `PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS` | `reflectionsPoolMaxTokens` |
 | `PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS` | `reflectorInputMaxTokens` |
-| `PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS` | `dropperInputMaxTokens` |
 | `PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS` | `observerChunkMaxTokens` |
-| `PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS` | `observerPreambleMaxTokens` |
 | `PI_BLACKHOLE_AGENT_MAX_TURNS` | `agentMaxTurns` |
 | `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS` | `providerIdleTimeoutMs` |
 | `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS` | `workerAttemptTimeoutMs` |
@@ -695,10 +766,19 @@ Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accept
 Float fields (must be in `(0, 1]`):
 
 | Variable | Overrides |
-|----------|-----------|
-| `PI_BLACKHOLE_COMPACT_AFTER_RATIO` | `compactAfterRatio` |
+| --- | --- |
 | `PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD` | `dropperPressureThreshold` |
-| `PI_BLACKHOLE_DROPPER_POOL_FULLNESS_THRESHOLD` | `dropperPoolFullnessThreshold` |
+
+The `compactAfter*` value variables also force the shape: setting
+`PI_BLACKHOLE_COMPACT_AFTER_TOKENS` implies `compactAfterBy: "tokens"`, `…_RATIO`
+implies `"percent"` (a value ≤ 1 is treated as the old fraction and converted
+to a percent), and `…_RESERVE_TOKENS` implies `"reserve"`. There are no env
+vars for `compactAfterBy`, `compactAfterMinTokens`, or `compactAfterMaxTokens`,
+and `PI_BLACKHOLE_COMPACTION_ENGINE` was removed.
+
+`PI_BLACKHOLE_COMPACT_AFTER_RATIO` is a percent in `(0, 100]` (also accepts the
+old fraction <= 1 and converts it). `PI_BLACKHOLE_DROPPER_POOL_FULLNESS_THRESHOLD`
+was removed.
 
 Preset-name field (non-empty string):
 
@@ -721,12 +801,11 @@ Enum fields (invalid values keep the file value; matching is case-insensitive):
 
 ## Complete Examples
 
-### Minimal auto-compact (new config, all defaults)
+### Minimal auto-compact (all defaults)
 
 ```json
 {
-  "compaction": "auto",
-  "compactionEngine": "blackhole",
+  "compaction": "automatic",
   "tailBehavior": "minimal",
   "memory": true
 }
@@ -737,18 +816,27 @@ Enum fields (invalid values keep the file value; matching is case-insensitive):
 ```json
 {
   "compaction": "manual",
-  "compactionEngine": "blackhole",
   "tailBehavior": "minimal",
   "memory": false
 }
 ```
 
-### Pi's engine, no blackhole involvement
+### Pi handles compaction (blackhole steps aside)
 
 ```json
 {
-  "compaction": "auto",
-  "compactionEngine": "pi-default"
+  "compaction": "off"
+}
+```
+
+### 256k @ ~120k, 1M @ 180k
+
+```json
+{
+  "compaction": "automatic",
+  "compactAfterBy": "percent",
+  "compactAfterRatio": 46,
+  "compactAfterMaxTokens": 180000
 }
 ```
 
@@ -795,7 +883,7 @@ Enum fields (invalid values keep the file value; matching is case-insensitive):
 
 ### `compactionSummaryMode`
 
-Controls how auto-compaction summaries are stored and presented to the model. Only applies when `compaction: "auto"` and `compactionEngine: "blackhole"`. Explicit `/blackhole` triggers independent of this mode and always folds the chain into a clean segment.
+Controls how auto-compaction summaries are stored and presented to the model. Only applies when `compaction: "automatic"`. Explicit `/blackhole` triggers independent of this mode and always folds the chain into a clean segment.
 
 | Value | Behavior |
 |-------|----------|
