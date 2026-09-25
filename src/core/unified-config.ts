@@ -239,8 +239,8 @@ export interface UnifiedConfig {
   workerAttemptTimeoutMs?: number;
   /** Provider-neutral prompt-cache retention preference for the memory
    *  workers. Unset defers to pi's effective setting (provider default
-   *  `short`; `PI_CACHE_RETENTION=long` opts in); adapters ignore values they
-   *  do not support, so `long` is opt-in rather than our default. */
+   *  `short`); adapters ignore values they do not support, so `long` is
+   *  opt-in rather than our default. */
   cacheRetention?: CacheRetention;
 
   /** Base model override for all memory workers. */

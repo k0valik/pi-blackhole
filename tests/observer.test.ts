@@ -444,6 +444,30 @@ describe("runObserver", () => {
 
     expect(toolResult?.terminate).toBe(false);
     expect(toolResult?.content?.[0]?.text).toContain("complete=true was not honored");
+    expect(toolResult?.content?.[0]?.text).toContain("dropped when the run ends");
+  });
+
+  it("reports run-scoped rejection totals in the receipt", async () => {
+    const receipts: string[] = [];
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      const first = await context.tools[0].execute("tool-1", {
+        observations: [{ content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] }],
+        complete: false,
+      });
+      const second = await context.tools[0].execute("tool-2", {
+        observations: [
+          { content: "Good observation", relevance: "high", sourceEntryIds: ["entry-a"] },
+        ],
+        complete: true,
+      });
+      receipts.push(first.content?.[0]?.text ?? "", second.content?.[0]?.text ?? "");
+    });
+
+    await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(receipts[0]).toContain("Run totals: 0 recorded, 1 rejected");
+    // The rejection from batch 1 stays visible to the model in batch 2's receipt.
+    expect(receipts[1]).toContain("Run totals: 1 recorded, 1 rejected");
   });
 
   it("closes only after a clean complete batch follows a rejected one", async () => {

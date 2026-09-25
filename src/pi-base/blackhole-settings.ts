@@ -353,7 +353,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "enum",
       label: "Worker prompt-cache retention",
       description:
-        "Provider-neutral prompt-cache retention for the memory workers; unset defers to pi's effective setting (provider default short, PI_CACHE_RETENTION=long opts in). Adapters ignore values they do not support.",
+        "Provider-neutral prompt-cache retention for the memory workers; unset defers to pi's effective setting. Adapters ignore values they do not support.",
       // "unset" is a modal-only sentinel: validate() drops it before the config
       // is persisted, so an untouched field never pins a value in the file.
       value: cfg.cacheRetention ?? "unset",

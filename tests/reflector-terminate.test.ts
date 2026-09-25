@@ -1,25 +1,25 @@
 /**
  * Integration: pi's real agent loop honors the terminate flag returned by
- * record_observations.
+ * record_reflections.
  *
- * The observer unit tests drive a fake loop and only inspect the flag we
- * return; these tests run the actual agentLoop with a scripted stream so a
- * host that stops honoring terminate — or a tool schema the host rejects —
- * fails here instead of shipping green.
+ * Mirrors tests/observer-terminate.test.ts for the second worker that ships the
+ * early-stop mechanism, so a reflector-specific schema or tool-result shape
+ * cannot slip through on the observer's coverage alone.
  */
 
 import { describe, expect, it } from "vitest";
 
-import { runObserver } from "../src/om/agents/observer/agent.js";
+import { runReflector } from "../src/om/agents/reflector/agent.js";
+import { observation } from "./fixtures/session.js";
+
+const obsA = observation("aaaaaaaaaaaa");
+const obsB = observation("bbbbbbbbbbbb");
 
 const baseArgs = {
   model: {} as any,
   apiKey: "test",
-  priorReflections: [],
-  priorObservations: [],
-  chunk: "[Source entry id: entry-a]\nUser asked for a memory update.",
-  allowedSourceEntryIds: ["entry-a"],
-  sourceEntryTimestamps: { "entry-a": "2026-05-02 10:30" },
+  reflections: [],
+  observations: [obsA, obsB],
 };
 
 interface ScriptedTurn {
@@ -54,16 +54,16 @@ function assistantTurn(
 
 function toolCallTurn(args: Record<string, unknown>) {
   return assistantTurn(
-    [{ type: "toolCall", id: "call-1", name: "record_observations", arguments: args }],
+    [{ type: "toolCall", id: "call-1", name: "record_reflections", arguments: args }],
     "toolUse",
   );
 }
 
-const textTurn = assistantTurn([{ type: "text", text: "chunk covered" }], "stop");
+const textTurn = assistantTurn([{ type: "text", text: "review done" }], "stop");
 
-function observationTurn(content: string, complete?: boolean) {
+function reflectionTurn(content: string, complete?: boolean) {
   return toolCallTurn({
-    observations: [{ content, relevance: "high", sourceEntryIds: ["entry-a"] }],
+    reflections: [{ content, supportingObservationIds: ["aaaaaaaaaaaa"] }],
     ...(complete === undefined ? {} : { complete }),
   });
 }
@@ -98,54 +98,50 @@ function scriptedStream(script: ReadonlyArray<ScriptedTurn>) {
   return { streamFn, calls: () => calls };
 }
 
-describe("real agent loop honors record_observations terminate", () => {
+describe("real agent loop honors record_reflections terminate", () => {
   it("stops the run after a complete batch without another provider turn", async () => {
-    const { streamFn, calls } = scriptedStream([observationTurn("Integrated observation", true)]);
+    const { streamFn, calls } = scriptedStream([reflectionTurn("Integrated reflection", true)]);
 
-    const result = await runObserver({ ...baseArgs, streamFn });
+    const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(1);
-    expect(result.observations?.map((observation) => observation.content)).toEqual([
-      "Integrated observation",
-    ]);
+    expect(result?.map((item) => item.content)).toEqual(["Integrated reflection"]);
   });
 
   it("requests another turn after an incomplete batch", async () => {
     const { streamFn, calls } = scriptedStream([
-      observationTurn("Partial observation", false),
+      reflectionTurn("Partial reflection", false),
       textTurn,
     ]);
 
-    const result = await runObserver({ ...baseArgs, streamFn });
+    const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(2);
-    expect(result.observations).toHaveLength(1);
+    expect(result).toHaveLength(1);
   });
 
   it("requests another turn after a refused complete batch", async () => {
     const { streamFn, calls } = scriptedStream([
       toolCallTurn({
-        observations: [{ content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] }],
+        reflections: [{ content: "Bad support", supportingObservationIds: ["missing"] }],
         complete: true,
       }),
       textTurn,
     ]);
 
-    const result = await runObserver({ ...baseArgs, streamFn });
+    const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(2);
-    expect(result.observations).toBeUndefined();
+    expect(result).toBeUndefined();
   });
 
   it("records a batch whose arguments omit complete instead of failing validation", async () => {
-    const { streamFn, calls } = scriptedStream([observationTurn("No flag observation"), textTurn]);
+    const { streamFn, calls } = scriptedStream([reflectionTurn("No flag reflection"), textTurn]);
 
-    const result = await runObserver({ ...baseArgs, streamFn });
+    const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(2);
-    expect(result.observations?.map((observation) => observation.content)).toEqual([
-      "No flag observation",
-    ]);
+    expect(result?.map((item) => item.content)).toEqual(["No flag reflection"]);
   });
 
   it("fails fast instead of looping when the script runs out", async () => {
@@ -153,7 +149,7 @@ describe("real agent loop honors record_observations terminate", () => {
 
     // The exhausted script ends the run with an error turn; without that the
     // loop would keep requesting provider turns until vitest times out.
-    await expect(runObserver({ ...baseArgs, streamFn })).rejects.toThrow(
+    await expect(runReflector({ ...baseArgs, streamFn })).rejects.toThrow(
       /scripted stream exhausted/,
     );
     expect(calls()).toBe(0);

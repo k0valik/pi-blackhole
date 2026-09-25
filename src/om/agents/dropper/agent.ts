@@ -64,8 +64,8 @@ interface RunDropperArgs {
   /**
    * Provider-neutral prompt-cache retention preference
    * (`SimpleStreamOptions.cacheRetention`). Unset defers to pi's effective
-   * setting (provider default `short`; `PI_CACHE_RETENTION=long` opts in);
-   * adapters ignore values they do not support.
+   * setting (provider default `short`); adapters ignore values they do not
+   * support.
    */
   cacheRetention?: CacheRetention;
 }
