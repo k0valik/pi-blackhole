@@ -7,6 +7,7 @@ import {
   makeModelResolver,
   runConsolidationPipeline,
   capSourceEntriesToTokens,
+  anyStageDue,
   type ConsolidationCtx,
 } from "../src/om/consolidation.js";
 import {
@@ -45,6 +46,7 @@ interface ObserverAgentInput {
 }
 
 interface DropperAgentInput {
+  model: { provider: string; id: string };
   observations: Array<{ id: string }>;
   budgetTokens: number;
   signal?: AbortSignal;
@@ -925,9 +927,9 @@ function observerChunkArg(callIndex = 0): ObserverAgentInput {
   return call[0];
 }
 
-function dropperCallArg(): DropperAgentInput {
-  const call = agents.runDropper.mock.calls[0];
-  if (!call) throw new Error("dropper did not run");
+function dropperCallArg(callIndex = 0): DropperAgentInput {
+  const call = agents.runDropper.mock.calls[callIndex];
+  if (!call) throw new Error(`dropper ran ${agents.runDropper.mock.calls.length} time(s)`);
   return call[0];
 }
 
@@ -1306,14 +1308,19 @@ describe("observer preamble cap", () => {
 });
 
 describe("dropper pressure valve", () => {
-  function pressureFixture(): PipelineFixture {
+  function pressureFixture(
+    options: {
+      observations?: ReturnType<typeof observation>[];
+      poolMaxTokens?: number;
+    } = {},
+  ): PipelineFixture {
     const fixture = makePipelineFixture({
       observeAfterTokens: 1_000_000,
       entries: [
         rawMessage("big-1", "x".repeat(400)),
         observationsRecordedEntry("obs-1", {
           coversUpToId: "big-1",
-          observations: [
+          observations: options.observations ?? [
             observation("aaaaaaaaaaaa", { tokenCount: 800, sourceEntryIds: ["big-1"] }),
             observation("bbbbbbbbbbbb", { tokenCount: 200, sourceEntryIds: ["big-1"] }),
           ],
@@ -1325,7 +1332,7 @@ describe("dropper pressure valve", () => {
       ],
     });
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
-    fixture.runtime.config.observationsPoolMaxTokens = 1_000;
+    fixture.runtime.config.observationsPoolMaxTokens = options.poolMaxTokens ?? 1_000;
     fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
@@ -1348,6 +1355,99 @@ describe("dropper pressure valve", () => {
         (entry) => entry.customType === "om.observations.dropped" && entry.id !== "drop-0",
       ),
     ).toHaveLength(1);
+  });
+
+  test("skips an undersized primary model for an uncapped pressure prompt and uses fallback", async () => {
+    const fixture = pressureFixture({
+      poolMaxTokens: 5_000,
+      observations: [
+        observation("aaaaaaaaaaaa", {
+          content: "x".repeat(20_000),
+          tokenCount: 5_000,
+          sourceEntryIds: ["big-1"],
+        }),
+      ],
+    });
+    fixture.runtime.config.dropperInputMaxTokens = 1_000;
+    fixture.runtime.config.dropperModel = { provider: "test", id: "primary", cooldownHours: 0 };
+    fixture.runtime.config.dropperFallbackModels = [{ provider: "test", id: "fallback" }];
+    let resolutionCount = 0;
+    const resolveModel = vi.fn(async () => ({
+      ok: true as const,
+      model:
+        resolutionCount++ === 0
+          ? { provider: "test", id: "primary", contextWindow: 10_000 }
+          : { provider: "test", id: "fallback", contextWindow: 20_000 },
+      apiKey: "test",
+    }));
+    fixture.runtime.resolveModel = resolveModel;
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+
+    expect({
+      resolutionCount: resolveModel.mock.calls.length,
+      dropperModels: agents.runDropper.mock.calls.map(([input]) => input.model.id),
+    }).toEqual({ resolutionCount: 2, dropperModels: ["fallback"] });
+  });
+
+  test("does not retry an empty pressure run against the unchanged active pool", async () => {
+    const fixture = pressureFixture();
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+    expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(false);
+    await fixture.run();
+    await fixture.run();
+
+    expect(agents.runDropper).toHaveBeenCalledOnce();
+  });
+
+  function expectPressureRerunWithChangedPool(): void {
+    expect(agents.runDropper).toHaveBeenCalledTimes(2);
+    expect(dropperCallArg(1).observations.map((observation) => observation.id)).toEqual([
+      "aaaaaaaaaaaa",
+      "bbbbbbbbbbbb",
+      "cccccccccccc",
+    ]);
+  }
+
+  test("re-enables pressure after the automatic active pool changes", async () => {
+    const fixture = pressureFixture();
+    agents.runDropper.mockResolvedValue([]);
+    await fixture.run();
+
+    fixture.entries.push(
+      observationsRecordedEntry("obs-2", {
+        coversUpToId: "big-1",
+        observations: [observation("cccccccccccc", { tokenCount: 100, sourceEntryIds: ["big-1"] })],
+      }),
+    );
+    expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(true);
+    await fixture.run();
+
+    expectPressureRerunWithChangedPool();
+  });
+
+  test("re-enables pressure after the manual pending pool changes", async () => {
+    clearPendingState("cursor-session");
+    const fixture = pressureFixture();
+    fixture.runtime.config.compaction = "manual";
+    agents.runDropper.mockResolvedValue([]);
+    await fixture.run();
+
+    savePendingObservation("cursor-session", {
+      coversUpToId: "big-1",
+      data: {
+        observations: [observation("cccccccccccc", { tokenCount: 100, sourceEntryIds: ["big-1"] })],
+      },
+    });
+    expect(anyStageDue(fixture.entries, fixture.runtime, readPendingState("cursor-session"))).toBe(
+      true,
+    );
+    await fixture.run();
+
+    expectPressureRerunWithChangedPool();
   });
 
   test("manual pressure bypasses covered-data gates and records the drop", async () => {

@@ -185,6 +185,18 @@ function dropperPressureReached(config: Runtime["config"], poolTokens: number): 
   );
 }
 
+function activePoolSignature(entries: Entry[], pending?: PendingOMState): string {
+  const observationIds = livePoolObservations(entries, pending)
+    .map((observation) => observation.id)
+    .sort();
+  return JSON.stringify(observationIds);
+}
+
+function matchesEmptyPressurePool(runtime: Runtime, poolSignature: string): boolean {
+  const cursor = runtime.cursors?.dropper;
+  return cursor?.state === "empty" && cursor.activePoolSignature === poolSignature;
+}
+
 /** Cursor-aware stage-due check.  Uses cursors when available; falls back to
  *  legacy coverage markers when cursors are absent (cold start, fork recovery).
  *
@@ -267,7 +279,11 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
           // Must have at least dropperPoolFullnessThreshold fullness to consider dropper
           if (fullnessVsPool < (config.dropperPoolFullnessThreshold ?? 0.1)) return false;
 
-          if (dropperPressureReached(config, poolTokens)) return true;
+          if (
+            dropperPressureReached(config, poolTokens) &&
+            !matchesEmptyPressurePool(runtime, activePoolSignature(entries, pending))
+          )
+            return true;
 
           // New data check: new obs or ref batches after dropper cursor
           const cursor = cursors.dropper;
@@ -1230,10 +1246,17 @@ async function runDropperStage(
   let dropTokens = 0;
   let observationCoverageId: string | undefined;
   const pressurePending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
-  const pressureRun = dropperPressureReached(
+  const pressurePoolSignature = activePoolSignature(entries, pressurePending);
+  const pressureReached = dropperPressureReached(
     runtime.config,
     observationPoolTokens(entries, pressurePending).tokens,
   );
+  const pressureAlreadyChecked =
+    pressureReached && matchesEmptyPressurePool(runtime, pressurePoolSignature);
+  const pressureRun = pressureReached && !pressureAlreadyChecked;
+  const advanceDropperCursor = (entryId: string, state: "skipped" | "not_due"): void => {
+    if (!pressureAlreadyChecked) runtime.advanceCursor("dropper", entryId, state);
+  };
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
     // Check any accumulated batch for unprocessed observations, not just the latest
@@ -1241,7 +1264,7 @@ async function runDropperStage(
       (b: any) => (b.data as any)?.observations?.length,
     );
     if (!hasPendingObs && !pressureRun) {
-      runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped");
+      advanceDropperCursor(entries.at(-1)?.id ?? "unknown", "skipped");
       return "continue";
     }
     observationCoverageId = pending.observation?.coversUpToId;
@@ -1249,13 +1272,13 @@ async function runDropperStage(
       const obsIdx = entryIndexForId(entries, pending.observation?.coversUpToId ?? "");
       const dropIdx = entryIndexForId(entries, pending.dropped.coversUpToId);
       if (obsIdx >= 0 && dropIdx >= 0 && obsIdx <= dropIdx && !pressureRun) {
-        runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "skipped");
+        advanceDropperCursor(pending.dropped.coversUpToId, "skipped");
         return "continue";
       }
       if (dropIdx >= 0) {
         dropTokens = rawTokensAfterIndex(entries, dropIdx);
         if (dropTokens < runtime.config.reflectAfterTokens && !pressureRun) {
-          runtime.advanceCursor("dropper", pending.dropped.coversUpToId, "not_due");
+          advanceDropperCursor(pending.dropped.coversUpToId, "not_due");
           return "continue";
         }
       } else {
@@ -1267,12 +1290,12 @@ async function runDropperStage(
   } else {
     dropTokens = rawTokensSinceDropCoverage(entries);
     if (dropTokens < runtime.config.reflectAfterTokens && !pressureRun) {
-      runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "not_due");
+      advanceDropperCursor(entries.at(-1)?.id ?? "unknown", "not_due");
       return "continue";
     }
     observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
     if (!observationCoverageId && !pressureRun) {
-      runtime.advanceCursor("dropper", entries.at(-1)?.id ?? "unknown", "skipped");
+      advanceDropperCursor(entries.at(-1)?.id ?? "unknown", "skipped");
       return "continue";
     }
   }
@@ -1295,10 +1318,7 @@ async function runDropperStage(
       newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4,
     );
     const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
-    const dropperInputTokens = Math.min(
-      dropperNewObsTokens + dropperSummaryBudget,
-      runtime.config.dropperInputMaxTokens,
-    );
+    const dropperInputTokens = dropperNewObsTokens + dropperSummaryBudget;
     // Adjust accumulated for pending coverage in manual mode
     let effectiveDropTokens = dropTokens;
     if (isManualMode(runtime.config)) {
@@ -1418,11 +1438,14 @@ async function runDropperStage(
         }
         runtime.advanceCursor("dropper", coversUpToId, "recorded");
       } else {
-        // No drops selected (maxDropsAllowed=0 or LLM returned no candidates)
+        // Bind empty pressure results to the current pool and branch tip.
         runtime.advanceCursor(
           "dropper",
-          coversUpToId ?? observationCoverageId ?? entries.at(-1)?.id ?? "unknown",
+          pressureReached
+            ? (entries.at(-1)?.id ?? "unknown")
+            : (coversUpToId ?? observationCoverageId ?? entries.at(-1)?.id ?? "unknown"),
           "empty",
+          pressureReached ? pressurePoolSignature : undefined,
         );
       }
       return "continue";

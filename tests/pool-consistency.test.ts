@@ -155,6 +155,25 @@ describe("observationPoolTokens", () => {
     expect(observationPoolTokens(asEntries(entries))).toEqual({ tokens: 700, count: 1 });
   });
 
+  it("does not restore a ledger-tombstoned observation from pending batches", () => {
+    const entries = [
+      ...observationBranch(),
+      observationsDroppedEntry("om-drop-1", {
+        observationIds: ["bbbbbbbbbbbb"],
+        coversUpToId: "om-obs-1",
+      }),
+    ];
+    savePendingObservation(SESSION, {
+      coversUpToId: "raw-1",
+      data: { observations: [observation("bbbbbbbbbbbb", { tokenCount: 700 })] },
+    });
+
+    expect(observationPoolTokens(asEntries(entries), readPendingState(SESSION))).toEqual({
+      tokens: 700,
+      count: 1,
+    });
+  });
+
   it("adds every pending observation batch when pending is supplied", () => {
     const pending: PendingOMState = {
       observationBatches: [

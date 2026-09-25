@@ -482,10 +482,10 @@ Minimum observation-pool fullness (fraction of `observationsPoolMaxTokens`) befo
 |------|---------|-------|
 | number | 0.10 | (0, 1] |
 
-- **0.70** (default): dropper fires when pool reaches 70% of `reflectorInputMaxTokens` — leaves 30% headroom for system prompts, tool scaffolding, and reflection summaries
-- **Higher** (e.g. 0.90): less aggressive pruning, more headroom needed from your model
-- **Lower** (e.g. 0.50): more aggressive pruning, useful with smaller models or free-tier context windows
-- **1.0**: disable pressure-driven dropper entirely — dropper only runs when new observation/reflection data exists AND the pool is ≥10% full
+- **0.70** (default): pressure-driven dropper runs when the observation pool reaches 70% of `observationsPoolMaxTokens`
+- **Higher** (e.g. 0.90): waits until the observation pool is fuller before pressure-driven pruning
+- **Lower** (e.g. 0.50): starts pressure-driven pruning at lower observation-pool fullness
+- **1.0**: disable pressure-driven dropper entirely — dropper only runs when new observation/reflection data exists AND pool fullness reaches `dropperPoolFullnessThreshold` (10% by default)
 
 ### `agentMaxTurns`
 

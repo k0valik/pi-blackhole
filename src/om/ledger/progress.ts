@@ -143,8 +143,9 @@ export function rawTokensSinceDropCoverage(entries: Entry[]): number {
 
 /** Canonical live pool used by pressure measurement and candidates. */
 export function livePoolObservations(entries: Entry[], pending?: PendingOMState): Observation[] {
+  const folded = foldLedger(entries);
   const pool = new Map(
-    foldLedger(entries).activeObservations.map((observation) => [observation.id, observation]),
+    folded.activeObservations.map((observation) => [observation.id, observation]),
   );
   for (const batch of pending?.observationBatches ?? []) {
     const data = batch.data as { observations?: unknown } | undefined;
@@ -156,6 +157,7 @@ export function livePoolObservations(entries: Entry[], pending?: PendingOMState)
         typeof observation.id !== "string" ||
         typeof observation.content !== "string" ||
         typeof observation.tokenCount !== "number" ||
+        folded.droppedObservationIds.has(observation.id) ||
         pool.has(observation.id)
       ) {
         continue;

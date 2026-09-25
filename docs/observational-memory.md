@@ -192,7 +192,7 @@ The consolidation pipeline runs Observer → Reflector → Dropper on `agent_sta
 
 - **Observer due**: Tokens since last observation coverage ≥ `observeAfterTokens`
 - **Reflector due**: Tokens since last reflection coverage ≥ `reflectAfterTokens` AND new observations exist
-- **Dropper due**: Pool ≥ `max(dropperPressureThreshold, dropperPoolFullnessThreshold) × observationsPoolMaxTokens` OR (new data exists AND pool ≥ 10% full)
+- **Dropper due**: Pool ≥ `max(dropperPressureThreshold, dropperPoolFullnessThreshold) × observationsPoolMaxTokens` OR (new data exists AND pool fullness ≥ `dropperPoolFullnessThreshold`, 10% by default)
 
 In manual mode (`compaction: "manual"`), the branch has no OM markers — pending state provides pool fullness and new-data visibility.
 

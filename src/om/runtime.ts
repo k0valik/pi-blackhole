@@ -53,6 +53,8 @@ export type CursorState = "initial" | "recorded" | "empty" | "error" | "skipped"
 export interface PipelineCursor {
   entryId: string;
   state: CursorState;
+  /** Active observation IDs from an empty pressure run; dropper only. */
+  activePoolSignature?: string;
 }
 
 export interface PipelineCursors {
@@ -699,8 +701,15 @@ export class Runtime {
   }
 
   /** Advance a stage's cursor to a new entry ID with the given state. */
-  advanceCursor(stage: ConsolidationPhase, entryId: string, state: CursorState): void {
-    this.cursors[stage] = { entryId, state };
+  advanceCursor(
+    stage: ConsolidationPhase,
+    entryId: string,
+    state: CursorState,
+    activePoolSignature?: string,
+  ): void {
+    const cursor: PipelineCursor = { entryId, state };
+    if (activePoolSignature) cursor.activePoolSignature = activePoolSignature;
+    this.cursors[stage] = cursor;
   }
 
   /** Load cursors from the per‑session pending file into the in‑memory map. */
@@ -721,9 +730,13 @@ export class Runtime {
         };
       }
       if (stored.dropper?.entryId && stored.dropper?.state) {
+        const activePoolSignature = stored.dropper.activePoolSignature;
         this.cursors.dropper = {
           entryId: stored.dropper.entryId,
           state: stored.dropper.state as CursorState,
+          ...(typeof activePoolSignature === "string" && activePoolSignature
+            ? { activePoolSignature }
+            : {}),
         };
       }
     } catch {
