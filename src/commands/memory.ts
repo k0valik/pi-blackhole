@@ -33,7 +33,7 @@ import {
   type Projection,
 } from "../om/ledger/index.js";
 import { readPendingState } from "../om/pending.js";
-import { DROPPER_NEWDATA_FLOOR } from "../om/consolidation.js";
+import { dropperNewDataFloor } from "../om/consolidation.js";
 import {
   isFixedTokenThreshold,
   isManualMode,
@@ -260,7 +260,7 @@ export function registerMemoryCommand(pi: ExtensionAPI, runtime: Runtime): void 
         "New conversation since the last memory update. A run starts once it passes the threshold.",
         `Notes:          ~${obsProgress.toLocaleString()} tokens (triggers at ${runtime.config.observeAfterTokens.toLocaleString()})`,
         `Insights:       ~${reflectionProgress.toLocaleString()} tokens (triggers at ${runtime.config.reflectAfterTokens.toLocaleString()})`,
-        `Pruning:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(DROPPER_NEWDATA_FLOOR * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
+        `Pruning:        pool ${pct(poolTokens, runtime.config.observationsPoolMaxTokens)}% — eligible at ≥${Math.round(dropperNewDataFloor(runtime.config.dropperPressureThreshold) * 100)}% with new data; ${pressureHint(runtime.config)} (${dropProgress.toLocaleString()}/${runtime.config.reflectAfterTokens.toLocaleString()} new tokens)`,
         `Compaction:     ~${compactionProgress.toLocaleString()} tokens` +
           (isManualMode(runtime.config)
             ? " [manual]"

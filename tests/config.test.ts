@@ -660,6 +660,8 @@ describe("Env overrides", () => {
   afterEach(() => {
     delete process.env.PI_VCC_OM_PASSIVE;
     delete process.env.PI_OBSERVATIONAL_MEMORY_PASSIVE;
+    delete process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
+    delete process.env.PI_BLACKHOLE_COMPACTION;
   });
 
   it("env PI_VCC_OM_PASSIVE=true forces compaction:off + memory:false", async () => {
@@ -688,6 +690,23 @@ describe("Env overrides", () => {
     const config = loadUnifiedConfig(testDir);
     expect(config.compaction).toBe("off");
     expect(config.memory).toBe(false);
+  });
+
+  it("falsy PI_VCC_OM_PASSIVE undoes a project-layer passive:true", async () => {
+    process.env.PI_VCC_OM_PASSIVE = "false";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ passive: true }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compaction).toBe("automatic");
+    expect(config.memory).toBe(true);
+  });
+
+  it("legacy PI_BLACKHOLE_COMPACTION_ENGINE=pi-default still keeps blackhole out", async () => {
+    process.env.PI_BLACKHOLE_COMPACTION_ENGINE = "pi-default";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({});
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compaction).toBe("off");
   });
 });
 
@@ -822,6 +841,18 @@ describe("Declarative env overrides apply at runtime", () => {
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBe(180_000);
     expect(config.compactAfterRatio).toBe(65);
+  });
+
+  it("re-derives the shape from merged values across scopes (global token pin wins)", async () => {
+    // A project layer's reserve used to stamp compactAfterBy:"reserve", which
+    // silently outranked the global token pin. The value keys are the
+    // cross-layer source of truth, so tokens must win.
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 100_000 });
+    writeConfig({ compactReserveTokens: 32_768 }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterBy).toBe("tokens");
+    expect(config.compactAfterTokens).toBe(100_000);
   });
 });
 
@@ -1054,5 +1085,19 @@ describe("loader parity: file bytes → same effective threshold on both loaders
     });
     expect(t.viaFileLoader).toBe(104_571);
     expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+});
+
+describe("configFileNeedsMigration", () => {
+  it("treats compactionEngine as a legacy key, not a new one", async () => {
+    const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
+    writeConfig({ compactionEngine: "pi-default" });
+    expect(configFileNeedsMigration()).toBe(true);
+  });
+
+  it("returns false once a new key is present", async () => {
+    const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
+    writeConfig({ compaction: "off" });
+    expect(configFileNeedsMigration()).toBe(false);
   });
 });

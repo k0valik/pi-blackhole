@@ -356,10 +356,26 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
     }
   });
 
-  it("keeps percent boundary values (0, 100]", async () => {
-    for (const ratio of [0.01, 1, 46, 99.9, 100]) {
+  it("keeps percent values above the fraction range", async () => {
+    for (const ratio of [46, 99.9, 100]) {
       expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBe(ratio);
     }
+  });
+
+  it("scales a pre-plan fraction below 1 to a percent (bare 1 stays 1%)", async () => {
+    expect((await validate({ compactAfterRatio: 0.01 })).compactAfterRatio).toBe(1);
+    expect((await validate({ compactAfterRatio: 0.5 })).compactAfterRatio).toBe(50);
+    expect((await validate({ compactAfterRatio: 0.65 })).compactAfterRatio).toBe(65);
+    // The migration turns a bare legacy `1` into 100%; the seatbelt normalizer
+    // leaves `1` as 1% so the transform is idempotent.
+    expect((await validate({ compactAfterRatio: 1 })).compactAfterRatio).toBe(1);
+  });
+
+  it("scales a tiny fraction to a stable 1% (idempotent, never re-scaled)", async () => {
+    const once = await validate({ compactAfterRatio: 0.001 });
+    expect(once.compactAfterRatio).toBe(1);
+    const twice = await validate(once);
+    expect(twice.compactAfterRatio).toBe(1);
   });
 
   it("drops non-integer or negative token knobs", async () => {

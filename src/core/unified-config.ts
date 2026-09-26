@@ -218,7 +218,8 @@ export interface UnifiedConfig {
    *  dropping without new data. A value of 1 disables pressure.
    *  Default 0.70 (70%). Must be in range (0, 1]. The former
    *  dropperPoolFullnessThreshold was merged into this (plan-09 §3.3); the
-   *  new-data path uses the constant floor DROPPER_NEWDATA_FLOOR (0.10). */
+   *  new-data path derives its floor from this value (dropperNewDataFloor,
+   *  plan-11 §4). */
   dropperPressureThreshold: number;
   /** Max source entries tokens sent to observer per chunk. */
   observerChunkMaxTokens: number;
@@ -329,47 +330,39 @@ export const DEFAULTS: UnifiedConfig = {
   showWorkerNotifications: true,
 };
 
-/**
- * Legacy scaffold default (pre-curve): scaffoldConfig() and the settings modal
- * used to materialize `compactAfterTokens: 81000` into config files even for
- * users who never chose it. Treated as default-posture residue by
- * normalizeThresholdKnobs (used by both the file loader and the modal
- * validate) — the value 81000 reads as "the old default" and yields to the
- * default preset curve / derived knobs. An env-set 81000 stays explicit.
- * Flat-81k behavior is reproducible with any other explicit fixed value
- * (spec §10).
- */
-const LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS = 81_000;
+// Shared validity predicates live in config-validators.ts so the file loader,
+// the settings-modal validate, the trigger resolver, and the on-disk migration
+// cannot disagree about whether a value is valid. Re-exported for existing
+// importers.
+import {
+  isCompactAfterBy,
+  isFixedTokenThreshold,
+  isReserveTokens,
+  isWindowPercent,
+  LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS,
+  windowPercent,
+} from "./config-validators.js";
 
-/**
- * Shared validity predicates for the auto-compaction threshold knobs.
- *
- * Single source of truth used by the file loader (`parseConfig`), the
- * settings-modal `validate`, and the trigger resolver
- * (`compactThresholdTokens`): all three agree that `0` means "not set" and
- * that out-of-range values behave like absent keys (fall through to the next
- * precedence tier) instead of acting as live thresholds. A literal `81000` is
- * intentionally VALID here — dropping that scaffold residue is the loader's
- * job (env-set 81000 stays explicit); the resolver must not second-guess it.
- */
-export function isFixedTokenThreshold(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0;
-}
+export {
+  COMPACT_AFTER_BY_VALUES,
+  isCompactAfterBy,
+  isFixedTokenThreshold,
+  isReserveTokens,
+  isWindowPercent,
+  legacyFractionToPercent,
+  windowPercent,
+} from "./config-validators.js";
+export type { CompactAfterBy } from "./config-validators.js";
 
-/** Threshold percentage of the context window, in (0, 100]. */
-export function isWindowPercent(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0 && v <= 100;
-}
-
-export function isReserveTokens(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0;
-}
-
-/** Shape selector for the auto-compaction threshold (plan-09 §3.2). */
-export const COMPACT_AFTER_BY_VALUES = ["preset", "percent", "tokens", "reserve"] as const;
-export type CompactAfterBy = (typeof COMPACT_AFTER_BY_VALUES)[number];
-export function isCompactAfterBy(v: unknown): v is CompactAfterBy {
-  return typeof v === "string" && (COMPACT_AFTER_BY_VALUES as readonly string[]).includes(v);
+/** Warn once per process when a legacy fraction is auto-scaled. */
+let warnedLegacyRatioFraction = false;
+function warnLegacyRatioFraction(): void {
+  if (warnedLegacyRatioFraction) return;
+  warnedLegacyRatioFraction = true;
+  console.warn(
+    "blackhole: compactAfterRatio held a pre-plan fraction; treated values in (0, 1] as a " +
+      "percent (×100). Re-save your config (or let the on-disk migration run) to persist it.",
+  );
 }
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
@@ -516,6 +509,15 @@ export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
   }
   if (!isWindowPercent(rec.compactAfterRatio)) {
     delete rec.compactAfterRatio;
+  } else {
+    // Pre-plan fraction (or a bare `1` with no percent selector) that escaped
+    // migration — scale instead of letting the resolver read it as a sub-1%
+    // percent (see windowPercent).
+    const normalized = windowPercent(rec.compactAfterRatio);
+    if (normalized !== rec.compactAfterRatio) {
+      rec.compactAfterRatio = normalized;
+      warnLegacyRatioFraction();
+    }
   }
   if (!isReserveTokens(rec.compactReserveTokens)) {
     delete rec.compactReserveTokens;
@@ -732,6 +734,29 @@ function migrateOldKnobs(parsed: Record<string, unknown>): void {
   delete parsed.overrideDefaultCompaction;
 }
 
+/**
+ * Re-derive the auto-compaction shape selector from the merged value keys, so
+ * a project layer's selector cannot silently outrank a global pin (plan-11 §8).
+ * Returns undefined when no value key is present (the explicit selector, or the
+ * preset default, stands).
+ */
+function deriveCompactAfterBy(
+  rec: Record<string, unknown>,
+): "tokens" | "percent" | "reserve" | undefined {
+  const tokens = rec.compactAfterTokens;
+  if (isFixedTokenThreshold(tokens) && tokens !== LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS) {
+    return "tokens";
+  }
+  if (isWindowPercent(rec.compactAfterRatio)) return "percent";
+  if (isReserveTokens(rec.compactReserveTokens)) return "reserve";
+  return undefined;
+}
+
+/** Format an in-memory migration skip for the loader's warning channel. */
+function migrationSkipWarning(w: { key: string; reason: string }): string {
+  return `blackhole: config key "${w.key}" has an unrecognized value (${w.reason}); left it untouched — fix it in /blackhole settings.`;
+}
+
 // ── Load and save ────────────────────────────────────────────────────────────
 
 function readJson(path: string): {
@@ -795,21 +820,38 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     raw = merged;
   }
 
-  // Capture the pre-migration legacy signal the passive env undo needs —
-  // migration deletes `passive` before the env block runs.
-  const legacyPassiveKey = raw?.passive === true;
-
-  // In-memory migration of the global/legacy layer (plan-10): the on-disk
-  // rewrite happens at session start; this keeps read-only installs correct.
-  if (raw) raw = applyConfigMigrations(raw).config;
-
-  // Project-local override: <cwd>/.pi/pi-blackhole-config.json
+  // Project-local override: <cwd>/.pi/pi-blackhole-config.json. Read it before
+  // the global migration so the pre-migration `passive` signal survives in
+  // both layers (the legacy env undo needs it).
   const projectConfigPath = join(cwd, ".pi", CONFIG_FILE);
   const projectResult = readJson(projectConfigPath);
   const projectRaw = projectResult.data;
   if (projectResult.error && onWarn) onWarn(projectResult.error);
+
+  // Capture the pre-migration legacy signal the passive env undo needs —
+  // migration deletes `passive` before the env block runs. Both layers count.
+  const legacyPassiveKey =
+    raw?.passive === true || (isRecord(projectRaw) && projectRaw.passive === true);
+
+  // In-memory migration of the global/legacy layer (plan-10): the on-disk
+  // rewrite happens at session start; this keeps read-only installs correct.
+  if (raw) {
+    const migrated = applyConfigMigrations(raw);
+    for (const w of migrated.warnings) onWarn?.(migrationSkipWarning(w));
+    raw = migrated.config;
+  }
+
   if (projectRaw && isRecord(projectRaw)) {
-    raw = { ...raw, ...applyConfigMigrations(projectRaw).config };
+    const migratedProject = applyConfigMigrations(projectRaw);
+    for (const w of migratedProject.warnings) onWarn?.(migrationSkipWarning(w));
+    raw = { ...raw, ...migratedProject.config };
+    // The shape selector is a single scalar, but the value keys may be split
+    // across layers. Re-derive it once from the merged values so a project
+    // layer cannot silently outrank a global pin (plan-11 §8).
+    if (raw) {
+      const derived = deriveCompactAfterBy(raw);
+      if (derived !== undefined) raw.compactAfterBy = derived;
+    }
   }
 
   const parsed = parseConfig(raw);
@@ -850,6 +892,21 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
       merged.compaction = trimmed;
     } else {
       console.warn(`blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`);
+    }
+  }
+
+  // ── Env override — legacy compaction engine ──
+  // The variable is gone, but a stale `PI_BLACKHOLE_COMPACTION_ENGINE=pi-default`
+  // must not silently flip the user into `automatic` (the opposite intent).
+  const envEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
+  if (envEngine !== undefined) {
+    const trimmed = envEngine.trim().toLowerCase();
+    console.warn(
+      `blackhole: PI_BLACKHOLE_COMPACTION_ENGINE is no longer supported ("${envEngine}") — use ` +
+        `PI_BLACKHOLE_COMPACTION=off instead. See docs/MIGRATION-GUIDE.md.`,
+    );
+    if (trimmed === "pi-default" && envCompaction === undefined) {
+      merged.compaction = "off";
     }
   }
 
@@ -1007,7 +1064,7 @@ export function configFileNeedsMigration(): boolean {
     const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
     if (
       raw.compaction !== undefined ||
-      raw.compactionEngine !== undefined ||
+      raw.compactAfterBy !== undefined ||
       raw.tailBehavior !== undefined
     ) {
       return false; // already has new keys
@@ -1015,7 +1072,8 @@ export function configFileNeedsMigration(): boolean {
     return (
       raw.passive !== undefined ||
       raw.noAutoCompact !== undefined ||
-      raw.overrideDefaultCompaction !== undefined
+      raw.overrideDefaultCompaction !== undefined ||
+      raw.compactionEngine !== undefined
     );
   } catch {
     return false;

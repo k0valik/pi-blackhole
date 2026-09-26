@@ -10,6 +10,7 @@ beforeAll(() => {
 });
 
 import { createSettingsModalBody } from "./body.ts";
+import { buildVisibilityContext } from "./values.ts";
 import type { Field } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -268,5 +269,30 @@ describe("§2.4 Misc gaps", () => {
     body.handleInput?.("\x12");
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("num", 5, expect.objectContaining({ key: "num" }));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// visibleWhen resolves from the active tab's rows only
+// ─────────────────────────────────────────────────────────────────────
+
+describe("buildVisibilityContext tab scoping", () => {
+  it("does not borrow a same-key value from another tab", () => {
+    const rows: any[] = [
+      { field: { key: "compactAfterBy", type: "enum", tab: "project" }, value: "percent" },
+      // Same key in another tab — must not win just by appearing later.
+      { field: { key: "compactAfterBy", type: "enum", tab: "defaults" }, value: undefined },
+      { field: { key: "compactAfterRatio", type: "number", tab: "project" }, value: 46 },
+    ];
+    const state: any = {
+      rows,
+      tabs: [
+        { id: "project", label: "Project" },
+        { id: "defaults", label: "Defaults" },
+      ],
+      activeTabId: "project",
+    };
+    const ctx = buildVisibilityContext(state, rows[2]!.field, "project");
+    expect(ctx.get("compactAfterBy")).toBe("percent");
   });
 });

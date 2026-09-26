@@ -498,13 +498,14 @@ Max conversation tokens sent to the note-taker per reading pass.
 ### `dropperPressureThreshold` *(Prune memory when)*
 
 Fraction of `observationsPoolMaxTokens` at which low-value notes are pruned.
-The new-data floor is the constant `0.10`; `1.0` disables pressure-driven
-pruning.
+The new-data floor is derived from this value
+(`dropperNewDataFloor(P) = clamp(0.15 × P, 0.02, 0.10)`); `1.0` disables
+pressure-driven pruning.
 
 > **Upgrade note.** `dropperPoolFullnessThreshold` was merged into this key
 > (0.6.0); migration sets `max(oldPressure, oldFullness)`. The old independent
-> new-data floor is now the constant `0.10`, so this is exact for every config
-> whose floor was the default and differs only for a custom floor above `0.10`.
+> new-data floor is now derived from the pressure — the default `0.70`
+> reproduces the old `0.10`, and a custom pressure scales the floor with it.
 
 | Type | Default | Range |
 | --- | --- | --- |

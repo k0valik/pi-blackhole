@@ -20,7 +20,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 });
 
 import { foldLedger, observationPoolTokens, type Entry } from "../src/om/ledger/index.js";
-import { anyStageDue } from "../src/om/consolidation.js";
+import { anyStageDue, dropperNewDataFloor } from "../src/om/consolidation.js";
 import { Runtime } from "../src/om/runtime.js";
 import {
   clearPendingState,
@@ -335,7 +335,7 @@ describe("dropper pool pressure", () => {
   });
 });
 
-describe("dropper constant new-data floor (plan-09 §3.3)", () => {
+describe("dropper new-data floor (plan-09 §3.3 / plan-11 §4)", () => {
   // Pool is 1,400 tokens; observationsPoolMaxTokens moves the fullness fraction.
   function floorRuntime(poolMax: number): Runtime {
     return triggerRuntime({
@@ -367,6 +367,34 @@ describe("dropper constant new-data floor (plan-09 §3.3)", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(true);
     runtime.advanceCursor("dropper", lastId(entries), "skipped");
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+});
+
+describe("dropper derived new-data floor (plan-11 §4)", () => {
+  it.each([
+    [0.01, 0.02],
+    [0.2, 0.03],
+    [0.4, 0.06],
+    [0.5, 0.075],
+    [0.7, 0.1],
+    [1, 0.1],
+    [Number.NaN, 0.1],
+  ])("pressure %s → floor %s", (pressure, expected) => {
+    expect(dropperNewDataFloor(pressure)).toBeCloseTo(expected, 10);
+  });
+
+  it("a lowered pressure lowers the floor, so new-data pruning can start earlier", () => {
+    // 5% pool fullness: below the old 0.10 constant floor, above the derived
+    // floor for pressure 0.2 (0.03). The pressure path (20%) is not reached.
+    const runtime = triggerRuntime({
+      reflectAfterTokens: 1,
+      reflectorInputMaxTokens: 1_000_000,
+      observationsPoolMaxTokens: 28_000,
+      dropperPressureThreshold: 0.2,
+    });
+    const entries = asEntries(observationBranch());
+    runtime.advanceCursor("reflector", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
   });
 });
 

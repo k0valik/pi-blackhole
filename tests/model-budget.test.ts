@@ -142,6 +142,26 @@ describe("compactThresholdTokens", () => {
     expect(compactThresholdTokens({ compactAfterRatio: 0.01 }, 1)).toBe(1);
   });
 
+  it("treats a pre-plan fraction as a percent, never a sub-1% threshold", () => {
+    // A fraction that escaped the on-disk migration (read-only file, settings
+    // modal, aborted step) must not be divided by 100 a second time, which
+    // would collapse the threshold and compact on nearly every turn.
+    expect(compactThresholdTokens({ compactAfterRatio: 0.65 }, 200_000)).toBe(130_000);
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 0.65 }, 200_000),
+    ).toBe(130_000);
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 0.5 }, 200_000),
+    ).toBe(100_000);
+  });
+
+  it("keeps a genuine percent value untouched", () => {
+    expect(compactThresholdTokens({ compactAfterRatio: 65 }, 200_000)).toBe(130_000);
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 46 }, 200_000),
+    ).toBe(92_000);
+  });
+
   it("derives window − reserve when only compactReserveTokens is set", () => {
     expect(compactThresholdTokens({ compactReserveTokens: 32_768 }, 1_000_000)).toBe(967_232);
     expect(compactThresholdTokens({ compactReserveTokens: 32_768 }, 128_000)).toBe(95_232);
@@ -298,13 +318,14 @@ describe("compactThresholdTokens — shape + band (plan-09 §3.2)", () => {
     ).toBe(expected);
   });
 
-  it("a tiny percent on a tiny window still clamps to at least 1 token", () => {
+  it("scales a sub-1 percent to a 1% floor (never a sub-1% threshold)", () => {
+    // A pre-plan fraction that escaped migration is read as a percent.
     expect(compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 0.01 }, 1)).toBe(
       1,
     );
     expect(
       compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 0.01 }, 1_000),
-    ).toBe(1);
+    ).toBe(10);
   });
 
   it("the band applies on top of the preset shape", () => {

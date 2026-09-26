@@ -183,12 +183,20 @@ function pendingObservationsCreatedAfter(
 }
 
 /**
- * Minimum pool fullness before the dropper may run on the new-data path.
- * A constant, not a knob: plan-09 §3.3 merged the former
- * `dropperPoolFullnessThreshold` into `dropperPressureThreshold`, which now
- * only drives the no-new-data pressure path. 0.10 matches the old default.
+ * Minimum pool fullness before the dropper may run on the new-data path,
+ * derived from the single surviving pressure knob (plan-11 §4).
+ *
+ * The old surface had two fractions: `dropperPoolFullnessThreshold` (a floor on
+ * both paths) and `dropperPressureThreshold` (the no-new-data trigger). They
+ * merged into one knob, so the floor is now derived from it: `clamp(0.15 × P,
+ * 0.02, 0.10)`. The default pressure (0.70) reproduces the old 0.10 floor
+ * exactly; lowering the pressure lowers the floor proportionally, so "prune
+ * earlier" stays coherent across the whole knob.
  */
-export const DROPPER_NEWDATA_FLOOR = 0.1;
+export function dropperNewDataFloor(pressureThreshold: number): number {
+  const p = Number.isFinite(pressureThreshold) ? pressureThreshold : 0.7;
+  return Math.min(0.1, Math.max(0.02, 0.15 * p));
+}
 
 /**
  * Pressure gate for the dropper: the pool is full enough that it should be
@@ -198,7 +206,7 @@ export const DROPPER_NEWDATA_FLOOR = 0.1;
  * P gauge and `/blackhole-memory` divide by — not `reflectorInputMaxTokens`,
  * which only sizes reflector/dropper prompts. A threshold of `1.0` (the
  * documented "off" value), or a non-positive pool max, disables pressure
- * entirely; the ordinary new-data trigger (gated by DROPPER_NEWDATA_FLOOR)
+ * entirely; the ordinary new-data trigger (gated by dropperNewDataFloor)
  * is unaffected.
  */
 function dropperPressureReached(config: Runtime["config"], poolTokens: number): boolean {
@@ -313,12 +321,12 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
               ? poolTokens / config.observationsPoolMaxTokens
               : 0;
 
-          // Must have at least DROPPER_NEWDATA_FLOOR fullness to consider dropper
-          if (fullnessVsPool < DROPPER_NEWDATA_FLOOR) return false;
+          // Must have at least the derived new-data floor to consider dropper
+          if (fullnessVsPool < dropperNewDataFloor(config.dropperPressureThreshold)) return false;
 
-          // Pressure check: pool ≥ max(pressure, fullness) fraction of
-          // observationsPoolMaxTokens — and not for a pool the dropper has
-          // already evaluated and left untouched.
+          // Pressure check: pool ≥ pressure fraction of observationsPoolMaxTokens
+          // — and not for a pool the dropper has already evaluated and left
+          // untouched.
           if (
             dropperPressureReached(config, poolTokens) &&
             !matchesEmptyPressurePool(runtime, activePoolSignature(entries, pending))
@@ -1470,7 +1478,7 @@ async function runDropperStage(
             observations: newObservations,
             existingObservationsSummary: existingObservationsSummary || undefined,
             budgetTokens: runtime.config.observationsPoolMaxTokens,
-            skipFullness: DROPPER_NEWDATA_FLOOR,
+            skipFullness: dropperNewDataFloor(runtime.config.dropperPressureThreshold),
             maxTurns: runtime.config.agentMaxTurns,
             thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForThinking),
             providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,

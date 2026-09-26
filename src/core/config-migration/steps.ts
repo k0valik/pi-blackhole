@@ -1,30 +1,53 @@
 /**
- * Config-file migration steps (plan-10).
+ * Config-file migration steps (plan-10, hardened in plan-11).
  *
  * Pure, per-file transforms over the raw JSON object:
  *  - only keys listed in a step's `consumes` are read or (eventually) deleted;
  *  - unknown keys are never touched;
- *  - a step that finds an unrecognized consumed value returns `error`, which
- *    aborts the whole file (plan-10 §3: "never project when anything is
- *    unrecognized").
+ *  - a value that is the documented `0` "not set" sentinel is treated as
+ *    absent, never as invalid;
+ *  - an unrecognized value is *skipped*, not fatal: the step leaves that key
+ *    untouched and returns a `warning`, so one bad value cannot silently revert
+ *    the rest of the file (plan-11 §2.3).
  *
  * Steps never delete consumed keys themselves — the two-phase runner does that
  * only after the projected values are verified on disk (plan-10 §3–§4).
+ *
+ * Validity predicates come from `config-validators.ts`, the same module the
+ * loader and resolver use, so the migration can never be stricter or looser
+ * than the runtime for the same key.
  */
 
-/** Current on-disk config schema version, stamped on the first migration. */
+import {
+  isCompactAfterBy,
+  isCompactionValue,
+  isFixedTokenThreshold,
+  isReserveTokens,
+  isUnitFraction,
+  isUnsetZero,
+  isWindowPercent,
+  LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS,
+  legacyFractionToPercent,
+  windowPercent,
+} from "../config-validators.js";
+
+/** Current on-disk config schema version, stamped on the first clean migration. */
 export const CONFIG_VERSION = 1;
 
-/** Pre-curve scaffold residue: never a deliberate pin. Dropped on migration. */
-const LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS = 81_000;
+export interface MigrationWarning {
+  /** The owned key whose value was not recognized. */
+  key: string;
+  value: unknown;
+  reason: string;
+}
 
 export interface MigrationResult {
   /** True when the step wrote or changed a produced value. */
   changed: boolean;
-  /** Present when a consumed value cannot be projected; aborts the file. */
-  error?: string;
-  /** Consumed keys that are dead and should be removed (phase 2). */
+  /** Consumed keys that are safe to remove (phase 2). */
   delete?: string[];
+  /** Present when a consumed value cannot be projected — that key is skipped. */
+  warning?: MigrationWarning;
 }
 
 export interface ConfigMigration {
@@ -43,24 +66,29 @@ export interface ConfigMigration {
   message?: string;
 }
 
-// ── Validators (local copy so this module imports nothing → no cycles) ──────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
-function isPositiveInt(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0;
+/** Collect one warning per unrecognized value, keeping the step total. */
+class Skipped {
+  readonly warnings: MigrationWarning[] = [];
+  warn(key: string, value: unknown, reason: string): void {
+    this.warnings.push({ key, value, reason });
+  }
+  get warning(): MigrationWarning | undefined {
+    return this.warnings[0];
+  }
 }
 
-/** Old `compactAfterRatio` was a fraction in (0, 1]. */
-function isOldFraction(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0 && v <= 1;
-}
-
-/** Unit fraction, e.g. a dropper threshold. */
-function isUnitFraction(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0 && v <= 1;
-}
-
-export function isCompactAfterBy(v: unknown): boolean {
-  return v === "preset" || v === "percent" || v === "tokens" || v === "reserve";
+/**
+ * Treat a `0` value as the documented "not set" sentinel: leave it out of the
+ * projection and mark the key for removal. Returns true when `value` was 0.
+ */
+function dropIfZero(value: unknown, key: string, del: string[]): boolean {
+  if (isUnsetZero(value)) {
+    del.push(key);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -97,24 +125,34 @@ const compactionEngineFold: ConfigMigration = {
   produces: ["compaction"],
   message: "compactionEngine was folded into compaction",
   apply(raw) {
+    const warning = new Skipped();
+    const del: string[] = [];
+
     const engine = raw.compactionEngine;
+    const engineValid = engine === undefined || engine === "blackhole" || engine === "pi-default";
+    if (!engineValid) {
+      warning.warn("compactionEngine", engine, "unrecognized compactionEngine value");
+    }
+
     const compaction = raw.compaction;
-    if (engine !== undefined && engine !== "blackhole" && engine !== "pi-default") {
-      return { changed: false, error: "unrecognized compactionEngine value" };
+    const compactionValid =
+      compaction === undefined || isCompactionValue(compaction) || compaction === "auto";
+    if (!compactionValid) {
+      warning.warn("compaction", compaction, "unrecognized compaction value");
     }
-    if (
-      compaction !== undefined &&
-      !["auto", "automatic", "manual", "off"].includes(compaction as string)
-    ) {
-      return { changed: false, error: "unrecognized compaction value" };
-    }
-    const folded = foldCompaction(compaction, engine);
-    const deleteEngine = engine !== undefined ? ["compactionEngine"] : [];
+
+    // Only recognized values participate in the fold.
+    const folded = foldCompaction(
+      compactionValid ? compaction : undefined,
+      engineValid ? engine : undefined,
+    );
+    if (engineValid && engine !== undefined) del.push("compactionEngine");
+
     if (folded === undefined || folded === compaction) {
-      return { changed: false, delete: deleteEngine };
+      return { changed: false, delete: del, warning: warning.warning };
     }
     raw.compaction = folded;
-    return { changed: true, delete: deleteEngine };
+    return { changed: true, delete: del, warning: warning.warning };
   },
 };
 
@@ -129,22 +167,36 @@ const legacyModes: ConfigMigration = {
   produces: ["compaction", "memory", "tailBehavior"],
   message: "legacy compaction keys were folded into compaction",
   apply(raw) {
-    for (const k of ["passive", "noAutoCompact", "overrideDefaultCompaction"] as const) {
-      if (raw[k] !== undefined && typeof raw[k] !== "boolean") {
-        return { changed: false, error: `unrecognized ${k} value` };
+    const warning = new Skipped();
+    const del: string[] = [];
+    const keys = ["passive", "noAutoCompact", "overrideDefaultCompaction"] as const;
+    const valid: Record<(typeof keys)[number], boolean> = {
+      passive: true,
+      noAutoCompact: true,
+      overrideDefaultCompaction: true,
+    };
+    for (const k of keys) {
+      const v = raw[k];
+      if (v === undefined) continue;
+      if (typeof v !== "boolean") {
+        valid[k] = false;
+        warning.warn(k, v, `unrecognized ${k} value`);
+        continue;
       }
+      del.push(k);
     }
+
     let changed = false;
     if (raw.compaction === undefined) {
-      if (raw.passive === true) {
+      if (valid.passive && raw.passive === true) {
         raw.compaction = "off";
         raw.memory = false;
         changed = true;
-      } else if (raw.noAutoCompact === true) {
+      } else if (valid.noAutoCompact && raw.noAutoCompact === true) {
         raw.compaction = "manual";
         changed = true;
       }
-      if (raw.overrideDefaultCompaction === true) {
+      if (valid.overrideDefaultCompaction && raw.overrideDefaultCompaction === true) {
         if (raw.compaction === undefined) {
           raw.compaction = "automatic";
           changed = true;
@@ -153,24 +205,23 @@ const legacyModes: ConfigMigration = {
           raw.tailBehavior = "minimal";
           changed = true;
         }
-      } else if (raw.overrideDefaultCompaction === false) {
+      } else if (valid.overrideDefaultCompaction && raw.overrideDefaultCompaction === false) {
         if (raw.compaction === undefined) {
           raw.compaction = "off";
           changed = true;
         }
       }
     }
-    return {
-      changed,
-      delete: ["passive", "noAutoCompact", "overrideDefaultCompaction"],
-    };
+    return { changed, delete: del, warning: warning.warning };
   },
 };
 
 /**
  * Make the threshold shape explicit and convert the old ratio fraction to a
  * percent. `compactAfterBy` is set by the old precedence (tokens > percent >
- * reserve); the value keys themselves stay (they are the shape's value).
+ * reserve) only when it is not already a valid selector; the ratio conversion
+ * runs either way, so a fraction that reached the file alongside a selector is
+ * still repaired.
  */
 const thresholdArray: ConfigMigration = {
   id: "threshold-array",
@@ -178,53 +229,79 @@ const thresholdArray: ConfigMigration = {
   produces: ["compactAfterBy", "compactAfterRatio", "compactAfterTokens", "compactReserveTokens"],
   message: "auto-compaction threshold shape recorded (compactAfterBy); ratio converted to percent",
   apply(raw) {
-    // Idempotence: a file that already has the selector is done.
-    if (isCompactAfterBy(raw.compactAfterBy)) return { changed: false };
+    const warning = new Skipped();
+    const del: string[] = [];
+    const selector = isCompactAfterBy(raw.compactAfterBy) ? raw.compactAfterBy : undefined;
 
-    const tokens = raw.compactAfterTokens;
-    const ratio = raw.compactAfterRatio;
-    const reserve = raw.compactReserveTokens;
-    if (tokens !== undefined && !isPositiveInt(tokens)) {
-      return { changed: false, error: "unrecognized compactAfterTokens value" };
-    }
-    if (ratio !== undefined && !isOldFraction(ratio)) {
-      return { changed: false, error: "unrecognized compactAfterRatio value" };
-    }
-    if (reserve !== undefined && !isPositiveInt(reserve)) {
-      return { changed: false, error: "unrecognized compactReserveTokens value" };
+    // tokens: 0 = unset, 81000 = scaffold residue, positive int = a real pin.
+    const rawTokens = raw.compactAfterTokens;
+    let tokenPin: number | undefined;
+    if (rawTokens !== undefined) {
+      if (dropIfZero(rawTokens, "compactAfterTokens", del)) {
+        // unset
+      } else if (!isFixedTokenThreshold(rawTokens)) {
+        warning.warn("compactAfterTokens", rawTokens, "unrecognized compactAfterTokens value");
+      } else if (rawTokens === LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS) {
+        del.push("compactAfterTokens");
+      } else {
+        tokenPin = rawTokens;
+      }
     }
 
-    // A literal 81000 was scaffold residue, never a real pin.
-    const tokenPin =
-      isPositiveInt(tokens) && tokens !== LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS ? tokens : undefined;
+    // ratio: 0 = unset, (0, 100] with a selector / (0, 1] fraction without one.
+    const rawRatio = raw.compactAfterRatio;
+    let ratioValid = false;
+    let converted = false;
+    if (rawRatio !== undefined) {
+      if (dropIfZero(rawRatio, "compactAfterRatio", del)) {
+        // unset
+      } else if (!isWindowPercent(rawRatio)) {
+        warning.warn("compactAfterRatio", rawRatio, "unrecognized compactAfterRatio value");
+      } else {
+        ratioValid = true;
+        // With no selector the ratio is the un-migrated legacy form, where a
+        // bare `1` means 100%; with a selector it is already a percent, and a
+        // value below 1 is a fraction that escaped repair.
+        const normalized =
+          selector === undefined ? legacyFractionToPercent(rawRatio) : windowPercent(rawRatio);
+        if (normalized !== rawRatio) {
+          raw.compactAfterRatio = normalized;
+          converted = true;
+        }
+      }
+    }
 
-    let changed = false;
-    const drop: string[] = [];
-    // Convert any present old fraction, even when it is not the winning shape,
-    // so a later switch to the percent shape is not misread.
-    if (isOldFraction(ratio)) {
-      raw.compactAfterRatio = Math.round(ratio * 100);
-      changed = true;
+    // reserve: 0 = unset, positive int = headroom.
+    const rawReserve = raw.compactReserveTokens;
+    let reserveValid = false;
+    if (rawReserve !== undefined) {
+      if (dropIfZero(rawReserve, "compactReserveTokens", del)) {
+        // unset
+      } else if (!isReserveTokens(rawReserve)) {
+        warning.warn("compactReserveTokens", rawReserve, "unrecognized compactReserveTokens value");
+      } else {
+        reserveValid = true;
+      }
     }
-    // A literal 81000 was scaffold residue, never a real pin — drop it.
-    if (isPositiveInt(tokens) && tokens === LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS) {
-      drop.push("compactAfterTokens");
-    }
+
+    let changed = converted;
+
     let shape: "tokens" | "percent" | "reserve" | undefined;
     if (tokenPin !== undefined) shape = "tokens";
-    else if (isOldFraction(ratio)) shape = "percent";
-    else if (isPositiveInt(reserve)) shape = "reserve";
-    if (shape !== undefined && raw.compactAfterBy !== shape) {
+    else if (ratioValid) shape = "percent";
+    else if (reserveValid) shape = "reserve";
+
+    if (selector === undefined && shape !== undefined) {
       raw.compactAfterBy = shape;
       changed = true;
     }
-    return { changed, delete: drop };
+    return { changed, delete: del, warning: warning.warning };
   },
 };
 
 /**
  * Merge the two dropper fractions into one knob. `dropperPressureThreshold`
- * survives; the new-data floor becomes the constant 0.10 (plan-09 §3.3), so
+ * survives; the new-data floor is derived from it at runtime (plan-11 §4), so
  * the survivor is `max(oldPressure, oldFullness)`.
  */
 const dropperFractionMerge: ConfigMigration = {
@@ -233,17 +310,35 @@ const dropperFractionMerge: ConfigMigration = {
   produces: ["dropperPressureThreshold"],
   message: "dropperPoolFullnessThreshold was merged into dropperPressureThreshold",
   apply(raw) {
+    const warning = new Skipped();
+    const del: string[] = [];
     const fullness = raw.dropperPoolFullnessThreshold;
     if (fullness === undefined) return { changed: false };
+    if (dropIfZero(fullness, "dropperPoolFullnessThreshold", del)) {
+      return { changed: false, delete: del };
+    }
     if (!isUnitFraction(fullness)) {
-      return { changed: false, error: "unrecognized dropperPoolFullnessThreshold value" };
+      warning.warn(
+        "dropperPoolFullnessThreshold",
+        fullness,
+        "unrecognized dropperPoolFullnessThreshold value",
+      );
+      return { changed: false, delete: del, warning: warning.warning };
     }
     const pressure = raw.dropperPressureThreshold;
-    if (pressure !== undefined && !isUnitFraction(pressure)) {
-      return { changed: false, error: "unrecognized dropperPressureThreshold value" };
+    if (pressure !== undefined && !isUnsetZero(pressure) && !isUnitFraction(pressure)) {
+      // Cannot safely merge onto an unrecognized pressure — leave both keys.
+      warning.warn(
+        "dropperPressureThreshold",
+        pressure,
+        "unrecognized dropperPressureThreshold value",
+      );
+      return { changed: false, delete: del, warning: warning.warning };
     }
-    raw.dropperPressureThreshold = Math.max(isUnitFraction(pressure) ? pressure : 0.7, fullness);
-    return { changed: true, delete: ["dropperPoolFullnessThreshold"] };
+    const base = typeof pressure === "number" && pressure > 0 ? pressure : 0.7;
+    raw.dropperPressureThreshold = Math.max(base, fullness);
+    del.push("dropperPoolFullnessThreshold");
+    return { changed: true, delete: del, warning: warning.warning };
   },
 };
 
@@ -257,22 +352,32 @@ const inputBudgetMerge: ConfigMigration = {
   produces: ["reflectorInputMaxTokens"],
   message: "dropperInputMaxTokens was merged into reflectorInputMaxTokens",
   apply(raw) {
+    const warning = new Skipped();
+    const del: string[] = [];
     const dropper = raw.dropperInputMaxTokens;
     if (dropper === undefined) return { changed: false };
-    if (!isPositiveInt(dropper)) {
-      return { changed: false, error: "unrecognized dropperInputMaxTokens value" };
+    if (dropIfZero(dropper, "dropperInputMaxTokens", del)) {
+      return { changed: false, delete: del };
+    }
+    if (!isFixedTokenThreshold(dropper)) {
+      warning.warn("dropperInputMaxTokens", dropper, "unrecognized dropperInputMaxTokens value");
+      return { changed: false, delete: del, warning: warning.warning };
     }
     const reflector = raw.reflectorInputMaxTokens;
-    if (reflector !== undefined && !isPositiveInt(reflector)) {
-      return { changed: false, error: "unrecognized reflectorInputMaxTokens value" };
-    }
-    // Only fill the survivor when it is unset; an explicit reflector value wins.
     let changed = false;
-    if (reflector === undefined) {
+    if (reflector === undefined || isUnsetZero(reflector)) {
       raw.reflectorInputMaxTokens = dropper;
       changed = true;
+    } else if (!isFixedTokenThreshold(reflector)) {
+      warning.warn(
+        "reflectorInputMaxTokens",
+        reflector,
+        "unrecognized reflectorInputMaxTokens value",
+      );
+      return { changed: false, delete: del, warning: warning.warning };
     }
-    return { changed, delete: ["dropperInputMaxTokens"] };
+    del.push("dropperInputMaxTokens");
+    return { changed, delete: del, warning: warning.warning };
   },
 };
 
@@ -282,11 +387,12 @@ const deadKnobs: ConfigMigration = {
   consumes: ["observationsPoolTargetTokens", "observerPreambleMaxTokens"],
   produces: [],
   message: "dead config knobs were removed",
-  apply() {
-    return {
-      changed: false,
-      delete: ["observationsPoolTargetTokens", "observerPreambleMaxTokens"],
-    };
+  apply(raw) {
+    const del: string[] = [];
+    for (const k of ["observationsPoolTargetTokens", "observerPreambleMaxTokens"]) {
+      if (raw[k] !== undefined) del.push(k);
+    }
+    return { changed: false, delete: del };
   },
 };
 
@@ -312,18 +418,20 @@ export interface ProjectionResult {
   messages: string[];
   /** Keys safe to delete in phase 2 (consumed but not produced). */
   consumedToDelete: string[];
-  /** Present when a consumed value was unrecognized; nothing may be written. */
-  error?: string;
+  /** Unrecognized values that were skipped; their keys are left in place. */
+  warnings: MigrationWarning[];
 }
 
 /**
  * Apply every step to a clone. Never deletes: the runner deletes
  * `consumedToDelete` only after the projected values are verified on disk.
+ * Never aborts: an unrecognized value is skipped and reported.
  */
 export function projectConfig(raw: Record<string, unknown>): ProjectionResult {
   const config = structuredClone(raw) as Record<string, unknown>;
   const applied: string[] = [];
   const messages: string[] = [];
+  const warnings: MigrationWarning[] = [];
   const consumedToDelete = new Set<string>();
   let valueChanged = false;
   let consumedPresent = false;
@@ -333,17 +441,7 @@ export function projectConfig(raw: Record<string, unknown>): ProjectionResult {
     if (owns.length === 0) continue;
     consumedPresent = true;
     const res = step.apply(config);
-    if (res.error) {
-      return {
-        config,
-        valueChanged: false,
-        consumedPresent,
-        applied,
-        messages,
-        consumedToDelete: [],
-        error: res.error,
-      };
-    }
+    if (res.warning) warnings.push(res.warning);
     if (res.changed) {
       valueChanged = true;
       applied.push(step.id);
@@ -361,23 +459,24 @@ export function projectConfig(raw: Record<string, unknown>): ProjectionResult {
     applied,
     messages,
     consumedToDelete: [...consumedToDelete],
+    warnings,
   };
 }
 
 /**
  * In-memory migration used by the runtime loader: apply the projection and
- * delete the consumed keys. Pure and safe to call on every load (idempotent).
- * On `error`, returns the original config untouched.
+ * delete the safe consumed keys. Pure and safe to call on every load
+ * (idempotent). Unrecognized values are skipped and reported via `warnings`.
  */
 export function applyConfigMigrations(raw: Record<string, unknown>): {
   config: Record<string, unknown>;
   changed: boolean;
+  warnings: MigrationWarning[];
 } {
   const proj = projectConfig(raw);
-  if (proj.error) return { config: raw, changed: false };
   const needsRewrite = proj.valueChanged || proj.consumedToDelete.length > 0;
-  if (!needsRewrite) return { config: raw, changed: false };
+  if (!needsRewrite) return { config: raw, changed: false, warnings: proj.warnings };
   const config = structuredClone(proj.config);
   for (const k of proj.consumedToDelete) delete config[k];
-  return { config, changed: true };
+  return { config, changed: true, warnings: proj.warnings };
 }

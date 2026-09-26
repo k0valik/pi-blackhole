@@ -219,7 +219,7 @@ The interaction with Pi's own threshold: Pi has `keepRecentTokens` (~20k tokens 
 >
 > Tell me your model name and its context window.
 
-### Question 4 (optional): Compaction engine behavior
+### Question 4 (optional): Compaction behavior
 
 **Agent context:** `compaction` controls *who* handles the compaction *content* and *timing*. `compactionEngine` no longer exists — it was folded in (0.6.0): `"blackhole"` became `"automatic"`, `"pi-default"` became `"off"`. `"auto"` is still accepted as an alias for `"automatic"`.
 

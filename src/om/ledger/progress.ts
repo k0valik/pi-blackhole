@@ -206,7 +206,7 @@ export function livePoolObservations(entries: Entry[], pending?: PendingOMState)
 
 /**
  * Canonical observation-pool measurement shared by the dropper trigger — the
- * fixed `DROPPER_NEWDATA_FLOOR` gate and the `dropperPressureThreshold`
+ * derived `dropperNewDataFloor(pressure)` gate and the `dropperPressureThreshold`
  * pressure basis — and the user-facing pool displays (`/blackhole-memory`,
  * the footer P gauge). All of them sum the same `livePoolObservations` set, so
  * no surface can drift onto a different token basis or dedup rule.

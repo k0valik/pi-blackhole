@@ -3,7 +3,9 @@ import {
   isFixedTokenThreshold,
   isReserveTokens,
   isWindowPercent,
+  legacyFractionToPercent,
   type OmModelConfig,
+  windowPercent,
 } from "../core/unified-config.js";
 
 export const AGENT_LOOP_MAX_TOKENS = 32_000;
@@ -113,7 +115,7 @@ function shapeThreshold(cfg: CompactThresholdConfig, contextWindow: number): num
     if (isFixedTokenThreshold(cfg.compactAfterTokens)) return cfg.compactAfterTokens;
   } else if (shape === "percent") {
     if (isWindowPercent(cfg.compactAfterRatio)) {
-      return Math.max(1, Math.floor((contextWindow * cfg.compactAfterRatio) / 100));
+      return Math.max(1, Math.floor((contextWindow * windowPercent(cfg.compactAfterRatio)) / 100));
     }
   } else if (shape === "reserve") {
     if (isReserveTokens(cfg.compactReserveTokens)) {
@@ -126,7 +128,10 @@ function shapeThreshold(cfg: CompactThresholdConfig, contextWindow: number): num
   // precedence (each tier applies only when its value is valid).
   if (isFixedTokenThreshold(cfg.compactAfterTokens)) return cfg.compactAfterTokens;
   if (isWindowPercent(cfg.compactAfterRatio)) {
-    return Math.max(1, Math.floor((contextWindow * cfg.compactAfterRatio) / 100));
+    return Math.max(
+      1,
+      Math.floor((contextWindow * legacyFractionToPercent(cfg.compactAfterRatio)) / 100),
+    );
   }
   if (isReserveTokens(cfg.compactReserveTokens)) {
     return Math.max(1, contextWindow - cfg.compactReserveTokens);

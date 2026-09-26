@@ -1,14 +1,20 @@
 /**
- * Two-phase, verified config-file migration runner (plan-10 §3–§4).
+ * Two-phase, verified config-file migration runner (plan-10 §3–§4, hardened in
+ * plan-11).
  *
  * Per file:
  *  1. read + parse; invalid JSON → warn + skip (never rewrite corrupt files)
- *  2. project the migration in memory; an unrecognized consumed value aborts
- *  3. no owned legacy key present → no-op ("no silent rewrites")
- *  4. PHASE 1: back up once, atomically write the new keys (+ version stamp),
- *     keeping the old keys, then re-read to verify the projection landed
- *  5. PHASE 2: only after verification (or in the remove-only case), atomically
+ *  2. already stamped (`configVersion`) → no-op (the version is the gate)
+ *  3. project the migration in memory; unrecognized values are skipped + reported
+ *  4. no owned legacy key present → no-op ("no silent rewrites")
+ *  5. BACKUP: write `.bak`, re-read it, and verify it matches the original —
+ *     bail before the first write if it cannot be produced
+ *  6. PHASE 1: atomically write the new keys, keeping the old keys, then
+ *     re-read to verify the projection landed
+ *  7. PHASE 2: only after verification (or in the remove-only case), atomically
  *     write again with the consumed keys deleted
+ *  8. stamp `configVersion` ONLY when nothing was skipped, so a partial
+ *     migration retries (and re-warns) on the next load
  *
  * A crash between phases is self-healing: the next load sees both the new and
  * old keys and takes the remove-only path. Read-only filesystems are a
@@ -17,10 +23,20 @@
  */
 
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { configPath } from "../unified-config.js";
-import { CONFIG_VERSION, projectConfig } from "./steps.js";
+import { CONFIG_VERSION, type MigrationWarning, projectConfig } from "./steps.js";
 
 const CONFIG_FILE = "pi-blackhole-config.json";
 
@@ -29,10 +45,12 @@ export interface MigrateFileDeps {
   write?: (path: string, text: string) => Promise<void>;
   /** Override the disk reader used for the initial read + verification (tests). */
   readText?: (path: string) => Promise<string>;
-  /** Override the one-time backup (tests). */
+  /** Override the verified backup (tests). Throwing aborts the migration. */
   backup?: (path: string) => Promise<void>;
   /** Override the warning sink (tests). */
   warn?: (message: string, error?: unknown) => void;
+  /** User-facing notification sink (tests / UI). */
+  notify?: (message: string, level?: "info" | "warning") => void;
 }
 
 export interface MigrateFileResult {
@@ -41,9 +59,13 @@ export interface MigrateFileResult {
   changed: boolean;
   /** True when the rewrite reached disk. */
   persisted: boolean;
+  /** True when the file already carried the config version (gate hit). */
+  gated: boolean;
   /** Ids of migration steps that changed a value. */
   applied: string[];
   messages: string[];
+  /** Unrecognized values that were skipped (their keys were left in place). */
+  warnings: MigrationWarning[];
   /** In-memory projected config (old keys retained when not persisted). */
   config?: Record<string, unknown>;
   error?: string;
@@ -53,22 +75,39 @@ export interface MigrateFileResult {
 
 /**
  * Write `text` to `path` atomically: temp file in the same directory, best-effort
- * fsync, rename over the target. On failure the original file stays intact and
- * the temp is removed.
+ * fsync, rename over the target. The temp inherits the target's permission bits
+ * so migration cannot widen a restricted config. On any failure the original
+ * file stays intact and the temp is removed.
  */
 export async function atomicWrite(path: string, text: string): Promise<void> {
   const dir = dirname(path);
   const tmp = join(dir, `.${basename(path)}.tmp-${process.pid}-${Date.now()}`);
   await mkdir(dir, { recursive: true });
-  await writeFile(tmp, text, "utf-8");
+  let mode: number | undefined;
   try {
-    const fh = await open(tmp, "r");
-    await fh.sync();
-    await fh.close();
+    mode = (await stat(path)).mode & 0o777;
   } catch {
-    /* fsync is best-effort */
+    /* target does not exist yet — use the process default */
   }
   try {
+    await writeFile(tmp, text, "utf-8");
+    if (mode !== undefined) {
+      try {
+        await chmod(tmp, mode);
+      } catch {
+        /* best-effort mode preservation */
+      }
+    }
+    try {
+      const fh = await open(tmp, "r");
+      try {
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      /* fsync is best-effort */
+    }
     await rename(tmp, path);
   } catch (error) {
     try {
@@ -80,19 +119,24 @@ export async function atomicWrite(path: string, text: string): Promise<void> {
   }
 }
 
-/** One-time `.bak` before the first write; skipped silently when unwritable. */
+/**
+ * One-time `.bak` before the first write. Unlike the original best-effort copy,
+ * this VERIFIES the backup: if it cannot be written and re-read byte-identical
+ * to the original, it throws and the migration is abandoned before any write.
+ */
 async function defaultBackup(path: string): Promise<void> {
   const bak = `${path}.bak`;
+  const original = await readFile(path, "utf-8");
   try {
-    await stat(bak);
-    return; // already backed up
+    const existing = await readFile(bak, "utf-8");
+    if (existing === original) return; // already backed up and verified
   } catch {
-    /* no backup yet */
+    /* no usable backup yet */
   }
-  try {
-    await copyFile(path, bak);
-  } catch {
-    /* best-effort: a read-only dir must not block the migration attempt */
+  await copyFile(path, bak);
+  const written = await readFile(bak, "utf-8");
+  if (written !== original) {
+    throw new Error("backup verification failed");
   }
 }
 
@@ -124,11 +168,19 @@ function serialize(config: Record<string, unknown>): string {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
+function warningMessage(path: string, w: MigrationWarning): string {
+  return (
+    `blackhole: config key "${w.key}" in ${path} has an unrecognized value ` +
+    `(${JSON.stringify(w.value)}) — left it untouched. Fix it in /blackhole settings.`
+  );
+}
+
 // ── Per-file runner ──────────────────────────────────────────────────────────
 
 /**
- * Migrate a single config file. Never throws; read-only filesystems and corrupt
- * JSON are reported via the result (and `warn`), not exceptions.
+ * Migrate a single config file. Never throws; read-only filesystems, corrupt
+ * JSON, unrecognized values, and backup failures are reported via the result
+ * (and `warn` / `notify`), not exceptions.
  */
 export async function migrateConfigFile(
   path: string,
@@ -138,12 +190,15 @@ export async function migrateConfigFile(
   const readText = deps.readText ?? ((p: string) => readFile(p, "utf-8"));
   const write = deps.write ?? atomicWrite;
   const backup = deps.backup ?? defaultBackup;
+  const notify = deps.notify;
   const base: MigrateFileResult = {
     path,
     changed: false,
     persisted: false,
+    gated: false,
     applied: [],
     messages: [],
+    warnings: [],
   };
 
   if (!existsSync(path)) return base;
@@ -167,39 +222,72 @@ export async function migrateConfigFile(
     return { ...base, error: "not an object" };
   }
 
-  const proj = projectConfig(raw);
-  if (proj.error) {
-    warn(`blackhole: config migration aborted for ${path} — ${proj.error}`);
-    return { ...base, error: proj.error };
+  // Version gate: a stamped file has already been migrated (or attempted) and
+  // is never rewritten again.
+  if (raw.configVersion !== undefined) {
+    return { ...base, gated: true };
   }
-  // No value change and nothing to delete → no rewrite ("no silent rewrites").
-  if (!proj.valueChanged && proj.consumedToDelete.length === 0) return base;
 
-  const stamp = raw.configVersion ?? CONFIG_VERSION;
+  const proj = projectConfig(raw);
+  for (const w of proj.warnings) {
+    warn(warningMessage(path, w));
+    notify?.(warningMessage(path, w), "warning");
+  }
+
+  // No owned legacy key, and no value change / cleanup → no rewrite.
+  if (!proj.consumedPresent) return { ...base, warnings: proj.warnings };
+  if (!proj.valueChanged && proj.consumedToDelete.length === 0) {
+    return { ...base, warnings: proj.warnings };
+  }
+
+  // Stamp only a clean migration; a partial one retries on the next load.
+  const stamp = proj.warnings.length === 0 ? CONFIG_VERSION : undefined;
   const phase2: Record<string, unknown> = structuredClone(proj.config);
   for (const k of proj.consumedToDelete) delete phase2[k];
-  phase2.configVersion = stamp;
+  if (stamp !== undefined) phase2.configVersion = stamp;
+
+  // BACKUP GATE — verified on both the value-changing and remove-only paths.
+  try {
+    await backup(path);
+  } catch (error) {
+    warn(
+      `blackhole: could not create a verified backup of ${path} — leaving it unchanged (${String(error)})`,
+    );
+    notify?.("blackhole: could not back up your config, so it was left unchanged.", "warning");
+    return {
+      ...base,
+      changed: true,
+      applied: proj.applied,
+      messages: proj.messages,
+      warnings: proj.warnings,
+      config: proj.config,
+      error: "backup failed",
+    };
+  }
 
   // Remove-only: the new keys are already present, so only delete the old ones.
   if (!proj.valueChanged) {
     try {
       await write(path, serialize(phase2));
       return {
-        path,
+        ...base,
         changed: true,
         persisted: true,
         applied: proj.applied,
         messages: proj.messages,
+        warnings: proj.warnings,
         config: phase2,
       };
     } catch (error) {
-      warn(`blackhole: could not migrate ${path} (read-only?) — ${String(error)}`);
+      const suffix = isReadOnlyError(error) ? "read-only filesystem" : String(error);
+      warn(`blackhole: could not migrate ${path} (${suffix})`);
+      notify?.(`blackhole: could not write your config (${suffix}); migrated in memory only.`);
       return {
-        path,
+        ...base,
         changed: true,
-        persisted: false,
         applied: proj.applied,
         messages: proj.messages,
+        warnings: proj.warnings,
         config: proj.config,
         error: String(error),
       };
@@ -207,19 +295,20 @@ export async function migrateConfigFile(
   }
 
   // PHASE 1 — write the new keys, keep the old ones.
-  const phase1: Record<string, unknown> = { ...proj.config, configVersion: stamp };
+  const phase1: Record<string, unknown> = { ...proj.config };
+  if (stamp !== undefined) phase1.configVersion = stamp;
   try {
-    await backup(path);
     await write(path, serialize(phase1));
   } catch (error) {
     const suffix = isReadOnlyError(error) ? "read-only filesystem" : String(error);
     warn(`blackhole: could not write migrated config to ${path} (${suffix})`);
+    notify?.(`blackhole: could not write your config (${suffix}); migrated in memory only.`);
     return {
-      path,
+      ...base,
       changed: true,
-      persisted: false,
       applied: proj.applied,
       messages: proj.messages,
+      warnings: proj.warnings,
       config: proj.config,
       error: String(error),
     };
@@ -239,11 +328,12 @@ export async function migrateConfigFile(
       `blackhole: config migration verification failed for ${path}; keeping the old keys (will retry next load)`,
     );
     return {
-      path,
+      ...base,
       changed: true,
       persisted: true,
       applied: proj.applied,
       messages: proj.messages,
+      warnings: proj.warnings,
       config: proj.config,
       error: "verification failed",
     };
@@ -253,11 +343,12 @@ export async function migrateConfigFile(
   // nothing to delete, phase 1 is already final.
   if (proj.consumedToDelete.length === 0) {
     return {
-      path,
+      ...base,
       changed: true,
       persisted: true,
       applied: proj.applied,
       messages: proj.messages,
+      warnings: proj.warnings,
       config: phase1,
     };
   }
@@ -266,23 +357,26 @@ export async function migrateConfigFile(
   } catch (error) {
     const suffix = isReadOnlyError(error) ? "read-only filesystem" : String(error);
     warn(`blackhole: could not remove legacy keys from ${path} (${suffix})`);
+    notify?.(`blackhole: could not finish writing your config (${suffix}).`, "warning");
     return {
-      path,
+      ...base,
       changed: true,
       persisted: false,
       applied: proj.applied,
       messages: proj.messages,
+      warnings: proj.warnings,
       config: proj.config,
       error: String(error),
     };
   }
 
   return {
-    path,
+    ...base,
     changed: true,
     persisted: true,
     applied: proj.applied,
     messages: proj.messages,
+    warnings: proj.warnings,
     config: phase2,
   };
 }

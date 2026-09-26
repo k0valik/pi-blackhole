@@ -59,12 +59,18 @@ export default async (pi: ExtensionAPI) => {
   pi.on("session_start", (_event: unknown, ctx: any) => {
     void (async () => {
       try {
-        const results = await migrateConfigFiles(ctx.cwd);
-        if (results.some((r) => r.changed)) {
-          const { maybeNotifyConfigMigration } =
-            await import("./src/changelog/migration-notice.js");
-          maybeNotifyConfigMigration(ctx, true);
-        }
+        const cwd = typeof ctx?.cwd === "string" && ctx.cwd.length > 0 ? ctx.cwd : process.cwd();
+        const notify = (message: string, level?: "info" | "warning") => {
+          if (ctx?.hasUI) ctx.ui?.notify?.(message, level);
+        };
+        const results = await migrateConfigFiles(cwd, { notify });
+        const outcome = results.some((r) => r.persisted)
+          ? ("migrated" as const)
+          : results.some((r) => r.changed)
+            ? ("blocked" as const)
+            : ("none" as const);
+        const { maybeNotifyConfigMigration } = await import("./src/changelog/migration-notice.js");
+        maybeNotifyConfigMigration(ctx, outcome);
       } catch {
         /* migration + notice are best-effort — never fatal */
       }

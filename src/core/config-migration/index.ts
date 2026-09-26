@@ -12,6 +12,11 @@ export {
   foldCompaction,
   projectConfig,
 } from "./steps.js";
-export type { ConfigMigration, MigrationResult, ProjectionResult } from "./steps.js";
+export type {
+  ConfigMigration,
+  MigrationResult,
+  MigrationWarning,
+  ProjectionResult,
+} from "./steps.js";
 export { atomicWrite, migrateConfigFile, migrateConfigFiles } from "./runner.js";
 export type { MigrateFileDeps, MigrateFileResult } from "./runner.js";

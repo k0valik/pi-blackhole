@@ -8,7 +8,7 @@ import { actionRenderer } from "./fields/action";
 import { booleanRenderer } from "./fields/boolean";
 import { readonlyRenderer } from "./fields/readonly";
 import { createScopeSelector } from "./scope-selector";
-import { renderFooter, renderFieldDesc, renderTabBar } from "./render";
+import { renderFooter, renderFieldDesc, renderTabBar, estimateDescriptionRows } from "./render";
 import type {
   NumberField,
   EnumField,
@@ -388,6 +388,30 @@ describe("UX Enhancements - Submenus and Hints", () => {
     renderFieldDesc(mockState, lines, 80, focusedRow);
 
     expect(lines.join("\n")).not.toContain("key:");
+  });
+
+  it("estimateDescriptionRows reserves at least the rendered description block height", () => {
+    const row: any = {
+      field: {
+        key: "observeAfterTokens",
+        label: "Take notes every",
+        type: "number",
+        min: 1_000,
+        max: 200_000,
+        description: "How much new conversation accumulates before the note-taker runs.",
+        valueDescription: () => "At 15000 — a pass starts after ~15k new tokens (default).",
+      },
+      value: 15_000,
+    };
+    const state: any = {
+      rows: [row],
+      cachedVisibleIndices: [0],
+      fieldSelected: 0,
+      args: { theme: mockTheme },
+    };
+    const lines: string[] = [];
+    renderFieldDesc(state, lines, 80, row);
+    expect(estimateDescriptionRows(state)).toBeGreaterThanOrEqual(lines.length);
   });
 
   it("modelRenderer submenu formats zero-match empty state and includes ctrl+w hint when filter is active", () => {

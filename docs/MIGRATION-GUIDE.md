@@ -18,7 +18,7 @@ what moved, what was removed, and how the automatic migration works.
 | `compactionEngine: "pi-default"`            | `compaction: "off"`                                      |
 | `compaction: "auto"`                        | `compaction: "automatic"`                                |
 | `compaction: "manual"` / `"off"`            | unchanged                                                |
-| `compactionAfterRatio: 0.46` (a fraction)   | `compactAfterRatio: 46` (a percent) + `compactAfterBy: "percent"` |
+| `compactAfterRatio: 0.46` (a fraction)   | `compactAfterRatio: 46` (a percent) + `compactAfterBy: "percent"` |
 | `compactAfterTokens: 120000`                | unchanged + `compactAfterBy: "tokens"`                   |
 | `compactReserveTokens: 32768`               | unchanged + `compactAfterBy: "reserve"`                  |
 | `dropperPoolFullnessThreshold` + `dropperPressureThreshold` | one `dropperPressureThreshold = max(...)` |
@@ -41,16 +41,26 @@ The per-file algorithm is **two-phase and verified**:
 
 1. Read and parse the file. Invalid JSON or a non-object is left untouched
    (a warning is printed; the file is never rewritten).
-2. Project the migration in memory. A recognized key with an unrecognized value
-   aborts the whole file — nothing is written or deleted.
-3. If the file has no legacy keys, it is a no-op. Blackhole does not silently
+2. If the file already carries a `"configVersion"` stamp, it is left alone —
+   the version is the gate, so a migrated file is never rewritten.
+3. Project the migration in memory. A `0` value is the documented "not set"
+   sentinel (never an error). A genuinely unrecognized value is **skipped**: its
+   key is left untouched and reported through a warning notification, while the
+   rest of the file still migrates.
+4. If the file has no legacy keys, it is a no-op. Blackhole does not silently
    rewrite unrelated files.
-4. **Phase 1:** back up the file once as `<file>.bak`, then atomically
-   (temp file + rename) write the migration with the new keys **and the old
-   keys still present**, plus a `"configVersion": 1` stamp. The file is then
-   re-read and every changed key is verified.
-5. **Phase 2:** only after that verification passes, atomically write the file
+5. **Backup gate:** write `<file>.bak`, re-read it, and confirm it matches the
+   original. If the backup cannot be produced, nothing is written at all.
+6. **Phase 1:** atomically (temp file + rename, preserving the file's
+   permissions) write the migration with the new keys **and the old keys still
+   present**, plus a `"configVersion": 1` stamp. The stamp is written only when
+   nothing was skipped. The file is then re-read and every changed key is
+   verified.
+7. **Phase 2:** only after that verification passes, atomically write the file
    again with the consumed legacy keys deleted.
+
+A partial migration (a skipped value) is **not** stamped, so it retries and
+re-warns on the next load until the value is fixed.
 
 Consequences worth knowing:
 
@@ -77,15 +87,17 @@ Consequences worth knowing:
 
 ### Dropper merge — one residual divergence
 
-`dropperPressureThreshold` (UI: **Prune memory when**) survives. The old
-new-data floor is now the constant `0.10`. Migration sets
-`dropperPressureThreshold = max(oldPressure, oldFullness)`.
+`dropperPressureThreshold` (UI: **Prune memory when**) survives. Migration sets
+`dropperPressureThreshold = max(oldPressure, oldFullness)`. The old independent
+new-data floor is replaced by a value **derived from the surviving pressure**:
+`dropperNewDataFloor(P) = clamp(0.15 × P, 0.02, 0.10)`.
 
-This is **exact** for every config whose floor was the default `0.10` — the
-overwhelming majority — at any pressure value. It only differs for a config
-that set `fullness` **above 0.10 and above `pressure`**: that config loses its
-custom new-data floor in favor of the constant. No single-knob formulation can
-preserve two independent numbers, so this is the one accepted divergence.
+This is **exact** for the default posture — `P = 0.70` reproduces the old `0.10`
+floor — and if you had a custom floor above `0.10` at the default pressure, the
+derived floor is close to it. It only differs for a config that paired a custom
+floor with a custom pressure (the two were independent before, and one number
+cannot encode two). No single-knob formulation preserves both exactly; this is
+the one accepted divergence, and it is smoothed rather than stepped.
 
 ### Input-budget merge
 

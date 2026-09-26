@@ -86,8 +86,11 @@ describe("compaction-engine-fold", () => {
     expect("compactionEngine" in off).toBe(false);
   });
 
-  it("aborts the whole file on an unrecognized engine value", () => {
-    expect(projectConfig({ compactionEngine: "hybrid" }).error).toBeTruthy();
+  it("skips an unrecognized engine value and reports it", () => {
+    const proj = projectConfig({ compactionEngine: "hybrid" });
+    expect(proj.warnings.map((w) => w.key)).toContain("compactionEngine");
+    expect(proj.config.compactionEngine).toBe("hybrid");
+    expect(proj.consumedToDelete).not.toContain("compactionEngine");
   });
 
   it("is a no-op for an already-migrated file", () => {
@@ -126,8 +129,11 @@ describe("legacy-modes", () => {
     expect(migrated({ overrideDefaultCompaction: true, compaction: "off" }).compaction).toBe("off");
   });
 
-  it("aborts on a non-boolean legacy value", () => {
-    expect(projectConfig({ passive: "yes" }).error).toBeTruthy();
+  it("skips a non-boolean legacy value and reports it", () => {
+    const proj = projectConfig({ passive: "yes" });
+    expect(proj.warnings.map((w) => w.key)).toContain("passive");
+    expect(proj.config.passive).toBe("yes");
+    expect(proj.consumedToDelete).not.toContain("passive");
   });
 });
 
@@ -191,8 +197,21 @@ describe("threshold-array", () => {
     expect(c.compactAfterRatio).toBe(46);
   });
 
-  it("aborts on an out-of-range old fraction", () => {
-    expect(projectConfig({ compactAfterRatio: 1.5 }).error).toBeTruthy();
+  it("skips an unrecognized ratio value and reports it", () => {
+    const proj = projectConfig({ compactAfterRatio: 101 });
+    expect(proj.warnings.map((w) => w.key)).toContain("compactAfterRatio");
+    expect(proj.config.compactAfterRatio).toBe(101);
+    expect(proj.consumedToDelete).not.toContain("compactAfterRatio");
+  });
+
+  it("treats a 0-valued compactAfterTokens as unset, never invalid", () => {
+    // Regression: a 0 sentinel used to abort the whole file, leaving a fraction
+    // ratio unconverted and read as a sub-1% percent.
+    const proj = projectConfig({ compactAfterTokens: 0, compactAfterRatio: 0.65 });
+    expect(proj.warnings).toHaveLength(0);
+    expect(proj.config.compactAfterRatio).toBe(65);
+    expect(proj.config.compactAfterBy).toBe("percent");
+    expect(proj.consumedToDelete).toContain("compactAfterTokens");
   });
 });
 
@@ -221,8 +240,11 @@ describe("dropper-fraction-merge", () => {
     expect("dropperPoolFullnessThreshold" in c).toBe(false);
   });
 
-  it("aborts on an unrecognized fullness value", () => {
-    expect(projectConfig({ dropperPoolFullnessThreshold: 2 }).error).toBeTruthy();
+  it("skips an unrecognized fullness value and reports it", () => {
+    const proj = projectConfig({ dropperPoolFullnessThreshold: 2 });
+    expect(proj.warnings.map((w) => w.key)).toContain("dropperPoolFullnessThreshold");
+    expect(proj.config.dropperPoolFullnessThreshold).toBe(2);
+    expect(proj.consumedToDelete).not.toContain("dropperPoolFullnessThreshold");
   });
 });
 
@@ -247,8 +269,11 @@ describe("input-budget-merge", () => {
     expect("dropperInputMaxTokens" in c).toBe(false);
   });
 
-  it("aborts on an unrecognized dropper budget", () => {
-    expect(projectConfig({ dropperInputMaxTokens: -1 }).error).toBeTruthy();
+  it("skips an unrecognized dropper budget and reports it", () => {
+    const proj = projectConfig({ dropperInputMaxTokens: -1 });
+    expect(proj.warnings.map((w) => w.key)).toContain("dropperInputMaxTokens");
+    expect(proj.config.dropperInputMaxTokens).toBe(-1);
+    expect(proj.consumedToDelete).not.toContain("dropperInputMaxTokens");
   });
 });
 
@@ -380,7 +405,7 @@ describe("runner — guarantees", () => {
     expect(writes).toHaveLength(0);
   });
 
-  it("aborts with no write when a consumed value is unrecognized", async () => {
+  it("skips an unrecognized value without writing", async () => {
     writeConfig(GLOBAL, { compactionEngine: "hybrid" });
     const writes: number[] = [];
     const res = await migrateConfigFile(GLOBAL, {
@@ -389,8 +414,63 @@ describe("runner — guarantees", () => {
       },
       warn: () => {},
     });
-    expect(res.error).toBeTruthy();
+    expect(res.warnings.map((w) => w.key)).toContain("compactionEngine");
     expect(writes).toHaveLength(0);
+  });
+
+  it("skips one bad value while still migrating the rest of the file", async () => {
+    writeConfig(GLOBAL, { compactionEngine: "hybrid", dropperPoolFullnessThreshold: 0.6 });
+    const res = await migrateConfigFile(GLOBAL, { warn: () => {} });
+    expect(res.warnings.map((w) => w.key)).toContain("compactionEngine");
+    const written = JSON.parse(readFileSync(GLOBAL, "utf-8")) as Record<string, unknown>;
+    expect(written.dropperPressureThreshold).toBe(0.7);
+    expect("dropperPoolFullnessThreshold" in written).toBe(false);
+    // A partial migration is not stamped, so it retries next load.
+    expect("configVersion" in written).toBe(false);
+  });
+
+  it("is gated by configVersion: a stamped file is never rewritten", async () => {
+    writeConfig(GLOBAL, { configVersion: 1, compactionEngine: "blackhole", memory: true });
+    const writes: number[] = [];
+    const res = await migrateConfigFile(GLOBAL, {
+      write: async () => {
+        writes.push(1);
+      },
+      warn: () => {},
+    });
+    expect(res.gated).toBe(true);
+    expect(res.changed).toBe(false);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("bails before any write when the backup cannot be verified", async () => {
+    const original = { compactionEngine: "pi-default", memory: true };
+    writeConfig(GLOBAL, original);
+    const writes: number[] = [];
+    const res = await migrateConfigFile(GLOBAL, {
+      backup: async () => {
+        throw new Error("EACCES");
+      },
+      write: async () => {
+        writes.push(1);
+      },
+      warn: () => {},
+    });
+    expect(res.persisted).toBe(false);
+    expect(res.error).toBe("backup failed");
+    expect(writes).toHaveLength(0);
+    expect(readConfig(GLOBAL)).toEqual(original);
+  });
+
+  it("notifies (not just warns) when a value is skipped", async () => {
+    writeConfig(GLOBAL, { compactionEngine: "hybrid" });
+    const notes: string[] = [];
+    await migrateConfigFile(GLOBAL, {
+      write: async () => {},
+      warn: () => {},
+      notify: (m) => notes.push(m),
+    });
+    expect(notes.join(" ")).toContain("compactionEngine");
   });
 
   it("writes new keys before removing old ones, verifying in between (two-phase)", async () => {
