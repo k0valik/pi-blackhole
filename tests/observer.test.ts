@@ -767,7 +767,10 @@ describe("runObserver", () => {
     expect(seenReasoning).toBeUndefined();
   });
 
-  it("throws when agent encounters stream error even if partial observations were recorded", async () => {
+  // Pi's real loop honors `terminate`, so this case needs a fake loop: a host
+  // that ignores it asks for one more turn after the complete=true close, and
+  // that trailing turn fails.
+  it("keeps a complete=true close when a trailing turn errors on a host that ignores terminate", async () => {
     const loop = ((_prompts: any[], context: any) => ({
       async *[Symbol.asyncIterator]() {
         await context.tools[0].execute("call-1", {
@@ -778,21 +781,28 @@ describe("runObserver", () => {
               sourceEntryIds: ["entry-a"],
             },
           ],
+          complete: true,
         });
         yield {
           type: "agent_end",
-          messages: [{ stopReason: "error", errorMessage: "Stream connection severed" }],
+          messages: [
+            {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "Stream connection severed",
+            },
+          ],
         };
       },
       result: async () => ({}),
     })) as any;
 
-    await expect(
-      runObserver({
-        ...baseArgs,
-        agentLoop: loop,
-      }),
-    ).rejects.toThrow("Observer API error: Stream connection severed");
+    const result = await runObserver({ ...baseArgs, agentLoop: loop });
+
+    expect(result.observations?.map((observation) => observation.content)).toEqual([
+      "User prefers terse output",
+    ]);
   });
 });
 

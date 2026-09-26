@@ -201,6 +201,10 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
   // is the model closing a covered chunk that yielded nothing, which is a
   // no_new_content outcome, not the empty_array protocol slip the kind implies.
   let lastBatchComplete = false;
+  // Whether the most recent batch was a fully valid complete=true close, i.e.
+  // the model declared the chunk covered and the tool honored it. A refused
+  // complete=true batch (rejected entries) does not count.
+  let closedByCompleteBatch = false;
 
   const recordObservations: AgentTool<typeof RecordObservationsSchema> = {
     name: "record_observations",
@@ -247,6 +251,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           ? ` ${rejected} observation${rejected === 1 ? "" : "s"} rejected for missing or invalid sourceEntryIds.`
           : "";
       const terminates = params.complete === true && rejected === 0;
+      closedByCompleteBatch = terminates;
       const refusal =
         params.complete === true && rejected > 0
           ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with sourceEntryIds copied from the chunk; anything not re-submitted is discarded and will not be recorded.`
@@ -354,8 +359,15 @@ ${conversation}`;
   }
   await stream.result();
 
-  if (agentError) {
-    throw new Error(`Observer API error: ${agentError}`);
+  // A run that already closed the chunk with a valid complete=true batch is
+  // covered however the loop ended: on a host that ignores `terminate`, a
+  // trailing turn that errors after the close must not discard the declared
+  // coverage, or the cursor never advances and the stage re-observes the same
+  // chunk every cycle. Any other error means the chunk may be partly covered.
+  if (agentError && !closedByCompleteBatch) {
+    throw new Error(
+      `Observer API error after ${accumulated.size} recorded observation(s): ${agentError}`,
+    );
   }
 
   if (accumulated.size === 0) {
