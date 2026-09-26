@@ -18,6 +18,9 @@ import {
 export { CACHE_RETENTION_VALUES, normalizeCacheRetention };
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
 import type { CacheRetention, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { applyConfigMigrations, foldCompaction, projectConfig } from "./config-migration/steps.js";
+
+export { foldCompaction };
 
 // ── getAgentDir with PI_CODING_AGENT_DIR override ───────────────────────────
 
@@ -81,23 +84,21 @@ export interface PresetAnchorDef {
 }
 
 export interface UnifiedConfig {
-  /** @deprecated Use compactionEngine instead. */
+  /** Legacy pre-0.6.0 key; folded into `compaction` + `tailBehavior`. */
   overrideDefaultCompaction?: boolean;
   /** Write debug snapshots to /tmp/pi-blackhole-debug.json. */
   debug: boolean;
 
   // ── New config surface — compaction, engine, tail behavior ──
 
-  /** Unified compaction control: "auto" | "manual" | "off".
-   *  "auto"   — auto-trigger on compactAfterTokens threshold
-   *  "manual"  — only via /blackhole command
-   *  "off"    — never compact (disables auto + blocks /blackhole) */
-  compaction: "auto" | "manual" | "off";
-
-  /** Which engine handles compaction.
-   *  "blackhole"  — blackhole's compile() + OM injection
-   *  "pi-default" — Pi's built-in summarization */
-  compactionEngine: "blackhole" | "pi-default";
+  /** Unified compaction control: "automatic" | "manual" | "off".
+   *  "automatic" — blackhole compacts automatically on its threshold
+   *  "manual"    — only via /blackhole command; memory output is buffered
+   *                 to per-session pending storage until then
+   *  "off"       — blackhole steps aside entirely; Pi handles automatic
+   *                 compaction (equivalent to the old compactionEngine
+   *                 "pi-default") */
+  compaction: "automatic" | "manual" | "off";
 
   /** How Blackhole exposes compaction summaries to the provider.
    *  "default"    — current one-summary replacement behavior
@@ -122,7 +123,7 @@ export interface UnifiedConfig {
   /** How much recent transcript to keep visible after compaction.
    *  "pi-default" — use Pi's firstKeptEntryId (respects Pi's keepRecentTokens)
    *  "minimal"    — keep only last user message (current agressive pi-vcc behavior)
-   *  ONLY applies when compactionEngine: "blackhole" */
+   *  ONLY applies when compaction: "automatic" */
   tailBehavior: "pi-default" | "minimal";
 
   /** Show a display-only copy of the newest assistant output that the
@@ -146,41 +147,50 @@ export interface UnifiedConfig {
   observeAfterTokens: number;
   /** Token threshold for reflector and dropper. */
   reflectAfterTokens: number;
-  /** Token threshold for proactive auto-compaction.
+  /**
+   * Which shape the auto-compaction threshold takes (plan-09 §3.2):
+   *  - "preset"  — a window-scaled curve (`compactAfterPreset`)
+   *  - "percent" — a percent of the model's context window (`compactAfterRatio`)
+   *  - "tokens"  — a fixed token count (`compactAfterTokens`)
+   *  - "reserve" — keep this much headroom free (`compactReserveTokens`)
    *
-   * When set (explicitly, in the config file or via env), this fixed token
-   * count always wins over the window-derived knobs and the preset curve
-   * below. Optional; 0/absent is treated as unset, and a file-level 81000 is
-   * legacy scaffold residue (never a deliberate pin) that both loaders drop —
-   * see normalizeThresholdKnobs. Unset means a window-derived knob, or the
-   * selected preset curve, governs. */
+   * `effective = clamp(shape(window), compactAfterMinTokens,
+   * compactAfterMaxTokens)`. Optional; when unset the loader derives it from
+   * whichever value key is present (tokens > percent > reserve > preset),
+   * which preserves pre-plan behavior for un-migrated in-memory configs.
+   */
+  compactAfterBy?: "preset" | "percent" | "tokens" | "reserve";
+  /** Fixed token threshold — used when `compactAfterBy` = "tokens". Optional;
+   *  0/absent is unset, and a file-level 81000 is legacy scaffold residue
+   *  (never a deliberate pin) that both loaders drop — see
+   *  normalizeThresholdKnobs. */
   compactAfterTokens?: number;
   /**
-   * Context-window-derived auto-compaction threshold (issue #60): when set,
-   * the effective threshold is `floor(contextWindow × compactAfterRatio)` for
-   * the active session model's window, so compaction tracks the model instead
-   * of a fixed token count. The fixed default is NOT applied when this (or
-   * compactReserveTokens) is set and compactAfterTokens is absent.
-   * Precedence when multiple knobs are set:
-   *   compactAfterTokens (explicit) > compactAfterRatio > compactReserveTokens > preset.
-   * Optional; unset by default. Must be in (0, 1].
+   * Threshold as a percentage of the active model's context window, in
+   * (0, 100] — used when `compactAfterBy` = "percent":
+   * floor(contextWindow × compactAfterRatio / 100). Optional; unset by default.
    */
   compactAfterRatio?: number;
   /**
-   * Alternative window-derived threshold: keep this many tokens of headroom
-   * free — threshold = `contextWindow − compactReserveTokens` (clamped ≥ 1).
-   * Same precedence rules and defaults as compactAfterRatio.
-   * Optional; unset by default. Must be a positive integer.
+   * Headroom reserve — used when `compactAfterBy` = "reserve": threshold =
+   * `contextWindow − compactReserveTokens` (clamped ≥ 1). Optional; unset by
+   * default. Must be a positive integer.
    */
   compactReserveTokens?: number;
+  /** Never compact below this many tokens, whatever the shape computes. Absorbs
+   *  a model downgrade when a percent shape is pinned. Optional; unset by
+   *  default. Must be a positive integer. */
+  compactAfterMinTokens?: number;
+  /** Never wait past this many tokens before compacting, whatever the shape
+   *  computes. Pins an absolute operating point on a huge window. Optional;
+   *  unset by default. Must be a positive integer. */
+  compactAfterMaxTokens?: number;
   /**
-   * Preset-curve selection knob (window-scaled threshold curve, spec
-   * work_docs/proposal-ratio-presets-by-context-window.md): names which preset
-   * in the effective preset table applies. Effective presets = the built-in
-   * definitions (model-budget BUILTIN_PRESETS) overlaid by any user
+   * Preset-curve selection — used when `compactAfterBy` = "preset". Names which
+   * preset in the effective preset table applies. Effective presets = the
+   * built-in definitions (model-budget BUILTIN_PRESETS) overlaid by any user
    * `compactAfterPresets` definitions in this file. An unknown name warns and
-   * falls back to the built-in "default" curve. Default "default" — a preset
-   * applies out of the box when no numeric knob is configured.
+   * falls back to the built-in "default" curve. Default "default".
    */
   compactAfterPreset?: string;
   /**
@@ -200,35 +210,19 @@ export interface UnifiedConfig {
   /** Treat every compaction as a full-fold boundary so early reflections/drops
    *  survive the first compaction in a fresh session. Default true. */
   fullFoldAlways: boolean;
-  /** Target token budget for the observation pool (dropper aims here).
-   *  Optional; defaults to half of observationsPoolMaxTokens when unset.
-   *  Must be less than observationsPoolMaxTokens.
-   *
-   *  NOTE: Ported from upstream as forward-compat (no-op in our pool algorithm).
-   *  Upstream renamed budgetTokens→targetTokens (52b5844) and uses this
-   *  for their tokensOverTarget / avgTokensPerObservation drop calculation.
-   *  We keep our ratio-based urgency algorithm; this knob exists so future
-   *  lockstep iterations don't diverge on the config shape. */
-  observationsPoolTargetTokens: number;
-  /** Max prompt tokens for reflector model input (rolling window cap). */
+  /** Max prompt tokens for a memory-snapshot job (reflector or pruner), a
+   *  rolling window cap. plan-09 §3.5 merged the former
+   *  dropperInputMaxTokens into this one — both read the same memory pool. */
   reflectorInputMaxTokens: number;
-  /** Max prompt tokens for dropper model input (rolling window cap). */
-  dropperInputMaxTokens: number;
   /** Fraction of observationsPoolMaxTokens that triggers pressure-driven
    *  dropping without new data. A value of 1 disables pressure.
-   *  Default 0.70 (70%). Must be in range (0, 1]. */
+   *  Default 0.70 (70%). Must be in range (0, 1]. The former
+   *  dropperPoolFullnessThreshold was merged into this (plan-09 §3.3); the
+   *  new-data path derives its floor from this value (dropperNewDataFloor,
+   *  plan-11 §4). */
   dropperPressureThreshold: number;
-  /** Minimum observation-pool fullness (fraction of observationsPoolMaxTokens)
-   *  before the dropper may run. Prevents churn on a nearly empty pool.
-   *  Default 0.10 (10%). Must be in range (0, 1]. */
-  dropperPoolFullnessThreshold: number;
   /** Max source entries tokens sent to observer per chunk. */
   observerChunkMaxTokens: number;
-  /** Max preamble tokens (CURRENT REFLECTIONS / OBSERVATIONS) in the observer prompt.
-   *  Default 0 means auto-compute from observerChunkMaxTokens (30%). Only applied in
-   *  noAutoCompact mode where accumulated batch history can grow unbounded.
-   *  Set to an explicit value to override the auto-computed budget. */
-  observerPreambleMaxTokens: number;
   /** Shared turn cap for background memory agents. */
   agentMaxTurns: number;
   /** Body-idle timeout for background provider streams. Uses pi's default when unset;
@@ -286,8 +280,7 @@ export const DEFAULTS: UnifiedConfig = {
   sessionFallback: true,
 
   // New config surface
-  compaction: "auto",
-  compactionEngine: "blackhole",
+  compaction: "automatic",
   compactionSummaryMode: "default",
 
   skipForProviders: [],
@@ -311,19 +304,18 @@ export const DEFAULTS: UnifiedConfig = {
   // treated as unset by normalizeThresholdKnobs. compactAfterPresets (the preset
   // DEFINITIONS) is deliberately NOT a DEFAULTS key — it is hand-edited JSON
   // that save() must carry verbatim (spec §4.2).
+  compactAfterBy: undefined,
   compactAfterRatio: undefined,
   compactReserveTokens: undefined,
+  compactAfterMinTokens: undefined,
+  compactAfterMaxTokens: undefined,
   compactAfterPreset: "default",
   observationsPoolMaxTokens: 20_000,
   reflectionsPoolMaxTokens: 8_000,
   fullFoldAlways: true,
-  observationsPoolTargetTokens: 10_000,
   reflectorInputMaxTokens: 80_000,
-  dropperInputMaxTokens: 80_000,
   dropperPressureThreshold: 0.7,
-  dropperPoolFullnessThreshold: 0.1,
   observerChunkMaxTokens: 40_000,
-  observerPreambleMaxTokens: 0,
   agentMaxTurns: 16,
   // Optional knobs must still be DEFAULTS members (as undefined) or
   // ConfigManager.save() — which diffs against Object.keys(DEFAULTS) —
@@ -338,39 +330,39 @@ export const DEFAULTS: UnifiedConfig = {
   showWorkerNotifications: true,
 };
 
-/**
- * Legacy scaffold default (pre-curve): scaffoldConfig() and the settings modal
- * used to materialize `compactAfterTokens: 81000` into config files even for
- * users who never chose it. Treated as default-posture residue by
- * normalizeThresholdKnobs (used by both the file loader and the modal
- * validate) — the value 81000 reads as "the old default" and yields to the
- * default preset curve / derived knobs. An env-set 81000 stays explicit.
- * Flat-81k behavior is reproducible with any other explicit fixed value
- * (spec §10).
- */
-const LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS = 81_000;
+// Shared validity predicates live in config-validators.ts so the file loader,
+// the settings-modal validate, the trigger resolver, and the on-disk migration
+// cannot disagree about whether a value is valid. Re-exported for existing
+// importers.
+import {
+  isCompactAfterBy,
+  isFixedTokenThreshold,
+  isReserveTokens,
+  isWindowPercent,
+  LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS,
+  windowPercent,
+} from "./config-validators.js";
 
-/**
- * Shared validity predicates for the auto-compaction threshold knobs.
- *
- * Single source of truth used by the file loader (`parseConfig`), the
- * settings-modal `validate`, and the trigger resolver
- * (`compactThresholdTokens`): all three agree that `0` means "not set" and
- * that out-of-range values behave like absent keys (fall through to the next
- * precedence tier) instead of acting as live thresholds. A literal `81000` is
- * intentionally VALID here — dropping that scaffold residue is the loader's
- * job (env-set 81000 stays explicit); the resolver must not second-guess it.
- */
-export function isFixedTokenThreshold(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0;
-}
+export {
+  COMPACT_AFTER_BY_VALUES,
+  isCompactAfterBy,
+  isFixedTokenThreshold,
+  isReserveTokens,
+  isWindowPercent,
+  legacyFractionToPercent,
+  windowPercent,
+} from "./config-validators.js";
+export type { CompactAfterBy } from "./config-validators.js";
 
-export function isWindowRatio(v: unknown): v is number {
-  return typeof v === "number" && Number.isFinite(v) && v > 0 && v <= 1;
-}
-
-export function isReserveTokens(v: unknown): v is number {
-  return typeof v === "number" && Number.isInteger(v) && v > 0;
+/** Warn once per process when a legacy fraction is auto-scaled. */
+let warnedLegacyRatioFraction = false;
+function warnLegacyRatioFraction(): void {
+  if (warnedLegacyRatioFraction) return;
+  warnedLegacyRatioFraction = true;
+  console.warn(
+    "blackhole: compactAfterRatio held a pre-plan fraction; treated values in (0, 1] as a " +
+      "percent (×100). Re-save your config (or let the on-disk migration run) to persist it.",
+  );
 }
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
@@ -386,18 +378,14 @@ const THINKING_LEVELS: readonly string[] = [
 ];
 
 // String enums for new config surface
-const COMPACTION_VALUES = ["auto", "manual", "off"] as const;
-const COMPACTION_ENGINE_VALUES = ["blackhole", "pi-default"] as const;
+const COMPACTION_VALUES = ["automatic", "manual", "off"] as const;
 const COMPACTION_SUMMARY_MODE_VALUES = ["default", "append"] as const;
 
 const TAIL_BEHAVIOR_VALUES = ["pi-default", "minimal"] as const;
 const MID_RUN_COMPACTION_VALUES = ["resume", "pause", "off"] as const;
 
-function isCompaction(v: unknown): v is "auto" | "manual" | "off" {
+function isCompaction(v: unknown): v is "automatic" | "manual" | "off" {
   return typeof v === "string" && (COMPACTION_VALUES as readonly string[]).includes(v);
-}
-function isCompactionEngine(v: unknown): v is "blackhole" | "pi-default" {
-  return typeof v === "string" && (COMPACTION_ENGINE_VALUES as readonly string[]).includes(v);
 }
 function isCompactionSummaryMode(v: unknown): v is "default" | "append" {
   return typeof v === "string" && (COMPACTION_SUMMARY_MODE_VALUES as readonly string[]).includes(v);
@@ -512,15 +500,33 @@ function parsePresetDefinitions(v: unknown): Record<string, PresetAnchorDef[]> |
  * validated/sorted/deduped exactly once. Idempotent — safe to run twice.
  */
 export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
+  if (!isCompactAfterBy(rec.compactAfterBy)) {
+    delete rec.compactAfterBy;
+  }
   const tokens = rec.compactAfterTokens;
   if (!isFixedTokenThreshold(tokens) || tokens === LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS) {
     delete rec.compactAfterTokens;
   }
-  if (!isWindowRatio(rec.compactAfterRatio)) {
+  if (!isWindowPercent(rec.compactAfterRatio)) {
     delete rec.compactAfterRatio;
+  } else {
+    // Pre-plan fraction (or a bare `1` with no percent selector) that escaped
+    // migration — scale instead of letting the resolver read it as a sub-1%
+    // percent (see windowPercent).
+    const normalized = windowPercent(rec.compactAfterRatio);
+    if (normalized !== rec.compactAfterRatio) {
+      rec.compactAfterRatio = normalized;
+      warnLegacyRatioFraction();
+    }
   }
   if (!isReserveTokens(rec.compactReserveTokens)) {
     delete rec.compactReserveTokens;
+  }
+  if (!isFixedTokenThreshold(rec.compactAfterMinTokens)) {
+    delete rec.compactAfterMinTokens;
+  }
+  if (!isFixedTokenThreshold(rec.compactAfterMaxTokens)) {
+    delete rec.compactAfterMaxTokens;
   }
   const preset = rec.compactAfterPreset;
   if (typeof preset !== "string" || preset.length === 0) {
@@ -549,12 +555,18 @@ export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
   }
 }
 
+/**
+ * Fold the legacy two-key compaction surface (`compaction` + `compactionEngine`)
+ * into the single `compaction` enum (plan-09 §3.1). The implementation lives in
+ * config-migration/steps.ts so the in-memory and on-disk paths share it.
+ */
+
 function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   const c: Partial<UnifiedConfig> = {};
 
   // String enums — compaction surface
-  if (isCompaction(raw.compaction)) c.compaction = raw.compaction;
-  if (isCompactionEngine(raw.compactionEngine)) c.compactionEngine = raw.compactionEngine;
+  const compaction = foldCompaction(raw.compaction, raw.compactionEngine);
+  if (compaction !== undefined) c.compaction = compaction;
   if (isCompactionSummaryMode(raw.compactionSummaryMode))
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
@@ -573,9 +585,12 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   // below so its bounds (e.g. MAX_TIMER_DELAY_MS) are the final word for
   // keys validated in both places.
   const THRESHOLD_BLUNT_KEYS = [
+    "compactAfterBy",
     "compactAfterTokens",
     "compactAfterRatio",
     "compactReserveTokens",
+    "compactAfterMinTokens",
+    "compactAfterMaxTokens",
     "compactAfterPreset",
     "compactAfterPresets",
     "providerIdleTimeoutMs",
@@ -616,11 +631,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     "recallResponseMaxChars",
     "observationsPoolMaxTokens",
     "reflectionsPoolMaxTokens",
-    "observationsPoolTargetTokens",
     "reflectorInputMaxTokens",
-    "dropperInputMaxTokens",
     "observerChunkMaxTokens",
-    "observerPreambleMaxTokens",
     "agentMaxTurns",
     "providerIdleTimeoutMs",
   ] as const;
@@ -634,23 +646,13 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   ) {
     c.dropperPressureThreshold = raw.dropperPressureThreshold;
   }
-  // dropperPoolFullnessThreshold: fractional, must be in (0, 1]
-  if (
-    typeof raw.dropperPoolFullnessThreshold === "number" &&
-    Number.isFinite(raw.dropperPoolFullnessThreshold) &&
-    raw.dropperPoolFullnessThreshold > 0 &&
-    raw.dropperPoolFullnessThreshold <= 1
-  ) {
-    c.dropperPoolFullnessThreshold = raw.dropperPoolFullnessThreshold;
-  }
   for (const k of THRESHOLD_BLUNT_KEYS) {
     if (raw[k] !== undefined) (c as Record<string, unknown>)[k] = raw[k];
   }
   for (const k of numKeys) {
-    // observerPreambleMaxTokens and timeout fields accept 0 (disabled/inherit);
+    // The timeout fields and 0-meaningful budgets accept 0 (disabled/inherit);
     // everything else must be > 0.
     const validator =
-      k === "observerPreambleMaxTokens" ||
       k === "providerIdleTimeoutMs" ||
       k === "retainedToolOutputMaxTokens" || // 0 = disabled (opt-in)
       k === "recallResponseMaxChars" || // 0 = unbounded (opt-out)
@@ -695,9 +697,13 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
  * Idempotent — safe to call repeatedly.
  */
 function migrateOldKnobs(parsed: Record<string, unknown>): void {
-  // Only run if new keys are absent AND old keys are present
-  if (parsed.compaction !== undefined || parsed.compactionEngine !== undefined) {
-    return; // new keys already set — no migration
+  // A recognized new-surface compaction value always wins; legacy keys are then
+  // dropped from the in-memory copy (the on-disk rewrite is plan-10's job).
+  if (parsed.compaction !== undefined) {
+    delete parsed.passive;
+    delete parsed.noAutoCompact;
+    delete parsed.overrideDefaultCompaction;
+    return;
   }
 
   // passive → compaction: "off" + memory: false
@@ -709,21 +715,28 @@ function migrateOldKnobs(parsed: Record<string, unknown>): void {
   else if (parsed.noAutoCompact === true) {
     parsed.compaction = "manual";
   }
-  // overrideDefaultCompaction → compactionEngine + tailBehavior
+
+  // overrideDefaultCompaction → the blackhole/pi-default engine fold. These
+  // only fill in when the more specific passive/noAutoCompact modes didn't win.
   if (parsed.overrideDefaultCompaction === true) {
-    parsed.compactionEngine = "blackhole";
-    // Preserve aggressive cut for existing users
+    if (parsed.compaction === undefined) parsed.compaction = "automatic";
+    // Preserve the aggressive cut for existing users.
     if (parsed.tailBehavior === undefined) {
       parsed.tailBehavior = "minimal";
     }
   } else if (parsed.overrideDefaultCompaction === false) {
-    parsed.compactionEngine = "pi-default";
+    if (parsed.compaction === undefined) parsed.compaction = "off";
   }
 
   // Remove old keys so migration runs only once
   delete parsed.passive;
   delete parsed.noAutoCompact;
   delete parsed.overrideDefaultCompaction;
+}
+
+/** Format an in-memory migration skip for the loader's warning channel. */
+function migrationSkipWarning(w: { key: string; reason: string }): string {
+  return `blackhole: config key "${w.key}" has an unrecognized value (${w.reason}); left it untouched — fix it in /blackhole settings.`;
 }
 
 // ── Load and save ────────────────────────────────────────────────────────────
@@ -789,13 +802,35 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     raw = merged;
   }
 
-  // Project-local override: <cwd>/.pi/pi-blackhole-config.json
+  // Project-local override: <cwd>/.pi/pi-blackhole-config.json. Read it before
+  // the global migration so the pre-migration `passive` signal survives in
+  // both layers (the legacy env undo needs it).
   const projectConfigPath = join(cwd, ".pi", CONFIG_FILE);
   const projectResult = readJson(projectConfigPath);
   const projectRaw = projectResult.data;
   if (projectResult.error && onWarn) onWarn(projectResult.error);
+
+  // Capture the pre-migration legacy signal the passive env undo needs —
+  // migration deletes `passive` before the env block runs. Both layers count.
+  const legacyPassiveKey =
+    raw?.passive === true || (isRecord(projectRaw) && projectRaw.passive === true);
+
+  // In-memory migration of the global/legacy layer (plan-10): the on-disk
+  // rewrite happens at session start; this keeps read-only installs correct.
+  if (raw) {
+    const migrated = applyConfigMigrations(raw);
+    for (const w of migrated.warnings) onWarn?.(migrationSkipWarning(w));
+    raw = migrated.config;
+  }
+
   if (projectRaw && isRecord(projectRaw)) {
-    raw = { ...raw, ...projectRaw };
+    const migratedProject = applyConfigMigrations(projectRaw);
+    for (const w of migratedProject.warnings) onWarn?.(migrationSkipWarning(w));
+    // Layer merge is override semantics: the project layer's keys (including its
+    // `compactAfterBy`) win. The value keys are per-layer and the selector is the
+    // authoritative shape once set, so no cross-layer re-derivation is applied —
+    // an explicit `compactAfterBy` (including the scaffold default) is honored.
+    raw = { ...raw, ...migratedProject.config };
   }
 
   const parsed = parseConfig(raw);
@@ -815,7 +850,7 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
       parsed.memory = false;
     } else if (["0", "false", "no", "off"].includes(v)) {
       // Falsy env override: undo passive migration when config relied on legacy key
-      if (raw?.passive === true) {
+      if (legacyPassiveKey) {
         delete parsed.compaction;
         delete parsed.memory;
       }
@@ -829,23 +864,28 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   const envCompaction = process.env.PI_BLACKHOLE_COMPACTION;
   if (envCompaction !== undefined) {
     const trimmed = envCompaction.trim().toLowerCase();
-    if (isCompaction(trimmed)) {
-      merged.compaction = trimmed as "auto" | "manual" | "off";
+    if (trimmed === "auto") {
+      // Pre-plan alias: keep working for env users (env vars are not migrated).
+      merged.compaction = "automatic";
+    } else if (isCompaction(trimmed)) {
+      merged.compaction = trimmed;
     } else {
       console.warn(`blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`);
     }
   }
 
-  // ── Env override — compaction engine ──
-  const envCompactionEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
-  if (envCompactionEngine !== undefined) {
-    const trimmed = envCompactionEngine.trim().toLowerCase();
-    if (isCompactionEngine(trimmed)) {
-      merged.compactionEngine = trimmed as "blackhole" | "pi-default";
-    } else {
-      console.warn(
-        `blackhole: invalid PI_BLACKHOLE_COMPACTION_ENGINE value "${envCompactionEngine}"; ignoring`,
-      );
+  // ── Env override — legacy compaction engine ──
+  // The variable is gone, but a stale `PI_BLACKHOLE_COMPACTION_ENGINE=pi-default`
+  // must not silently flip the user into `automatic` (the opposite intent).
+  const envEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
+  if (envEngine !== undefined) {
+    const trimmed = envEngine.trim().toLowerCase();
+    console.warn(
+      `blackhole: PI_BLACKHOLE_COMPACTION_ENGINE is no longer supported ("${envEngine}") — use ` +
+        `PI_BLACKHOLE_COMPACTION=off instead. See docs/MIGRATION-GUIDE.md.`,
+    );
+    if (trimmed === "pi-default" && envCompaction === undefined) {
+      merged.compaction = "off";
     }
   }
 
@@ -872,6 +912,16 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     // shape is exactly the Record<string, unknown> applyEnvOverrides expects.
     DEFAULTS as unknown as Record<string, unknown>,
   );
+
+  // An explicit threshold env var selects its shape, so it keeps winning over
+  // a migrated file's compactAfterBy (env vars are never migrated).
+  if (process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS !== undefined) {
+    withEnv.compactAfterBy = "tokens";
+  } else if (process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO !== undefined) {
+    withEnv.compactAfterBy = "percent";
+  } else if (process.env.PI_BLACKHOLE_COMPACT_RESERVE_TOKENS !== undefined) {
+    withEnv.compactAfterBy = "reserve";
+  }
 
   // Legacy-81000 note: file residue never reaches this point — parseConfig
   // already ran it through normalizeThresholdKnobs, which drops a file-level
@@ -933,7 +983,32 @@ export function saveUnifiedConfigScoped(
 }
 
 /**
- * Ensure ~/.pi/agent/pi-blackhole/pi-blackhole-config.json exists with defaults.
+ * Curated scaffold (plan-09 §7.6): the small, outcome-oriented starter set a
+ * fresh install writes to its config file. Deliberately not the full `DEFAULTS`
+ * dump — that pinned derived/advanced knobs and made the file look
+ * authoritative — and not `{}`, which would hide the surface entirely. Missing
+ * keys are filled from `DEFAULTS` at read time.
+ */
+export const SCAFFOLD_DEFAULTS = {
+  compaction: DEFAULTS.compaction,
+  compactionSummaryMode: DEFAULTS.compactionSummaryMode,
+  tailBehavior: DEFAULTS.tailBehavior,
+  showPreCompactionMessage: DEFAULTS.showPreCompactionMessage,
+  // DEFAULTS leaves this unset to preserve legacy precedence; the file states
+  // the out-of-box shape explicitly so a fresh install is self-describing.
+  compactAfterBy: "preset" as const,
+  retainedToolOutputMaxTokens: DEFAULTS.retainedToolOutputMaxTokens,
+  memory: DEFAULTS.memory,
+  observeAfterTokens: DEFAULTS.observeAfterTokens,
+  reflectAfterTokens: DEFAULTS.reflectAfterTokens,
+  observationsPoolMaxTokens: DEFAULTS.observationsPoolMaxTokens,
+  reflectionsPoolMaxTokens: DEFAULTS.reflectionsPoolMaxTokens,
+  statusBar: DEFAULTS.statusBar,
+} as const;
+
+/**
+ * Ensure ~/.pi/agent/pi-blackhole/pi-blackhole-config.json exists with the
+ * curated starter keys.
  *
  * Only creates the file if it doesn't exist. Missing keys are filled at read
  * time by loadUnifiedConfig() via { ...DEFAULTS, ...parsed } merge, so there
@@ -947,7 +1022,7 @@ export function scaffoldConfig(): void {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     if (!existsSync(path)) {
-      writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`);
+      writeFileSync(path, `${JSON.stringify(SCAFFOLD_DEFAULTS, null, 2)}\n`);
     }
   } catch (e) {
     console.error("blackhole: config scaffold failed", e);
@@ -957,27 +1032,19 @@ export function scaffoldConfig(): void {
 // ── Migration detection ───────────────────────────────────────────────────────
 
 /**
- * Check if the on-disk config file still uses legacy keys (needs migration).
- * Returns true when the file exists, has no new keys, but has old keys.
- * Used to prompt users to save their config with the new keys.
+ * Check if the on-disk config file still needs a migration write (a legacy key
+ * to remove, or a value to repair). In sync with the runner's rewrite condition:
+ * an owned legacy key is present AND either a value changed or a legacy key
+ * remains to delete. Used to prompt users to save their config with the new keys.
  */
 export function configFileNeedsMigration(): boolean {
   try {
     const path = configPath();
     if (!existsSync(path)) return false;
-    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-    if (
-      raw.compaction !== undefined ||
-      raw.compactionEngine !== undefined ||
-      raw.tailBehavior !== undefined
-    ) {
-      return false; // already has new keys
-    }
-    return (
-      raw.passive !== undefined ||
-      raw.noAutoCompact !== undefined ||
-      raw.overrideDefaultCompaction !== undefined
-    );
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    if (!isRecord(raw)) return false;
+    const proj = projectConfig(raw);
+    return proj.valueChanged || proj.consumedToDelete.length > 0;
   } catch {
     return false;
   }

@@ -129,12 +129,16 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
       return Number.isInteger(n) && n > 0 ? n : undefined;
     },
   },
-  // Float in (0, 1] — window-derived threshold ratio (issue #60)
+  // Percent in (0, 100] — window-derived threshold ratio (issue #60). Also
+  // accepts the pre-plan fraction form (0, 1] and converts it to a percent,
+  // since env vars are never migrated.
   compactAfterRatio: {
     var: "PI_BLACKHOLE_COMPACT_AFTER_RATIO",
     parse: (raw: string) => {
       const n = Number.parseFloat(raw);
-      return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
+      if (!Number.isFinite(n) || n <= 0) return undefined;
+      if (n <= 1) return Math.round(n * 100);
+      return n <= 100 ? n : undefined;
     },
   },
   // Positive integer — window headroom reserve (issue #60)
@@ -167,11 +171,8 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
       return Number.isInteger(n) && n >= 0 ? n : undefined;
     },
   },
-  observationsPoolTargetTokens: "PI_BLACKHOLE_OBSERVATIONS_POOL_TARGET_TOKENS",
   reflectorInputMaxTokens: "PI_BLACKHOLE_REFLECTOR_INPUT_MAX_TOKENS",
-  dropperInputMaxTokens: "PI_BLACKHOLE_DROPPER_INPUT_MAX_TOKENS",
   observerChunkMaxTokens: "PI_BLACKHOLE_OBSERVER_CHUNK_MAX_TOKENS",
-  observerPreambleMaxTokens: "PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS",
   agentMaxTurns: "PI_BLACKHOLE_AGENT_MAX_TURNS",
   // Non-negative integer (0 = disabled, unset = inherit pi default)
   providerIdleTimeoutMs: {
@@ -198,14 +199,6 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
       return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
     },
   },
-  // Float in (0, 1]
-  dropperPoolFullnessThreshold: {
-    var: "PI_BLACKHOLE_DROPPER_POOL_FULLNESS_THRESHOLD",
-    parse: (raw: string) => {
-      const n = Number.parseFloat(raw);
-      return Number.isFinite(n) && n > 0 && n <= 1 ? n : undefined;
-    },
-  },
   // Comma-separated provider skip list ("provider" or "provider:api")
   skipForProviders: {
     var: "PI_BLACKHOLE_SKIP_PROVIDERS",
@@ -221,17 +214,10 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
     var: "PI_BLACKHOLE_COMPACTION",
     parse: (raw: string) => {
       const trimmed = raw.trim().toLowerCase();
-      return ["auto", "manual", "off"].includes(trimmed)
-        ? (trimmed as "auto" | "manual" | "off")
-        : undefined;
-    },
-  },
-  compactionEngine: {
-    var: "PI_BLACKHOLE_COMPACTION_ENGINE",
-    parse: (raw: string) => {
-      const trimmed = raw.trim().toLowerCase();
-      return ["blackhole", "pi-default"].includes(trimmed)
-        ? (trimmed as "blackhole" | "pi-default")
+      // "auto" is the pre-plan alias; env vars are not migrated, so keep it working.
+      if (trimmed === "auto") return "automatic" as const;
+      return ["automatic", "manual", "off"].includes(trimmed)
+        ? (trimmed as "automatic" | "manual" | "off")
         : undefined;
     },
   },

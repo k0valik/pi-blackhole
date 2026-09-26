@@ -45,8 +45,7 @@ describe("Config defaults", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
     // New config surface defaults
-    expect(config.compaction).toBe("auto");
-    expect(config.compactionEngine).toBe("blackhole");
+    expect(config.compaction).toBe("automatic");
     expect(config.tailBehavior).toBe("minimal");
     expect(config.debug).toBe(false);
     expect(config.observeAfterTokens).toBe(15_000);
@@ -118,7 +117,7 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
     expect(config.compactReserveTokens).toBeUndefined();
     expect(config.compactAfterTokens).toBeUndefined();
   });
@@ -136,7 +135,7 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     writeConfig({ compactAfterTokens: 180_000, compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBe(180_000);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
   });
 
   it("a DEFAULT-valued compactAfterTokens in the file does not block derived mode", async () => {
@@ -144,15 +143,15 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     // file — that must not count as an explicit choice, or derived mode could
     // never engage for those users.
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 0.65 });
+    writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 65 });
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBeUndefined();
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
   });
 
   it("rejects out-of-range ratios (no derived knob; preset governs)", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ compactAfterRatio: 1.5 }); // > 1
+    writeConfig({ compactAfterRatio: 101 }); // > 100
     let config = loadUnifiedConfig(testDir);
     expect(config.compactAfterRatio).toBeUndefined();
     expect(config.compactAfterTokens).toBeUndefined();
@@ -190,7 +189,7 @@ describe("compactAfterRatio / compactReserveTokens (derived threshold)", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterRatio: 0.5, compactReserveTokens: 1_000 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.5);
+    expect(config.compactAfterRatio).toBe(50);
     expect(config.compactReserveTokens).toBe(1_000);
     expect(config.compactAfterTokens).toBeUndefined();
   });
@@ -402,18 +401,19 @@ describe("dropperPressureThreshold", () => {
     expect(config.dropperPressureThreshold).toBe(0.7);
   });
 
-  it("can be overridden via config file", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPressureThreshold: 0.5 });
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPressureThreshold).toBe(0.5);
-  });
+  it.each([0.01, 0.1, 0.25, 0.5, 0.6, 0.7, 0.9, 0.99, 1])(
+    "round-trips a valid fraction %s",
+    async (threshold) => {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ dropperPressureThreshold: threshold });
+      expect(loadUnifiedConfig(testDir).dropperPressureThreshold).toBe(threshold);
+    },
+  );
 
-  it("falls back to default for invalid values", async () => {
+  it.each([1.0001, 1.5, 2, 0, -0.1])("falls back to default for invalid value %s", async (v) => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPressureThreshold: 1.5 }); // > 1
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPressureThreshold).toBe(0.7);
+    writeConfig({ dropperPressureThreshold: v });
+    expect(loadUnifiedConfig(testDir).dropperPressureThreshold).toBe(0.7);
   });
 
   it("accepts 1.0 to disable pressure-driven dropper", async () => {
@@ -424,32 +424,12 @@ describe("dropperPressureThreshold", () => {
   });
 });
 
-describe("dropperPoolFullnessThreshold", () => {
-  it("defaults to 0.10 when no config file exists", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(0.1);
-  });
-
-  it("can be overridden via config file", async () => {
+describe("dropperPoolFullnessThreshold (removed in plan-09 §3.3)", () => {
+  it("is ignored now that the two dropper fractions are merged", async () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ dropperPoolFullnessThreshold: 0.05 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(0.05);
-  });
-
-  it("falls back to default for invalid values", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPoolFullnessThreshold: 1.5 }); // > 1
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(0.1);
-  });
-
-  it("accepts 1.0 to disable the fullness gate", async () => {
-    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
-    writeConfig({ dropperPoolFullnessThreshold: 1.0 });
-    const config = loadUnifiedConfig(testDir);
-    expect(config.dropperPoolFullnessThreshold).toBe(1.0);
+    expect((config as Record<string, unknown>).dropperPoolFullnessThreshold).toBeUndefined();
   });
 });
 
@@ -618,8 +598,8 @@ describe("Legacy config fallback", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ overrideDefaultCompaction: true, debug: true }, "pi-vcc-config.json");
     const config = loadUnifiedConfig(testDir);
-    // Legacy overrideDefaultCompaction:true → compactionEngine:blackhole + tailBehavior:minimal
-    expect(config.compactionEngine).toBe("blackhole");
+    // Legacy overrideDefaultCompaction:true → compaction:automatic + tailBehavior:minimal
+    expect(config.compaction).toBe("automatic");
     expect(config.tailBehavior).toBe("minimal");
     expect(config.debug).toBe(true);
     expect((config as any).overrideDefaultCompaction).toBeUndefined();
@@ -636,7 +616,6 @@ describe("Legacy config fallback", () => {
     );
     const config = loadUnifiedConfig(testDir);
     expect(config.compaction).toBe("off");
-    expect(config.compactionEngine).toBe("pi-default");
     expect(config.debug).toBe(false);
   });
 
@@ -681,6 +660,8 @@ describe("Env overrides", () => {
   afterEach(() => {
     delete process.env.PI_VCC_OM_PASSIVE;
     delete process.env.PI_OBSERVATIONAL_MEMORY_PASSIVE;
+    delete process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
+    delete process.env.PI_BLACKHOLE_COMPACTION;
   });
 
   it("env PI_VCC_OM_PASSIVE=true forces compaction:off + memory:false", async () => {
@@ -698,7 +679,7 @@ describe("Env overrides", () => {
     writeConfig({ passive: true });
     const config = loadUnifiedConfig(testDir);
     // Falsy env override undoes the passive migration, falling back to defaults
-    expect(config.compaction).toBe("auto");
+    expect(config.compaction).toBe("automatic");
     expect(config.memory).toBe(true);
   });
 
@@ -709,6 +690,23 @@ describe("Env overrides", () => {
     const config = loadUnifiedConfig(testDir);
     expect(config.compaction).toBe("off");
     expect(config.memory).toBe(false);
+  });
+
+  it("falsy PI_VCC_OM_PASSIVE undoes a project-layer passive:true", async () => {
+    process.env.PI_VCC_OM_PASSIVE = "false";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ passive: true }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compaction).toBe("automatic");
+    expect(config.memory).toBe(true);
+  });
+
+  it("legacy PI_BLACKHOLE_COMPACTION_ENGINE=pi-default still keeps blackhole out", async () => {
+    process.env.PI_BLACKHOLE_COMPACTION_ENGINE = "pi-default";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({});
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compaction).toBe("off");
   });
 });
 
@@ -801,12 +799,12 @@ describe("Declarative env overrides apply at runtime", () => {
     process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "0.5";
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.5);
+    expect(config.compactAfterRatio).toBe(50);
     expect(config.compactAfterTokens).toBeUndefined();
   });
 
   it("invalid env compactAfterRatio is rejected (keeps configured state)", async () => {
-    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "1.5";
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "150";
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterRatio).toBeUndefined();
@@ -842,7 +840,36 @@ describe("Declarative env overrides apply at runtime", () => {
     writeConfig({ compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
     expect(config.compactAfterTokens).toBe(180_000);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
+  });
+
+  it("lets a project layer's threshold shape override the global one", async () => {
+    // Layer merge is override semantics: the project's selector is authoritative,
+    // so a project reserve is not silently outranked by a global token pin.
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterTokens: 100_000 });
+    writeConfig({ compactReserveTokens: 32_768 }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterBy).toBe("reserve");
+    expect(config.compactReserveTokens).toBe(32_768);
+  });
+
+  it("lets a project-supplied threshold value select its shape over a global selector", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterBy: "percent", compactAfterRatio: 50 });
+    writeConfig({ compactAfterTokens: 150_000 }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterBy).toBe("tokens");
+    expect(config.compactAfterTokens).toBe(150_000);
+  });
+
+  it("preserves a valid global selector when the project supplies no threshold", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterBy: "percent", compactAfterRatio: 50 });
+    writeConfig({ memory: false }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterBy).toBe("percent");
+    expect(config.compactAfterRatio).toBe(50);
   });
 });
 
@@ -940,7 +967,7 @@ describe("compactAfterPreset / compactAfterPresets (window-curve presets)", () =
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterTokens: 81_000, compactAfterRatio: 0.65 });
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterRatio).toBe(0.65);
+    expect(config.compactAfterRatio).toBe(65);
     expect(config.compactAfterTokens).toBeUndefined();
   });
 
@@ -1040,14 +1067,14 @@ describe("loader parity: file bytes → same effective threshold on both loaders
   });
 
   it("out-of-range ratio resolves to the preset curve on both loaders", async () => {
-    const t = await thresholdsForFile({ compactAfterRatio: 2.5 });
+    const t = await thresholdsForFile({ compactAfterRatio: 101 });
     expect(t.viaFileLoader).toBe(102_800);
     expect(t.viaModalLoader).toBe(t.viaFileLoader);
   });
 
   it("valid knobs resolve identically on both loaders", async () => {
     expect((await thresholdsForFile({ compactAfterTokens: 180_000 })).viaModalLoader).toBe(180_000);
-    const ratio = await thresholdsForFile({ compactAfterRatio: 0.65 });
+    const ratio = await thresholdsForFile({ compactAfterRatio: 65 });
     expect(ratio.viaFileLoader).toBe(83_200);
     expect(ratio.viaModalLoader).toBe(ratio.viaFileLoader);
     const reserve = await thresholdsForFile({ compactReserveTokens: 32_768 });
@@ -1075,5 +1102,25 @@ describe("loader parity: file bytes → same effective threshold on both loaders
     });
     expect(t.viaFileLoader).toBe(104_571);
     expect(t.viaModalLoader).toBe(t.viaFileLoader);
+  });
+});
+
+describe("configFileNeedsMigration", () => {
+  it("treats compactionEngine as a legacy key, not a new one", async () => {
+    const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
+    writeConfig({ compactionEngine: "pi-default" });
+    expect(configFileNeedsMigration()).toBe(true);
+  });
+
+  it("returns false once a new key is present", async () => {
+    const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
+    writeConfig({ compaction: "off" });
+    expect(configFileNeedsMigration()).toBe(false);
+  });
+
+  it("returns true for a legacy value that still needs repairing", async () => {
+    const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 0.8 }); // fraction -> percent + selector
+    expect(configFileNeedsMigration()).toBe(true);
   });
 });

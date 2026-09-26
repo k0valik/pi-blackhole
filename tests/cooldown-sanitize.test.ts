@@ -180,6 +180,6 @@ describe("resolveModel skip toast (issue #80)", () => {
     const toast: string = notify.mock.calls[0][0];
     expect(toast).not.toContain("<!DOCTYPE");
     expect(toast).not.toContain("@font-face");
-    expect(toast).toContain("details in cooldown log");
+    expect(toast).toContain("details in the cooldown log");
   });
 });

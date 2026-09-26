@@ -270,3 +270,109 @@ describe("§2.4 Misc gaps", () => {
     expect(onChange).toHaveBeenCalledWith("num", 5, expect.objectContaining({ key: "num" }));
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// visibleWhen resolves from the active tab's rows only
+// ─────────────────────────────────────────────────────────────────────
+
+describe("buildVisibilityContext tab scoping", () => {
+  it("does not borrow a same-key value from another tab", () => {
+    const fields: Field[] = [
+      {
+        key: "compactAfterBy",
+        type: "enum",
+        label: "Shape (project)",
+        value: "percent",
+        tab: "project",
+        options: ["preset", "percent"],
+      },
+      {
+        key: "compactAfterBy",
+        type: "enum",
+        label: "Shape (defaults)",
+        value: undefined,
+        tab: "defaults",
+        options: ["preset", "percent"],
+      },
+      {
+        key: "compactAfterRatio",
+        type: "number",
+        label: "Percent",
+        value: 46,
+        tab: "project",
+        visibleWhen: (ctx) => ctx.get("compactAfterBy") === "percent",
+      },
+    ];
+    const body = createSettingsModalBody<Field>(
+      {
+        title: "test",
+        fields,
+        tabs: [
+          { id: "project", label: "Project" },
+          { id: "defaults", label: "Defaults" },
+        ],
+        initialTab: "project",
+      },
+      {
+        tui: fakeTui(),
+        theme: fakeTheme(),
+        ctx: fakeCtx(),
+        close: vi.fn(),
+      },
+    );
+    // The project tab's ratio row is visible because its visibleWhen resolves
+    // compactAfterBy from the project row ("percent"), not the later defaults
+    // row (undefined).
+    expect(body.render(80).join("\n")).toContain("Percent");
+  });
+
+  it("does not let another tab's value show a row the active tab hides", () => {
+    const fields: Field[] = [
+      {
+        key: "compactAfterBy",
+        type: "enum",
+        label: "Shape (project)",
+        value: "preset",
+        tab: "project",
+        options: ["preset", "percent"],
+      },
+      {
+        key: "compactAfterBy",
+        type: "enum",
+        label: "Shape (defaults)",
+        value: "percent",
+        tab: "defaults",
+        options: ["preset", "percent"],
+      },
+      {
+        key: "compactAfterRatio",
+        type: "number",
+        label: "Ratio percent marker",
+        value: 46,
+        tab: "project",
+        visibleWhen: (ctx) => ctx.get("compactAfterBy") === "percent",
+      },
+    ];
+    const body = createSettingsModalBody<Field>(
+      {
+        title: "test",
+        fields,
+        tabs: [
+          { id: "project", label: "Project" },
+          { id: "defaults", label: "Defaults" },
+        ],
+        initialTab: "project",
+      },
+      {
+        tui: fakeTui(),
+        theme: fakeTheme(),
+        ctx: fakeCtx(),
+        close: vi.fn(),
+      },
+    );
+    // The active tab is "project" ("preset") -> the ratio row stays hidden even
+    // though the earlier "defaults" row holds "percent". Resolving across tabs
+    // would wrongly show it.
+    expect(body.render(80).join("\n")).not.toContain("Ratio percent marker");
+  });
+});

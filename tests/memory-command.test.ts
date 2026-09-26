@@ -53,10 +53,8 @@ function createMockEnvironment() {
       reflectAfterTokens: 25_000,
       compactAfterTokens: 81_000,
       observationsPoolMaxTokens: 20_000,
-      dropperPoolFullnessThreshold: 0.1,
       dropperPressureThreshold: 0.7,
       observerChunkMaxTokens: 40_000,
-      observerPreambleMaxTokens: 0,
       passive: false,
       noAutoCompact: false,
     },
@@ -200,15 +198,13 @@ describe("/blackhole-memory command", () => {
     expect(ui.notify).toHaveBeenCalledTimes(1);
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("Memory");
-    expect(msg).toContain("Observations:");
-    expect(msg).toContain("Reflections:");
-    expect(msg).toContain("Observer:");
-    expect(msg).toContain("Reflector:");
-    expect(msg).toContain("Dropper:");
+    expect(msg).toContain("Notes:");
+    expect(msg).toContain("Insights:");
+    expect(msg).toContain("Pruning:");
     expect(msg).toContain("eligible at ≥10% with new data; pressure at ≥70% pool");
     expect(msg).toContain("Compaction:");
-    expect(msg).toContain("Obs pool:");
-    expect(msg).toContain("Reflect pool:");
+    expect(msg).toContain("Note memory:");
+    expect(msg).toContain("Insight memory:");
   });
 
   it("status shows recorded / dropped / visible counts", async () => {
@@ -315,7 +311,7 @@ describe("/blackhole-memory command", () => {
 
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("In flight");
-    expect(msg).toContain("Consolidation: running");
+    expect(msg).toContain("Memory update: running");
     expect(msg).toContain("Auto-compaction: running");
   });
 
@@ -338,8 +334,8 @@ describe("/blackhole-memory command", () => {
 
     const msg = (ui.notify as any).mock.calls[0][0] as string;
     expect(msg).toContain("Last error");
-    expect(msg).toContain("Observer: Model unavailable");
-    expect(msg).toContain("Dropper: Budget exceeded");
+    expect(msg).toContain("Note-taking: Model unavailable");
+    expect(msg).toContain("Pruning: Budget exceeded");
   });
 
   it("view mode renders visible observations and reflections", async () => {
@@ -433,7 +429,7 @@ describe("/blackhole-memory command", () => {
   it("status shows the context-window-derived threshold with its basis (issue #60)", async () => {
     const { pi, runtime, handlerMap, buildBranch } = createMockEnvironment();
     runtime.config.compactAfterTokens = undefined; // derived mode
-    runtime.config.compactAfterRatio = 0.65;
+    runtime.config.compactAfterRatio = 65;
     runtime.config.compactReserveTokens = undefined;
     registerMemoryCommand(pi as any, runtime as any);
 

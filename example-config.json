@@ -1,14 +1,64 @@
 {
-  "_comment": "blackhole unified configuration v2 — ~/.pi/agent/pi-blackhole/pi-blackhole-config.json",
+  "_comment": "blackhole unified configuration v3 — ~/.pi/agent/pi-blackhole/pi-blackhole-config.json",
   "_all_settings_in_one_file": true,
-  "_new_keys": "compaction, compactionEngine, compactionSummaryMode, tailBehavior, sessionFallback — new config surface",
-  "_renamed": "was example-config-v2.json; old example-config.json → example-config-old.json",
+  "_new_keys": "compaction, compactionSummaryMode, tailBehavior, compactAfterBy — v3 config surface",
+  "_renamed": "v2 example → example-config-old.json (migration fixture); this file is the post-reorg surface",
 
-  "compaction": "auto",
-  "compactionEngine": "blackhole",
+  "compaction": "automatic",
+  "_comment_compaction": "automatic | manual | off. 'automatic' triggers on threshold, 'manual' only on /blackhole, 'off' leaves compaction to Pi. compactionEngine was folded in (v3): 'blackhole' → 'automatic', 'pi-default' → 'off'; 'auto' is still accepted as an alias.",
   "compactionSummaryMode": "default",
   "tailBehavior": "minimal",
   "midRunCompaction": "off",
+  "showPreCompactionMessage": true,
+
+  "_comment_threshold": "Auto-compaction = one shape (compactAfterBy) clamped to an optional floor/ceiling band. effective = clamp(shape(window), compactAfterMinTokens, compactAfterMaxTokens).",
+  "compactAfterBy": "preset",
+  "compactAfterPreset": "default",
+  "_comment_compactAfterPreset": "Curve used when compactAfterBy = 'preset'. The built-in 'default' curve scales the trigger to the model's context window: floor(window × ratio), 0.90 @ 32,768 → 0.40 @ 1,048,576.",
+  "compactAfterRatio": 0,
+  "_comment_compactAfterRatio": "Value when compactAfterBy = 'percent' — a PERCENT in (0, 100]. 0 = not set. (Was a fraction 0.46 before v3; the fraction is converted to 46 on migration.)",
+  "compactAfterTokens": 0,
+  "_comment_compactAfterTokens": "Value when compactAfterBy = 'tokens' — a flat count on every model. 0 = not set. Exactly 81000 is legacy scaffold residue and is dropped.",
+  "compactReserveTokens": 0,
+  "_comment_compactReserveTokens": "Value when compactAfterBy = 'reserve' — keep this much headroom free: threshold = window − reserve. 0 = not set.",
+  "compactAfterMinTokens": 0,
+  "_comment_compactAfterMinTokens": "Floor: never compact below this many tokens, whatever the shape computes. 0 = no floor.",
+  "compactAfterMaxTokens": 0,
+  "_comment_compactAfterMaxTokens": "Ceiling: never wait past this many tokens, whatever the shape computes. 0 = no ceiling. Example: { compactAfterBy: 'percent', compactAfterRatio: 46, compactAfterMaxTokens: 180000 } → 256k @ ~120k, 1M @ 180k.",
+  "compactAfterPresets": {
+    "default": [
+      { "window": 32768, "ratio": 0.9 },
+      { "window": 131072, "ratio": 0.8 },
+      { "window": 262144, "ratio": 0.7 },
+      { "window": 1048576, "ratio": 0.4 }
+    ],
+    "early-1m": [{ "window": 131072, "ratio": 0.6 }]
+  },
+  "_comment_compactAfterPresets": "Hand-edited preset definitions only — never a settings-modal field, and config saves carry them verbatim. Same-name entries override the built-in curve; new names extend the table and appear in the modal's preset select. 'early-1m' is an example user preset (single anchor = constant ratio).",
+
+  "retainedToolOutputMaxTokens": 20000,
+  "recallResponseMaxChars": 48000,
+
+  "observationsPoolMaxTokens": 20000,
+  "reflectionsPoolMaxTokens": 8000,
+  "reflectorInputMaxTokens": 80000,
+  "_comment_reflectorInputMaxTokens": "Largest memory snapshot an insight-building or pruning job reads (shared). dropperInputMaxTokens was merged into this key in v3.",
+  "observerChunkMaxTokens": 40000,
+  "dropperPressureThreshold": 0.7,
+  "_comment_dropperPressureThreshold": "Prune memory when note memory is this fraction full. dropperPoolFullnessThreshold was merged into this key in v3 (new-data floor is the constant 0.10). 1 disables pressure-driven pruning.",
+  "observeAfterTokens": 15000,
+  "reflectAfterTokens": 25000,
+  "agentMaxTurns": 16,
+  "providerIdleTimeoutMs": 0,
+  "workerAttemptTimeoutMs": 0,
+
+  "memory": true,
+  "sessionFallback": true,
+  "statusBar": true,
+  "showWorkerNotifications": true,
+  "debug": false,
+  "debugLog": false,
+  "_comment_cacheRetention": "Optional (leave absent by default): none | short | long. Absent inherits pi's effective setting. Pinning 'short' downgrades a host whose effective setting is longer; adapters that lack 'long' ignore it. The modal's 'unset' choice removes the key.",
 
   "skipForProviders": [],
   "_comment_skipForProviders": "EXPERIMENTAL compatibility shim (pi-codex-compaction coexistence): providers for which blackhole steps aside entirely — no compaction, no observational-memory consolidation. Entries: bare provider or 'provider:api'. Env override PI_BLACKHOLE_SKIP_PROVIDERS (comma-separated). Default [] = disabled. Deliberately unsurfaced in README/CONFIG.md; do not rely on it.",
@@ -20,7 +70,6 @@
     "thinking": "low",
     "cooldownHours": 6
   },
-
   "observerModel": {
     "_comment": "Observer primary: Qwen3 Next 80B via OpenRouter free (strong extraction with reasoning).",
     "provider": "openrouter",
@@ -44,7 +93,6 @@
       "cooldownHours": 6
     }
   ],
-
   "reflectorModel": {
     "_comment": "Reflector primary: GPT OSS 120B via Cerebras (strong reasoning for synthesis).",
     "provider": "cerebras",
@@ -68,7 +116,6 @@
       "cooldownHours": 6
     }
   ],
-
   "dropperModel": {
     "_comment": "Dropper primary: GPT OSS 120B via Cerebras (judgment/prioritization).",
     "provider": "cerebras",
@@ -93,63 +140,30 @@
     }
   ],
 
-  "observeAfterTokens": 15000,
-  "reflectAfterTokens": 25000,
-  "compactAfterPreset": "default",
-  "_comment_compactAfterPreset": "Compaction threshold preset selection (default 'default'). The no-knob default is no longer a fixed 81000 tokens: the built-in 'default' curve auto-scales the trigger to the model's context window (fires at floor(window x ratio), 0.90 @ 32,768 -> 0.40 @ 1,048,576). To pin a fixed threshold instead, set compactAfterTokens to any value other than exactly 81000 - that exact value is legacy scaffold residue and is dropped at load.",
-  "compactAfterPresets": {
-    "default": [
-      { "window": 32768, "ratio": 0.9 },
-      { "window": 131072, "ratio": 0.8 },
-      { "window": 262144, "ratio": 0.7 },
-      { "window": 1048576, "ratio": 0.4 }
-    ],
-    "early-1m": [{ "window": 131072, "ratio": 0.6 }]
-  },
-  "_comment_compactAfterPresets": "Hand-edited preset definitions only - never a settings-modal field, and config saves carry them verbatim. Same-name entries override the built-in curve; new names extend the table and appear in the modal's preset select. 'early-1m' is an example user preset (single anchor = constant ratio).",
-  "retainedToolOutputMaxTokens": 20000,
-  "observationsPoolMaxTokens": 20000,
-  "reflectionsPoolMaxTokens": 8000,
-  "observationsPoolTargetTokens": 10000,
-  "reflectorInputMaxTokens": 80000,
-  "dropperInputMaxTokens": 80000,
-  "dropperPressureThreshold": 0.7,
-  "observerChunkMaxTokens": 40000,
-  "observerPreambleMaxTokens": 0,
-  "agentMaxTurns": 16,
-  "providerIdleTimeoutMs": 0,
-  "workerAttemptTimeoutMs": 0,
-
-  "memory": true,
-  "sessionFallback": true,
-  "debug": false,
-  "debugLog": false,
-
   "_notes": [
-    "v2 config surface:",
-    "  compaction (auto|manual|off) — how compaction triggers",
-    "  compactionEngine (blackhole|pi-default) — who handles it",
+    "v3 config surface:",
+    "  compaction (automatic|manual|off) — how compaction triggers",
     "  compactionSummaryMode (default|append) — replace one summary or freeze auto-compaction segments",
     "  tailBehavior (pi-default|minimal) — how much stays visible",
     "  midRunCompaction (resume|pause|off) — threshold check during tool loops",
+    "  compactAfterBy (preset|percent|tokens|reserve) + compactAfterMinTokens / compactAfterMaxTokens — the threshold shape and band",
     "  retainedToolOutputMaxTokens — newest-first historical tool-output text budget; older text remains available through recall",
     "  observationsPoolMaxTokens / reflectionsPoolMaxTokens — rendered-line caps including IDs and separators; headings/footer extra; source history retained",
     "  append rebase — pressure plus useful saving at existing compactions; cadence unchanged",
     "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
-    "  dropperPressureThreshold (0-1, default 0.70) — fraction of observationsPoolMaxTokens where dropper fires without new data (1 disables)",
+    "  dropperPressureThreshold (0-1, default 0.70) — fraction of the note-memory budget where pruning fires without new data (1 disables)",
     "  providerIdleTimeoutMs (ms, 0=disabled, unset=inherit pi default) — body-idle timeout for background provider streams",
-    "  workerAttemptTimeoutMs (ms, 0/unset=disabled, max 2147483647) — hard elapsed deadline per worker/model attempt; a configured candidate's timeout engages its cooldown + the next fallback; the session fallback is tried once per stage, with no cooldown",
-    "  cacheRetention (none|short|long, unset=inherit pi's effective setting) — prompt-cache retention for the observer/reflector/dropper streams; left unset here on purpose, since pinning \"short\" downgrades a host whose effective setting is longer. \"long\" is opt-in, and adapters that lack it ignore the value",
-    "  compactAfterPreset / compactAfterPresets — auto-compaction preset curve selection + definitions (default curve 0.90@32k → 0.40@1M); replaces the flat 81000 default — a file compactAfterTokens of exactly 81000 is legacy residue and is dropped",
+    "  workerAttemptTimeoutMs (ms, 0/unset=disabled, max 2147483647) — hard elapsed deadline per worker/model attempt",
+    "  cacheRetention (none|short|long, unset=inherit pi's effective setting) — prompt-cache retention for the worker streams",
+    "  compactAfterPreset / compactAfterPresets — preset curve selection + definitions (default curve 0.90@32k → 0.40@1M)",
     "",
-    "Backward compat: old keys (overrideDefaultCompaction, noAutoCompact, passive)",
-    "are migrated to new keys at load time.",
+    "Migration: v2 and older keys (overrideDefaultCompaction, noAutoCompact, passive, compactionEngine, observationsPoolTargetTokens, observerPreambleMaxTokens, dropperInputMaxTokens, dropperPoolFullnessThreshold) are rewritten on disk by a two-phase, verified migration; see docs/MIGRATION-GUIDE.md.",
     "",
     "Env overrides:",
     "  PI_BLACKHOLE_PASSIVE=1  → compaction:off + memory:false",
-    "  PI_BLACKHOLE_COMPACTION  → override compaction setting",
-    "  PI_BLACKHOLE_COMPACTION_ENGINE → override compactionEngine setting",
+    "  PI_BLACKHOLE_COMPACTION  → override compaction setting (automatic|manual|off|auto)",
     "  PI_BLACKHOLE_COMPACTION_SUMMARY_MODE → override compactionSummaryMode setting",
+    "  PI_BLACKHOLE_COMPACT_AFTER_TOKENS / _RATIO / _RESERVE_TOKENS → override the value and force the matching shape",
     "  PI_BLACKHOLE_COMPACT_AFTER_PRESET → override the compaction preset curve selection",
     "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget",
     "  PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS → override reflection output budget",

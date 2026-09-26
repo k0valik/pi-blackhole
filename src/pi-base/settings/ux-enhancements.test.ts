@@ -8,7 +8,7 @@ import { actionRenderer } from "./fields/action";
 import { booleanRenderer } from "./fields/boolean";
 import { readonlyRenderer } from "./fields/readonly";
 import { createScopeSelector } from "./scope-selector";
-import { renderFooter, renderFieldDesc, renderTabBar } from "./render";
+import { renderFooter, renderFieldDesc, renderTabBar, estimateDescriptionRows } from "./render";
 import type {
   NumberField,
   EnumField,
@@ -312,6 +312,106 @@ describe("UX Enhancements - Submenus and Hints", () => {
       expect.arrayContaining(["  This setting is currently disabled.", "Enabled"]),
     );
     expect(colors["accent"] ?? []).not.toContain("Enabled");
+  });
+
+  it("renderFieldDesc renders the dynamic valueDescription in the accent slot", () => {
+    const colors: Record<string, string[]> = {};
+    const testTheme: any = {
+      ...mockTheme,
+      fg: (color: string, text: string) => {
+        colors[color] = colors[color] ?? [];
+        colors[color]!.push(text);
+        return text;
+      },
+    };
+    const mockState: any = { args: { theme: testTheme } };
+    const focusedRow: any = {
+      field: {
+        key: "observeAfterTokens",
+        label: "Take notes every",
+        type: "number",
+        min: 1_000,
+        max: 200_000,
+        valueDescription: (value: unknown) =>
+          value === 15_000
+            ? "At 15000 — a pass starts after ~15k new tokens (default)."
+            : undefined,
+      },
+      value: 15_000,
+    };
+
+    const lines: string[] = [];
+    renderFieldDesc(mockState, lines, 80, focusedRow);
+
+    expect(colors["accent"]).toEqual(
+      expect.arrayContaining(["At 15000 — a pass starts after ~15k new tokens (default)."]),
+    );
+    expect(lines.join("\n")).toContain("At 15000 — a pass starts after ~15k new tokens (default).");
+  });
+
+  it("renderFieldDesc renders a dim key legend for data fields", () => {
+    const colors: Record<string, string[]> = {};
+    const testTheme: any = {
+      ...mockTheme,
+      fg: (color: string, text: string) => {
+        colors[color] = colors[color] ?? [];
+        colors[color]!.push(text);
+        return text;
+      },
+    };
+    const mockState: any = { args: { theme: testTheme } };
+    const focusedRow: any = {
+      field: {
+        key: "tailBehavior",
+        label: "Recent messages kept visible",
+        type: "enum",
+        options: ["minimal", "pi-default"],
+        value: "minimal",
+      },
+      value: "minimal",
+    };
+
+    const lines: string[] = [];
+    renderFieldDesc(mockState, lines, 80, focusedRow);
+
+    expect(colors["dim"]).toContain("  key: tailBehavior");
+  });
+
+  it("renderFieldDesc omits the key legend for section rows", () => {
+    const lines: string[] = [];
+    const mockState: any = { args: { theme: mockTheme } };
+    const focusedRow: any = {
+      field: { key: "_sec_compaction", label: "Compaction", type: "section", value: "Compaction" },
+      value: "Compaction",
+    };
+
+    renderFieldDesc(mockState, lines, 80, focusedRow);
+
+    expect(lines.join("\n")).not.toContain("key:");
+  });
+
+  it("estimateDescriptionRows reserves at least the rendered description block height", () => {
+    const row: any = {
+      field: {
+        key: "observeAfterTokens",
+        label: "Take notes every",
+        type: "number",
+        min: 1_000,
+        max: 200_000,
+        description: "How much new conversation accumulates before the note-taker runs.",
+        valueDescription: () => "At 15000 — a pass starts after ~15k new tokens (default).",
+      },
+      value: 15_000,
+    };
+    const state: any = {
+      rows: [row],
+      cachedVisibleIndices: [0],
+      fieldSelected: 0,
+      args: { theme: mockTheme },
+    };
+    const lines: string[] = [];
+    renderFieldDesc(state, lines, 80, row);
+    expect(estimateDescriptionRows(state)).toBeGreaterThanOrEqual(lines.length);
   });
 
   it("modelRenderer submenu formats zero-match empty state and includes ctrl+w hint when filter is active", () => {
