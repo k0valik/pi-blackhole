@@ -21,6 +21,7 @@ import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
 import {
   CACHE_RETENTION_VALUES,
   DEFAULTS,
+  foldCompaction,
   normalizeCacheRetention,
   normalizeThresholdKnobs,
   type UnifiedConfig,
@@ -31,6 +32,23 @@ import { openChangelogView } from "../changelog/changelog.js";
 const CONFIG_FILENAME = "pi-blackhole-config.json";
 
 export const GLOBAL_CONFIG_DIR = join(getPiAgentDir(), "pi-blackhole");
+
+// ── Copy helpers ─────────────────────────────────────────────────────────────
+
+/** Compact token count for help copy: 20000 → "20k", 1000000 → "1M". */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+/** A `type: "section"` heading row (non-interactive full-width label). */
+function sectionRow(key: string, label: string) {
+  return { key, type: "section" as const, label, value: label };
+}
 
 // ── ConfigManager instance ───────────────────────────────────────────────────
 
@@ -45,139 +63,179 @@ export const config = new ConfigManager<UnifiedConfig>({
 
   fields: (cfg) => [
     // ── Compaction ──
+    sectionRow("_sec_compaction", "Compaction"),
     {
       key: "compaction",
       type: "enum",
-      label: "Compaction mode",
+      label: "When to compact",
       description:
-        "auto=trigger on threshold, manual=only /blackhole, off=auto:Pi handles, /blackhole:blackhole pipeline",
+        "How blackhole handles compaction of the chat history. Automatic compacts on its own when the threshold is reached; manual only compacts when you run /blackhole; off leaves compaction to Pi.",
       value: cfg.compaction,
-      options: ["auto", "manual", "off"],
+      options: ["automatic", "manual", "off"],
       optionLabels: {
-        auto: "auto — trigger on threshold",
-        manual: "manual — only /blackhole",
-        off: "off — auto:Pi handles, /blackhole:blackhole pipeline",
+        automatic: "automatic",
+        manual: "manual",
+        off: "off",
       },
-    },
-    {
-      key: "compactionEngine",
-      type: "enum",
-      label: "Compaction engine",
-      description: "blackhole=structured summary+OM, pi-default=built-in Pi summarization",
-      value: cfg.compactionEngine,
-      options: ["blackhole", "pi-default"],
-      optionLabels: {
-        blackhole: "blackhole — structured summary + OM",
-        "pi-default": "pi-default — built-in Pi summarization",
+      valueDescriptions: {
+        automatic: "blackhole compacts automatically when the threshold is reached (recommended).",
+        manual: "Only /blackhole compacts; memory notes are held until then.",
+        off: "blackhole steps aside and Pi handles compaction; /blackhole still works.",
       },
     },
     {
       key: "compactionSummaryMode",
       type: "enum",
-      label: "Summary history",
-      description:
-        "default=replace one complete summary, append=freeze automatic segments and rebase on /blackhole",
+      label: "How summaries are kept",
+      description: "What happens to earlier summaries when a new compaction happens.",
       value: cfg.compactionSummaryMode,
       options: ["default", "append"],
       optionLabels: {
-        default: "default — one complete replacement summary",
-        append: "append — immutable auto segments; /blackhole rebases",
+        default: "default",
+        append: "append",
+      },
+      valueDescriptions: {
+        default: "Each compaction replaces the previous summary with one current summary.",
+        append: "Every summary is kept as a separate part; /blackhole merges them back into one.",
       },
     },
     {
       key: "tailBehavior",
       type: "enum",
-      label: "Visible tail",
+      label: "Recent messages kept visible",
       description:
-        "minimal=keep last user message only (default), pi-default=keep Pi's preserved visible context",
+        "How much of the most recent chat stays on screen after a compaction. Everything before that point is summarized and removed from view.",
       value: cfg.tailBehavior,
       options: ["minimal", "pi-default"],
       optionLabels: {
-        minimal: "minimal — keep last user message only (default)",
-        "pi-default": "pi-default — keep Pi's preserved visible context",
+        minimal: "minimal",
+        "pi-default": "pi-default",
+      },
+      valueDescriptions: {
+        minimal: "Keep only your last message (default).",
+        "pi-default": "Keep roughly the last 20k tokens of chat.",
       },
     },
     {
       key: "midRunCompaction",
       type: "enum",
-      label: "Mid-run compaction",
-      description:
-        "resume=compact transparently and continue the same run, pause=interrupt and stop, off=only check when run ends (default)",
+      label: "Compacting during a long task",
+      description: "Whether blackhole may compact while a long task is still running.",
       value: cfg.midRunCompaction,
       options: ["resume", "pause", "off"],
       optionLabels: {
-        resume: "resume — transparent compact, same run (experimental)",
-        pause: "pause — interrupt, compact, and stop",
-        off: "off — only check when run ends (default)",
+        resume: "resume",
+        pause: "pause",
+        off: "off",
+      },
+      valueDescriptions: {
+        resume: "Compact mid-task and continue without interrupting (experimental).",
+        pause: "Interrupt the task, compact, and stop so you can review.",
+        off: "Only check the threshold between tasks (default).",
       },
     },
     {
       key: "showPreCompactionMessage",
       type: "boolean",
-      label: "Show pre-compaction output",
+      label: "Keep the last answer visible",
       description:
-        "Display-only copy (max 16 KiB) of the newest assistant output the compaction dropped. Never enters model context or memory.",
+        "After a compaction, re-display the newest answer that was scrolled out of view. Display only — never sent to the model.",
       value: cfg.showPreCompactionMessage,
       valueDescriptions: {
-        on: "Shown — recent output re-rendered below the compaction card",
-        off: "Hidden — compaction card only",
+        on: "The dropped answer is shown again below the compaction card (up to 16 KiB).",
+        off: "Only the compaction card is shown.",
+      },
+    },
+
+    // ── When to compact automatically ──
+    sectionRow("_sec_auto", "When to compact automatically"),
+    {
+      key: "compactAfterBy",
+      type: "enum",
+      label: "Auto-compact when",
+      description:
+        "How the auto-compaction point is chosen. A preset adapts to each model's context window; percent, fixed, and reserve are simple overrides.",
+      value: cfg.compactAfterBy ?? "preset",
+      options: ["preset", "percent", "tokens", "reserve"],
+      optionLabels: {
+        preset: "preset",
+        percent: "percent",
+        tokens: "tokens",
+        reserve: "reserve",
+      },
+      valueDescriptions: {
+        preset:
+          "The threshold follows a curve scaled to each model's context window (recommended).",
+        percent:
+          "The same fraction of every model's window; add a floor or ceiling to stay sane across models.",
+        tokens: "The same fixed number of tokens on every model.",
+        reserve:
+          "Keep a fixed amount of context free; compact once the remaining headroom would drop below it.",
+      },
+    },
+    {
+      key: "compactAfterRatio",
+      type: "number",
+      label: "Percent of context window",
+      description:
+        "Compact once the conversation reaches this percentage of the active model's context window. Add a floor and ceiling if you switch between very different model sizes.",
+      value: cfg.compactAfterRatio ?? 0,
+      min: 0,
+      max: 100,
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "percent",
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "Not set — pick a percentage to use this shape.";
+        const small = Math.round((256_000 * n) / 100);
+        const big = Math.round((1_000_000 * n) / 100);
+        return `At ${n}% — a 256k-token model compacts near ${fmtTokens(small)} tokens; a 1M model near ${fmtTokens(big)} unless a ceiling is set.`;
       },
     },
     {
       key: "compactAfterTokens",
       type: "number",
-      label: "Auto-compact threshold (tokens)",
+      label: "Fixed token count",
       description:
-        "Explicit fixed token threshold; wins over the window-derived knobs and the preset curve. 0 = not set (a preset curve, ratio, or reserve governs).",
+        "Compact once the conversation reaches this exact number of tokens, regardless of the model's context window.",
       value: cfg.compactAfterTokens ?? 0,
       min: 0,
       max: 500_000,
       step: 1_000,
-    },
-    {
-      key: "retainedToolOutputMaxTokens",
-      type: "number",
-      label: "Retained tool outputs",
-      description:
-        "Token budget for historical tool-output text; newest is retained first and older text remains available via recall",
-      value: cfg.retainedToolOutputMaxTokens,
-      min: 1_000,
-      max: 200_000,
-      step: 1_000,
-    },
-    // Context-window-derived knobs (issue #60) + preset curve (spec §4). Always
-    // visible: 0 means "not set" (the loader treats 0 as unset, so the selected
-    // preset curve governs). Type a value to engage the knob; set it back to 0
-    // to turn it off. The tokens field above wins whenever it holds an explicit
-    // non-zero value; ratio wins over reserve when both are set; the preset
-    // select (below) picks the curve that applies when no numeric knob is set.
-    {
-      key: "compactAfterRatio",
-      type: "number",
-      label: "Auto-compact ratio (of context window)",
-      description:
-        "Compact when the session reaches this fraction of the active model's context window (e.g. 0.65 on a 200k model fires at ~130k). 0 = not set. An explicit token threshold wins; beats the reserve knob and the preset curve.",
-      value: cfg.compactAfterRatio ?? 0,
-      min: 0,
-      max: 1,
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "tokens",
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — no fixed threshold.";
+        return `At ${n} — compaction starts at ${fmtTokens(n)} tokens on every model.`;
+      },
     },
     {
       key: "compactReserveTokens",
       type: "number",
-      label: "Auto-compact headroom reserve",
+      label: "Headroom reserve",
       description:
-        "Alternative window-derived knob: compact when only this many tokens of headroom remain (threshold = window − reserve). 0 = not set. An explicit token threshold wins; ratio wins when both are set.",
+        "Keep this many tokens of context free — compact once the remaining headroom would drop below it (threshold = window − reserve). Keeps a constant margin on any model size.",
       value: cfg.compactReserveTokens ?? 0,
       integer: true,
       min: 0,
       max: 2_000_000,
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "reserve",
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — no reserve (this shape is inactive).";
+        const small = Math.max(1, 200_000 - n);
+        const big = Math.max(1, 1_000_000 - n);
+        return `At ${n} — a 200k model compacts near ${fmtTokens(small)} tokens; a 1M model near ${fmtTokens(big)}.`;
+      },
     },
     {
       key: "compactAfterPreset",
       type: "enum",
-      label: "Compaction threshold preset",
+      label: "Preset",
       description:
-        "Window-scaled curve that sets the threshold when no numeric knob above is set (default: compact at 90% of a 32k window, falling to 40% at 1M). To edit the curve or add presets, hand-edit compactAfterPresets in the config file.",
+        "Which window-scaled curve sets the compaction point. Edit curves in the config file under compactAfterPresets.",
       value: cfg.compactAfterPreset ?? "default",
       // Options = built-in preset names + any user-added names from the file
       // (same effective-presets merge the resolver uses, so the modal list and
@@ -186,240 +244,354 @@ export const config = new ConfigManager<UnifiedConfig>({
       optionLabels: Object.fromEntries(
         Object.keys(effectivePresets(cfg)).map((name) => [
           name,
-          name === "default"
-            ? "default — falling curve (0.90 @ 32k → 0.40 @ 1M)"
-            : `${name} (custom preset)`,
+          name === "default" ? "default" : `${name} (custom)`,
         ]),
       ),
+      valueDescriptions: {
+        default: "Gently falling curve: ~90% of a small window, ~40% of a 1M window.",
+      },
+      depth: 1,
+      visibleWhen: (v) => v.get("compactAfterBy") === "preset",
+    },
+    {
+      key: "compactAfterMinTokens",
+      type: "number",
+      label: "Never compact below",
+      description:
+        "Never compact before the conversation grows past this many tokens, whatever the percentage or preset says. Protects you when you switch to a smaller-context model and the percentage alone would compact far too early.",
+      value: cfg.compactAfterMinTokens ?? 0,
+      min: 0,
+      max: 2_000_000,
+      step: 1_000,
+      depth: 1,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — no floor (default).";
+        return `At ${n} — never compacts before ${fmtTokens(n)} tokens, even on a smaller model.`;
+      },
+    },
+    {
+      key: "compactAfterMaxTokens",
+      type: "number",
+      label: "Never compact later than",
+      description:
+        "Never let the conversation grow past this many tokens before compacting, whatever the percentage or preset says. Useful on very large windows where a percentage would wait far too long.",
+      value: cfg.compactAfterMaxTokens ?? 0,
+      min: 0,
+      max: 2_000_000,
+      step: 1_000,
+      depth: 1,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — no ceiling (default).";
+        return `At ${n} — compacts by ${fmtTokens(n)} tokens even on a very large window.`;
+      },
     },
 
-    // ── Observational Memory ──
+    // ── Context budgets ──
+    sectionRow("_sec_context", "Context budgets"),
+    {
+      key: "retainedToolOutputMaxTokens",
+      type: "number",
+      label: "Tool output kept",
+      description:
+        "How much recent tool and command output stays in context. Older output is replaced by a recall pointer, so nothing is lost — it just is not sent to the model every turn.",
+      value: cfg.retainedToolOutputMaxTokens,
+      min: 1_000,
+      max: 200_000,
+      step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0)
+          return "At 0 — no limit; all tool output stays in context.";
+        return `At ${n} — the newest ~${fmtTokens(n)} tokens of tool output stay in context${n === 20_000 ? " (default)" : ""}.`;
+      },
+    },
+    {
+      key: "recallResponseMaxChars",
+      type: "number",
+      label: "Recall answer size",
+      description:
+        "Largest single answer the recall tool may return, so one huge old message cannot flood the context. Full content stays reachable through paged drill-downs.",
+      value: cfg.recallResponseMaxChars,
+      min: 0,
+      max: 2_000_000,
+      step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — no cap on a single recall answer.";
+        const toks = Math.round(n / 4);
+        return `At ${n} — one recall answer is capped at ~${fmtTokens(n)} characters (~${fmtTokens(toks)} tokens)${n === 48_000 ? " (default)" : ""}.`;
+      },
+    },
+
+    // ── Memory — behavior ──
+    sectionRow("_sec_memory_behavior", "Memory — behavior"),
     {
       key: "memory",
       type: "boolean",
       label: "Observational memory",
-      description: "Enable OM workers (observer, reflector, dropper) and content injection",
+      description:
+        "Background jobs that read your conversation and keep durable notes and insights across compactions.",
       value: cfg.memory,
       valueDescriptions: {
-        on: "Active — OM workers + content injection enabled",
-        off: "Suspended — OM disabled",
+        on: "Memory jobs run and their notes are included in compactions (default).",
+        off: "No memory jobs and no memory content; compaction still works.",
       },
-    },
-    {
-      key: "sessionFallback",
-      type: "boolean",
-      label: "Session model fallback",
-      description:
-        "off=skip stage when all OM models fail, instead of falling back to the main coding model",
-      value: cfg.sessionFallback ?? true,
     },
     {
       key: "observeAfterTokens",
       type: "number",
-      label: "Observer threshold",
-      description: "Tokens accumulated since last observer run before triggering next observe",
+      label: "Take notes every",
+      description:
+        "How much new conversation accumulates before the note-taker runs. Lower keeps memory more current at the cost of more background calls.",
       value: cfg.observeAfterTokens,
       min: 1_000,
       max: 200_000,
       step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        return `At ${n} — a note-taking pass starts after ~${fmtTokens(n)} new tokens${n === 15_000 ? " (default)" : ""}.`;
+      },
     },
     {
       key: "reflectAfterTokens",
       type: "number",
-      label: "Reflect + dropper threshold",
-      description: "Tokens accumulated since last reflect before triggering reflector and dropper",
+      label: "Build insights every",
+      description:
+        "How much new conversation accumulates before notes are distilled into durable insights and memory is pruned of low-value notes.",
       value: cfg.reflectAfterTokens,
       min: 1_000,
       max: 200_000,
       step: 1_000,
-    },
-    {
-      key: "observationsPoolMaxTokens",
-      type: "number",
-      label: "Observation pool max",
-      description:
-        "Full-fold pressure and max estimated rendered observation-line tokens in compaction output",
-      value: cfg.observationsPoolMaxTokens,
-      min: 1_000,
-      max: 200_000,
-      step: 1_000,
-    },
-    {
-      key: "reflectionsPoolMaxTokens",
-      type: "number",
-      label: "Reflection output max",
-      description:
-        "Max estimated rendered reflection-line tokens in compaction output. 0 disables the cap. Full source records remain available through recall.",
-      value: cfg.reflectionsPoolMaxTokens,
-      min: 0,
-      max: 200_000,
-      step: 1_000,
-    },
-    {
-      key: "observationsPoolTargetTokens",
-      type: "number",
-      label: "Observation pool target",
-      description: "Target tokens after dropper prunes (defaults to half of pool max)",
-      value: cfg.observationsPoolTargetTokens,
-      min: 500,
-      max: 200_000,
-      step: 500,
-    },
-    {
-      key: "reflectorInputMaxTokens",
-      type: "number",
-      label: "Reflector input max",
-      description: "Max prompt tokens for reflector model input (rolling window cap)",
-      value: cfg.reflectorInputMaxTokens,
-      min: 1_000,
-      max: 500_000,
-      step: 1_000,
-    },
-    {
-      key: "dropperInputMaxTokens",
-      type: "number",
-      label: "Dropper input max",
-      description: "Max prompt tokens for dropper model input (rolling window cap)",
-      value: cfg.dropperInputMaxTokens,
-      min: 1_000,
-      max: 500_000,
-      step: 1_000,
-    },
-    {
-      key: "observerChunkMaxTokens",
-      type: "number",
-      label: "Observer chunk max",
-      description: "Max source entry tokens sent to observer per chunk",
-      value: cfg.observerChunkMaxTokens,
-      min: 1_000,
-      max: 200_000,
-      step: 1_000,
-    },
-    {
-      key: "observerPreambleMaxTokens",
-      type: "number",
-      label: "Observer preamble max",
-      description: "Preamble budget in manual compaction mode (0=auto-compute 30% of chunk)",
-      value: cfg.observerPreambleMaxTokens,
-      min: 0,
-      max: 100_000,
-      step: 500,
+      valueDescription: (v) => {
+        const n = Number(v);
+        return `At ${n} — insights are built and memory is pruned after ~${fmtTokens(n)} new tokens${n === 25_000 ? " (default)" : ""}.`;
+      },
     },
     {
       key: "dropperPressureThreshold",
       type: "number",
-      label: "Dropper pressure threshold",
+      label: "Prune memory when",
       description:
-        "Fraction of observationsPoolMaxTokens that triggers pressure-driven dropper (1 disables)",
+        "How full note memory gets, as a share of the note memory budget, before low-value notes are pruned. Pruning always needs this threshold.",
       value: cfg.dropperPressureThreshold,
       min: 0.01,
       max: 1,
       step: 0.01,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "Not set — pruning needs a positive threshold.";
+        const pct = Math.round(n * 100);
+        return `At ${pct}% — pruning starts once note memory is ~${pct}% full${n === 0.7 ? " (default)" : ""}. Lower prunes earlier; higher keeps more notes.`;
+      },
+    },
+
+    // ── Memory — sizes ──
+    sectionRow("_sec_memory_sizes", "Memory — sizes"),
+    {
+      key: "observationsPoolMaxTokens",
+      type: "number",
+      label: "Note memory budget",
+      description:
+        "How much note text is kept in the memory sent to the model. Once saved notes reach this size, blackhole runs a full memory maintenance pass that keeps the most useful notes.",
+      value: cfg.observationsPoolMaxTokens,
+      min: 1_000,
+      max: 200_000,
+      step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        return `At ${n} — memory is maintained once notes reach ~${fmtTokens(n)} tokens${n === 20_000 ? " (default)" : ""}. Raise to retain more detail; lower to send less memory every turn.`;
+      },
     },
     {
-      key: "dropperPoolFullnessThreshold",
+      key: "reflectionsPoolMaxTokens",
       type: "number",
-      label: "Dropper pool fullness threshold",
+      label: "Insight memory budget",
       description:
-        "Min observation-pool fullness (fraction of pool max) before the dropper runs (0-1, default 0.10)",
-      value: cfg.dropperPoolFullnessThreshold,
-      min: 0.01,
-      max: 1,
-      step: 0.01,
+        "How much insight text is kept in the memory sent to the model. Older insights drop out of view but stay available through recall.",
+      value: cfg.reflectionsPoolMaxTokens,
+      min: 0,
+      max: 200_000,
+      step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — keep all insights.";
+        return `At ${n} — the newest ~${fmtTokens(n)} tokens of insights are kept${n === 8_000 ? " (default)" : ""}.`;
+      },
+    },
+    {
+      key: "observerChunkMaxTokens",
+      type: "number",
+      label: "Conversation read per pass",
+      description:
+        "How much new conversation the note-taker reads in one pass. Anything beyond this is read on a later pass.",
+      value: cfg.observerChunkMaxTokens,
+      min: 1_000,
+      max: 200_000,
+      step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        return `At ${n} — up to ~${fmtTokens(n)} tokens of conversation per pass${n === 40_000 ? " (default)" : ""}.`;
+      },
+    },
+    {
+      key: "reflectorInputMaxTokens",
+      type: "number",
+      label: "Memory read per job",
+      description:
+        "Largest memory snapshot an insight-building or pruning job reads at once. Lower is cheaper but sees less context.",
+      value: cfg.reflectorInputMaxTokens,
+      min: 1_000,
+      max: 500_000,
+      step: 1_000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        return `At ${n} — up to ~${fmtTokens(n)} tokens of memory per job${n === 80_000 ? " (default)" : ""}.`;
+      },
+    },
+
+    // ── Advanced ──
+    sectionRow("_sec_advanced", "Advanced"),
+    {
+      key: "sessionFallback",
+      type: "boolean",
+      label: "Fall back to session model",
+      description: "What to do when every model configured for a memory job fails.",
+      value: cfg.sessionFallback ?? true,
+      valueDescriptions: {
+        on: "Use your main chat model for that memory job (default).",
+        off: "Skip that memory update instead of spending your chat model on it.",
+      },
     },
     {
       key: "agentMaxTurns",
       type: "number",
-      label: "Max turns per agent",
-      description: "Shared turn cap for background memory agents",
+      label: "Max steps per memory job",
+      description:
+        "Maximum tool and reasoning steps a single background memory job may take before it stops.",
       value: cfg.agentMaxTurns,
       min: 1,
       max: 100,
       step: 1,
+      valueDescription: (v) => {
+        const n = Number(v);
+        return `At ${n} — up to ${n} step${n === 1 ? "" : "s"} per job${n === 16 ? " (default)" : ""}.`;
+      },
     },
     {
-      key: "providerIdleTimeoutMs",
-      type: "number",
-      label: "Provider idle timeout (ms)",
+      key: "fullFoldAlways",
+      type: "boolean",
+      label: "Keep early notes through first compaction",
       description:
-        "Body-idle timeout for background provider streams; 0 = disabled, unset = inherit pi's default",
-      value: cfg.providerIdleTimeoutMs ?? 0,
-      min: 0,
-      max: 3_600_000,
-      step: 1000,
+        "Keep notes and insights gathered early in a session through its first compaction, instead of letting that compaction start memory fresh.",
+      value: cfg.fullFoldAlways,
+      valueDescriptions: {
+        on: "Early memory survives the first compaction (default).",
+        off: "The first compaction starts memory from scratch.",
+      },
     },
     {
       key: "cacheRetention",
       type: "enum",
-      label: "Worker prompt-cache retention",
+      label: "Memory job prompt caching",
       description:
-        "Provider-neutral prompt-cache retention for the memory workers; unset defers to pi's effective setting. Adapters ignore values they do not support.",
+        "Whether memory jobs ask the provider to cache their prompts. Caching can cut cost and latency when the same prompt is reused.",
       // "unset" is a modal-only sentinel: validate() drops it before the config
       // is persisted, so an untouched field never pins a value in the file.
       value: cfg.cacheRetention ?? "unset",
       options: ["unset", ...CACHE_RETENTION_VALUES],
       optionLabels: {
-        unset: "unset — inherit pi's effective setting",
-        none: "none — no prompt caching where supported",
-        short: "short — pi's provider default",
-        long: "long — extended retention where supported",
+        unset: "unset",
+        none: "none",
+        short: "short",
+        long: "long",
+      },
+      valueDescriptions: {
+        unset: "Use pi's default (short).",
+        none: "Do not request caching.",
+        short: "pi's default retention.",
+        long: "Extended retention where the provider supports it.",
+      },
+    },
+    {
+      key: "providerIdleTimeoutMs",
+      type: "number",
+      label: "Memory job idle timeout",
+      description:
+        "How long a memory job's model connection may go silent before it is treated as dead. 0 disables the timeout; unset uses pi's default.",
+      value: cfg.providerIdleTimeoutMs ?? 0,
+      min: 0,
+      max: 3_600_000,
+      step: 1000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — disabled (default).";
+        return `At ${n} — a job's connection may go silent this long before it is treated as dead.`;
       },
     },
     {
       key: "workerAttemptTimeoutMs",
       type: "number",
-      label: "Worker attempt timeout (ms)",
+      label: "Memory job attempt timeout",
       description:
-        "Hard elapsed deadline per worker/model attempt; timeout aborts the call and tries the next fallback; 0 = disabled",
+        "Hard time limit for one memory-job model attempt. When it expires, blackhole aborts and tries the next fallback model. 0 disables it.",
       value: cfg.workerAttemptTimeoutMs ?? 0,
       min: 0,
       max: 3_600_000,
       step: 1000,
+      valueDescription: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "At 0 — disabled (default).";
+        return `At ${n} — one attempt is aborted after this long and the next fallback is tried.`;
+      },
     },
-    {
-      key: "fullFoldAlways",
-      type: "boolean",
-      label: "Preserve OM on first compaction",
-      description:
-        "When true, early reflections/drops survive the first compaction in a fresh session",
-      value: cfg.fullFoldAlways,
-    },
-
-    // ── UI ──
     {
       key: "statusBar",
       type: "boolean",
       label: "Footer status bar",
-      description: "Show token gauges (O/P/X) and worker events in the footer",
+      description: "Show the footer memory gauges and background job activity.",
       value: cfg.statusBar,
+      valueDescriptions: {
+        on: "Gauges and job activity shown (default).",
+        off: "Hidden.",
+      },
     },
     {
       key: "showWorkerNotifications",
       type: "boolean",
-      label: "Worker notifications",
+      label: "Memory job notifications",
       description:
-        "Show routine observer/reflector/dropper progress toasts; warnings, errors and compaction notices always show",
+        "Show routine progress messages while background memory jobs run. Warnings and errors always show.",
       value: cfg.showWorkerNotifications,
       valueDescriptions: {
-        on: "On — routine worker progress toasts shown",
-        off: "Off — quiet; warnings/errors only",
+        on: "Routine progress messages shown (default).",
+        off: "Quiet; warnings and errors only.",
       },
     },
-
-    // ── Debug ──
     {
       key: "debug",
       type: "boolean",
       label: "Debug snapshots",
-      description: "Write detailed debug snapshots to /tmp/pi-blackhole-debug.json",
+      description:
+        "Save a detailed snapshot of each compaction to /tmp/pi-blackhole-debug.json for troubleshooting.",
       value: cfg.debug,
+      valueDescriptions: {
+        on: "Snapshots written.",
+        off: "None (default).",
+      },
     },
     {
       key: "debugLog",
       type: "boolean",
       label: "Debug JSONL logging",
-      description: "Write structured JSONL debug logs to agent directory",
+      description:
+        "Append a rolling structured log of background activity to ~/.pi/agent/pi-blackhole/debug.ndjson.",
       value: cfg.debugLog,
+      valueDescriptions: {
+        on: "Log written (rotates at 10 MB).",
+        off: "None (default).",
+      },
     },
   ],
 
@@ -432,7 +604,16 @@ export const config = new ConfigManager<UnifiedConfig>({
     const parsed = { ...raw } as Partial<UnifiedConfig>;
 
     // ── Migration: legacy keys → new surface ──
-    if (parsed.compaction === undefined && parsed.compactionEngine === undefined) {
+    // Fold the two-key compaction surface (plan-09 §3.1) with the same helper
+    // the file loader uses, so the modal and the runtime agree.
+    const foldedCompaction = foldCompaction(
+      (parsed as Record<string, unknown>).compaction,
+      (parsed as Record<string, unknown>).compactionEngine,
+    );
+    if (foldedCompaction !== undefined) parsed.compaction = foldedCompaction;
+    delete (parsed as Record<string, unknown>).compactionEngine;
+
+    if (parsed.compaction === undefined) {
       if (parsed.passive === true) {
         parsed.compaction = "off";
         parsed.memory = false;
@@ -440,17 +621,17 @@ export const config = new ConfigManager<UnifiedConfig>({
         parsed.compaction = "manual";
       }
       if (parsed.overrideDefaultCompaction === true) {
-        parsed.compactionEngine = "blackhole";
+        if (parsed.compaction === undefined) parsed.compaction = "automatic";
         if (parsed.tailBehavior === undefined) {
           parsed.tailBehavior = "minimal";
         }
       } else if (parsed.overrideDefaultCompaction === false) {
-        parsed.compactionEngine = "pi-default";
+        if (parsed.compaction === undefined) parsed.compaction = "off";
       }
-      delete (parsed as Record<string, unknown>).passive;
-      delete (parsed as Record<string, unknown>).noAutoCompact;
-      delete (parsed as Record<string, unknown>).overrideDefaultCompaction;
     }
+    delete (parsed as Record<string, unknown>).passive;
+    delete (parsed as Record<string, unknown>).noAutoCompact;
+    delete (parsed as Record<string, unknown>).overrideDefaultCompaction;
 
     // ── Legacy passive env vars (Layer 4, highest priority) ──
     const envPassive =
@@ -474,19 +655,10 @@ export const config = new ConfigManager<UnifiedConfig>({
     const envCompaction = process.env.PI_BLACKHOLE_COMPACTION;
     if (envCompaction !== undefined) {
       const trimmed = envCompaction.trim().toLowerCase();
-      if (!["auto", "manual", "off"].includes(trimmed)) {
+      // "auto" is the pre-plan alias; env vars are not migrated.
+      if (!["automatic", "manual", "off", "auto"].includes(trimmed)) {
         console.warn(
           `blackhole: invalid PI_BLACKHOLE_COMPACTION value "${envCompaction}"; ignoring`,
-        );
-      }
-    }
-
-    const envCompactionEngine = process.env.PI_BLACKHOLE_COMPACTION_ENGINE;
-    if (envCompactionEngine !== undefined) {
-      const trimmed = envCompactionEngine.trim().toLowerCase();
-      if (!["blackhole", "pi-default"].includes(trimmed)) {
-        console.warn(
-          `blackhole: invalid PI_BLACKHOLE_COMPACTION_ENGINE value "${envCompactionEngine}"; ignoring`,
         );
       }
     }
@@ -542,18 +714,15 @@ export const config = new ConfigManager<UnifiedConfig>({
       "retainedToolOutputMaxTokens",
       "observationsPoolMaxTokens",
       "reflectionsPoolMaxTokens",
-      "observationsPoolTargetTokens",
       "reflectorInputMaxTokens",
-      "dropperInputMaxTokens",
       "observerChunkMaxTokens",
-      "observerPreambleMaxTokens",
       "agentMaxTurns",
     ];
     for (const k of REQUIRED_NUMERIC_KEYS) {
       // SAFETY: merged is a plain config object; indexing by dynamic key needs
       // the Record view to read/write numeric fields uniformly.
       const v = (merged as unknown as Record<string, unknown>)[k];
-      const minVal = k === "observerPreambleMaxTokens" || k === "reflectionsPoolMaxTokens" ? 0 : 1;
+      const minVal = k === "reflectionsPoolMaxTokens" ? 0 : 1;
       if (
         typeof v !== "number" ||
         !Number.isFinite(v) ||
@@ -571,20 +740,6 @@ export const config = new ConfigManager<UnifiedConfig>({
     const dpt = merged.dropperPressureThreshold;
     if (typeof dpt !== "number" || !Number.isFinite(dpt) || dpt <= 0 || dpt > 1) {
       merged.dropperPressureThreshold = DEFAULTS.dropperPressureThreshold;
-    }
-
-    // dropperPoolFullnessThreshold — must be in (0, 1]
-    const dpf = merged.dropperPoolFullnessThreshold;
-    if (typeof dpf !== "number" || !Number.isFinite(dpf) || dpf <= 0 || dpf > 1) {
-      merged.dropperPoolFullnessThreshold = DEFAULTS.dropperPoolFullnessThreshold;
-    }
-
-    // observationsPoolTargetTokens — must be < max
-    if (
-      merged.observationsPoolTargetTokens === undefined ||
-      merged.observationsPoolTargetTokens >= merged.observationsPoolMaxTokens
-    ) {
-      merged.observationsPoolTargetTokens = Math.floor(merged.observationsPoolMaxTokens / 2);
     }
 
     return merged;

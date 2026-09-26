@@ -605,11 +605,16 @@ export function createSettingsModalBody<F extends Field>(
     // Tab focus back to the field zone.
     const totalCount = totalVisibleItems(state);
     const lastIndex = Math.max(0, totalCount - 1);
+    // In read-only mode the field zone is non-interactive: up/down only scroll
+    // the list, so they must NOT clear the tab/action ring focus. Otherwise the
+    // pre-focused action (e.g. "Edit" in the display-all modal) loses its
+    // highlight the moment the user scrolls, hiding the way into edit mode.
     if (
-      matchesKey(data, "up") ||
-      matchesKey(data, "down") ||
-      matchesKey(data, "pageUp") ||
-      matchesKey(data, "pageDown")
+      !readOnly &&
+      (matchesKey(data, "up") ||
+        matchesKey(data, "down") ||
+        matchesKey(data, "pageUp") ||
+        matchesKey(data, "pageDown"))
     ) {
       state.tabActionFocus = -1;
     }

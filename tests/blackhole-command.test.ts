@@ -193,8 +193,8 @@ describe("/blackhole command", () => {
     const call = ctx.compact.mock.calls[0][0];
     call.onComplete();
 
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("42 source entries");
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("5.0k tok");
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("compacted 42 conversation entries");
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("5.0k tokens");
   });
 
   it("sends onComplete fallback notification without stats", async () => {
@@ -207,7 +207,7 @@ describe("/blackhole command", () => {
     const call = ctx.compact.mock.calls[0][0];
     call.onComplete();
 
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("Compacted with blackhole");
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("blackhole: compacted");
   });
 
   it("handles onError for cancellation", async () => {
@@ -221,7 +221,7 @@ describe("/blackhole command", () => {
     call.onError(new Error("Compaction cancelled"));
 
     expect(notifyCalls[notifyCalls.length - 1].level).toBe("warning");
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("Nothing to compact");
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("blackhole: nothing to compact");
   });
 
   it("handles onError for general failure", async () => {
@@ -235,7 +235,9 @@ describe("/blackhole command", () => {
     call.onError(new Error("Model API error"));
 
     expect(notifyCalls[notifyCalls.length - 1].level).toBe("error");
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("Compaction failed: Model API error");
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain(
+      "blackhole: compaction failed — Model API error",
+    );
   });
 
   it("/blackhole om-off disables memory and saves config", async () => {
@@ -318,7 +320,7 @@ describe("/blackhole command", () => {
     const ctx = makeHandlerArgs();
     await handlerMap.get("blackhole")!("", ctx);
 
-    expect(notifyCalls[0].msg).toContain("pending entries flushed");
+    expect(notifyCalls[0].msg).toContain("blackhole: pending memory flushed");
     expect(existsSync(pendingFile)).toBe(false); // cleared after flush
     // Should call compact after flush
     expect(ctx.compact).toHaveBeenCalledTimes(1);

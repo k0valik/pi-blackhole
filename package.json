@@ -25,6 +25,7 @@
   },
   "files": [
     "dist/",
+    "docs/",
     "*.ts",
     "src/**/*.ts",
     "!src/**/*.test.ts",

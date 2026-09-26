@@ -351,6 +351,14 @@ export function renderBody(
   return lines;
 }
 
+/** Slot-2 help text for the focused value (boolean/enum/number), if defined. */
+function valueDescriptionText(field: Field, value: unknown): string | undefined {
+  if (field.type === "boolean") return field.valueDescriptions?.[value ? "on" : "off"];
+  if (field.type === "enum") return field.valueDescriptions?.[value as string];
+  if (field.type === "number") return field.valueDescriptions?.[String(value)];
+  return undefined;
+}
+
 export function renderFieldDesc(
   state: BodyState,
   lines: string[],
@@ -391,24 +399,7 @@ export function renderFieldDesc(
   }
 
   // valueDescriptions: per-value help text for boolean/enum/number
-  let vdText: string | undefined;
-  if (field.type === "boolean") {
-    const vd = field.valueDescriptions;
-    if (vd) {
-      const key = focused.value ? "on" : "off";
-      vdText = vd[key as "on" | "off"];
-    }
-  } else if (field.type === "enum") {
-    const vd = field.valueDescriptions;
-    if (vd) {
-      vdText = vd[focused.value as string];
-    }
-  } else if (field.type === "number") {
-    const vd = field.valueDescriptions;
-    if (vd) {
-      vdText = vd[String(focused.value)];
-    }
-  }
+  const vdText = valueDescriptionText(field, focused.value);
   if (vdText) {
     lines.push("");
     const vdColor = field.disabled ? "muted" : "accent";
@@ -417,8 +408,20 @@ export function renderFieldDesc(
     }
   }
 
-  // Validation warning: show when the focused row's current value
-  // violates its type constraints (enum membership, number range, etc.).
+  // Dynamic value-aware help line (slot 2) for knobs whose meaning depends on
+  // the current number, e.g. "At 20000 — memory is pruned once notes reach ~20k".
+  const dynamicVd = field.valueDescription?.(focused.value);
+  if (dynamicVd) {
+    lines.push("");
+    const vdColor = field.disabled ? "muted" : "accent";
+    for (const line of wrapLine(state.args.theme.fg(vdColor, dynamicVd), Math.max(1, width - 4))) {
+      lines.push(`  ${line}`);
+    }
+  }
+
+  // Key legend (§4.8): surface the underlying JSON key so a user can map the UI
+  // label to the file and tune it by hand. Rendered from the field's own key so
+  // it can never drift from the real key.
   const warning = validateFieldValue(focused.field, focused.value);
   if (warning) {
     lines.push("");
@@ -426,24 +429,31 @@ export function renderFieldDesc(
       lines.push(state.args.theme.fg("warning", `  ${line}`));
     }
   }
+
+  if (field.key && field.type !== "section") {
+    lines.push(state.args.theme.fg("dim", `  key: ${field.key}`));
+  }
 }
 
 /** Tiny heuristic so renderBody knows roughly how much room the
- *  description block will eat. Real content is recomputed per render
- *  but we want the list to start scrolling before that math kicks in. */
+ *  description block will eat. Every block renderFieldDesc emits starts with a
+ *  blank line, so count each present block as two rows; over-reserving only
+ *  shrinks the list, whereas under-reserving truncates the help copy. */
 export function estimateDescriptionRows(state: BodyState): number {
   const focused = focusedRow(state);
   if (!focused) return 0;
-  let estimate = 0;
-  if (focused.field.description || focused.field.disabled) estimate = 2;
   const field = focused.field;
+  let rows = 0;
+  if (field.description || field.disabled) rows += 2;
+  if (valueDescriptionText(field, focused.value)) rows += 2;
+  if (field.valueDescription?.(focused.value)) rows += 2;
+  if (validateFieldValue(field, focused.value)) rows += 2;
   if (field.type === "number") {
     if (typeof field.min === "number" || typeof field.max === "number" || field.integer) {
-      estimate = Math.max(estimate, 2);
+      rows += 1;
     }
   }
-  // Validation warning
-  const warning = validateFieldValue(focused.field, focused.value);
-  if (warning) estimate = Math.max(estimate, 1);
-  return estimate;
+  // Key legend is always rendered for data fields (see renderFieldDesc).
+  if (field.type !== "section") rows += 1;
+  return rows;
 }

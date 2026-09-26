@@ -107,7 +107,7 @@ describe("makeModelResolver — per-stage failure notifications", () => {
     const observerResult = await resolver("observer");
     expect(observerResult).toBeUndefined();
     expect(notifyCalls.length).toBe(1);
-    expect(notifyCalls[0]!.message).toContain("observer skipped");
+    expect(notifyCalls[0]!.message).toContain("skipping note-taking");
 
     // Pipeline resets the flag at each stage boundary
     runtime.resolveFailureNotified = false;
@@ -117,7 +117,7 @@ describe("makeModelResolver — per-stage failure notifications", () => {
     const reflectorResult = await resolver("reflector");
     expect(reflectorResult).toBeUndefined();
     expect(notifyCalls.length).toBe(2);
-    expect(notifyCalls[1]!.message).toContain("reflector skipped");
+    expect(notifyCalls[1]!.message).toContain("skipping insight-building");
   });
 });
 
@@ -204,18 +204,17 @@ describe("anyStageDue with cursors", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
 
-  test("dropper due when pool fullness passes a lowered fullness threshold", async () => {
+  test("dropper due via the new-data path once the pool clears the constant floor", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const { anyStageDue } = await import("../src/om/consolidation.js");
     const runtime = new Runtime();
     runtime.config.observeAfterTokens = 100000;
     runtime.config.reflectAfterTokens = 5;
-    runtime.config.observationsPoolMaxTokens = 100_000;
-    runtime.config.dropperPoolFullnessThreshold = 0.01; // 1%
+    runtime.config.observationsPoolMaxTokens = 10_000;
     runtime.config.dropperPressureThreshold = 0.7;
     runtime.config.reflectorInputMaxTokens = 10_000; // pressure needs 7,000 — pool only has 1,400
     // No dropper cursor → token condition is rawTokensSinceDropCoverage ≥ 5 (msg-1 ≈ 50 tokens).
-    // Pool: 2 obs × 700 = 1,400 / 100,000 = 1.4% ≥ 1% → dropper due.
+    // Pool: 2 obs × 700 = 1,400 / 10,000 = 14% ≥ the constant 10% floor → dropper due.
     // Reflector is silenced by advancing its cursor past all entries.
     const entries = [
       {
@@ -257,14 +256,13 @@ describe("anyStageDue with cursors", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(true);
   });
 
-  test("dropper NOT due when pool fullness is below the configured threshold", async () => {
+  test("dropper NOT due when pool fullness is below the constant floor", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const { anyStageDue } = await import("../src/om/consolidation.js");
     const runtime = new Runtime();
     runtime.config.observeAfterTokens = 100000;
     runtime.config.reflectAfterTokens = 5;
     runtime.config.observationsPoolMaxTokens = 100_000;
-    runtime.config.dropperPoolFullnessThreshold = 0.05; // 5% — pool at 1.4%
     runtime.config.dropperPressureThreshold = 0.7;
     runtime.config.reflectorInputMaxTokens = 10_000; // pressure needs 7,000 — pool only has 1,400
     const entries = [
@@ -1493,11 +1491,10 @@ describe("capSourceEntriesToTokens", () => {
 
 /** The observer preamble cap must apply in auto/off mode, not only manual mode. */
 describe("observer preamble cap", () => {
-  test("caps priorObservations in auto mode via observerPreambleMaxTokens", async () => {
+  test("caps priorObservations in auto mode to 30% of the reading batch", async () => {
     const fixture = makePipelineFixture({ observeAfterTokens: 100 });
     fixture.runtime.config.compaction = "auto";
-    fixture.runtime.config.observerPreambleMaxTokens = 500;
-    fixture.runtime.config.observerChunkMaxTokens = 10_000;
+    fixture.runtime.config.observerChunkMaxTokens = 2_000; // 30% = 600-token preamble
 
     const observations = Array.from({ length: 20 }, (_, i) => ({
       id: Math.abs(i).toString(16).padStart(12, "0"),
@@ -1521,51 +1518,16 @@ describe("observer preamble cap", () => {
 
     expect(agents.runObserver).toHaveBeenCalledTimes(1);
     const input = observerChunkArg();
-    // 20 medium observations would exceed the 500-token preamble budget;
+    // 20 medium observations would exceed the 600-token preamble budget;
     // the auto-mode cap must trim them down.
     expect(input.priorObservations.length).toBeLessThan(observations.length);
     expect(input.priorObservations.length).toBeGreaterThan(0);
   });
 
-  test("defaults to 30% of observerChunkMaxTokens when observerPreambleMaxTokens is 0", async () => {
+  test("caps priorReflections in auto mode to 30% of the reading batch", async () => {
     const fixture = makePipelineFixture({ observeAfterTokens: 100 });
     fixture.runtime.config.compaction = "auto";
-    fixture.runtime.config.observerPreambleMaxTokens = 0;
-    fixture.runtime.config.observerChunkMaxTokens = 4_000; // 30% = 1200 tokens
-
-    const observations = Array.from({ length: 20 }, (_, i) => ({
-      id: Math.abs(i).toString(16).padStart(12, "0"),
-      content: `Observation ${i} ` + "x".repeat(200),
-      timestamp: "2026-05-02 10:00",
-      relevance: "medium" as const,
-      sourceEntryIds: ["src-1"],
-      tokenCount: 0,
-    }));
-    fixture.entries.push(rawMessage("src-1", "Source entry " + "y".repeat(100_000)));
-    fixture.entries.push(
-      observationsRecordedEntry("obs-marker", {
-        observations,
-        coversUpToId: "src-1",
-      }),
-    );
-    // Add a second source entry so there is unobserved content after the marker.
-    fixture.entries.push(rawMessage("src-2", "More source " + "z".repeat(100_000)));
-
-    await fixture.run();
-
-    expect(agents.runObserver).toHaveBeenCalledTimes(1);
-    const input = observerChunkArg();
-    // With a 1200-token default budget, 20 medium observations (~63 tokens each)
-    // should be capped well below the 20 created.
-    expect(input.priorObservations.length).toBeLessThan(observations.length);
-    expect(input.priorObservations.length).toBeGreaterThan(0);
-  });
-
-  test("caps priorReflections in auto mode via observerPreambleMaxTokens", async () => {
-    const fixture = makePipelineFixture({ observeAfterTokens: 100 });
-    fixture.runtime.config.compaction = "auto";
-    fixture.runtime.config.observerPreambleMaxTokens = 500;
-    fixture.runtime.config.observerChunkMaxTokens = 10_000;
+    fixture.runtime.config.observerChunkMaxTokens = 2_000; // 30% = 600-token preamble
 
     const reflections = Array.from({ length: 20 }, (_, i) =>
       reflection((100 + i).toString(16).padStart(12, "0"), ["src-1"], {
@@ -1586,20 +1548,54 @@ describe("observer preamble cap", () => {
 
     expect(agents.runObserver).toHaveBeenCalledTimes(1);
     const input = observerChunkArg();
-    // 20 reflections at ~60 tokens each would exceed the 500-token preamble
+    // 20 reflections at ~60 tokens each would exceed the 600-token preamble
     // budget; the newest-first cap must trim them down without emptying them.
     expect(input.priorReflections.length).toBeLessThan(reflections.length);
     expect(input.priorReflections.length).toBeGreaterThan(0);
   });
 
+  test("the 30% preamble budget scales with observerChunkMaxTokens", async () => {
+    function buildFixture(chunkTokens: number): PipelineFixture {
+      const fixture = makePipelineFixture({ observeAfterTokens: 100 });
+      fixture.runtime.config.compaction = "auto";
+      fixture.runtime.config.observerChunkMaxTokens = chunkTokens;
+      const observations = Array.from({ length: 20 }, (_, i) => ({
+        id: Math.abs(i + 1)
+          .toString(16)
+          .padStart(12, "0"),
+        content: `Observation ${i} ` + "x".repeat(200),
+        timestamp: "2026-05-02 10:00",
+        relevance: "medium" as const,
+        sourceEntryIds: ["src-1"],
+        tokenCount: 0,
+      }));
+      fixture.entries.push(rawMessage("src-1", "Source entry " + "y".repeat(100_000)));
+      fixture.entries.push(
+        observationsRecordedEntry("obs-marker", { observations, coversUpToId: "src-1" }),
+      );
+      fixture.entries.push(rawMessage("src-2", "More source " + "z".repeat(100_000)));
+      return fixture;
+    }
+
+    await buildFixture(1_000).run(); // 300-token budget
+    const small = observerChunkArg(0).priorObservations.length;
+    await buildFixture(4_000).run(); // 1,200-token budget
+    const large = observerChunkArg(1).priorObservations.length;
+
+    // A larger reading batch must keep more of the same prior notes; a fixed
+    // cap (not derived from observerChunkMaxTokens) would flatten this.
+    expect(small).toBeGreaterThan(0);
+    expect(small).toBeLessThan(large);
+    expect(large).toBeLessThanOrEqual(20);
+  });
+
   test("skips observer when chunk fits but full prompt with preamble exceeds context window", async () => {
     const fixture = makePipelineFixture({ observeAfterTokens: 100 });
     fixture.runtime.config.compaction = "auto";
-    fixture.runtime.config.observerPreambleMaxTokens = 500;
     fixture.runtime.config.observerChunkMaxTokens = 10_000;
     // Small model window: chunk (~600 tokens) + 8k reserve fits in 11k, but
-    // adding the preamble (~500 tokens) and the ~3.3k system prompt does not.
-    // The old chunk-only guard would have passed this call through.
+    // adding the 30%-of-chunk preamble (~3000 tokens) and the ~3.3k system
+    // prompt does not. The old chunk-only guard would have passed this through.
     fixture.runtime.resolveModel = async () => ({
       ok: true as const,
       source: "candidate" as const,
@@ -1658,33 +1654,36 @@ describe("dropper pressure valve", () => {
     });
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
     fixture.runtime.config.observationsPoolMaxTokens = options.poolMaxTokens ?? 1_000;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
     return fixture;
   }
 
-  test("the dropper stage honors the dropperPoolFullness floor over a lower pressure threshold", async () => {
-    // Pool is 1,000 / 2,000 tokens (50%): well over the 10% pressure
-    // threshold, but under the configured 60% fullness floor.
+  it.each([
+    ["0.3 (below the 50% pool)", 0.3, true],
+    ["0.5 (at the 50% pool)", 0.5, true],
+    ["0.6 (above the 50% pool)", 0.6, false],
+    ["1.0 (pressure disabled)", 1.0, false],
+  ])(
+    "runs the pruner only when the pool clears the pressure line (%s)",
+    async (_name, threshold, expected) => {
+      const fixture = pressureFixture({ poolMaxTokens: 2_000 });
+      fixture.runtime.config.dropperPressureThreshold = threshold;
+      agents.runDropper.mockResolvedValue([]);
+
+      await fixture.run();
+
+      expect(agents.runDropper.mock.calls.length > 0).toBe(expected);
+    },
+  );
+
+  test("the due-check applies the same pressure threshold as the stage", async () => {
     const fixture = pressureFixture({ poolMaxTokens: 2_000 });
-    fixture.runtime.config.dropperPressureThreshold = 0.1;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.6;
-    agents.runDropper.mockResolvedValue([]);
-
-    await fixture.run();
-
-    expect(agents.runDropper).not.toHaveBeenCalled();
-  });
-
-  test("the due-check applies the same fullness floor as the stage", async () => {
-    const fixture = pressureFixture({ poolMaxTokens: 2_000 });
-    fixture.runtime.config.dropperPressureThreshold = 0.1;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.6;
+    fixture.runtime.config.dropperPressureThreshold = 0.6;
 
     expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(false);
 
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.4;
+    fixture.runtime.config.dropperPressureThreshold = 0.4;
     expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(true);
   });
 
@@ -1717,7 +1716,7 @@ describe("dropper pressure valve", () => {
         }),
       ],
     });
-    fixture.runtime.config.dropperInputMaxTokens = 1_000;
+    fixture.runtime.config.reflectorInputMaxTokens = 1_000;
     fixture.runtime.config.dropperModel = { provider: "test", id: "primary", cooldownHours: 0 };
     fixture.runtime.config.dropperFallbackModels = [{ provider: "test", id: "fallback" }];
     let resolutionCount = 0;
@@ -1806,7 +1805,6 @@ describe("dropper pressure valve", () => {
     fixture.runtime.config.compaction = "manual";
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
     fixture.runtime.config.observationsPoolMaxTokens = 1_000;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     savePendingObservation("cursor-session", {
       coversUpToId: "raw-1",
@@ -1890,7 +1888,6 @@ describe("showWorkerNotifications", () => {
     });
     fixture.runtime.config.reflectAfterTokens = 1_000_000;
     fixture.runtime.config.observationsPoolMaxTokens = 1_000;
-    fixture.runtime.config.dropperPoolFullnessThreshold = 0.1;
     fixture.runtime.config.dropperPressureThreshold = 0.7;
     fixture.runtime.advanceCursor("dropper", "obs-1", "skipped");
     return fixture;
@@ -1904,7 +1901,7 @@ describe("showWorkerNotifications", () => {
 
     expect(agents.runObserver).toHaveBeenCalledOnce();
     expect(infoCalls(notify).map(([message]) => message)).toEqual([
-      expect.stringContaining("Observational memory: observer running on ~"),
+      expect.stringContaining("blackhole: reading recent conversation for notes (~"),
     ]);
   });
 
@@ -1931,7 +1928,7 @@ describe("showWorkerNotifications", () => {
     await fixture.run();
 
     expect(notify).toHaveBeenCalledWith(
-      "Observational memory: no observations — 2 observation(s) rejected for invalid sourceEntryIds",
+      "blackhole: no new notes — 2 note(s) referenced unknown conversation entries",
       "warning",
     );
   });
@@ -1946,7 +1943,7 @@ describe("showWorkerNotifications", () => {
     expect(agents.runObserver).not.toHaveBeenCalled();
     expect(agents.runReflector).toHaveBeenCalledOnce();
     expect(infoCalls(notify).map(([message]) => message)).toEqual([
-      expect.stringContaining("Observational memory: reflector running (~"),
+      expect.stringContaining("blackhole: building insights from saved notes (~"),
     ]);
   });
 
@@ -1973,7 +1970,7 @@ describe("showWorkerNotifications", () => {
     expect(agents.runReflector).not.toHaveBeenCalled();
     expect(agents.runDropper).toHaveBeenCalledOnce();
     expect(infoCalls(notify).map(([message]) => message)).toEqual([
-      expect.stringContaining("Observational memory: dropper running (~"),
+      expect.stringContaining("blackhole: pruning low-value notes (~"),
     ]);
   });
 
