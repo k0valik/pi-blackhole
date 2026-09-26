@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getDiscardedObservations,
   isCooldownWorthyError,
   isDeterministicError,
   isRetryableError,
+  ObserverStreamError,
 } from "../src/om/retryable-error.js";
+
+describe("getDiscardedObservations", () => {
+  it("reads the count only from an ObserverStreamError", () => {
+    expect(getDiscardedObservations(new ObserverStreamError("Observer API error: x", 3))).toBe(3);
+    expect(getDiscardedObservations(new Error("Observer API error: x"))).toBeUndefined();
+    expect(getDiscardedObservations(undefined)).toBeUndefined();
+    expect(getDiscardedObservations(null)).toBeUndefined();
+  });
+});
 
 // Issue: OpenCode Go gateway rejects worker requests without x-opencode-session
 // (400 MissingSessionID). That 400 is deterministic — retrying the same model

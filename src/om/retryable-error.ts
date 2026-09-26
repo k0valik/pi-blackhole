@@ -42,6 +42,29 @@ const BARE_DETERMINISTIC_CODE_RE = /(?:^|[\s:([{="'])(40[014]|403|422)\b/;
 const DETERMINISTIC_SIGNAL_RE =
   /error|fail|missing|forbidden|denied|bad request|not found|unauthorized|invalid/i;
 
+/**
+ * Observer run that ended in a stream error. The message stays `Observer API
+ * error: …` so the regex classification below is unchanged; the count of
+ * observations recorded before the failure travels out of band, where no
+ * classifier can misread it as a status code. It lives here rather than in
+ * the observer module so consolidation can read it without a static import of
+ * the lazily loaded observer agent.
+ */
+export class ObserverStreamError extends Error {
+  constructor(
+    message: string,
+    readonly discardedObservations: number,
+  ) {
+    super(message);
+    this.name = "ObserverStreamError";
+  }
+}
+
+/** Observations an observer stream error discarded, or undefined for any other error. */
+export function getDiscardedObservations(error: unknown): number | undefined {
+  return error instanceof ObserverStreamError ? error.discardedObservations : undefined;
+}
+
 /** Check whether an error is a deterministic client error (see above). */
 export function isDeterministicError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error || "");

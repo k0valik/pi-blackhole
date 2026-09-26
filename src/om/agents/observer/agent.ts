@@ -24,6 +24,7 @@ import { OBSERVER_SYSTEM } from "./prompts.js";
 import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
 import { estimateStringTokens } from "../../tokens.js";
+import { ObserverStreamError } from "../../retryable-error.js";
 
 interface RunObserverArgs {
   model: Model<any>;
@@ -174,6 +175,11 @@ export type ObserverEmptyReason =
 export interface ObserverResult {
   observations: Observation[] | undefined;
   emptyReason?: ObserverEmptyReason;
+  /**
+   * Provider error from a turn after a valid complete=true close. The run kept
+   * its result (the chunk was declared covered); the caller should log this.
+   */
+  errorAfterClose?: string;
 }
 
 export async function runObserver(args: RunObserverArgs): Promise<ObserverResult> {
@@ -201,10 +207,11 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
   // is the model closing a covered chunk that yielded nothing, which is a
   // no_new_content outcome, not the empty_array protocol slip the kind implies.
   let lastBatchComplete = false;
-  // Whether any batch in this run was a fully valid complete=true close, i.e.
-  // the model declared the chunk covered and the tool honored it. Sticky: a
-  // later batch on a host that ignores `terminate` cannot revoke the close. A
-  // refused complete=true batch (rejected entries) does not count.
+  // Whether the run has closed the chunk with a fully valid complete=true batch,
+  // i.e. the model declared the chunk covered and the tool honored it. A later
+  // batch without rejections (a host that ignores `terminate` asks for more
+  // turns) does not revoke the close; a later batch with rejected entries does,
+  // because the tool just told the model coverage still needs corrections.
   let closedByCompleteBatch = false;
 
   const recordObservations: AgentTool<typeof RecordObservationsSchema> = {
@@ -253,6 +260,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           : "";
       const terminates = params.complete === true && rejected === 0;
       if (terminates) closedByCompleteBatch = true;
+      else if (rejected > 0) closedByCompleteBatch = false;
       const refusal =
         params.complete === true && rejected > 0
           ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with sourceEntryIds copied from the chunk; anything not re-submitted is discarded and will not be recorded.`
@@ -371,9 +379,7 @@ ${conversation}`;
   if (agentError && !(closedByCompleteBatch && accumulated.size > 0)) {
     // The message stays byte-identical: isDeterministicError scans it for bare
     // 4xx codes, so an interpolated observation count could misclassify it.
-    throw Object.assign(new Error(`Observer API error: ${agentError}`), {
-      discardedObservations: accumulated.size,
-    });
+    throw new ObserverStreamError(`Observer API error: ${agentError}`, accumulated.size);
   }
 
   if (accumulated.size === 0) {
@@ -399,5 +405,8 @@ ${conversation}`;
     return { observations: undefined, emptyReason };
   }
 
-  return { observations: Array.from(accumulated.values()) };
+  return {
+    observations: Array.from(accumulated.values()),
+    ...(agentError ? { errorAfterClose: agentError } : {}),
+  };
 }

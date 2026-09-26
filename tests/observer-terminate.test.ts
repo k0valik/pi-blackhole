@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runObserver } from "../src/om/agents/observer/agent.js";
+import { ObserverStreamError } from "../src/om/retryable-error.js";
 import { createScriptedStream } from "./fixtures/scripted-stream.js";
 
 const baseArgs = {
@@ -44,6 +45,7 @@ describe("real agent loop honors record_observations terminate", () => {
     expect(result.observations?.map((observation) => observation.content)).toEqual([
       "Integrated observation",
     ]);
+    expect(result.errorAfterClose).toBeUndefined();
   });
 
   it("requests another turn after an incomplete batch", async () => {
@@ -90,7 +92,10 @@ describe("real agent loop honors record_observations terminate", () => {
   it("throws when a recorded batch is followed by a stream error", async () => {
     const { streamFn, calls } = scripted.stream([observationTurn("Partial observation", false)]);
 
-    await expect(runObserver({ ...baseArgs, streamFn })).rejects.toMatchObject({
+    const error = await runObserver({ ...baseArgs, streamFn }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ObserverStreamError);
+    expect(error).toMatchObject({
       message: expect.stringMatching(
         /^Observer API error: scripted stream exhausted: the agent loop requested turn 2/,
       ),
