@@ -220,9 +220,12 @@ describe("threshold-array", () => {
       compactAfterRatio: 101,
       compactReserveTokens: -5,
     });
-    expect(proj.warnings.map((w) => w.key)).toEqual(
-      expect.arrayContaining(["compactAfterTokens", "compactAfterRatio", "compactReserveTokens"]),
-    );
+    // Exact list pins the count and the order; an extra or duplicated warning fails.
+    expect(proj.warnings.map((w) => w.key)).toEqual([
+      "compactAfterTokens",
+      "compactAfterRatio",
+      "compactReserveTokens",
+    ]);
   });
 });
 
@@ -440,8 +443,7 @@ describe("runner — guarantees", () => {
     expect("configVersion" in written).toBe(false);
   });
 
-  it("is gated by configVersion only when no legacy key is left", async () => {
-    // Fully migrated: stamped and clean -> never rewritten.
+  it("gates a stamped, fully-migrated file (no legacy key left)", async () => {
     writeConfig(GLOBAL, {
       configVersion: 1,
       compaction: "off",
@@ -449,7 +451,27 @@ describe("runner — guarantees", () => {
       compactAfterBy: "preset",
     });
     const writes: number[] = [];
-    let res = await migrateConfigFile(GLOBAL, {
+    const res = await migrateConfigFile(GLOBAL, {
+      write: async () => {
+        writes.push(1);
+      },
+      warn: () => {},
+    });
+    expect(res.gated).toBe(true);
+    expect(res.changed).toBe(false);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("gates a file with a newer stamp (>= comparison, not ===)", async () => {
+    // A future stamp must not be re-migrated: `===` would let it through and rewrite.
+    writeConfig(GLOBAL, {
+      configVersion: 7,
+      compaction: "off",
+      memory: true,
+      compactAfterBy: "preset",
+    });
+    const writes: number[] = [];
+    const res = await migrateConfigFile(GLOBAL, {
       write: async () => {
         writes.push(1);
       },
@@ -457,15 +479,16 @@ describe("runner — guarantees", () => {
     });
     expect(res.gated).toBe(true);
     expect(writes).toHaveLength(0);
+  });
 
-    // Crash window: stamped but the legacy key was never deleted -> finish it.
+  it("finishes a crash-window file stamped with a leftover legacy key", async () => {
     writeConfig(GLOBAL, {
       configVersion: 1,
       compactionEngine: "pi-default",
       compaction: "off",
       memory: true,
     });
-    res = await migrateConfigFile(GLOBAL, { backup: async () => {}, warn: () => {} });
+    const res = await migrateConfigFile(GLOBAL, { backup: async () => {}, warn: () => {} });
     expect(res.gated).toBe(false);
     expect(res.persisted).toBe(true);
     const written = readConfig(GLOBAL);
@@ -508,6 +531,16 @@ describe("runner — guarantees", () => {
     writeText(`${GLOBAL}.bak`, '{"pristine":true}\n');
     await migrateConfigFile(GLOBAL, { warn: () => {} });
     expect(readFileSync(`${GLOBAL}.bak`, "utf-8")).toBe('{"pristine":true}\n');
+  });
+
+  it("replaces an unparseable backup (only a restorable .bak keeps the gate)", async () => {
+    writeConfig(GLOBAL, { compactionEngine: "pi-default" });
+    writeText(`${GLOBAL}.bak`, "{ this is not json");
+    await migrateConfigFile(GLOBAL, { warn: () => {} });
+    // The corrupt residue is not a restorable snapshot, so a real one is written.
+    expect(JSON.parse(readFileSync(`${GLOBAL}.bak`, "utf-8"))).toMatchObject({
+      compactionEngine: "pi-default",
+    });
   });
 
   it("writes new keys before removing old ones, verifying in between (two-phase)", async () => {

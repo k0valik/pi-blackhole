@@ -7,7 +7,7 @@
  *  - a value that is the documented `0` "not set" sentinel is treated as
  *    absent, never as invalid;
  *  - an unrecognized value is *skipped*, not fatal: the step leaves that key
- *    untouched and returns a `warning`, so one bad value cannot silently revert
+ *    untouched and returns `warnings`, so one bad value cannot silently revert
  *    the rest of the file (plan-11 §2.3).
  *
  * Steps never delete consumed keys themselves — the two-phase runner does that

@@ -9,8 +9,9 @@
  *     crash-window retry, not a no-op)
  *  3. project the migration in memory; unrecognized values are skipped + reported
  *  4. no owned legacy key present → no-op ("no silent rewrites")
- *  5. BACKUP: write `.bak`, re-read it, and verify it matches the original —
- *     bail before the first write if it cannot be produced
+ *  5. BACKUP: on first migration create `.bak` (write-once), re-read it, and
+ *     verify it matches the original — bail before the first write if it cannot
+ *     be produced
  *  6. PHASE 1: atomically write the new keys, keeping the old keys, then
  *     re-read to verify the projection landed
  *  7. PHASE 2: only after verification (or in the remove-only case), atomically
@@ -122,16 +123,19 @@ export async function atomicWrite(path: string, text: string): Promise<void> {
 }
 
 /**
- * One-time `.bak` before the first write. Write-once: an existing backup is the
- * pristine pre-migration snapshot and is never clobbered by a half-migrated file
- * on a later retry. When it has to be created, it is verified byte-identical to
- * the original, and a failure abandons the migration before any write.
+ * One-time `.bak` before the first write. Write-once: an existing *restorable*
+ * backup is the pristine pre-migration snapshot and is never clobbered by a
+ * half-migrated file on a later retry. A backup that is not restorable (a
+ * partial copy left by an earlier crash) does not count — the gate must not be
+ * silently disabled by a corrupt residue. When it has to be created, it is
+ * verified byte-identical to the original, and a failure abandons the migration
+ * before any write.
  */
 async function defaultBackup(path: string): Promise<void> {
   const bak = `${path}.bak`;
   try {
     const existing = await readFile(bak, "utf-8");
-    if (existing.length > 0) return; // write-once — keep the original snapshot
+    if (isRestorable(existing)) return; // write-once — keep the original snapshot
   } catch {
     /* no backup yet */
   }
@@ -140,6 +144,19 @@ async function defaultBackup(path: string): Promise<void> {
   const written = await readFile(bak, "utf-8");
   if (written !== original) {
     throw new Error("backup verification failed");
+  }
+}
+
+/**
+ * A backup we can restore from: parseable JSON object. A pristine config always
+ * is one, so anything else is a corrupt/partial residue and may be replaced.
+ */
+function isRestorable(text: string): boolean {
+  if (text.length === 0) return false;
+  try {
+    return isRecord(JSON.parse(text));
+  } catch {
+    return false;
   }
 }
 
@@ -171,10 +188,12 @@ function serialize(config: Record<string, unknown>): string {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-function warningMessage(path: string, w: MigrationWarning): string {
+/** One aggregated message per file, so a file with N bad keys is one toast. */
+function warningMessage(path: string, warnings: MigrationWarning[]): string {
+  const keys = warnings.map((w) => `${w.key}=${JSON.stringify(w.value)}`).join(", ");
   return (
-    `blackhole: config key "${w.key}" in ${path} has an unrecognized value ` +
-    `(${JSON.stringify(w.value)}) — left it untouched. Fix it in /blackhole settings.`
+    `blackhole: unrecognized config value${warnings.length === 1 ? "" : "s"} in ${path}: ` +
+    `${keys} — left untouched. Fix in /blackhole settings.`
   );
 }
 
@@ -237,9 +256,10 @@ export async function migrateConfigFile(
     return { ...base, gated: true };
   }
 
-  for (const w of proj.warnings) {
-    warn(warningMessage(path, w));
-    notify?.(warningMessage(path, w), "warning");
+  if (proj.warnings.length > 0) {
+    const msg = warningMessage(path, proj.warnings);
+    warn(msg);
+    notify?.(msg, "warning");
   }
 
   // No owned legacy key, and no value change / cleanup → no rewrite.

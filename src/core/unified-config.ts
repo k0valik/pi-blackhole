@@ -1032,9 +1032,10 @@ export function scaffoldConfig(): void {
 // ── Migration detection ───────────────────────────────────────────────────────
 
 /**
- * Check if the on-disk config file still uses legacy keys (needs migration).
- * Returns true when the file exists, has no new keys, but has old keys.
- * Used to prompt users to save their config with the new keys.
+ * Check if the on-disk config file still needs a migration write (a legacy key
+ * to remove, or a value to repair). In sync with the runner's rewrite condition:
+ * an owned legacy key is present AND either a value changed or a legacy key
+ * remains to delete. Used to prompt users to save their config with the new keys.
  */
 export function configFileNeedsMigration(): boolean {
   try {
@@ -1042,10 +1043,8 @@ export function configFileNeedsMigration(): boolean {
     if (!existsSync(path)) return false;
     const raw = JSON.parse(readFileSync(path, "utf-8"));
     if (!isRecord(raw)) return false;
-    // In sync with the runner's gate: a file still has owned legacy keys to
-    // remove. (A stamped file with leftovers is a crash-window retry; a file
-    // with only produced/new keys reports false.)
-    return projectConfig(raw).consumedToDelete.length > 0;
+    const proj = projectConfig(raw);
+    return proj.valueChanged || proj.consumedToDelete.length > 0;
   } catch {
     return false;
   }

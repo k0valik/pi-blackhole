@@ -853,6 +853,24 @@ describe("Declarative env overrides apply at runtime", () => {
     expect(config.compactAfterBy).toBe("reserve");
     expect(config.compactReserveTokens).toBe(32_768);
   });
+
+  it("lets a project-supplied threshold value select its shape over a global selector", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterBy: "percent", compactAfterRatio: 50 });
+    writeConfig({ compactAfterTokens: 150_000 }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterBy).toBe("tokens");
+    expect(config.compactAfterTokens).toBe(150_000);
+  });
+
+  it("preserves a valid global selector when the project supplies no threshold", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterBy: "percent", compactAfterRatio: 50 });
+    writeConfig({ memory: false }, ".pi/pi-blackhole-config.json");
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterBy).toBe("percent");
+    expect(config.compactAfterRatio).toBe(50);
+  });
 });
 
 describe("Integer fields are validated as positive integers", () => {
@@ -1098,5 +1116,11 @@ describe("configFileNeedsMigration", () => {
     const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
     writeConfig({ compaction: "off" });
     expect(configFileNeedsMigration()).toBe(false);
+  });
+
+  it("returns true for a legacy value that still needs repairing", async () => {
+    const { configFileNeedsMigration } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 0.8 }); // fraction -> percent + selector
+    expect(configFileNeedsMigration()).toBe(true);
   });
 });
