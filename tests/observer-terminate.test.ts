@@ -90,10 +90,30 @@ describe("real agent loop honors record_observations terminate", () => {
   it("throws when a recorded batch is followed by a stream error", async () => {
     const { streamFn, calls } = scripted.stream([observationTurn("Partial observation", false)]);
 
-    await expect(runObserver({ ...baseArgs, streamFn })).rejects.toThrow(
-      /Observer API error after 1 recorded observation\(s\): scripted stream exhausted: the agent loop requested turn 2/,
-    );
+    await expect(runObserver({ ...baseArgs, streamFn })).rejects.toMatchObject({
+      message: expect.stringMatching(
+        /^Observer API error: scripted stream exhausted: the agent loop requested turn 2/,
+      ),
+      discardedObservations: 1,
+    });
     expect(calls()).toBe(2);
+  });
+
+  it("throws when a refused complete batch is followed by a stream error", async () => {
+    const { streamFn } = scripted.stream([
+      scripted.toolCallTurn({
+        observations: [
+          { content: "Good source", relevance: "high", sourceEntryIds: ["entry-a"] },
+          { content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] },
+        ],
+        complete: true,
+      }),
+    ]);
+
+    await expect(runObserver({ ...baseArgs, streamFn })).rejects.toMatchObject({
+      message: expect.stringMatching(/^Observer API error: scripted stream exhausted/),
+      discardedObservations: 1,
+    });
   });
 
   it("ends the run with an exhaustion error instead of looping", async () => {

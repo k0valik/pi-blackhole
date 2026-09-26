@@ -2,7 +2,7 @@
 
 ### Fixed
 
-- **An observer stream error no longer counts as a completed chunk.** If the provider failed after the model had already recorded one observation, `runObserver` returned the partial result as a success, so the stage advanced `coversUpToId` to the end of the chunk and the rest of that chunk was never observed. An `agent_end` with `stopReason: "error"` now throws `Observer API error after N recorded observation(s)`, so the stage keeps the cursor where it was, retries through the normal fallback chain, and the error records how much work was discarded. One exception: if the model had already closed the chunk with a valid `complete: true` batch, the run keeps its result even when a trailing turn fails (a host that ignores `terminate`), so that failure cannot stall the cursor on the same chunk every cycle.
+- **An observer stream error no longer counts as a completed chunk.** If the provider failed after the model had already recorded one observation, `runObserver` returned the partial result as a success, so the stage advanced `coversUpToId` to the end of the chunk and the rest of that chunk was never observed. An `agent_end` with `stopReason: "error"` now throws `Observer API error`, so the stage keeps the cursor where it was and retries through the normal fallback chain; the `observer.error` debug log records how many observations were discarded (`discardedObservations`). One exception: if the model had already closed the chunk with a valid, non-empty `complete: true` batch, the run keeps its result even when a later turn fails (a host that ignores `terminate`), so that failure cannot stall the cursor on the same chunk every cycle. An empty close followed by an error still throws, as before.
 
 ---
 

@@ -975,6 +975,8 @@ export async function runObserverStage(
         retryable: isRetryableError(error),
         deterministic: isDeterministicError(error),
         cooldownWorthy: isCooldownWorthyError(error),
+        // Observations recorded before a stream error and discarded with the run.
+        discardedObservations: (error as { discardedObservations?: number }).discardedObservations,
       });
       // A timed-out session model has no candidate config to cool down, so
       // the loop would re-resolve the same stalled model and burn the full

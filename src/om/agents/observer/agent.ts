@@ -201,9 +201,10 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
   // is the model closing a covered chunk that yielded nothing, which is a
   // no_new_content outcome, not the empty_array protocol slip the kind implies.
   let lastBatchComplete = false;
-  // Whether the most recent batch was a fully valid complete=true close, i.e.
-  // the model declared the chunk covered and the tool honored it. A refused
-  // complete=true batch (rejected entries) does not count.
+  // Whether any batch in this run was a fully valid complete=true close, i.e.
+  // the model declared the chunk covered and the tool honored it. Sticky: a
+  // later batch on a host that ignores `terminate` cannot revoke the close. A
+  // refused complete=true batch (rejected entries) does not count.
   let closedByCompleteBatch = false;
 
   const recordObservations: AgentTool<typeof RecordObservationsSchema> = {
@@ -251,7 +252,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           ? ` ${rejected} observation${rejected === 1 ? "" : "s"} rejected for missing or invalid sourceEntryIds.`
           : "";
       const terminates = params.complete === true && rejected === 0;
-      closedByCompleteBatch = terminates;
+      if (terminates) closedByCompleteBatch = true;
       const refusal =
         params.complete === true && rejected > 0
           ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with sourceEntryIds copied from the chunk; anything not re-submitted is discarded and will not be recorded.`
@@ -359,15 +360,20 @@ ${conversation}`;
   }
   await stream.result();
 
-  // A run that already closed the chunk with a valid complete=true batch is
-  // covered however the loop ended: on a host that ignores `terminate`, a
-  // trailing turn that errors after the close must not discard the declared
-  // coverage, or the cursor never advances and the stage re-observes the same
-  // chunk every cycle. Any other error means the chunk may be partly covered.
-  if (agentError && !closedByCompleteBatch) {
-    throw new Error(
-      `Observer API error after ${accumulated.size} recorded observation(s): ${agentError}`,
-    );
+  // A run that already closed the chunk with a valid complete=true batch that
+  // recorded something keeps its result however the loop ended: on a host that
+  // ignores `terminate`, a trailing turn that errors after the close must not
+  // discard the declared coverage, or the cursor never advances and the stage
+  // re-observes the same chunk every cycle. An empty close still throws, as it
+  // did before, so a provider failing after every tool call cannot turn each
+  // chunk into a silent "nothing new" skip. Any other error means the chunk
+  // may be partly covered.
+  if (agentError && !(closedByCompleteBatch && accumulated.size > 0)) {
+    // The message stays byte-identical: isDeterministicError scans it for bare
+    // 4xx codes, so an interpolated observation count could misclassify it.
+    throw Object.assign(new Error(`Observer API error: ${agentError}`), {
+      discardedObservations: accumulated.size,
+    });
   }
 
   if (accumulated.size === 0) {
