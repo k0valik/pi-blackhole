@@ -843,16 +843,15 @@ describe("Declarative env overrides apply at runtime", () => {
     expect(config.compactAfterRatio).toBe(65);
   });
 
-  it("re-derives the shape from merged values across scopes (global token pin wins)", async () => {
-    // A project layer's reserve used to stamp compactAfterBy:"reserve", which
-    // silently outranked the global token pin. The value keys are the
-    // cross-layer source of truth, so tokens must win.
+  it("lets a project layer's threshold shape override the global one", async () => {
+    // Layer merge is override semantics: the project's selector is authoritative,
+    // so a project reserve is not silently outranked by a global token pin.
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ compactAfterTokens: 100_000 });
     writeConfig({ compactReserveTokens: 32_768 }, ".pi/pi-blackhole-config.json");
     const config = loadUnifiedConfig(testDir);
-    expect(config.compactAfterBy).toBe("tokens");
-    expect(config.compactAfterTokens).toBe(100_000);
+    expect(config.compactAfterBy).toBe("reserve");
+    expect(config.compactReserveTokens).toBe(32_768);
   });
 });
 

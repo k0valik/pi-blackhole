@@ -213,6 +213,17 @@ describe("threshold-array", () => {
     expect(proj.config.compactAfterBy).toBe("percent");
     expect(proj.consumedToDelete).toContain("compactAfterTokens");
   });
+
+  it("reports every skipped value in a step, not just the first", () => {
+    const proj = projectConfig({
+      compactAfterTokens: -1,
+      compactAfterRatio: 101,
+      compactReserveTokens: -5,
+    });
+    expect(proj.warnings.map((w) => w.key)).toEqual(
+      expect.arrayContaining(["compactAfterTokens", "compactAfterRatio", "compactReserveTokens"]),
+    );
+  });
 });
 
 // ── Per-step: dropper fraction merge ────────────────────────────────────────
@@ -429,18 +440,37 @@ describe("runner — guarantees", () => {
     expect("configVersion" in written).toBe(false);
   });
 
-  it("is gated by configVersion: a stamped file is never rewritten", async () => {
-    writeConfig(GLOBAL, { configVersion: 1, compactionEngine: "blackhole", memory: true });
+  it("is gated by configVersion only when no legacy key is left", async () => {
+    // Fully migrated: stamped and clean -> never rewritten.
+    writeConfig(GLOBAL, {
+      configVersion: 1,
+      compaction: "off",
+      memory: true,
+      compactAfterBy: "preset",
+    });
     const writes: number[] = [];
-    const res = await migrateConfigFile(GLOBAL, {
+    let res = await migrateConfigFile(GLOBAL, {
       write: async () => {
         writes.push(1);
       },
       warn: () => {},
     });
     expect(res.gated).toBe(true);
-    expect(res.changed).toBe(false);
     expect(writes).toHaveLength(0);
+
+    // Crash window: stamped but the legacy key was never deleted -> finish it.
+    writeConfig(GLOBAL, {
+      configVersion: 1,
+      compactionEngine: "pi-default",
+      compaction: "off",
+      memory: true,
+    });
+    res = await migrateConfigFile(GLOBAL, { backup: async () => {}, warn: () => {} });
+    expect(res.gated).toBe(false);
+    expect(res.persisted).toBe(true);
+    const written = readConfig(GLOBAL);
+    expect("compactionEngine" in written).toBe(false);
+    expect(written.configVersion).toBe(1);
   });
 
   it("bails before any write when the backup cannot be verified", async () => {
@@ -471,6 +501,13 @@ describe("runner — guarantees", () => {
       notify: (m) => notes.push(m),
     });
     expect(notes.join(" ")).toContain("compactionEngine");
+  });
+
+  it("never clobbers an existing backup (write-once)", async () => {
+    writeConfig(GLOBAL, { compactionEngine: "pi-default" });
+    writeText(`${GLOBAL}.bak`, '{"pristine":true}\n');
+    await migrateConfigFile(GLOBAL, { warn: () => {} });
+    expect(readFileSync(`${GLOBAL}.bak`, "utf-8")).toBe('{"pristine":true}\n');
   });
 
   it("writes new keys before removing old ones, verifying in between (two-phase)", async () => {

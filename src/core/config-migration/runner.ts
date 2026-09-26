@@ -4,7 +4,9 @@
  *
  * Per file:
  *  1. read + parse; invalid JSON → warn + skip (never rewrite corrupt files)
- *  2. already stamped (`configVersion`) → no-op (the version is the gate)
+ *  2. already stamped at the current version with nothing left to clean → no-op
+ *     (the version is the gate; a stamped file with leftover keys is a
+ *     crash-window retry, not a no-op)
  *  3. project the migration in memory; unrecognized values are skipped + reported
  *  4. no owned legacy key present → no-op ("no silent rewrites")
  *  5. BACKUP: write `.bak`, re-read it, and verify it matches the original —
@@ -120,19 +122,20 @@ export async function atomicWrite(path: string, text: string): Promise<void> {
 }
 
 /**
- * One-time `.bak` before the first write. Unlike the original best-effort copy,
- * this VERIFIES the backup: if it cannot be written and re-read byte-identical
- * to the original, it throws and the migration is abandoned before any write.
+ * One-time `.bak` before the first write. Write-once: an existing backup is the
+ * pristine pre-migration snapshot and is never clobbered by a half-migrated file
+ * on a later retry. When it has to be created, it is verified byte-identical to
+ * the original, and a failure abandons the migration before any write.
  */
 async function defaultBackup(path: string): Promise<void> {
   const bak = `${path}.bak`;
-  const original = await readFile(path, "utf-8");
   try {
     const existing = await readFile(bak, "utf-8");
-    if (existing === original) return; // already backed up and verified
+    if (existing.length > 0) return; // write-once — keep the original snapshot
   } catch {
-    /* no usable backup yet */
+    /* no backup yet */
   }
+  const original = await readFile(path, "utf-8");
   await copyFile(path, bak);
   const written = await readFile(bak, "utf-8");
   if (written !== original) {
@@ -222,13 +225,18 @@ export async function migrateConfigFile(
     return { ...base, error: "not an object" };
   }
 
-  // Version gate: a stamped file has already been migrated (or attempted) and
-  // is never rewritten again.
-  if (raw.configVersion !== undefined) {
+  const proj = projectConfig(raw);
+
+  // Version gate: a file stamped at the current (or a newer) version with no
+  // owned legacy keys left is done. A stamped file that still has consumed keys
+  // is a crash-window leftover (phase 1 landed, phase 2 did not) and must take
+  // the remove-only path, so it is NOT gated. Comparing the version (not mere
+  // presence) lets a future CONFIG_VERSION re-run against older stamps.
+  const stamped = typeof raw.configVersion === "number" && raw.configVersion >= CONFIG_VERSION;
+  if (stamped && proj.consumedToDelete.length === 0) {
     return { ...base, gated: true };
   }
 
-  const proj = projectConfig(raw);
   for (const w of proj.warnings) {
     warn(warningMessage(path, w));
     notify?.(warningMessage(path, w), "warning");
@@ -240,8 +248,15 @@ export async function migrateConfigFile(
     return { ...base, warnings: proj.warnings };
   }
 
-  // Stamp only a clean migration; a partial one retries on the next load.
-  const stamp = proj.warnings.length === 0 ? CONFIG_VERSION : undefined;
+  // Stamp only a clean migration; a partial one retries on the next load. An
+  // existing (possibly newer) stamp is never downgraded.
+  const existingStamp = typeof raw.configVersion === "number" ? raw.configVersion : undefined;
+  const stamp =
+    proj.warnings.length === 0
+      ? existingStamp !== undefined
+        ? Math.max(existingStamp, CONFIG_VERSION)
+        : CONFIG_VERSION
+      : undefined;
   const phase2: Record<string, unknown> = structuredClone(proj.config);
   for (const k of proj.consumedToDelete) delete phase2[k];
   if (stamp !== undefined) phase2.configVersion = stamp;
@@ -281,7 +296,10 @@ export async function migrateConfigFile(
     } catch (error) {
       const suffix = isReadOnlyError(error) ? "read-only filesystem" : String(error);
       warn(`blackhole: could not migrate ${path} (${suffix})`);
-      notify?.(`blackhole: could not write your config (${suffix}); migrated in memory only.`);
+      notify?.(
+        `blackhole: could not write your config (${suffix}); migrated in memory only.`,
+        "warning",
+      );
       return {
         ...base,
         changed: true,
@@ -302,7 +320,10 @@ export async function migrateConfigFile(
   } catch (error) {
     const suffix = isReadOnlyError(error) ? "read-only filesystem" : String(error);
     warn(`blackhole: could not write migrated config to ${path} (${suffix})`);
-    notify?.(`blackhole: could not write your config (${suffix}); migrated in memory only.`);
+    notify?.(
+      `blackhole: could not write your config (${suffix}); migrated in memory only.`,
+      "warning",
+    );
     return {
       ...base,
       changed: true,

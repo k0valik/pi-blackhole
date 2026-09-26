@@ -18,7 +18,7 @@ import {
 export { CACHE_RETENTION_VALUES, normalizeCacheRetention };
 import { getAgentDir as originalGetAgentDir } from "@earendil-works/pi-coding-agent";
 import type { CacheRetention, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { applyConfigMigrations, foldCompaction } from "./config-migration/steps.js";
+import { applyConfigMigrations, foldCompaction, projectConfig } from "./config-migration/steps.js";
 
 export { foldCompaction };
 
@@ -734,24 +734,6 @@ function migrateOldKnobs(parsed: Record<string, unknown>): void {
   delete parsed.overrideDefaultCompaction;
 }
 
-/**
- * Re-derive the auto-compaction shape selector from the merged value keys, so
- * a project layer's selector cannot silently outrank a global pin (plan-11 §8).
- * Returns undefined when no value key is present (the explicit selector, or the
- * preset default, stands).
- */
-function deriveCompactAfterBy(
-  rec: Record<string, unknown>,
-): "tokens" | "percent" | "reserve" | undefined {
-  const tokens = rec.compactAfterTokens;
-  if (isFixedTokenThreshold(tokens) && tokens !== LEGACY_SCAFFOLD_COMPACT_AFTER_TOKENS) {
-    return "tokens";
-  }
-  if (isWindowPercent(rec.compactAfterRatio)) return "percent";
-  if (isReserveTokens(rec.compactReserveTokens)) return "reserve";
-  return undefined;
-}
-
 /** Format an in-memory migration skip for the loader's warning channel. */
 function migrationSkipWarning(w: { key: string; reason: string }): string {
   return `blackhole: config key "${w.key}" has an unrecognized value (${w.reason}); left it untouched — fix it in /blackhole settings.`;
@@ -844,14 +826,11 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   if (projectRaw && isRecord(projectRaw)) {
     const migratedProject = applyConfigMigrations(projectRaw);
     for (const w of migratedProject.warnings) onWarn?.(migrationSkipWarning(w));
+    // Layer merge is override semantics: the project layer's keys (including its
+    // `compactAfterBy`) win. The value keys are per-layer and the selector is the
+    // authoritative shape once set, so no cross-layer re-derivation is applied —
+    // an explicit `compactAfterBy` (including the scaffold default) is honored.
     raw = { ...raw, ...migratedProject.config };
-    // The shape selector is a single scalar, but the value keys may be split
-    // across layers. Re-derive it once from the merged values so a project
-    // layer cannot silently outrank a global pin (plan-11 §8).
-    if (raw) {
-      const derived = deriveCompactAfterBy(raw);
-      if (derived !== undefined) raw.compactAfterBy = derived;
-    }
   }
 
   const parsed = parseConfig(raw);
@@ -1061,20 +1040,12 @@ export function configFileNeedsMigration(): boolean {
   try {
     const path = configPath();
     if (!existsSync(path)) return false;
-    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-    if (
-      raw.compaction !== undefined ||
-      raw.compactAfterBy !== undefined ||
-      raw.tailBehavior !== undefined
-    ) {
-      return false; // already has new keys
-    }
-    return (
-      raw.passive !== undefined ||
-      raw.noAutoCompact !== undefined ||
-      raw.overrideDefaultCompaction !== undefined ||
-      raw.compactionEngine !== undefined
-    );
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    if (!isRecord(raw)) return false;
+    // In sync with the runner's gate: a file still has owned legacy keys to
+    // remove. (A stamped file with leftovers is a crash-window retry; a file
+    // with only produced/new keys reports false.)
+    return projectConfig(raw).consumedToDelete.length > 0;
   } catch {
     return false;
   }

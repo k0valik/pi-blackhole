@@ -10,7 +10,6 @@ beforeAll(() => {
 });
 
 import { createSettingsModalBody } from "./body.ts";
-import { buildVisibilityContext } from "./values.ts";
 import type { Field } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -278,21 +277,52 @@ describe("§2.4 Misc gaps", () => {
 
 describe("buildVisibilityContext tab scoping", () => {
   it("does not borrow a same-key value from another tab", () => {
-    const rows: any[] = [
-      { field: { key: "compactAfterBy", type: "enum", tab: "project" }, value: "percent" },
-      // Same key in another tab — must not win just by appearing later.
-      { field: { key: "compactAfterBy", type: "enum", tab: "defaults" }, value: undefined },
-      { field: { key: "compactAfterRatio", type: "number", tab: "project" }, value: 46 },
+    const fields: Field[] = [
+      {
+        key: "compactAfterBy",
+        type: "enum",
+        label: "Shape (project)",
+        value: "percent",
+        tab: "project",
+        options: ["preset", "percent"],
+      },
+      {
+        key: "compactAfterBy",
+        type: "enum",
+        label: "Shape (defaults)",
+        value: undefined,
+        tab: "defaults",
+        options: ["preset", "percent"],
+      },
+      {
+        key: "compactAfterRatio",
+        type: "number",
+        label: "Percent",
+        value: 46,
+        tab: "project",
+        visibleWhen: (ctx) => ctx.get("compactAfterBy") === "percent",
+      },
     ];
-    const state: any = {
-      rows,
-      tabs: [
-        { id: "project", label: "Project" },
-        { id: "defaults", label: "Defaults" },
-      ],
-      activeTabId: "project",
-    };
-    const ctx = buildVisibilityContext(state, rows[2]!.field, "project");
-    expect(ctx.get("compactAfterBy")).toBe("percent");
+    const body = createSettingsModalBody<Field>(
+      {
+        title: "test",
+        fields,
+        tabs: [
+          { id: "project", label: "Project" },
+          { id: "defaults", label: "Defaults" },
+        ],
+        initialTab: "project",
+      },
+      {
+        tui: fakeTui(),
+        theme: fakeTheme(),
+        ctx: fakeCtx(),
+        close: vi.fn(),
+      },
+    );
+    // The project tab's ratio row is visible because its visibleWhen resolves
+    // compactAfterBy from the project row ("percent"), not the later defaults
+    // row (undefined).
+    expect(body.render(80).join("\n")).toContain("Percent");
   });
 });

@@ -162,6 +162,15 @@ describe("compactThresholdTokens", () => {
     ).toBe(92_000);
   });
 
+  it("reads a bare 1 the same way with and without an explicit selector", () => {
+    // One normalizer for the runtime: a bare 1 is 1%, not 100%. Only the
+    // migration (which owns the legacy fraction) turns a bare legacy 1 into 100.
+    expect(compactThresholdTokens({ compactAfterRatio: 1 }, 200_000)).toBe(2_000);
+    expect(
+      compactThresholdTokens({ compactAfterBy: "percent", compactAfterRatio: 1 }, 200_000),
+    ).toBe(2_000);
+  });
+
   it("derives window − reserve when only compactReserveTokens is set", () => {
     expect(compactThresholdTokens({ compactReserveTokens: 32_768 }, 1_000_000)).toBe(967_232);
     expect(compactThresholdTokens({ compactReserveTokens: 32_768 }, 128_000)).toBe(95_232);

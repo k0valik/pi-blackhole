@@ -46,8 +46,8 @@ export interface MigrationResult {
   changed: boolean;
   /** Consumed keys that are safe to remove (phase 2). */
   delete?: string[];
-  /** Present when a consumed value cannot be projected — that key is skipped. */
-  warning?: MigrationWarning;
+  /** Unrecognized values that were skipped — those keys are left in place. */
+  warnings?: MigrationWarning[];
 }
 
 export interface ConfigMigration {
@@ -73,9 +73,6 @@ class Skipped {
   readonly warnings: MigrationWarning[] = [];
   warn(key: string, value: unknown, reason: string): void {
     this.warnings.push({ key, value, reason });
-  }
-  get warning(): MigrationWarning | undefined {
-    return this.warnings[0];
   }
 }
 
@@ -149,10 +146,10 @@ const compactionEngineFold: ConfigMigration = {
     if (engineValid && engine !== undefined) del.push("compactionEngine");
 
     if (folded === undefined || folded === compaction) {
-      return { changed: false, delete: del, warning: warning.warning };
+      return { changed: false, delete: del, warnings: warning.warnings };
     }
     raw.compaction = folded;
-    return { changed: true, delete: del, warning: warning.warning };
+    return { changed: true, delete: del, warnings: warning.warnings };
   },
 };
 
@@ -212,7 +209,7 @@ const legacyModes: ConfigMigration = {
         }
       }
     }
-    return { changed, delete: del, warning: warning.warning };
+    return { changed, delete: del, warnings: warning.warnings };
   },
 };
 
@@ -295,7 +292,7 @@ const thresholdArray: ConfigMigration = {
       raw.compactAfterBy = shape;
       changed = true;
     }
-    return { changed, delete: del, warning: warning.warning };
+    return { changed, delete: del, warnings: warning.warnings };
   },
 };
 
@@ -323,7 +320,7 @@ const dropperFractionMerge: ConfigMigration = {
         fullness,
         "unrecognized dropperPoolFullnessThreshold value",
       );
-      return { changed: false, delete: del, warning: warning.warning };
+      return { changed: false, delete: del, warnings: warning.warnings };
     }
     const pressure = raw.dropperPressureThreshold;
     if (pressure !== undefined && !isUnsetZero(pressure) && !isUnitFraction(pressure)) {
@@ -333,12 +330,12 @@ const dropperFractionMerge: ConfigMigration = {
         pressure,
         "unrecognized dropperPressureThreshold value",
       );
-      return { changed: false, delete: del, warning: warning.warning };
+      return { changed: false, delete: del, warnings: warning.warnings };
     }
     const base = typeof pressure === "number" && pressure > 0 ? pressure : 0.7;
     raw.dropperPressureThreshold = Math.max(base, fullness);
     del.push("dropperPoolFullnessThreshold");
-    return { changed: true, delete: del, warning: warning.warning };
+    return { changed: true, delete: del, warnings: warning.warnings };
   },
 };
 
@@ -361,7 +358,7 @@ const inputBudgetMerge: ConfigMigration = {
     }
     if (!isFixedTokenThreshold(dropper)) {
       warning.warn("dropperInputMaxTokens", dropper, "unrecognized dropperInputMaxTokens value");
-      return { changed: false, delete: del, warning: warning.warning };
+      return { changed: false, delete: del, warnings: warning.warnings };
     }
     const reflector = raw.reflectorInputMaxTokens;
     let changed = false;
@@ -374,10 +371,10 @@ const inputBudgetMerge: ConfigMigration = {
         reflector,
         "unrecognized reflectorInputMaxTokens value",
       );
-      return { changed: false, delete: del, warning: warning.warning };
+      return { changed: false, delete: del, warnings: warning.warnings };
     }
     del.push("dropperInputMaxTokens");
-    return { changed, delete: del, warning: warning.warning };
+    return { changed, delete: del, warnings: warning.warnings };
   },
 };
 
@@ -441,7 +438,7 @@ export function projectConfig(raw: Record<string, unknown>): ProjectionResult {
     if (owns.length === 0) continue;
     consumedPresent = true;
     const res = step.apply(config);
-    if (res.warning) warnings.push(res.warning);
+    if (res.warnings) warnings.push(...res.warnings);
     if (res.changed) {
       valueChanged = true;
       applied.push(step.id);
