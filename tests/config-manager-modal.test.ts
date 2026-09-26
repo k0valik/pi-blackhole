@@ -171,6 +171,56 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
   });
 });
 
+describe("workerAttemptTimeoutMs persistence (0e1b110)", () => {
+  it("writes workerAttemptTimeoutMs on a fresh global save", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    const { readFileSync } = await import("node:fs");
+
+    const cfgDir = join(testDir, "pi-blackhole-wat-fresh");
+    mkdirSync(cfgDir, { recursive: true });
+
+    config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 15_000 }, "global", undefined, cfgDir);
+
+    const written = JSON.parse(
+      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(written.workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("replaces an existing file value on a global save", async () => {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+    const { readFileSync, writeFileSync } = await import("node:fs");
+
+    const cfgDir = join(testDir, "pi-blackhole-wat-replace");
+    mkdirSync(cfgDir, { recursive: true });
+    writeFileSync(
+      join(cfgDir, "pi-blackhole-config.json"),
+      JSON.stringify({ workerAttemptTimeoutMs: 60_000 }),
+    );
+
+    config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 15_000 }, "global", undefined, cfgDir);
+
+    const written = JSON.parse(
+      readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(written.workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("persists and reloads through the project scope", async () => {
+    const { config, GLOBAL_CONFIG_DIR } = await import("../src/pi-base/blackhole-settings.js");
+    const { DEFAULTS } = await import("../src/core/unified-config.js");
+
+    const projDir = join(testDir, "pi-blackhole-wat-proj");
+    mkdirSync(projDir, { recursive: true });
+
+    config.save({ ...DEFAULTS, workerAttemptTimeoutMs: 20_000 }, "project", projDir);
+
+    expect(config.load(projDir, GLOBAL_CONFIG_DIR).workerAttemptTimeoutMs).toBe(20_000);
+  });
+});
+
 describe("preset-curve select + hand-edited preset definitions (window curve)", () => {
   it("exposes the compactAfterPreset select with built-in + user preset names", async () => {
     const { config } = await import("../src/pi-base/blackhole-settings.js");
@@ -344,6 +394,17 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
     expect((await validate({ providerIdleTimeoutMs: 0 })).providerIdleTimeoutMs).toBe(0);
     expect((await validate({ providerIdleTimeoutMs: 30_000 })).providerIdleTimeoutMs).toBe(30_000);
   });
+
+  it("drops invalid workerAttemptTimeoutMs but keeps 0 (disabled)", async () => {
+    expect((await validate({ workerAttemptTimeoutMs: -1 })).workerAttemptTimeoutMs).toBeUndefined();
+    expect(
+      (await validate({ workerAttemptTimeoutMs: "fast" })).workerAttemptTimeoutMs,
+    ).toBeUndefined();
+    expect((await validate({ workerAttemptTimeoutMs: 0 })).workerAttemptTimeoutMs).toBe(0);
+    expect((await validate({ workerAttemptTimeoutMs: 30_000 })).workerAttemptTimeoutMs).toBe(
+      30_000,
+    );
+  });
 });
 
 describe("modal save preserves hand-edited configs (models, unknown keys, presets)", () => {
@@ -404,6 +465,57 @@ describe("modal save preserves hand-edited configs (models, unknown keys, preset
         { window: 32_768, ratio: 0.9 },
       ],
     });
+  });
+});
+
+describe("modal save for cacheRetention", () => {
+  /**
+   * Drive the real modal flow for one scope: read the layer, apply the user's
+   * field edits, validate, save. `configDir` is isolated per case so the global
+   * file the other suites share is never touched.
+   */
+  async function saveFromModal(
+    dir: string,
+    edits: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    const { readFileSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    const layer = config.layerValues("global", undefined, dir) as Record<string, unknown>;
+    const validate = config.opts.validate as (
+      r: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    config.save(validate({ ...layer, ...edits }) as never, "global", undefined, dir);
+    return JSON.parse(readFileSync(join(dir, "pi-blackhole-config.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it("writes a chosen retention value", async () => {
+    const written = await saveFromModal(join(testDir, "cr-choose"), { cacheRetention: "long" });
+    expect(written.cacheRetention).toBe("long");
+  });
+
+  it("keeps the file clean when the field is never touched", async () => {
+    const written = await saveFromModal(join(testDir, "cr-untouched"), {});
+    // The modal sentinel must not reach the file: an untouched field pins nothing.
+    expect("cacheRetention" in written).toBe(false);
+  });
+
+  it("removes an existing value when the field is set back to unset", async () => {
+    const dir = join(testDir, "cr-unset");
+    const { writeFileSync } = await import("node:fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "pi-blackhole-config.json"),
+      JSON.stringify({ cacheRetention: "long", customHandKey: { foo: 1 } }, null, 2),
+    );
+
+    const written = await saveFromModal(dir, { cacheRetention: "unset" });
+
+    expect("cacheRetention" in written).toBe(false);
+    expect(written.customHandKey).toEqual({ foo: 1 });
   });
 });
 

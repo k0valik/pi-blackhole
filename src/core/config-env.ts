@@ -9,6 +9,7 @@
  * the runtime ignored the declarative map and only applied the passive
  * trio + compaction/compaction-engine vars.)
  */
+import type { CacheRetention } from "@earendil-works/pi-ai";
 import { readBooleanEnv, readPositiveIntEnv } from "../pi-base/config.js";
 
 export interface EnvParser {
@@ -17,6 +18,35 @@ export interface EnvParser {
   /** Custom parse function (receives raw string, returns parsed value) */
   parse: (raw: string, current: unknown) => unknown;
 }
+
+/**
+ * Supported `SimpleStreamOptions.cacheRetention` values (pi-ai). Lives here so
+ * the env parser, the config loader, and the settings modal all derive from one
+ * list: `unified-config.ts` imports this module, so it cannot own the constant
+ * without creating an import cycle. `unified-config.ts` re-exports both.
+ */
+export const CACHE_RETENTION_VALUES: readonly CacheRetention[] = ["none", "short", "long"];
+
+/**
+ * Canonicalize a raw retention value, or `undefined` when it is not one.
+ * Case and surrounding whitespace are normalized so all three entry points
+ * (file, env var, settings modal) resolve `"LONG"` the same way instead of the
+ * env var accepting it while the file silently drops it.
+ */
+export function normalizeCacheRetention(v: unknown): CacheRetention | undefined {
+  if (typeof v !== "string") return undefined;
+  const canonical = v.trim().toLowerCase();
+  return (CACHE_RETENTION_VALUES as readonly string[]).includes(canonical)
+    ? (canonical as CacheRetention)
+    : undefined;
+}
+
+/**
+ * Node's maximum safe setTimeout delay (2^31 − 1 ms ≈ 24.9 days). Larger
+ * values silently overflow the timer to ~1 ms, so direct file/env timer
+ * configuration is rejected above this bound.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export type EnvOverride = string | EnvParser;
 
@@ -86,6 +116,7 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   fullFoldAlways: "PI_BLACKHOLE_FULL_FOLD_ALWAYS",
   showPreCompactionMessage: "PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE",
   statusBar: "PI_BLACKHOLE_STATUSBAR",
+  showWorkerNotifications: "PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS",
   // Positive integers
   compactAfterTokens: {
     // Parser (not the plain string form) so an UNSET var never re-injects the
@@ -150,6 +181,15 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
       return Number.isInteger(n) && n >= 0 ? n : undefined;
     },
   },
+  // Non-negative integer up to Node's timer maximum (0 = disabled, unset =
+  // no hard elapsed deadline)
+  workerAttemptTimeoutMs: {
+    var: "PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS",
+    parse: (raw: string) => {
+      const n = Number(raw);
+      return Number.isInteger(n) && n >= 0 && n <= MAX_TIMER_DELAY_MS ? n : undefined;
+    },
+  },
   // Float in (0, 1]
   dropperPressureThreshold: {
     var: "PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD",
@@ -212,5 +252,11 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
         ? (trimmed as "resume" | "pause" | "off")
         : undefined;
     },
+  },
+  // Prompt-cache retention preference for the memory workers; an unsupported
+  // value leaves the file value (or pi's effective setting) in place.
+  cacheRetention: {
+    var: "PI_BLACKHOLE_CACHE_RETENTION",
+    parse: (raw: string) => normalizeCacheRetention(raw),
   },
 };

@@ -26,15 +26,21 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AuthResult } from "@earendil-works/pi-ai";
 import { debugLog } from "./debug-log.js";
 
+interface ResolvedModelBase {
+  ok: true;
+  model: any;
+  apiKey: string;
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+  cooldownApplied?: boolean;
+}
+
 export type ResolveResult =
-  | {
-      ok: true;
-      model: any;
-      apiKey: string;
-      headers?: Record<string, string>;
-      env?: Record<string, string>;
-      cooldownApplied?: boolean;
-    }
+  | (ResolvedModelBase & {
+      source: "candidate";
+      candidateConfig: ConfiguredModel;
+    })
+  | (ResolvedModelBase & { source: "session" })
   | { ok: false; reason: string };
 
 type NotifyLevel = "warning" | "info" | "error";
@@ -53,6 +59,10 @@ export type CursorState = "initial" | "recorded" | "empty" | "error" | "skipped"
 export interface PipelineCursor {
   entryId: string;
   state: CursorState;
+  /** Signature (sorted observation-id list) of the pool an empty pressure run
+   *  evaluated — dropper only, and only on `"empty"` cursors. It suppresses
+   *  repeat pressure runs until the pool changes; see `consolidation.ts`. */
+  activePoolSignature?: string;
 }
 
 export interface PipelineCursors {
@@ -325,6 +335,20 @@ export class Runtime {
     this.hasEmittedInfoThisTurn = false;
   }
 
+  /**
+   * Emit a routine observer/reflector/dropper progress toast, unless the user
+   * turned worker notifications off (`showWorkerNotifications: false`).
+   *
+   * Only routine progress goes through here — model fallback/unavailability,
+   * no-output warnings, worker failures and compaction notices keep using
+   * `tryEmitInfo` / `ui.notify` directly so they stay visible when the knob is
+   * off.
+   */
+  tryEmitWorkerInfo(hasUI: boolean, ui: { notify: Notify } | undefined, message: string): boolean {
+    if (this.config.showWorkerNotifications === false) return false;
+    return this.tryEmitInfo(hasUI, ui, message);
+  }
+
   ensureConfig(cwd: string, warn?: (message: string) => void): void {
     if (this.configLoaded) return;
     this.config = loadConfig(cwd, warn);
@@ -456,6 +480,8 @@ export class Runtime {
 
       return {
         ok: true,
+        source: "candidate",
+        candidateConfig: candidate,
         model: resolvedModel,
         apiKey: (auth.apiKey as string) ?? "",
         headers: auth.headers as Record<string, string> | undefined,
@@ -493,6 +519,24 @@ export class Runtime {
         };
       }
 
+      // In-memory per-cycle failures also apply to the session fallback: when
+      // the session model shares provider/id with a candidate that already
+      // failed this cycle (cooldownHours: 0), it IS the same model. Returning
+      // it would re-run an identical stalled model, and findCandidateConfig
+      // would match the configured entry — defeating the stage-level break.
+      if (
+        typeof sessionIdentity.provider === "string" &&
+        typeof sessionIdentity.id === "string" &&
+        this.failedInCycle.has(
+          modelKey({ provider: sessionIdentity.provider, id: sessionIdentity.id }),
+        )
+      ) {
+        return {
+          ok: false,
+          reason: `no model available for ${stageName} (all candidates exhausted, session model ${sessionIdentity.provider}/${sessionIdentity.id} failed this cycle)`,
+        };
+      }
+
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
       signal?.throwIfAborted();
       let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
@@ -522,6 +566,7 @@ export class Runtime {
 
       return {
         ok: true,
+        source: "session",
         model: resolvedModel,
         apiKey: (auth.apiKey as string) ?? "",
         headers: auth.headers as Record<string, string> | undefined,
@@ -606,23 +651,6 @@ export class Runtime {
   }
 
   /**
-   * Get the model config for the currently resolved model (used for cooldown recording).
-   * Returns the candidate config if the model was from the candidate list,
-   * or undefined if it's the session model.
-   */
-  findCandidateConfig(resolvedModel: unknown, ctx: ResolveCtx): ConfiguredModel | undefined {
-    const candidates = this.buildCandidateList(ctx.stageModel, ctx.stageFallbacks);
-    const model = resolvedModel as { provider?: string; id?: string };
-    if (!model.provider || !model.id) return undefined;
-    return (
-      candidates.find((c) => c.provider === model.provider && c.id === model.id) ??
-      (this.config.model?.provider === model.provider && this.config.model?.id === model.id
-        ? this.config.model
-        : undefined)
-    );
-  }
-
-  /**
    * Record a retryable error for a model.  The model must be one of the candidates
    * (not the session model).  If it's the session model we don't cool it down.
    *
@@ -699,8 +727,15 @@ export class Runtime {
   }
 
   /** Advance a stage's cursor to a new entry ID with the given state. */
-  advanceCursor(stage: ConsolidationPhase, entryId: string, state: CursorState): void {
-    this.cursors[stage] = { entryId, state };
+  advanceCursor(
+    stage: ConsolidationPhase,
+    entryId: string,
+    state: CursorState,
+    activePoolSignature?: string,
+  ): void {
+    const cursor: PipelineCursor = { entryId, state };
+    if (activePoolSignature) cursor.activePoolSignature = activePoolSignature;
+    this.cursors[stage] = cursor;
   }
 
   /** Load cursors from the per‑session pending file into the in‑memory map. */
@@ -721,9 +756,13 @@ export class Runtime {
         };
       }
       if (stored.dropper?.entryId && stored.dropper?.state) {
+        const activePoolSignature = stored.dropper.activePoolSignature;
         this.cursors.dropper = {
           entryId: stored.dropper.entryId,
           state: stored.dropper.state as CursorState,
+          ...(typeof activePoolSignature === "string" && activePoolSignature
+            ? { activePoolSignature }
+            : {}),
         };
       }
     } catch {

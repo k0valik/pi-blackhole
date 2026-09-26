@@ -57,7 +57,6 @@ src/
 │   ├── runtime.ts             # Model resolution, cooldown integration, pipeline cursors, retry gate
 │   ├── cooldown.ts            # Cooldown persistence and expiry logic
 │   ├── pending.ts             # Per-session pending file management (manual compaction mode)
-│   ├── configure-overlay.ts   # The /blackhole configure TUI overlay — shows which keys are editable
 │   ├── model-budget.ts        # effectiveContextWindow() — context window override resolution order
 │   ├── debug-log.ts           # Debug logging (rotation, format)
 │   ├── retryable-error.ts     # Regex patterns for retryable error detection
@@ -281,6 +280,7 @@ Based on interview answers, build the config object. Write it to:
   "sessionFallback": true,        // false = skip worker when all configured models fail, don't use main model
   "fullFoldAlways": true,         // false = early reflections/drops don't survive first compaction until pool fills
   "statusBar": true,              // false = hide footer token gauges (O/P/X) + worker events
+  "showWorkerNotifications": true, // false = quiet: hide routine observer/reflector/dropper progress toasts (warnings, errors and compaction notices always show)
 
   // ── Base model (shared fallback for all workers) ──
   "model": { "provider": "...", "id": "..." },
@@ -303,9 +303,12 @@ Based on interview answers, build the config object. Write it to:
   "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
   "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
   "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
+  "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
+  "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647); configured candidates: cooldown + fallback; session fallback: once per stage, no cooldown
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
-  "dropperPressureThreshold": 0.70,    // pool reaches 70% of reflectorInputMaxTokens → dropper fires even without new data
+  "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
+  // "cacheRetention": "long",     // optional worker prompt cache: "none" | "short" | "long" (omit = inherit pi's effective setting)
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
 }
 ```
@@ -535,6 +538,7 @@ These override config file values at load time, applied AFTER config is parsed. 
 | `PI_BLACKHOLE_PASSIVE` | Sets `compaction: "off"` + `memory: false` | `1`, `true`, `yes`, `on` |
 | `PI_BLACKHOLE_COMPACTION` | Overrides `compaction` | `auto`, `manual`, `off` |
 | `PI_BLACKHOLE_COMPACTION_ENGINE` | Overrides `compactionEngine` | `blackhole`, `pi-default` |
+| `PI_BLACKHOLE_CACHE_RETENTION` | Overrides `cacheRetention` (worker prompt cache) | `none`, `short`, `long` |
 
 Legacy aliases (still work): `PI_VCC_OM_PASSIVE`, `PI_OBSERVATIONAL_MEMORY_PASSIVE`.
 

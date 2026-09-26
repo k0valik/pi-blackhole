@@ -4,15 +4,15 @@ Pi-blackhole's configuration lives at `~/.pi/agent/pi-blackhole/pi-blackhole-con
 
 ## Config file safety
 
-The config file must contain **valid JSON**. A trailing comma, partial write, or sync-conflict copy will cause the entire file to be rejected — and previously, the overlay would silently fall back to defaults and then overwrite your model configs on save.
+The config file must contain **valid JSON**. A trailing comma, partial write, or sync-conflict copy will cause the entire file to be rejected — the loader reports the failure instead of silently replacing your config with defaults.
 
 **Current behavior:**
-- Invalid JSON is logged as a warning and surfaced as a yellow notification in the TUI
-- The `/blackhole configure` overlay shows a red error banner and **blocks Ctrl+S** until the file is fixed
-- The overlay preserves unknown keys (e.g. `observerModel`, `reflectorModel`) on valid files — only keys in the overlay's field list are managed there
-- Changes made via the overlay take effect **immediately** — no session restart needed (the runtime reloads config from disk after save)
+- Invalid JSON is surfaced as a yellow TUI warning — `Config file "pi-blackhole-config.json" is Invalid JSON: <parse error>. Using defaults.`
+- `/blackhole settings` (alias `/blackhole configure`) still opens and shows defaults for the unreadable file — the modal does not block on the parse error
+- Saves are diff-based against the file: only fields you actually changed are written, and unknown keys outside the schema (hand-edited extras) are preserved
+- Changes take effect **immediately** — no session restart needed (the runtime reloads config from disk after save)
 
-**If your config gets corrupted:** fix the JSON syntax directly in the file, then reopen the overlay.
+**If your config gets corrupted:** fix the JSON syntax directly in the file *before* saving from the modal. An unreadable file reads back as empty, so a `global`/`project` save has nothing to diff against and rewrites the file with exactly what the modal is showing (defaults, plus any env overrides) — everything the broken file held is gone. A `session`-scope save writes the session JSONL instead and leaves the file untouched.
 
 ## Quick Reference
 
@@ -48,6 +48,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "sessionFallback": true,        // Fall back to session model when OM models fail
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
   "statusBar": true,              // Footer token gauges (O/P/X) + worker events
+  "showWorkerNotifications": true, // Routine observer/reflector/dropper progress toasts
   "observeAfterTokens": 15000,    // Token threshold for observer runs
   "reflectAfterTokens": 25000,    // Token threshold for reflector + dropper
   "observationsPoolMaxTokens": 20000, // Full-fold pressure + rendered observation-line cap
@@ -60,7 +61,9 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "dropperPressureThreshold": 0.70, // Pool-pressure relief valve
   "dropperPoolFullnessThreshold": 0.10, // Min pool fullness before dropper runs
   "agentMaxTurns": 16,            // Max turns per memory agent
-  "providerIdleTimeoutMs": 0,     // Background provider idle timeout in ms (0 = disabled, unset = inherit pi default)
+  "providerIdleTimeoutMs": 0,     // Background provider body-idle timeout in ms (0 = disabled, unset = inherit pi default)
+  "workerAttemptTimeoutMs": 0,    // Hard elapsed deadline per worker/model attempt (0 or unset = disabled)
+  // "cacheRetention": "long",    // Optional worker prompt-cache retention: "none" | "short" | "long" (omit = inherit pi's effective setting)
 
   // ── Model configs (edit by hand) ──
   "model": { "provider": "...", "id": "..." },
@@ -468,7 +471,7 @@ Max preamble tokens per section (`CURRENT REFLECTIONS` / `CURRENT OBSERVATIONS`)
 
 ### `dropperPressureThreshold`
 
-Fraction of `reflectorInputMaxTokens` at which the dropper runs even without new observation or reflection data. This is a **pool-size pressure valve**: when the active observation pool exceeds this fraction of `reflectorInputMaxTokens`, the dropper fires to keep the pool pruned. The reflector's own input is capped separately by `reflectorInputMaxTokens` and only includes new items plus a summary budget.
+Fraction of `observationsPoolMaxTokens` at which the dropper runs without new data. The pool must also clear `dropperPoolFullnessThreshold`; `1.0` disables pressure.
 
 | Type | Default | Range |
 |------|---------|-------|
@@ -482,10 +485,10 @@ Minimum observation-pool fullness (fraction of `observationsPoolMaxTokens`) befo
 |------|---------|-------|
 | number | 0.10 | (0, 1] |
 
-- **0.70** (default): dropper fires when pool reaches 70% of `reflectorInputMaxTokens` — leaves 30% headroom for system prompts, tool scaffolding, and reflection summaries
-- **Higher** (e.g. 0.90): less aggressive pruning, more headroom needed from your model
-- **Lower** (e.g. 0.50): more aggressive pruning, useful with smaller models or free-tier context windows
-- **1.0**: disable pressure-driven dropper entirely — dropper only runs when new observation/reflection data exists AND the pool is ≥10% full
+- **0.70** (default): pressure-driven dropper runs when the observation pool reaches 70% of `observationsPoolMaxTokens`
+- **Higher** (e.g. 0.90): waits until the observation pool is fuller before pressure-driven pruning
+- **Lower** (e.g. 0.50): starts pressure-driven pruning at lower observation-pool fullness
+- **1.0**: disable pressure-driven dropper entirely — dropper only runs when new observation/reflection data exists AND pool fullness reaches `dropperPoolFullnessThreshold` (10% by default)
 
 ### `agentMaxTurns`
 
@@ -495,15 +498,45 @@ Shared turn cap for background memory agents. It is passed as `maxTurns` to `run
 |------|---------|
 | number | 16 |
 
+### `cacheRetention`
+
+Provider-neutral prompt-cache retention preference forwarded to the observer, reflector, and dropper worker streams. Unset defers to pi's effective setting (its provider default is `short`). Adapters that do not support a value ignore it, so `long` is opt-in rather than our default.
+
+- **unset** — inherit pi's effective setting (its provider default is `short`).
+- **`none`** — no prompt caching where the adapter supports it.
+- **`short`** — short-lived retention, pi's provider default.
+- **`long`** — extended retention where supported.
+
+Accepted via plain config, `/blackhole settings`, or `PI_BLACKHOLE_CACHE_RETENTION`; values are case-insensitive on every path, so `"LONG"` resolves to `long`. The settings modal shows an explicit `unset` option so an untouched field never pins a value, and switching back to `unset` removes a stored value from the file; invalid file or env values are dropped at load and the previous value stays. The setting only affects memory workers, never foreground Pi chat requests.
+
+| Type | Default | Values |
+|------|---------|--------|
+| string | unset | `none` \| `short` \| `long` |
+
 ### `providerIdleTimeoutMs`
 
 Body-idle timeout for background provider streams (observer/reflector/dropper worker HTTP requests). Higher values let background memory jobs tolerate longer silent provider intervals without forcing interactive Pi requests to wait equally long. Applied by wrapping the provider `fetch` with an undici dispatcher that injects `bodyTimeout`.
 
 - **unset** — inherit pi's global provider timeout (no wrapper applied).
 - **`0`** — explicitly disabled (no wrapper applied).
-- **`> 0`** — wait up to this many milliseconds for a response body after the request is sent.
+- **`> 0`** — allow at most this many milliseconds between response-body chunks.
+
+This is not a hard request deadline: waiting for response headers, streamed heartbeat bytes, and later agent-loop turns can keep a worker alive longer. Use `workerAttemptTimeoutMs` when fallback must happen by a wall-clock deadline.
 
 Accepted via plain config or `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS`. Negative values are rejected. WebSocket transports are not affected.
+
+| Type | Default | Range |
+|------|---------|-------|
+| number | unset | `0` or positive integer |
+
+### `workerAttemptTimeoutMs`
+
+Hard elapsed deadline for one worker/model attempt. It covers the complete observer, reflector, or dropper agent loop for the selected model: response headers, streamed bodies and heartbeats, tool turns, and final confirmation. When the deadline expires, Blackhole aborts that attempt. If the model is a configured candidate, Blackhole records its cooldown and immediately resolves the next fallback, which gets a fresh deadline. The final session-model fallback behaves differently: it is attempted once per stage, and a timeout there records no cooldown and ends the stage's model search instead of retrying the same session model up to ten times.
+
+- **unset** or **`0`** — disabled.
+- **`> 0`** — abort one model attempt after this many milliseconds.
+
+Accepted via plain config, `/blackhole settings`, or `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS`. Settings-modal saves persist the key correctly at global, project, and session scope. Direct config and env values must not exceed 2,147,483,647 ms (Node's maximum timer delay); larger values are rejected. The settings UI caps edits at 3,600,000 ms. It only affects Blackhole workers, never foreground Pi chat requests.
 
 | Type | Default | Range |
 |------|---------|-------|
@@ -569,6 +602,16 @@ Show the footer status bar: three token gauges — O (transcript since last obse
 |------|---------|
 | boolean | `true` |
 
+### `showWorkerNotifications`
+
+Routine observer, reflector, and dropper progress toasts — `observer running on ~N-token chunk`, `N observations recorded`, `reflector running`, `dropper running`, and the info-level `no observations` notice. Set to `false` for quiet sessions.
+
+Warnings and errors are unaffected: model fallback/unavailability, context-window skips, no-output warnings, worker failures, compaction notifications, and explicit `/blackhole*` command output all stay visible.
+
+| Type | Default |
+|------|---------|
+| boolean | `true` |
+
 ## Debug Section
 
 ### `debug` / `debugLog`
@@ -626,6 +669,7 @@ Boolean fields:
 | `PI_BLACKHOLE_SESSION_FALLBACK` | `sessionFallback` |
 | `PI_BLACKHOLE_FULL_FOLD_ALWAYS` | `fullFoldAlways` |
 | `PI_BLACKHOLE_STATUSBAR` | `statusBar` |
+| `PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS` | `showWorkerNotifications` |
 
 Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accepts `0` to disable its cap):
 
@@ -646,6 +690,7 @@ Integer fields (invalid values fall back; `reflectionsPoolMaxTokens` also accept
 | `PI_BLACKHOLE_OBSERVER_PREAMBLE_MAX_TOKENS` | `observerPreambleMaxTokens` |
 | `PI_BLACKHOLE_AGENT_MAX_TURNS` | `agentMaxTurns` |
 | `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS` | `providerIdleTimeoutMs` |
+| `PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS` | `workerAttemptTimeoutMs` |
 
 Float fields (must be in `(0, 1]`):
 
@@ -660,6 +705,12 @@ Preset-name field (non-empty string):
 | Variable | Overrides |
 |----------|-----------|
 | `PI_BLACKHOLE_COMPACT_AFTER_PRESET` | `compactAfterPreset` |
+
+Enum fields (invalid values keep the file value; matching is case-insensitive):
+
+| Variable | Overrides |
+|----------|-----------|
+| `PI_BLACKHOLE_CACHE_RETENTION` | `cacheRetention` (`none` \| `short` \| `long`) |
 
 ### Paths and internals
 

@@ -61,6 +61,7 @@ describe("Config defaults", () => {
     expect(config.agentMaxTurns).toBe(16);
     expect(config.memory).toBe(true);
     expect(config.debugLog).toBe(false);
+    expect(config.showWorkerNotifications).toBe(true);
     expect(config.model).toBeUndefined();
     expect(config.observerModel).toBeUndefined();
     expect(config.reflectorModel).toBeUndefined();
@@ -217,6 +218,180 @@ describe("providerIdleTimeoutMs", () => {
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
     writeConfig({ providerIdleTimeoutMs: -100 });
     expect(loadUnifiedConfig(testDir).providerIdleTimeoutMs).toBeUndefined();
+  });
+});
+
+describe("workerAttemptTimeoutMs", () => {
+  it("leaves the hard deadline disabled when omitted", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+
+  it("accepts a positive hard deadline", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 15_000 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("accepts 0 as explicit disabled", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 0 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBe(0);
+  });
+
+  it("ignores negative hard deadlines", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: -100 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+
+  it("rejects a file value above Node's maximum timer delay", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 2_147_483_648 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+
+  it("accepts the maximum timer delay exactly", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 2_147_483_647 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBe(2_147_483_647);
+  });
+
+  it("rejects a non-integer value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 1.5 });
+    expect(loadUnifiedConfig(testDir).workerAttemptTimeoutMs).toBeUndefined();
+  });
+});
+
+describe("showWorkerNotifications", () => {
+  it("defaults to true when no config file exists", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(true);
+  });
+
+  it("honors an explicit false from the config file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showWorkerNotifications: false });
+    expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(false);
+  });
+
+  it("ignores a non-boolean file value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showWorkerNotifications: "no" });
+    expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(true);
+  });
+
+  it("env override wins over the file value", async () => {
+    process.env.PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS = "false";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ showWorkerNotifications: true });
+      expect(loadUnifiedConfig(testDir).showWorkerNotifications).toBe(false);
+    } finally {
+      delete process.env.PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS;
+    }
+  });
+});
+
+describe("cacheRetention", () => {
+  const envKey = "PI_BLACKHOLE_CACHE_RETENTION";
+  const mgrDir = join(testDir, "mgr-cache-retention");
+
+  afterEach(() => {
+    delete process.env[envKey];
+    rmSync(mgrDir, { recursive: true, force: true });
+  });
+
+  async function modalCacheRetention(data: Record<string, unknown>): Promise<unknown> {
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    mkdirSync(mgrDir, { recursive: true });
+    writeFileSync(join(mgrDir, "pi-blackhole-config.json"), JSON.stringify(data, null, 2));
+    const loaded = config.loadWithWarnings(undefined, mgrDir).config as {
+      cacheRetention?: unknown;
+    };
+    return loaded.cacheRetention;
+  }
+
+  it("stays unset by default so pi's own retention applies", async () => {
+    const { loadUnifiedConfig, DEFAULTS } = await import("../src/core/unified-config.js");
+    expect(DEFAULTS.cacheRetention).toBeUndefined();
+    expect(loadUnifiedConfig(testDir).cacheRetention).toBeUndefined();
+  });
+
+  it("accepts every supported retention value from the file", async () => {
+    const { loadUnifiedConfig, CACHE_RETENTION_VALUES } =
+      await import("../src/core/unified-config.js");
+    for (const cacheRetention of CACHE_RETENTION_VALUES) {
+      writeConfig({ cacheRetention });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe(cacheRetention);
+    }
+  });
+
+  it("ignores an unsupported file value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ cacheRetention: "forever" });
+    expect(loadUnifiedConfig(testDir).cacheRetention).toBeUndefined();
+  });
+
+  it("normalizes letter case from the file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ cacheRetention: "LONG" });
+    expect(loadUnifiedConfig(testDir).cacheRetention).toBe("long");
+  });
+
+  it("normalizes letter case from the env var", async () => {
+    process.env[envKey] = "LoNg";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ cacheRetention: "none" });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe("long");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("normalizes letter case on the settings-modal loader too", async () => {
+    expect(await modalCacheRetention({ cacheRetention: "SHORT" })).toBe("short");
+  });
+
+  it("env override wins over the file value", async () => {
+    process.env[envKey] = "long";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ cacheRetention: "none" });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe("long");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("an unsupported env value leaves the file value in place", async () => {
+    process.env[envKey] = "forever";
+    try {
+      const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+      writeConfig({ cacheRetention: "short" });
+      expect(loadUnifiedConfig(testDir).cacheRetention).toBe("short");
+    } finally {
+      delete process.env[envKey];
+    }
+  });
+
+  it("resolves identically on the file loader and the settings-modal loader", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    for (const data of [
+      { cacheRetention: "long" },
+      { cacheRetention: "forever" },
+      // Modal "unset" sentinel must never survive into an effective value.
+      { cacheRetention: "unset" },
+      {},
+    ]) {
+      writeConfig(data);
+      const viaFileLoader = loadUnifiedConfig(testDir).cacheRetention;
+      expect(await modalCacheRetention(data)).toBe(viaFileLoader);
+    }
+    writeConfig({ cacheRetention: "long" });
+    expect(await modalCacheRetention({ cacheRetention: "long" })).toBe("long");
   });
 });
 
@@ -547,6 +722,7 @@ describe("Declarative env overrides apply at runtime", () => {
     delete process.env.PI_BLACKHOLE_DEBUG;
     delete process.env.PI_BLACKHOLE_DROPPER_PRESSURE_THRESHOLD;
     delete process.env.PI_BLACKHOLE_OBSERVE_AFTER_TOKENS;
+    delete process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS;
   });
 
   it("int override wins over the file value (runtime path)", async () => {
@@ -563,6 +739,38 @@ describe("Declarative env overrides apply at runtime", () => {
     writeConfig({ debug: false });
     const config = loadUnifiedConfig(testDir);
     expect(config.debug).toBe(true);
+  });
+
+  it("worker attempt timeout env override wins over the file value", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "15000";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(15_000);
+  });
+
+  it("worker attempt timeout env override accepts 0 as disabled", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "0";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(0);
+  });
+
+  it("invalid worker attempt timeout env override keeps the file value", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "soon";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(60_000);
+  });
+
+  it("env override above the timer maximum keeps the file value", async () => {
+    process.env.PI_BLACKHOLE_WORKER_ATTEMPT_TIMEOUT_MS = "2147483648";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ workerAttemptTimeoutMs: 60_000 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.workerAttemptTimeoutMs).toBe(60_000);
   });
 
   it("invalid int falls back to the configured value", async () => {

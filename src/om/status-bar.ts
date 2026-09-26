@@ -294,10 +294,11 @@ export function registerStatusBar(pi: ExtensionAPI, runtime: Runtime): void {
   }
 
   pi.on("session_start", (_event, ctx) => {
-    ui = ctx.ui as StatusBarUi;
+    ui = ctx.hasUI !== false ? (ctx.ui as StatusBarUi | undefined) : undefined;
     model = ctx.model;
     lastCtx = ctx as BranchCtx;
     clearWorkers();
+    if (!ui) return;
     recompute(ctx as BranchCtx);
     // The pipeline can launch after this module's event handlers ran (handler
     // order inside one event is not a guarantee we own), and an idle session

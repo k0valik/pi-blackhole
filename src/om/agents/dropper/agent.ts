@@ -6,7 +6,7 @@
  * and throws if the API errored without collecting any drop candidates.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -61,6 +61,13 @@ interface RunDropperArgs {
    * OpenCode `x-opencode-session`) without per-provider branching upstream.
    */
   sessionId?: string;
+  /**
+   * Provider-neutral prompt-cache retention preference
+   * (`SimpleStreamOptions.cacheRetention`). Unset defers to pi's effective
+   * setting (provider default `short`); adapters ignore values they do not
+   * support.
+   */
+  cacheRetention?: CacheRetention;
 }
 
 const DROP_SKIP_FULLNESS = 0.1;
@@ -210,10 +217,11 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   } = args;
   if (observations.length === 0) return undefined;
 
-  // Delta-scoped, not the live pool: `observations` is the post-last-drop delta
-  // handed to runDropper, so this measures the candidate set, not the whole
-  // active pool (observationPoolTokens). Widening the scope here would change
-  // which observations the dropper can drop.
+  // Candidate-scoped, not the live pool as such: `observations` is exactly the
+  // set the caller chose to evaluate — the post-last-drop delta for cadence
+  // runs, the whole live pool (`livePoolObservations`) for pressure runs. So
+  // this measures that candidate set; widening the scope here would change
+  // which observations the dropper is allowed to drop.
   const observationTokens = observations.reduce(
     (sum, observation) => sum + observation.tokenCount,
     0,
@@ -358,6 +366,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     headers,
     env,
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],

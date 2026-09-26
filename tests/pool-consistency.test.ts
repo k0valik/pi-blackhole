@@ -155,6 +155,25 @@ describe("observationPoolTokens", () => {
     expect(observationPoolTokens(asEntries(entries))).toEqual({ tokens: 700, count: 1 });
   });
 
+  it("does not restore a ledger-tombstoned observation from pending batches", () => {
+    const entries = [
+      ...observationBranch(),
+      observationsDroppedEntry("om-drop-1", {
+        observationIds: ["bbbbbbbbbbbb"],
+        coversUpToId: "om-obs-1",
+      }),
+    ];
+    savePendingObservation(SESSION, {
+      coversUpToId: "raw-1",
+      data: { observations: [observation("bbbbbbbbbbbb", { tokenCount: 700 })] },
+    });
+
+    expect(observationPoolTokens(asEntries(entries), readPendingState(SESSION))).toEqual({
+      tokens: 700,
+      count: 1,
+    });
+  });
+
   it("adds every pending observation batch when pending is supplied", () => {
     const pending: PendingOMState = {
       observationBatches: [
@@ -178,6 +197,70 @@ describe("observationPoolTokens", () => {
     });
   });
 
+  it("counts an observation recorded in both the branch and pending only once", () => {
+    const pending: PendingOMState = {
+      observationBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { observations: [observation("aaaaaaaaaaaa", { tokenCount: 700 })] },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
+  it("applies pending drop batches to pending observations", () => {
+    const pending: PendingOMState = {
+      observationBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { observations: [observation("cccccccccccc", { tokenCount: 300 })] },
+        },
+      ],
+      droppedBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { coversUpToId: "raw-1", observationIds: ["cccccccccccc"] },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
+  it("falls back to the singular pending drop when no drop batches exist", () => {
+    const pending: PendingOMState = {
+      dropped: {
+        coversUpToId: "om-obs-1",
+        data: { coversUpToId: "om-obs-1", observationIds: ["bbbbbbbbbbbb"] },
+      },
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 700,
+      count: 1,
+    });
+  });
+
+  it("skips pending observations without a usable id/content/tokenCount", () => {
+    const pending: PendingOMState = {
+      observationBatches: [
+        {
+          coversUpToId: "raw-1",
+          data: { observations: [{ id: "cccccccccccc", content: "no token count here" }] },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
   it("measures only the branch when pending is omitted", () => {
     const entries = asEntries([textCustomMessage("raw-1", "x".repeat(400))]);
     expect(observationPoolTokens(entries)).toEqual({ tokens: 0, count: 0 });
@@ -190,6 +273,38 @@ describe("observationPoolTokens", () => {
       0,
     );
     expect(observationPoolTokens(entries).tokens).toBe(inline);
+  });
+});
+
+describe("dropper pool pressure", () => {
+  function pressureRuntime(pressure: number, poolMax = POOL_MAX): Runtime {
+    return triggerRuntime({
+      reflectAfterTokens: 1_000_000,
+      reflectorInputMaxTokens: 1_000_000,
+      observationsPoolMaxTokens: poolMax,
+      dropperPressureThreshold: pressure,
+    });
+  }
+
+  it("uses observationsPoolMaxTokens as the pressure basis", () => {
+    const entries = asEntries(observationBranch()); // 1,400 / 2,800 tokens
+    const runtime = pressureRuntime(0.49); // threshold 1,372
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+  });
+
+  it("stays idle below the pressure threshold", () => {
+    const entries = asEntries(observationBranch());
+    const runtime = pressureRuntime(0.51); // threshold 1,428
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+
+  it("treats a threshold of 1 as pressure disabled", () => {
+    const entries = asEntries(observationBranch());
+    const runtime = pressureRuntime(1, 1_400);
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
 });
 

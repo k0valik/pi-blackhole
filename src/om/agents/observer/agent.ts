@@ -7,7 +7,7 @@
  * This allows the consolidation pipeline to fall back to alternative models.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -55,6 +55,13 @@ interface RunObserverArgs {
    * OpenCode `x-opencode-session`) without per-provider branching upstream.
    */
   sessionId?: string;
+  /**
+   * Provider-neutral prompt-cache retention preference
+   * (`SimpleStreamOptions.cacheRetention`). Unset defers to pi's effective
+   * setting (provider default `short`); adapters ignore values they do not
+   * support.
+   */
+  cacheRetention?: CacheRetention;
 }
 
 const RelevanceSchema = Type.Union([
@@ -82,8 +89,24 @@ const RecordObservationsSchema = Type.Object({
       }),
     }),
     {
-      description: "Batch of new observations. May be empty only if the tool is not called at all.",
+      // The empty batch is the only sanctioned way to close a chunk that yielded
+      // nothing, so it is paired with the flag. The previous wording also offered
+      // "if the tool is not called at all", which is both self-contradictory (an
+      // uncalled tool has no array) and points at the plain-text path the observer
+      // stage reports as a tool_not_called warning.
+      description:
+        "Batch of new observations. May be empty only alongside complete=true, " +
+        "which closes a run that found nothing new.",
     },
+  ),
+  // Optional on purpose: a model that omits the flag must lose only the
+  // early-stop hint, never the batch itself (a required field would fail
+  // host-side validation and drop every observation in the call).
+  complete: Type.Optional(
+    Type.Boolean({
+      description:
+        "Whether this batch completes chunk coverage. Set false when more observations or corrections remain.",
+    }),
   ),
 });
 
@@ -174,17 +197,22 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
   let totalDuplicates = 0;
   let totalRejected = 0;
   let totalProposed = 0;
+  // Whether the most recent batch carried complete=true. An empty complete batch
+  // is the model closing a covered chunk that yielded nothing, which is a
+  // no_new_content outcome, not the empty_array protocol slip the kind implies.
+  let lastBatchComplete = false;
 
   const recordObservations: AgentTool<typeof RecordObservationsSchema> = {
     name: "record_observations",
     label: "Record observations",
     description:
       "Record a batch of new observations distilled from the conversation chunk. " +
-      "Call this multiple times as you work through the chunk. Stop calling when coverage is complete, " +
-      "then emit a short plain-text confirmation to end the run.",
+      "complete=true ends fully valid chunk coverage; use complete=false when more observations or corrections remain. " +
+      "Incomplete or rejected work stays open.",
     parameters: RecordObservationsSchema,
     execute: async (_id, params: RecordObservationsArgs) => {
       toolCalled = true;
+      lastBatchComplete = params.complete === true;
       let added = 0;
       let duplicates = 0;
       let rejected = 0;
@@ -218,28 +246,56 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
         rejected > 0
           ? ` ${rejected} observation${rejected === 1 ? "" : "s"} rejected for missing or invalid sourceEntryIds.`
           : "";
+      const terminates = params.complete === true && rejected === 0;
+      const refusal =
+        params.complete === true && rejected > 0
+          ? ` complete=true was not honored: ${rejected} observation${rejected === 1 ? "" : "s"} in this batch still ${rejected === 1 ? "needs" : "need"} correcting — re-submit them with sourceEntryIds copied from the chunk; anything not re-submitted is discarded and will not be recorded.`
+          : "";
+      // The run totals are counter semantics, not a claim about this receipt:
+      // stated as what the number means, they stay true on the batch that
+      // creates the count as well as on later ones, and they tell the model not
+      // to re-propose against a count it already corrected.
+      const totals =
+        ` Run totals: ${accumulated.size} recorded, ` +
+        `${totalDuplicates} duplicate${totalDuplicates === 1 ? "" : "s"} skipped, ` +
+        `${totalRejected} rejected cumulatively across this run ` +
+        `(a count above zero does not mean corrections are still owed).`;
+      const guidance = terminates
+        ? ""
+        : ` Continue with complete=false while content remains or corrections are needed; use complete=true on the final valid batch.`;
       const ack =
         `Recorded ${added} new observation${added === 1 ? "" : "s"} ` +
         (duplicates > 0
           ? `(${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped).`
           : ".") +
         rejectedPart +
-        ` Total so far this run: ${accumulated.size}. ` +
-        `Continue if the chunk still has uncovered content; otherwise stop calling the tool and emit a short plain-text confirmation.`;
+        totals +
+        guidance +
+        refusal;
       return {
         content: [{ type: "text", text: ack }],
         details: { added, duplicates, rejected, total: accumulated.size },
+        // Per-batch gate, deliberately not run-scoped: an earlier rejection was
+        // reported in its own receipt and stays visible in the cumulative run
+        // totals, and a corrected later batch must still be able to close the
+        // run — run-wide gating would disable early-stop for the whole run
+        // after any single rejected entry, including runs that fixed it.
+        terminate: terminates,
       };
     },
   };
 
+  // The system prompt (OBSERVER_SYSTEM) is the append-stable prefix every
+  // observer run shares, so prompt-cache retention only pays off if nothing
+  // before the per-run chunk varies. The ledger blocks below it do change on
+  // every run, and the chunk is per-run by definition — hence the ordering.
   const userText = `CURRENT REFLECTIONS:
 ${joinOrEmpty(priorReflections)}
 
 CURRENT OBSERVATIONS:
 ${joinOrEmpty(priorObservations)}
 
-Compress the following new conversation chunk into observations by calling record_observations one or more times. Do not restate facts already present in current reflections or current observations. Stop calling the tool and reply with a short plain-text confirmation once the chunk is fully covered.
+Compress the following new conversation chunk into observations by calling record_observations one or more times. Use complete=false for partial batches or corrections, and use complete=true only on the final valid batch after the chunk is fully covered. If no observations are warranted, close the run with one record_observations call carrying an empty observations array and complete=true. Do not restate facts already present in current reflections or current observations.
 
 NEW CONVERSATION CHUNK:
 ${conversation}`;
@@ -264,6 +320,7 @@ ${conversation}`;
     headers,
     env,
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
+    ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
     maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
@@ -311,7 +368,13 @@ ${conversation}`;
     } else if (totalDuplicates > 0 && totalAdded === 0) {
       emptyReason = { kind: "all_duplicates", count: totalDuplicates };
     } else if (totalProposed === 0) {
-      emptyReason = { kind: "empty_array", count: 0 };
+      // An empty batch flagged complete is the sanctioned "covered, nothing new"
+      // close, so it reports as no_new_content (info) rather than the warning an
+      // unflagged empty batch earns. The rejected/duplicate branches above keep
+      // priority, so an outstanding rejection is never masked by the close.
+      emptyReason = lastBatchComplete
+        ? { kind: "no_new_content" }
+        : { kind: "empty_array", count: 0 };
     } else {
       emptyReason = { kind: "no_new_content" };
     }

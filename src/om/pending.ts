@@ -71,7 +71,7 @@ export interface PendingOMState {
   cursors?: {
     observer?: { entryId: string; state: string };
     reflector?: { entryId: string; state: string };
-    dropper?: { entryId: string; state: string };
+    dropper?: { entryId: string; state: string; activePoolSignature?: string };
   };
 }
 

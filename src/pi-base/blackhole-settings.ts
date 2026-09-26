@@ -1,9 +1,9 @@
 /**
  * Blackhole settings — modal-based configuration via ConfigManager.
  *
- * Replaces the hand-rolled configure overlay (src/om/configure-overlay.ts)
- * with pi-base's ConfigManager + openConfigFlow (scope-selector →
- * edit/display-all modal).
+ * The single config UI: pi-base's ConfigManager + openConfigFlow
+ * (scope-selector → edit/display-all modal). `/blackhole configure` is a
+ * hidden alias for `/blackhole settings` and opens this modal.
  *
  * Env-var overrides are applied by ConfigManager after load + validate,
  * so they take effect for both the runtime path (loadUnifiedConfig) and
@@ -18,7 +18,13 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ConfigManager } from "../pi-base/config-manager.js";
 import { getPiAgentDir } from "../pi-base/paths.js";
 import { DECLARATIVE_ENV_OVERRIDES } from "../core/config-env.js";
-import { DEFAULTS, normalizeThresholdKnobs, type UnifiedConfig } from "../core/unified-config.js";
+import {
+  CACHE_RETENTION_VALUES,
+  DEFAULTS,
+  normalizeCacheRetention,
+  normalizeThresholdKnobs,
+  type UnifiedConfig,
+} from "../core/unified-config.js";
 import { effectivePresets } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
@@ -304,7 +310,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "number",
       label: "Dropper pressure threshold",
       description:
-        "Fraction of reflectorInputMaxTokens that triggers pressure-driven dropper (0-1, default 0.70)",
+        "Fraction of observationsPoolMaxTokens that triggers pressure-driven dropper (1 disables)",
       value: cfg.dropperPressureThreshold,
       min: 0.01,
       max: 1,
@@ -343,6 +349,34 @@ export const config = new ConfigManager<UnifiedConfig>({
       step: 1000,
     },
     {
+      key: "cacheRetention",
+      type: "enum",
+      label: "Worker prompt-cache retention",
+      description:
+        "Provider-neutral prompt-cache retention for the memory workers; unset defers to pi's effective setting. Adapters ignore values they do not support.",
+      // "unset" is a modal-only sentinel: validate() drops it before the config
+      // is persisted, so an untouched field never pins a value in the file.
+      value: cfg.cacheRetention ?? "unset",
+      options: ["unset", ...CACHE_RETENTION_VALUES],
+      optionLabels: {
+        unset: "unset — inherit pi's effective setting",
+        none: "none — no prompt caching where supported",
+        short: "short — pi's provider default",
+        long: "long — extended retention where supported",
+      },
+    },
+    {
+      key: "workerAttemptTimeoutMs",
+      type: "number",
+      label: "Worker attempt timeout (ms)",
+      description:
+        "Hard elapsed deadline per worker/model attempt; timeout aborts the call and tries the next fallback; 0 = disabled",
+      value: cfg.workerAttemptTimeoutMs ?? 0,
+      min: 0,
+      max: 3_600_000,
+      step: 1000,
+    },
+    {
       key: "fullFoldAlways",
       type: "boolean",
       label: "Preserve OM on first compaction",
@@ -358,6 +392,18 @@ export const config = new ConfigManager<UnifiedConfig>({
       label: "Footer status bar",
       description: "Show token gauges (O/P/X) and worker events in the footer",
       value: cfg.statusBar,
+    },
+    {
+      key: "showWorkerNotifications",
+      type: "boolean",
+      label: "Worker notifications",
+      description:
+        "Show routine observer/reflector/dropper progress toasts; warnings, errors and compaction notices always show",
+      value: cfg.showWorkerNotifications,
+      valueDescriptions: {
+        on: "On — routine worker progress toasts shown",
+        off: "Off — quiet; warnings/errors only",
+      },
     },
 
     // ── Debug ──
@@ -471,7 +517,20 @@ export const config = new ConfigManager<UnifiedConfig>({
     // (Runs before the merge so an emptied preset name falls back to the
     // DEFAULTS "default", and dropped knobs stay absent. Env overrides
     // re-apply afterwards, so env-set values stay explicit.)
+    // SAFETY: parsed is a plain config record; the normalizer only validates or deletes named properties.
     normalizeThresholdKnobs(parsed as unknown as Record<string, unknown>);
+
+    // ── cacheRetention: drop the modal "unset" sentinel and any unsupported value ──
+    // Keeps the modal path in lockstep with loadUnifiedConfig's parseConfig,
+    // which only accepts none|short|long (case-insensitively, via the same
+    // normalizer). Deleting here is also how the modal clears a stored value:
+    // the save diff carries the key as undefined, so the key leaves the file.
+    const cacheRetention = normalizeCacheRetention(parsed.cacheRetention);
+    if (cacheRetention) {
+      parsed.cacheRetention = cacheRetention;
+    } else {
+      delete parsed.cacheRetention;
+    }
 
     // ── Merge with defaults ──
     const merged = { ...DEFAULTS, ...parsed } as UnifiedConfig;
