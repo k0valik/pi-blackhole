@@ -16,6 +16,7 @@ import { type ResolveResult, type Runtime, type RuntimeGeneration } from "./runt
 import { withProviderAttributionHeaders } from "./provider-stream.js";
 import { runWorkerAttempt, WorkerAttemptTimeoutError } from "./worker-attempt.js";
 import {
+  getDiscardedObservations,
   isCooldownWorthyError,
   isDeterministicError,
   isRetryableError,
@@ -891,6 +892,15 @@ export async function runObserverStage(
       );
       if (!runtime.isGenerationActive(generation)) return "abort";
 
+      // The run closed the chunk and then a later turn failed (a host that
+      // ignores `terminate`). The result is kept; the provider error is logged.
+      if (result.errorAfterClose) {
+        debugLog("observer.error_after_close", {
+          error: result.errorAfterClose,
+          coversUpToId,
+        });
+      }
+
       if (result.observations && result.observations.length > 0) {
         const data = buildObservationsRecordedData(result.observations, coversUpToId);
         if (!data) {
@@ -975,6 +985,8 @@ export async function runObserverStage(
         retryable: isRetryableError(error),
         deterministic: isDeterministicError(error),
         cooldownWorthy: isCooldownWorthyError(error),
+        // Observations recorded before a stream error and discarded with the run.
+        discardedObservations: getDiscardedObservations(error),
       });
       // A timed-out session model has no candidate config to cool down, so
       // the loop would re-resolve the same stalled model and burn the full

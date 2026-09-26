@@ -13,6 +13,7 @@ import {
   OBSERVATION_TIMESTAMP_PATTERN,
   runObserver,
 } from "../src/om/agents/observer/agent.js";
+import { ObserverStreamError } from "../src/om/retryable-error.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { leadingSystemPrompt } from "./fixtures/agent-context.js";
 
@@ -765,6 +766,111 @@ describe("runObserver", () => {
     });
 
     expect(seenReasoning).toBeUndefined();
+  });
+
+  // Pi's real loop honors `terminate`, so these cases need a fake loop: a host
+  // that ignores it keeps asking for turns after a complete=true close, and the
+  // trailing turn fails.
+  function trailingErrorLoop(batches: Array<{ observations: unknown[]; complete?: boolean }>) {
+    return ((_prompts: any[], context: any) => ({
+      async *[Symbol.asyncIterator]() {
+        for (const [index, batch] of batches.entries()) {
+          await context.tools[0].execute(`call-${index}`, batch);
+        }
+        yield {
+          type: "agent_end",
+          messages: [
+            {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "Stream connection severed",
+            },
+          ],
+        };
+      },
+      result: async () => ({}),
+    })) as any;
+  }
+
+  const terseObservation = {
+    content: "User prefers terse output",
+    relevance: "high",
+    sourceEntryIds: ["entry-a"],
+  };
+
+  it("keeps a complete=true close when a trailing turn errors on a host that ignores terminate", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: trailingErrorLoop([{ observations: [terseObservation], complete: true }]),
+    });
+
+    expect(result.observations?.map((observation) => observation.content)).toEqual([
+      "User prefers terse output",
+    ]);
+    expect(result.errorAfterClose).toBe("Stream connection severed");
+  });
+
+  it("keeps the close when a later complete=false batch precedes the trailing error", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: trailingErrorLoop([
+        { observations: [terseObservation], complete: true },
+        { observations: [], complete: false },
+      ]),
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBe("Stream connection severed");
+  });
+
+  it("throws when an empty complete=true close is followed by a trailing error", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([{ observations: [], complete: true }]),
+      }),
+    ).rejects.toMatchObject({
+      message: "Observer API error: Stream connection severed",
+      discardedObservations: 0,
+    });
+  });
+
+  it("throws when a later complete=false batch with rejected entries retracts the close", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([
+          { observations: [terseObservation], complete: true },
+          {
+            observations: [
+              { content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] },
+            ],
+            complete: false,
+          },
+        ]),
+      }),
+    ).rejects.toBeInstanceOf(ObserverStreamError);
+  });
+
+  it("throws when a refused complete=true batch retracts an earlier close", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([
+          { observations: [terseObservation], complete: true },
+          {
+            observations: [
+              { content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] },
+            ],
+            complete: true,
+          },
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      message: "Observer API error: Stream connection severed",
+      discardedObservations: 1,
+    });
   });
 });
 
