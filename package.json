@@ -52,16 +52,16 @@
     "verify": "pnpm check && pnpm test"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.87.0",
-    "@earendil-works/pi-ai": "0.87.0",
-    "@earendil-works/pi-coding-agent": "0.87.0",
-    "@earendil-works/pi-tui": "0.87.0",
+    "@earendil-works/pi-agent-core": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-tui": "0.87.1",
     "lint-staged": "17.5.1",
-    "oxfmt": "^0.68.0",
-    "oxlint": "1.83.0",
+    "oxfmt": "^0.70.0",
+    "oxlint": "1.85.0",
     "simple-git-hooks": "^2.14.0",
     "tsup": "^8.5.1",
-    "typebox": "1.3.33",
+    "typebox": "1.3.34",
     "typescript": "6.0.3",
     "vitest": "5.0.1"
   },
