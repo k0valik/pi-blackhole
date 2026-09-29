@@ -13,6 +13,12 @@ import {
   OBSERVATION_TIMESTAMP_PATTERN,
   runObserver,
 } from "../src/om/agents/observer/agent.js";
+import {
+  getDiscardedCount,
+  isDeterministicError,
+  isRetryableError,
+  WorkerStreamError,
+} from "../src/om/retryable-error.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { leadingSystemPrompt } from "./fixtures/agent-context.js";
 
@@ -765,6 +771,388 @@ describe("runObserver", () => {
     });
 
     expect(seenReasoning).toBeUndefined();
+  });
+
+  // Pi's real loop honors `terminate`, so these cases need a fake loop: a host
+  // that ignores it keeps asking for turns after a complete=true close, and the
+  // trailing turn fails.
+  function trailingErrorLoop(batches: Array<{ observations: unknown[]; complete?: boolean }>) {
+    return ((_prompts: any[], context: any) => ({
+      async *[Symbol.asyncIterator]() {
+        for (const [index, batch] of batches.entries()) {
+          await context.tools[0].execute(`call-${index}`, batch);
+        }
+        yield {
+          type: "agent_end",
+          messages: [
+            {
+              role: "assistant",
+              content: [],
+              stopReason: "error",
+              errorMessage: "Stream connection severed",
+            },
+          ],
+        };
+      },
+      result: async () => ({}),
+    })) as any;
+  }
+
+  const terseObservation = {
+    content: "User prefers terse output",
+    relevance: "high",
+    sourceEntryIds: ["entry-a"],
+  };
+
+  it("keeps a complete=true close when a trailing turn errors on a host that ignores terminate", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: trailingErrorLoop([{ observations: [terseObservation], complete: true }]),
+    });
+
+    expect(result.observations?.map((observation) => observation.content)).toEqual([
+      "User prefers terse output",
+    ]);
+    expect(result.errorAfterClose).toBe("Stream connection severed");
+  });
+
+  // `complete=true` is the model's declaration that the chunk is fully covered,
+  // whatever size that batch arrived in: an empty close after a partial batch
+  // means "nothing further is worth recording", not "discard what I recorded".
+  it("keeps an earlier partial batch when the run closes with an empty complete=true", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: trailingErrorLoop([
+        { observations: [terseObservation], complete: false },
+        { observations: [], complete: true },
+      ]),
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBe("Stream connection severed");
+  });
+
+  it("keeps the close when a later complete=false batch is empty (no stall on hosts that ignore terminate)", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: trailingErrorLoop([
+        { observations: [terseObservation], complete: true },
+        { observations: [], complete: false },
+      ]),
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBe("Stream connection severed");
+  });
+
+  it("keeps the close when a later batch only repeats recorded observations", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: trailingErrorLoop([
+        { observations: [terseObservation], complete: true },
+        { observations: [terseObservation], complete: false },
+      ]),
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBe("Stream connection severed");
+  });
+
+  it("throws when a later complete=false batch records new observations after the close", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([
+          { observations: [terseObservation], complete: true },
+          {
+            observations: [
+              {
+                content: "User works on Windows",
+                relevance: "medium",
+                sourceEntryIds: ["entry-a"],
+              },
+            ],
+            complete: false,
+          },
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      message: "Observer API error: Stream connection severed",
+      discardedCount: 2,
+    });
+  });
+
+  it("throws when an empty complete=true close is followed by a trailing error", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([{ observations: [], complete: true }]),
+      }),
+    ).rejects.toMatchObject({
+      message: "Observer API error: Stream connection severed",
+      discardedCount: 0,
+    });
+  });
+
+  it("throws when a later complete=false batch with rejected entries retracts the close", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([
+          { observations: [terseObservation], complete: true },
+          {
+            observations: [
+              { content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] },
+            ],
+            complete: false,
+          },
+        ]),
+      }),
+    ).rejects.toBeInstanceOf(WorkerStreamError);
+  });
+
+  it("throws when a refused complete=true batch retracts an earlier close", async () => {
+    await expect(
+      runObserver({
+        ...baseArgs,
+        agentLoop: trailingErrorLoop([
+          { observations: [terseObservation], complete: true },
+          {
+            observations: [
+              { content: "Bad source", relevance: "medium", sourceEntryIds: ["missing"] },
+            ],
+            complete: true,
+          },
+        ]),
+      }),
+    ).rejects.toMatchObject({
+      message: "Observer API error: Stream connection severed",
+      discardedCount: 1,
+    });
+  });
+
+  // The turn cap can end a run mid-chunk. A partial batch that never closed is
+  // not a completed chunk: reporting it as success would advance coversUpToId
+  // and the tail of the chunk would never be observed.
+  function turnCapLoop(
+    batches: Array<{ observations: unknown[]; complete?: boolean }>,
+    capEndsRun = true,
+    agentError?: string,
+    quietTail = false,
+    legacyHook = false,
+  ) {
+    return ((_prompts: any[], context: any, config: any) => ({
+      async *[Symbol.asyncIterator]() {
+        for (const [index, batch] of batches.entries()) {
+          await context.tools[0].execute(`call-${index}`, batch);
+        }
+        if (capEndsRun) {
+          // The host enforces the cap after the completed turn; it does not
+          // know or care that the run never closed the chunk. The legacy
+          // variant drives shouldStopAfterTurn so the test fails if the agent
+          // stops spreading the 0.86 hook into its loop config.
+          const contextArg = quietTail
+            ? { message: { stopReason: "stop" }, toolResults: [] }
+            : { message: { stopReason: "toolUse" } };
+          if (legacyHook) config.shouldStopAfterTurn?.(contextArg);
+          else config.finishTurn?.(contextArg);
+        }
+        if (agentError !== undefined) {
+          yield {
+            type: "agent_end",
+            messages: [
+              {
+                role: "assistant",
+                content: [],
+                stopReason: "error",
+                errorMessage: agentError,
+              },
+            ],
+          };
+        }
+      },
+      result: async () => ({}),
+    })) as any;
+  }
+
+  it("throws when the turn cap ends a run that never closed", async () => {
+    const error = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop([{ observations: [terseObservation], complete: false }]),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: expect.stringContaining("turn cap"),
+      discardedCount: 1,
+    });
+  });
+
+  it("throws when the legacy turn-cap hook ends a run that never closed", async () => {
+    const error = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop(
+        [{ observations: [terseObservation], complete: false }],
+        true,
+        undefined,
+        false,
+        true,
+      ),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // Drives shouldStopAfterTurn instead of finishTurn: fails if runObserver
+    // stops spreading the Pi 0.86 hook into its agent-loop config.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: expect.stringContaining("turn cap"),
+      discardedCount: 1,
+    });
+  });
+
+  it("does not classify turn-cap exhaustion as a provider error", async () => {
+    const error = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop([{ observations: [terseObservation], complete: false }]),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // `agentMaxTurns` is a config limit, not a credential or payload failure:
+    // classifying it deterministic would cool the session model for an hour
+    // instead of letting the stage report the exhausted budget.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(isDeterministicError(error)).toBe(false);
+    expect(isRetryableError(error)).toBe(false);
+  });
+
+  it("keeps a completed close when the turn cap ends the run", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop([{ observations: [terseObservation], complete: true }]),
+      maxTurns: 1,
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBeUndefined();
+  });
+
+  it("does not throw when the turn cap ends a run that recorded nothing", async () => {
+    const result = await runObserver({ ...baseArgs, agentLoop: turnCapLoop([]), maxTurns: 1 });
+
+    expect(result.observations).toBeUndefined();
+    expect(result.emptyReason).toEqual({ kind: "tool_not_called" });
+  });
+
+  it("keeps a partial batch when the cap turn did no tool work", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop(
+        [{ observations: [terseObservation], complete: false }],
+        true,
+        undefined,
+        true,
+      ),
+      maxTurns: 1,
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBeUndefined();
+  });
+
+  it("keeps a non-closed partial batch when the turn cap never fires", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop([{ observations: [terseObservation], complete: false }], false),
+      maxTurns: 5,
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.errorAfterClose).toBeUndefined();
+  });
+
+  it("reports the stream error rather than the turn cap when both end the run", async () => {
+    const error = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop(
+        [{ observations: [terseObservation], complete: false }],
+        true,
+        "Stream connection severed",
+      ),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ message: "Observer API error: Stream connection severed" });
+  });
+
+  it("throws on a trailing error even when the capped run recorded nothing", async () => {
+    const error = await runObserver({
+      ...baseArgs,
+      agentLoop: turnCapLoop([], true, "Stream connection severed"),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // A trailing provider error beats the zero-record cap empty-success: the
+    // run never completed cleanly, so there is no genuine nothing-to-record
+    // outcome to advance the cursor over.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Observer API error: Stream connection severed",
+      discardedCount: 0,
+    });
+  });
+
+  // A stream that breaks outright never produces agent_end, so the guard above
+  // never runs — but the run still holds the records it had already taken.
+  // A manual async iterator (not a generator) so the zero-event shape does
+  // not trip require-yield.
+  function throwingLoop(
+    batches: Array<{ observations: unknown[]; complete?: boolean }>,
+    failure: unknown,
+  ) {
+    return ((_prompts: any[], context: any) => {
+      let broken = false;
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            next: async (): Promise<IteratorResult<unknown>> => {
+              if (!broken) {
+                broken = true;
+                for (const [index, batch] of batches.entries()) {
+                  await context.tools[0].execute(`call-${index}`, batch);
+                }
+                throw failure;
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+        result: async () => ({}),
+      };
+    }) as any;
+  }
+
+  it("reports the records a raw stream failure discarded", async () => {
+    const failure = new Error("stream blew up");
+    const error = await runObserver({
+      ...baseArgs,
+      agentLoop: throwingLoop([{ observations: [terseObservation], complete: false }], failure),
+    }).catch((caught: unknown) => caught);
+
+    // Rethrown unchanged: the stage switches on the identity of stale-context
+    // and timeout errors, so wrapping this would send it down the cooldown path.
+    expect(error).toBe(failure);
+    expect(getDiscardedCount(error)).toBe(1);
+  });
+
+  it("reports a zero count when the stream fails before anything was recorded", async () => {
+    const failure = new Error("stream blew up");
+    const error = await runObserver({ ...baseArgs, agentLoop: throwingLoop([], failure) }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBe(failure);
+    expect(getDiscardedCount(error)).toBe(0);
   });
 });
 

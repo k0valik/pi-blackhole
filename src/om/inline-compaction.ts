@@ -45,8 +45,18 @@ export type PrepareCompactionLike = (
   settings: CompactionSettingsLike,
 ) => unknown | undefined;
 
+/**
+ * The session model, as far as settings resolution cares about it. Pi resolves
+ * `compaction.modelOverrides["<provider>/<id>"]` by passing the model, so a
+ * probe that omits it answers a different question than the host will ask.
+ */
+export interface ModelLike {
+  provider?: string;
+  id?: string;
+}
+
 interface SettingsManagerLike {
-  getCompactionSettings?(): CompactionSettingsLike;
+  getCompactionSettings?(model?: ModelLike): CompactionSettingsLike;
 }
 
 interface PatchableSession {
@@ -143,6 +153,9 @@ export interface PrepareCompactionStatus {
   source?: string;
   failure?: string;
 }
+
+/** Which of the host's two manual-compaction refusals a branch would hit. */
+export type CompactionIneligibility = "already_compacted" | "too_small";
 
 export type InlineCompaction = (
   sessionManager: object,
@@ -968,11 +981,15 @@ export async function compactInlineAtTurnBoundary(
 
 export function getCapturedCompactionSettings(
   sessionManager: object,
+  model?: ModelLike,
 ): CompactionSettingsLike | undefined {
   const registry = getRegistry();
   const record = registry.sessions.get(sessionManager);
   if (record?.session?.settingsManager?.getCompactionSettings) {
-    return record.session.settingsManager.getCompactionSettings();
+    // The host resolves per-model keepRecentTokens/reserveTokens overrides only
+    // when it is handed the model; asking without it silently falls back to the
+    // ordinary setting and can disagree with what compact() will use.
+    return record.session.settingsManager.getCompactionSettings(model);
   }
   return undefined;
 }
@@ -992,11 +1009,25 @@ export function getPrepareCompactionStatus(sessionManager?: object): PrepareComp
   };
 }
 
-export function isCompactionEligible(
+/**
+ * Which of the host's two manual-compaction refusals this branch would hit, or
+ * `null` when it may compact.
+ *
+ * Pi's `compact()` throws a distinct message for each refusal — "Already
+ * compacted" when the branch ends in a compaction entry, "Nothing to compact
+ * (session too small)" when `prepareCompaction` finds nothing to summarize — so
+ * a caller that has to report the refusal needs to tell them apart. Mirrors
+ * `AgentSession.compact()`'s own discrimination rather than re-deriving it.
+ *
+ * Fails open (`null`) in every case where the host's answer is unknown: no
+ * `prepareCompaction`, no captured session, no settings, or a throwing probe.
+ */
+export function getCompactionIneligibility(
   sessionManager: object,
   entries: unknown[],
   customSettings?: CompactionSettingsLike,
-): boolean {
+  model?: ModelLike,
+): CompactionIneligibility | null {
   const registry = getRegistry();
   const record = registry.sessions.get(sessionManager);
   // A host-bound session uses the helper resolved for its own host — never the
@@ -1006,20 +1037,31 @@ export function isCompactionEligible(
     : registry.prepareCompaction;
   if (typeof prepare !== "function") {
     // Unknown host capability: do not permanently disable compaction.
-    return true;
+    return null;
   }
 
   try {
-    const settings = customSettings ?? getCapturedCompactionSettings(sessionManager);
+    const settings = customSettings ?? getCapturedCompactionSettings(sessionManager, model);
     if (!settings) {
       // Session not captured / settings unavailable: unknown host capability, do not block.
-      return true;
+      return null;
     }
 
     const prep = prepare(entries, settings);
-    return prep !== undefined;
+    if (prep !== undefined) return null;
+    const lastEntry = entries[entries.length - 1] as { type?: unknown } | undefined;
+    return lastEntry?.type === "compaction" ? "already_compacted" : "too_small";
   } catch {
     // Fail-open on unexpected error during settings resolution or preparation check so compaction is not blocked.
-    return true;
+    return null;
   }
+}
+
+export function isCompactionEligible(
+  sessionManager: object,
+  entries: unknown[],
+  customSettings?: CompactionSettingsLike,
+  model?: ModelLike,
+): boolean {
+  return getCompactionIneligibility(sessionManager, entries, customSettings, model) === null;
 }

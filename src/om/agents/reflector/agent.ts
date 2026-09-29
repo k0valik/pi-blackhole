@@ -3,7 +3,13 @@
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/agents/reflector/agent.ts)
  * Modified by pi-vcc-om: detects agent_end stopReason="error" in the stream
- * and throws if the API errored without collecting any tool results.
+ * and throws unless the run already closed the review with a valid
+ * complete=true batch that recorded reflections, so the stage cannot advance
+ * the reflector cursor over observations that were never crystallized. The
+ * same guard covers a run the agent turn cap cut off mid-review. A trailing
+ * failure after a kept close is returned as `errorAfterClose` (mirroring the
+ * observer) so the stage can cool a deterministically broken model instead of
+ * only debug-logging it.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -29,6 +35,11 @@ import {
   type Reflection,
 } from "../../ledger/index.js";
 import type { ReflectionCoverageTier } from "../dropper/coverage.js";
+import {
+  withDiscardedCount,
+  WorkerStreamError,
+  workerStreamErrorMessage,
+} from "../../retryable-error.js";
 
 interface RunReflectorArgs {
   model: Model<any>;
@@ -120,9 +131,19 @@ function normalizeReflectionContent(content: string): string | undefined {
   return normalized;
 }
 
-export async function runReflector(args: RunReflectorArgs): Promise<Reflection[] | undefined> {
+export interface ReflectorResult {
+  reflections: Reflection[] | undefined;
+  /**
+   * Provider error from a turn after a valid complete=true close. The run kept
+   * its result (the review was declared finished); the caller classifies and
+   * records it the same way the observer stage handles its own kept close.
+   */
+  errorAfterClose?: string;
+}
+
+export async function runReflector(args: RunReflectorArgs): Promise<ReflectorResult> {
   const { model, apiKey, headers, env, reflections, observations, signal } = args;
-  if (observations.length === 0) return undefined;
+  if (observations.length === 0) return { reflections: undefined };
 
   const allowedObservationIds = observations.map((observation) => observation.id);
   const existingReflectionIds = new Set(reflections.map((reflection) => reflection.id));
@@ -132,6 +153,15 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
   // it already sent — they are counter semantics, not work still owed.
   let runRejected = 0;
   let runDuplicates = 0;
+  // Whether the run closed the review with a valid complete=true batch that
+  // recorded reflections. Same rule as the observer: a later clean close keeps
+  // it, a later batch that records or rejects anything retracts it, and a
+  // batch that only re-proposes already-recorded reflections changes nothing.
+  // An empty closing batch after a partial batch still counts as coverage —
+  // complete=true is what declares the review finished, not the size of the
+  // closing batch — but a close from a run that recorded nothing at all still
+  // throws, so a failing provider cannot turn each review into a silent skip.
+  let closedByCompleteBatch = false;
 
   const recordReflections: AgentTool<typeof RecordReflectionsSchema> = {
     name: "record_reflections",
@@ -175,6 +205,8 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
       runRejected += rejected;
       runDuplicates += duplicates;
       const terminates = params.complete === true && rejected === 0;
+      if (terminates) closedByCompleteBatch = true;
+      else if (added > 0 || rejected > 0) closedByCompleteBatch = false;
       const rejectionReason =
         rejected > 0 ? " (invalid content or unknown supporting observation ids)" : "";
       const refusal =
@@ -240,6 +272,9 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
   const reasoning = (model as { reasoning?: unknown }).reasoning;
   const thinkingLevel = args.thinkingLevel ?? "low";
   const effectiveMaxTurns = args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
+  // Kept in scope past the config so the run can tell "the model stopped" from
+  // "the cap cut the model off".
+  const turnCap = effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : undefined;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
   const config: AgentLoopConfig & ProviderFetchOption & LegacyTurnCapOption = {
     model,
@@ -253,7 +288,9 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
-    ...(effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : {}),
+    ...(turnCap
+      ? { shouldStopAfterTurn: turnCap.shouldStopAfterTurn, finishTurn: turnCap.finishTurn }
+      : {}),
   };
 
   const loop = args.agentLoop ?? agentLoop;
@@ -262,22 +299,66 @@ export async function runReflector(args: RunReflectorArgs): Promise<Reflection[]
   const streamFn = args.streamFn ?? bridgeStreamFn;
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
-  for await (const event of stream) {
-    // Tool execution collects records.
-    if (event.type === "agent_end") {
-      const msgs = ((event as any).messages || []) as Array<{
-        stopReason?: string;
-        errorMessage?: string;
-      }>;
-      const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.stopReason === "error") {
-        agentError = lastMsg.errorMessage ?? "Unknown API error";
+  try {
+    for await (const event of stream) {
+      // Tool execution collects records.
+      if (event.type === "agent_end") {
+        const msgs = ((event as any).messages || []) as Array<{
+          stopReason?: string;
+          errorMessage?: string;
+        }>;
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg?.stopReason === "error") {
+          agentError = lastMsg.errorMessage ?? "Unknown API error";
+        }
       }
     }
+    await stream.result();
+  } catch (error) {
+    // A stream that breaks outright never emits agent_end, so the guard below
+    // never sees it — yet the run still holds everything recorded so far.
+    throw withDiscardedCount(error, accumulated.size);
   }
-  await stream.result();
-  if (agentError && accumulated.size === 0) throw new Error(`Reflector API error: ${agentError}`);
-  return accumulated.size > 0 ? Array.from(accumulated.values()) : undefined;
+
+  // The stage records these reflections and advances the reflector cursor to
+  // the observation coverage marker, so a partial review reported as success
+  // would leave the rest of those observations uncrystallized forever. Only a
+  // valid complete=true close from a run that recorded something proves the
+  // review actually finished.
+  if (agentError && !(closedByCompleteBatch && accumulated.size > 0)) {
+    // Byte-identical to the pre-existing message: isDeterministicError scans it
+    // for bare 4xx codes, so an interpolated count could misclassify it.
+    throw new WorkerStreamError(
+      workerStreamErrorMessage("Reflector", agentError),
+      accumulated.size,
+    );
+  }
+
+  // The cap ended the run before the model closed the review. Throwing keeps
+  // the cursor where it is; the message names no status code, because this is a
+  // config limit rather than a provider failure and must not cool a session
+  // model as deterministic. A cap firing before anything was recorded is still
+  // an empty success (the stage advances the cursor as "empty").
+  if (turnCap?.exhausted && accumulated.size > 0 && !closedByCompleteBatch) {
+    throw new WorkerStreamError(
+      `Reflector turn cap exhausted: ${accumulated.size} reflection${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
+      accumulated.size,
+      true,
+    );
+  }
+
+  // A kept close is a kept result with a surfaced failure: return the trailing
+  // error alongside the reflections so the stage can classify it with the same
+  // framing the throw path uses and cool a deterministically broken model. A
+  // cap firing before anything was recorded is still an empty success (the
+  // stage advances the cursor as "empty"); with recordings but no close the
+  // run throws above.
+  if (accumulated.size === 0) return { reflections: undefined };
+
+  return {
+    reflections: Array.from(accumulated.values()),
+    ...(agentError ? { errorAfterClose: agentError } : {}),
+  };
 }
 
 export function observationToReflectorLine(

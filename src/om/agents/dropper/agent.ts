@@ -3,7 +3,10 @@
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/agents/dropper/agent.ts)
  * Modified by pi-vcc-om: detects agent_end stopReason="error" in the stream
- * and throws if the API errored without collecting any drop candidates.
+ * and always throws, since the tool has no complete flag to prove the
+ * evaluation finished: a prefix of the proposed candidates reported as success
+ * would be written under an OM_OBSERVATIONS_DROPPED marker that a cadence run
+ * never re-evaluates. The same guard covers a run the agent turn cap cut off.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -18,6 +21,11 @@ import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
+import {
+  withDiscardedCount,
+  WorkerStreamError,
+  workerStreamErrorMessage,
+} from "../../retryable-error.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { reflectionToSummaryLine, type Observation, type Reflection } from "../../ledger/index.js";
 import { DROPPER_SYSTEM } from "./prompts.js";
@@ -359,6 +367,9 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   const reasoning = (model as { reasoning?: unknown }).reasoning;
   const thinkingLevel = args.thinkingLevel ?? "low";
   const effectiveMaxTurns = args.maxTurns && args.maxTurns > 0 ? args.maxTurns : undefined;
+  // Kept in scope past the config so the run can tell "the model stopped" from
+  // "the cap cut the model off".
+  const turnCap = effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : undefined;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
   const config: AgentLoopConfig & ProviderFetchOption & LegacyTurnCapOption = {
     model,
@@ -372,7 +383,9 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
-    ...(effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : {}),
+    ...(turnCap
+      ? { shouldStopAfterTurn: turnCap.shouldStopAfterTurn, finishTurn: turnCap.finishTurn }
+      : {}),
   };
 
   const loop = args.agentLoop ?? agentLoop;
@@ -381,22 +394,51 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   const streamFn = args.streamFn ?? bridgeStreamFn;
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
-  for await (const event of stream) {
-    // Tool execution collects candidate ids.
-    if (event.type === "agent_end") {
-      const msgs = ((event as any).messages || []) as Array<{
-        stopReason?: string;
-        errorMessage?: string;
-      }>;
-      const lastMsg = msgs[msgs.length - 1];
-      if (lastMsg?.stopReason === "error") {
-        agentError = lastMsg.errorMessage ?? "Unknown API error";
+  try {
+    for await (const event of stream) {
+      // Tool execution collects candidate ids.
+      if (event.type === "agent_end") {
+        const msgs = ((event as any).messages || []) as Array<{
+          stopReason?: string;
+          errorMessage?: string;
+        }>;
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg?.stopReason === "error") {
+          agentError = lastMsg.errorMessage ?? "Unknown API error";
+        }
       }
     }
+    await stream.result();
+  } catch (error) {
+    // A stream that breaks outright never emits agent_end, so the guard below
+    // never sees it — yet the run still holds every candidate proposed so far.
+    throw withDiscardedCount(error, proposedDropIds.length);
   }
-  await stream.result();
-  if (agentError && proposedDropIds.length === 0)
-    throw new Error(`Dropper API error: ${agentError}`);
+
+  // `drop_observations` carries no complete flag, so no batch can prove the
+  // evaluation finished. The stage writes an OM_OBSERVATIONS_DROPPED marker over
+  // the whole observation window and a cadence run never revisits what it
+  // covers, so a failure discards the prefix rather than publishing it as a
+  // finished evaluation.
+  if (agentError) {
+    throw new WorkerStreamError(
+      workerStreamErrorMessage("Dropper", agentError),
+      proposedDropIds.length,
+    );
+  }
+
+  // The cap ended the run mid-evaluation for the same reason. The message names
+  // no status code: this is a config limit rather than a provider failure, so it
+  // must not cool a session model as deterministic. A cap firing before any
+  // candidate was proposed is still an empty success (returns undefined).
+  if (turnCap?.exhausted && proposedDropIds.length > 0) {
+    throw new WorkerStreamError(
+      `Dropper turn cap exhausted: ${proposedDropIds.length} drop candidate${proposedDropIds.length === 1 ? "" : "s"} recorded before the run ended`,
+      proposedDropIds.length,
+      true,
+    );
+  }
+
   const droppedIds = selectDropCandidates(
     proposedDropIds,
     observations,

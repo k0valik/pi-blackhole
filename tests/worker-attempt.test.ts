@@ -3,6 +3,7 @@ import { getEventListeners } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runWorkerAttempt, WorkerAttemptTimeoutError } from "../src/om/worker-attempt.js";
+import { getDiscardedCount, withDiscardedCount } from "../src/om/retryable-error.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -204,5 +205,30 @@ describe("runWorkerAttempt", () => {
     await expect(runWorkerAttempt("observer", 1_000, parent.signal, run)).rejects.toBe(reason);
 
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("reports no discarded count for a run the hard deadline cut off", async () => {
+    vi.useFakeTimers();
+    const parent = new AbortController();
+    const pending = runWorkerAttempt("observer", 100, parent.signal, async (signal) => {
+      await new Promise<string>((_, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(withDiscardedCount(new Error("late abort"), 3)),
+          { once: true },
+        );
+      });
+    });
+    let caught: unknown;
+    pending.catch((error) => {
+      caught = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    // The deadline rejects immediately with its own error instead of waiting
+    // to learn what the worker had recorded, so the count stays unknown here.
+    expect(caught).toBeInstanceOf(WorkerAttemptTimeoutError);
+    expect(getDiscardedCount(caught)).toBeUndefined();
   });
 });

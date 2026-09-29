@@ -34,13 +34,14 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.8](CHANGELOG.md)**
+> **Latest release: [0.5.9](CHANGELOG.md)**
 >
-> - **Pi loads a prebuilt bundle** — `pi.extensions` points at the tsup `dist/index.js` instead of TypeScript source, cutting startup import time (500–570 ms → 350–530 ms). Registry installs ship `dist/`; git installs need `npmCommand` set, and a missing `dist/` now warns instead of failing silently.
-> - **Every observation-pool readout agrees** — the dropper trigger, `/blackhole-memory` pool lines, and the footer P gauge each summed the pool inline; they now share one helper, and `/blackhole-memory` includes (and labels) manual-mode pending batches so the display matches what the trigger gates on. No threshold or candidate behavior changes. ([#120](https://github.com/k0valik/pi-blackhole/issues/120))
-> - **`agentMaxTurns` is enforced on Pi 0.87** — the worker loops emitted only the removed `shouldStopAfterTurn`, so the turn budget was silently ignored; `createTurnCap` now emits both that hook and 0.87's `finishTurn`, with independent counters. ([upstream OM `#83`](https://github.com/elpapi42/pi-observational-memory/pull/83))
-> - **Extension registration survives class-based hosts** — hooks were invoked detached from their API object, which threw on hosts like oh-my-pi; handlers are now bound before registration. ([#124](https://github.com/k0valik/pi-blackhole/pull/124))
-> - **Custom-provider streams keep their receiver** — captured `streamSimple` handlers are bound to their config, so class-based providers no longer crash or silently fall back to the compat dispatcher. ([upstream OM `#80`](https://github.com/elpapi42/pi-observational-memory/pull/80))
+> - **Recall drill-downs can no longer flood your context** — every `#N:path` / `#N:text` expansion is capped by `recallResponseMaxChars`, and the cap names where to pick up (`continue at #42:src/auth.ts:412:30`), so a minified bundle or a huge write no longer dumps itself into the prompt.
+> - **Quiet sessions** — `showWorkerNotifications: false` silences routine observer/reflector/dropper progress toasts; warnings, errors, and `/blackhole*` command output stay visible.
+> - **Worker prompt caching is tunable per install** — `cacheRetention: none | short | long` is forwarded to all three worker streams, and unset inherits Pi's effective setting.
+> - **A hung worker model fails on a clock, not a hope** — new `workerAttemptTimeoutMs` bounds the whole agent loop (header waits, heartbeats, tool turns) per attempt; configured candidates then enter their normal cooldown and fallback chain.
+> - **Finished worker runs stop early** — `record_observations` / `record_reflections` accept a `complete` flag, so a fully-processed run ends instead of spending its `agentMaxTurns` budget.
+> - **Dropper pool pressure now works end to end** — gated on `observationsPoolMaxTokens` (the same pool the footer P gauge shows), it bypasses new-data gates and `1.0` disables it.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 

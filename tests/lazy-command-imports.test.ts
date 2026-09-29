@@ -67,7 +67,8 @@ async function fixture() {
   const { registerPiVccCommand } = await import("../src/commands/pi-vcc.js");
   let command: any;
   const ctx = {
-    sessionManager: { getSessionId: () => "test" },
+    cwd: process.cwd(),
+    sessionManager: { getSessionId: () => "test", getBranch: () => [] },
     compact: vi.fn(),
     ui: { notify: vi.fn() },
   };
@@ -77,7 +78,7 @@ async function fixture() {
         command = def;
       },
     } as any,
-    { config: {} } as any,
+    { config: {}, ensureConfig: vi.fn() } as any,
   );
   return { command, ctx };
 }

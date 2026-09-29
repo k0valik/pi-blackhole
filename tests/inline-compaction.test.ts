@@ -18,6 +18,7 @@ import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import {
   compactInlineAtTurnBoundary,
   getCapturedCompactionSettings,
+  getCompactionIneligibility,
   getPrepareCompactionStatus,
   InlineCompactionUnavailableError,
   installHostInlineCompactionAdapter,
@@ -1651,6 +1652,131 @@ describe("Blackhole inline compaction adapter", () => {
     session._bindExtensionCore({});
 
     expect(isCompactionEligible(session.sessionManager, [])).toBe(true);
+  });
+
+  // ── getCompactionIneligibility: which refusal, not just whether ───────────
+  //
+  // Pi's manual compact() throws two distinct refusals for the same undefined
+  // preparation ("Already compacted" vs "Nothing to compact (session too
+  // small)"). The manual command needs to say which one it hit.
+
+  function bindProbeSession(
+    prepare: ((entries: unknown[], settings: unknown) => unknown) | undefined,
+    getCompactionSettings: (model?: unknown) => unknown = () => ({
+      enabled: true,
+      reserveTokens: 1000,
+      keepRecentTokens: 20_000,
+    }),
+  ) {
+    const SessionClass = createSessionClass({ legacyDisconnect: false });
+    installInlineCompactionAdapter({
+      sessionClass: SessionClass as never,
+      prepareCompaction: prepare as never,
+    });
+    const session = new SessionClass();
+    (session as any).settingsManager = { getCompactionSettings };
+    session._bindExtensionCore({});
+    return session.sessionManager;
+  }
+
+  it("reports too_small when the preparation is undefined and the branch ends in a message", () => {
+    const manager = bindProbeSession(() => undefined);
+    const entries = [{ id: "e1", type: "message" }];
+    expect(getCompactionIneligibility(manager, entries)).toBe("too_small");
+  });
+
+  it("reports already_compacted when the branch ends in a compaction entry", () => {
+    const manager = bindProbeSession(() => undefined);
+    const entries = [
+      { id: "m1", type: "message" },
+      { id: "c1", type: "compaction" },
+    ];
+    expect(getCompactionIneligibility(manager, entries)).toBe("already_compacted");
+  });
+
+  it("reports no ineligibility when the host returns a preparation", () => {
+    const manager = bindProbeSession(() => ({ firstKeptEntryId: "e1" }));
+    expect(getCompactionIneligibility(manager, [{ id: "e1", type: "message" }])).toBeNull();
+  });
+
+  it("reports no ineligibility when prepareCompaction throws (fail open)", () => {
+    const manager = bindProbeSession(() => {
+      throw new Error("unexpected error");
+    });
+    expect(getCompactionIneligibility(manager, [{ id: "e1", type: "message" }])).toBeNull();
+  });
+
+  it("reports no ineligibility when prepareCompaction is unavailable (fail open)", () => {
+    const manager = bindProbeSession(undefined);
+    expect(getCompactionIneligibility(manager, [{ id: "e1", type: "message" }])).toBeNull();
+  });
+
+  it("reports no ineligibility when the settingsManager getter throws (fail open)", () => {
+    const manager = bindProbeSession(
+      () => undefined,
+      () => {
+        throw new Error("corrupt settings");
+      },
+    );
+    expect(getCompactionIneligibility(manager, [{ id: "e1", type: "message" }])).toBeNull();
+  });
+
+  it("resolves settings with the session model, so a per-model keepRecentTokens override decides", () => {
+    // Pi resolves compaction.modelOverrides["<provider>/<id>"] through
+    // getCompactionSettings(model); probing without the model answers a
+    // different question than the host will ask.
+    const manager = bindProbeSession(
+      (_entries, settings) =>
+        (settings as { keepRecentTokens: number }).keepRecentTokens >= 100_000
+          ? { firstKeptEntryId: "e1" }
+          : undefined,
+      (model) => ({
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: (model as { id?: string })?.id === "big-window" ? 200_000 : 20_000,
+      }),
+    );
+    const entries = [{ id: "e1", type: "message" }];
+    expect(
+      getCompactionIneligibility(manager, entries, undefined, {
+        provider: "anthropic",
+        id: "big-window",
+      }),
+    ).toBeNull();
+  });
+
+  it("reports too_small when no model override applies to the session model", () => {
+    const manager = bindProbeSession(
+      (_entries, settings) =>
+        (settings as { keepRecentTokens: number }).keepRecentTokens >= 100_000
+          ? { firstKeptEntryId: "e1" }
+          : undefined,
+      (model) => ({
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: (model as { id?: string })?.id === "big-window" ? 200_000 : 20_000,
+      }),
+    );
+    const entries = [{ id: "e1", type: "message" }];
+    expect(
+      getCompactionIneligibility(manager, entries, undefined, {
+        provider: "anthropic",
+        id: "small",
+      }),
+    ).toBe("too_small");
+  });
+
+  it("keeps isCompactionEligible in agreement with the ineligibility reason", () => {
+    const entries = [{ id: "e1", type: "message" }];
+    const eligible = bindProbeSession(() => ({ firstKeptEntryId: "e1" }));
+    const ineligible = bindProbeSession(() => undefined);
+
+    expect(isCompactionEligible(eligible, entries)).toBe(
+      getCompactionIneligibility(eligible, entries) === null,
+    );
+    expect(isCompactionEligible(ineligible, entries)).toBe(
+      getCompactionIneligibility(ineligible, entries) === null,
+    );
   });
 
   it("resolves prepareCompaction from the host package root via installHostInlineCompactionAdapter", async () => {

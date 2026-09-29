@@ -319,7 +319,7 @@ describe("V3 reflector agent", () => {
 
     const result = await runReflector({ ...baseArgs, agentLoop: loop });
 
-    expect(result).toEqual([
+    expect(result.reflections).toEqual([
       {
         id: hashId(content),
         content,
@@ -341,7 +341,9 @@ describe("V3 reflector agent", () => {
       });
     });
 
-    await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
+    await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toEqual({
+      reflections: undefined,
+    });
     // A fully rejected batch must not close the run: the model still owes a valid one.
     expect(toolResult?.terminate).toBe(false);
     expect(toolResult?.details).toMatchObject({ added: 0, rejected: 2 });
@@ -444,7 +446,7 @@ describe("V3 reflector agent", () => {
 
     const result = await runReflector({ ...baseArgs, agentLoop: loop });
 
-    expect(result?.map((item) => item.content)).toEqual(["No flag reflection."]);
+    expect(result.reflections?.map((item) => item.content)).toEqual(["No flag reflection."]);
     expect(toolResult?.terminate).toBe(false);
   });
 
@@ -625,11 +627,13 @@ describe("V3 reflector agent", () => {
       agentLoop: loop,
     });
 
-    expect(result?.map((item) => item.content)).toEqual(["New durable fact."]);
+    expect(result.reflections?.map((item) => item.content)).toEqual(["New durable fact."]);
   });
 
   it("returns undefined when no tool call records reflections", async () => {
     const loop = fakeAgentLoop(() => {});
-    await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toBeUndefined();
+    await expect(runReflector({ ...baseArgs, agentLoop: loop })).resolves.toEqual({
+      reflections: undefined,
+    });
   });
 });

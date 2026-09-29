@@ -15,10 +15,25 @@ import {
 } from "../hooks/before-compact";
 import { readPendingState, clearPendingState, hasPendingData } from "../om/pending.js";
 import {
+  getCompactionIneligibility,
+  type CompactionIneligibility,
+} from "../om/inline-compaction.js";
+import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
   OM_REFLECTIONS_RECORDED,
 } from "../om/ledger/index.js";
+
+/**
+ * One message per host refusal, shared by the pre-check and the onError
+ * backstop. "info", not "error": nothing failed — the session simply has
+ * nothing above the host's keep-recent budget, which is the same state the
+ * auto-compaction trigger treats silently.
+ */
+const manualRefusalMessage = (reason: CompactionIneligibility): string =>
+  reason === "already_compacted"
+    ? "blackhole: already compacted — nothing new to compact since the last summary"
+    : "blackhole: nothing to compact yet — Pi's keep-recent budget still covers this branch";
 
 export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
   const prefixMatch = (value: string, prefix: string): boolean => {
@@ -56,6 +71,11 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       );
     },
     handler: async (args, ctx) => {
+      // The manual path reads runtime.config below (and the flush depends on it),
+      // but a command can be the first thing that runs in a session — load the
+      // config before the first read so a configured `compaction: "manual"`
+      // session does not fall back to DEFAULTS.
+      runtime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) => ctx.ui.notify(msg, "warning"));
       const sessionId = ctx.sessionManager.getSessionId();
 
       // Handle subcommands
@@ -140,6 +160,25 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
       // that isn't a known subcommand is treated as follow-up text.
       const followUpPrompt = trimmed ? trimmed : null;
 
+      // Pi's compact() runs prepareCompaction() *before* it emits
+      // session_before_compact, so a branch it considers ineligible is refused
+      // by the host before any blackhole hook runs — nothing downstream can
+      // soften it. Ask the host's own question first, and report the refusal as
+      // information. Checked before the pending flush below: the flush appends
+      // entries, clears the pending buffer and announces it, and a refusal
+      // after it would leave a half-applied manual compaction. Custom entries
+      // carry no projected messages, so the flush cannot change the verdict.
+      const ineligibility = getCompactionIneligibility(
+        ctx.sessionManager,
+        ctx.sessionManager.getBranch(),
+        undefined,
+        ctx.model,
+      );
+      if (ineligibility) {
+        ctx.ui.notify(manualRefusalMessage(ineligibility), "info");
+        return;
+      }
+
       // If compaction is manual (or legacy noAutoCompact): flush pending OM entries
       // into the branch before compacting so the summary includes accumulated memory.
       if (runtime.config.compaction === "manual" && hasPendingData(sessionId)) {
@@ -197,10 +236,20 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           }
         },
         onError: (err) => {
-          if (err.message === "Compaction cancelled" || err.message === "Already compacted") {
-            ctx.ui.notify("blackhole: nothing to compact", "warning");
+          const message = String(err?.message ?? err);
+          // A refusal that slipped past the pre-check (our probe and the host's
+          // can disagree — Pi resolves per-model keepRecentTokens overrides) is
+          // still a refusal, not a failure.
+          if (message.startsWith("Nothing to compact")) {
+            ctx.ui.notify(manualRefusalMessage("too_small"), "info");
+          } else if (message === "Already compacted") {
+            ctx.ui.notify(manualRefusalMessage("already_compacted"), "info");
+          } else if (message === "Compaction cancelled") {
+            // Our own-cut guard already named the specific reason before
+            // returning { cancel: true }, and Pi renders "Compaction cancelled"
+            // itself for manual aborts. A second toast adds nothing.
           } else {
-            ctx.ui.notify(`blackhole: compaction failed — ${err.message}`, "error");
+            ctx.ui.notify(`Compaction failed: ${message}`, "error");
           }
         },
       });

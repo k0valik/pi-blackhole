@@ -65,6 +65,11 @@ export function runWorkerAttempt<T>(
       const error = new WorkerAttemptTimeoutError(stage, timeoutMs);
       // Mark settled before abort dispatches synchronous listeners. A worker
       // resolving from its abort handler must not beat the hard deadline.
+      // By design the deadline does not carry the worker's discarded count:
+      // the agent attaches it to its own (inner) rejection via
+      // `withDiscardedCount`, which this outer promise never exposes — waiting
+      // to learn what the worker had recorded would defeat the deadline. Stage
+      // error logs therefore read `discardedCount: undefined` for this path.
       settle(() => {
         controller.abort(error);
         reject(error);

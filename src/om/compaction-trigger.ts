@@ -265,7 +265,7 @@ async function handleTurnEnd(
     return;
   }
 
-  if (!isCompactionEligible(ctx.sessionManager, entries)) {
+  if (!isCompactionEligible(ctx.sessionManager, entries, undefined, ctx.model)) {
     dbg("compaction_trigger.turn_end.skip", {
       reason: "not_eligible",
       tokens,
@@ -469,7 +469,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
     return;
   }
 
-  if (!isCompactionEligible(ctx.sessionManager, entries)) {
+  if (!isCompactionEligible(ctx.sessionManager, entries, undefined, ctx.model)) {
     dbg("compaction_trigger.skip", {
       reason: "not_eligible",
       tokens,
@@ -604,7 +604,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
         return;
       }
 
-      if (!isCompactionEligible(ctx.sessionManager, currentEntries)) {
+      if (!isCompactionEligible(ctx.sessionManager, currentEntries, undefined, ctx.model)) {
         runtime.compactInFlight = false;
         runtime.autoCompactionController = null;
         dbg("compaction_trigger.microtask.bail", {

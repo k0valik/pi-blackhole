@@ -8,6 +8,7 @@
   "_comment_compaction": "automatic | manual | off. 'automatic' triggers on threshold, 'manual' only on /blackhole, 'off' leaves compaction to Pi. compactionEngine was folded in (v3): 'blackhole' → 'automatic', 'pi-default' → 'off'; 'auto' is still accepted as an alias.",
   "compactionSummaryMode": "default",
   "tailBehavior": "minimal",
+  "showPreCompactionMessage": true,
   "midRunCompaction": "off",
   "showPreCompactionMessage": true,
 
@@ -148,6 +149,7 @@
     "  midRunCompaction (resume|pause|off) — threshold check during tool loops",
     "  compactAfterBy (preset|percent|tokens|reserve) + compactAfterMinTokens / compactAfterMaxTokens — the threshold shape and band",
     "  retainedToolOutputMaxTokens — newest-first historical tool-output text budget; older text remains available through recall",
+    "  recallResponseMaxChars (default 48000, 0=unbounded) — cap on a single recall tool / /blackhole-recall response; per-entry and per-line shares are derived from it",
     "  observationsPoolMaxTokens / reflectionsPoolMaxTokens — rendered-line caps including IDs and separators; headings/footer extra; source history retained",
     "  append rebase — pressure plus useful saving at existing compactions; cadence unchanged",
     "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
@@ -167,6 +169,8 @@
     "  PI_BLACKHOLE_COMPACT_AFTER_PRESET → override the compaction preset curve selection",
     "  PI_BLACKHOLE_RETAINED_TOOL_OUTPUT_MAX_TOKENS → override retained tool-output budget",
     "  PI_BLACKHOLE_REFLECTIONS_POOL_MAX_TOKENS → override reflection output budget",
-    "  PI_BLACKHOLE_CACHE_RETENTION → override worker prompt-cache retention (none|short|long)"
+    "  PI_BLACKHOLE_CACHE_RETENTION → override worker prompt-cache retention (none|short|long)",
+    "  PI_BLACKHOLE_SHOW_WORKER_NOTIFICATIONS → override routine worker progress toasts",
+    "  PI_BLACKHOLE_RECALL_RESPONSE_MAX_CHARS → override the recall response cap"
   ]
 }

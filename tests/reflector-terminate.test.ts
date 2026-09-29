@@ -41,7 +41,7 @@ describe("real agent loop honors record_reflections terminate", () => {
     // A host that ignores terminate asks for a second turn; the counter counts
     // every request, so this assertion is what makes the regression visible.
     expect(calls()).toBe(1);
-    expect(result?.map((item) => item.content)).toEqual(["Integrated reflection"]);
+    expect(result.reflections?.map((item) => item.content)).toEqual(["Integrated reflection"]);
   });
 
   it("requests another turn after an incomplete batch", async () => {
@@ -53,7 +53,7 @@ describe("real agent loop honors record_reflections terminate", () => {
     const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(2);
-    expect(result).toHaveLength(1);
+    expect(result.reflections).toHaveLength(1);
   });
 
   it("requests another turn after a refused complete batch", async () => {
@@ -68,7 +68,7 @@ describe("real agent loop honors record_reflections terminate", () => {
     const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(2);
-    expect(result).toBeUndefined();
+    expect(result).toEqual({ reflections: undefined });
   });
 
   it("records a batch whose arguments omit complete instead of failing validation", async () => {
@@ -80,7 +80,7 @@ describe("real agent loop honors record_reflections terminate", () => {
     const result = await runReflector({ ...baseArgs, streamFn });
 
     expect(calls()).toBe(2);
-    expect(result?.map((item) => item.content)).toEqual(["No flag reflection"]);
+    expect(result.reflections?.map((item) => item.content)).toEqual(["No flag reflection"]);
   });
 
   it("ends the run with an exhaustion error instead of looping", async () => {

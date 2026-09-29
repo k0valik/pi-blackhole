@@ -27,6 +27,7 @@ vi.mock("../src/pi-base/settings/config-flow.js", () => ({
 }));
 
 import { registerPiVccCommand } from "../src/commands/pi-vcc.js";
+import { installInlineCompactionAdapter } from "../src/om/inline-compaction.js";
 import { openConfigFlow } from "../src/pi-base/settings/config-flow.js";
 
 function createMockEnvironment() {
@@ -210,7 +211,7 @@ describe("/blackhole command", () => {
     expect(notifyCalls[notifyCalls.length - 1].msg).toContain("blackhole: compacted");
   });
 
-  it("handles onError for cancellation", async () => {
+  it("adds no toast when a compaction is cancelled", async () => {
     const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
     registerPiVccCommand(pi as any, runtime as any);
 
@@ -218,10 +219,14 @@ describe("/blackhole command", () => {
     await handlerMap.get("blackhole")!("", ctx);
 
     const call = ctx.compact.mock.calls[0][0];
+    const before = notifyCalls.length;
     call.onError(new Error("Compaction cancelled"));
 
-    expect(notifyCalls[notifyCalls.length - 1].level).toBe("warning");
-    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("blackhole: nothing to compact");
+    // Our own-cut guard already named the specific reason
+    // (before-compact.ts REASON_MESSAGES) before returning { cancel: true }, and
+    // Pi renders "Compaction cancelled" itself for manual aborts. A second,
+    // vaguer "Nothing to compact" toast on top of that is pure noise.
+    expect(notifyCalls.length).toBe(before);
   });
 
   it("handles onError for general failure", async () => {
@@ -324,6 +329,232 @@ describe("/blackhole command", () => {
     expect(existsSync(pendingFile)).toBe(false); // cleared after flush
     // Should call compact after flush
     expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Manual-compaction eligibility ───────────────────────────────────────────
+//
+// Pi's AgentSession.compact() runs prepareCompaction() *before* it emits
+// session_before_compact, so an ineligible branch is refused by the host before
+// any blackhole hook runs — there is no in-hook way to see or soften it. The
+// command has to ask the same question the host will ask, before it calls.
+
+/**
+ * Minimal stand-in for the host AgentSession. `installInlineCompactionAdapter`
+ * shape-detects `compact()`, and the binding its patched `_bindExtensionCore`
+ * installs is what `getCompactionIneligibility` resolves `prepareCompaction`
+ * and the effective compaction settings through — an unbound sessionManager
+ * simply fails open, so the probe would be untestable. A fresh class per call
+ * keeps the module-global registry's per-prototype `installs` from leaking
+ * between tests.
+ */
+function createHostSession(options: {
+  /** Omit to model a host that exposes no prepareCompaction (fail-open path). */
+  prepareCompaction?: (entries: unknown[], settings: unknown) => unknown;
+  branchEntries?: unknown[];
+}) {
+  const getCompactionSettings = vi.fn((_model?: unknown) => ({
+    enabled: true,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000,
+  }));
+  const branchEntries = options.branchEntries ?? [
+    { id: "e1", type: "message", message: { role: "user", content: "hi" } },
+  ];
+
+  class HostSession {
+    sessionManager = {
+      getBranch: (): unknown[] => branchEntries,
+      getSessionId: (): string => "test-session",
+      buildSessionContext: (): { messages: unknown[] } => ({ messages: [] }),
+      appendCompaction: (): void => {},
+    };
+    agent = {
+      state: { messages: [] as unknown[] },
+      prepareNextTurnWithContext: async (turn: any) => ({ context: turn.context }),
+    };
+    settingsManager = { getCompactionSettings };
+    async abort(): Promise<void> {}
+    async compact(): Promise<void> {
+      await this.abort();
+      this.sessionManager.appendCompaction();
+      this.agent.state.messages = [];
+    }
+    _bindExtensionCore(_runner: unknown): void {}
+  }
+
+  installInlineCompactionAdapter({
+    sessionClass: HostSession as any,
+    hostPrepareCompaction: options.prepareCompaction as any,
+  });
+  const session = new HostSession();
+  session._bindExtensionCore({});
+
+  return { sessionManager: session.sessionManager, getCompactionSettings, branchEntries };
+}
+
+function writePendingState(): string {
+  const pendingFile = join(testRoot, "agent", "pi-blackhole", "test-session-pending.json");
+  writeFileSync(
+    pendingFile,
+    JSON.stringify({
+      observationBatches: [
+        {
+          data: { observations: [{ id: "aaaaaaaaaaaa", content: "test obs" }] },
+          coversUpToId: "raw-1",
+        },
+      ],
+      reflectionBatches: [
+        {
+          data: {
+            reflections: [
+              {
+                id: "eeeeeeeeeeee",
+                content: "test ref",
+                supportingObservationIds: ["aaaaaaaaaaaa"],
+              },
+            ],
+          },
+          coversUpToId: "raw-1",
+        },
+      ],
+    }),
+  );
+  return pendingFile;
+}
+
+describe("/blackhole manual-compaction eligibility", () => {
+  beforeEach(() => {
+    mkdirSync(join(testRoot, "agent", "pi-blackhole"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  it("refuses without compacting when the host reports the branch as too small", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+    const host = createHostSession({ prepareCompaction: () => undefined });
+
+    const ctx = makeHandlerArgs({ sessionManager: host.sessionManager });
+    await handlerMap.get("blackhole")!("", ctx);
+
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("nothing to compact yet");
+    expect(notifyCalls[notifyCalls.length - 1].level).toBe("info");
+  });
+
+  it("reports an already-compacted branch distinctly from a too-small one", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+    const host = createHostSession({
+      prepareCompaction: () => undefined,
+      branchEntries: [{ id: "c1", type: "compaction", summary: "prior" }],
+    });
+
+    const ctx = makeHandlerArgs({ sessionManager: host.sessionManager });
+    await handlerMap.get("blackhole")!("", ctx);
+
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(notifyCalls[notifyCalls.length - 1].msg).toContain("already compacted");
+  });
+
+  it("does not flush pending observational memory when the branch is ineligible", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls, appendEntryCalls } =
+      createMockEnvironment();
+    runtime.config.compaction = "manual";
+    registerPiVccCommand(pi as any, runtime as any);
+    const host = createHostSession({ prepareCompaction: () => undefined });
+    const pendingFile = writePendingState();
+
+    const ctx = makeHandlerArgs({ sessionManager: host.sessionManager });
+    await handlerMap.get("blackhole")!("", ctx);
+
+    expect(appendEntryCalls).toHaveLength(0);
+    expect(existsSync(pendingFile)).toBe(true);
+    expect(notifyCalls.some((n) => n.msg.includes("pending entries flushed"))).toBe(false);
+  });
+
+  it("compacts when the host reports the branch as eligible", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+    const host = createHostSession({
+      prepareCompaction: () => ({ firstKeptEntryId: "e1" }),
+    });
+
+    const ctx = makeHandlerArgs({ sessionManager: host.sessionManager });
+    await handlerMap.get("blackhole")!("", ctx);
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails open when the host exposes no prepareCompaction", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+    const host = createHostSession({});
+
+    const ctx = makeHandlerArgs({ sessionManager: host.sessionManager });
+    await handlerMap.get("blackhole")!("", ctx);
+
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves the host's compaction settings with the session model", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+    const host = createHostSession({
+      prepareCompaction: () => ({ firstKeptEntryId: "e1" }),
+    });
+    const model = { provider: "anthropic", id: "claude-sonnet-4" };
+
+    const ctx = makeHandlerArgs({ sessionManager: host.sessionManager, model });
+    await handlerMap.get("blackhole")!("", ctx);
+
+    // Pi resolves per-model overrides with getCompactionSettings(model); asking
+    // without the model answers a different question than the host will ask.
+    expect(host.getCompactionSettings).toHaveBeenCalledWith(model);
+  });
+
+  it("loads config before the manual path reads it", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+
+    const ctx = makeHandlerArgs();
+    await handlerMap.get("blackhole")!("", ctx);
+
+    expect(runtime.ensureConfig).toHaveBeenCalledWith(ctx.cwd, expect.any(Function));
+  });
+
+  it("treats a nothing-to-compact refusal as information, not a failure", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+
+    const ctx = makeHandlerArgs();
+    await handlerMap.get("blackhole")!("", ctx);
+
+    const call = ctx.compact.mock.calls[0][0];
+    call.onError(new Error("Nothing to compact (session too small)"));
+
+    const last = notifyCalls[notifyCalls.length - 1];
+    expect(last.level).toBe("info");
+    expect(last.msg).toContain("nothing to compact");
+    expect(last.msg).not.toContain("Compaction failed:");
+  });
+
+  it("reports an already-compacted refusal from the host as information", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls } = createMockEnvironment();
+    registerPiVccCommand(pi as any, runtime as any);
+
+    const ctx = makeHandlerArgs();
+    await handlerMap.get("blackhole")!("", ctx);
+
+    const call = ctx.compact.mock.calls[0][0];
+    call.onError(new Error("Already compacted"));
+
+    const last = notifyCalls[notifyCalls.length - 1];
+    expect(last.level).toBe("info");
+    expect(last.msg).toContain("already compacted");
   });
 });
 
