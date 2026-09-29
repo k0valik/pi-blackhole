@@ -2,7 +2,7 @@
   "_comment": "blackhole unified configuration v3 — ~/.pi/agent/pi-blackhole/pi-blackhole-config.json",
   "_all_settings_in_one_file": true,
   "_new_keys": "compaction, compactionSummaryMode, tailBehavior, compactAfterBy — v3 config surface",
-  "_renamed": "v2 example → example-config-old.json (migration fixture); this file is the post-reorg surface",
+  "_renamed": "The pre-reorg (v2) example is a repo-only migration fixture; for the old→new key mapping see docs/MIGRATION-GUIDE.md. This file is the post-reorg surface.",
 
   "compaction": "automatic",
   "_comment_compaction": "automatic | manual | off. 'automatic' triggers on threshold, 'manual' only on /blackhole, 'off' leaves compaction to Pi. compactionEngine was folded in (v3): 'blackhole' → 'automatic', 'pi-default' → 'off'; 'auto' is still accepted as an alias.",
@@ -10,7 +10,6 @@
   "tailBehavior": "minimal",
   "showPreCompactionMessage": true,
   "midRunCompaction": "off",
-  "showPreCompactionMessage": true,
 
   "_comment_threshold": "Auto-compaction = one shape (compactAfterBy) clamped to an optional floor/ceiling band. effective = clamp(shape(window), compactAfterMinTokens, compactAfterMaxTokens).",
   "compactAfterBy": "preset",
@@ -46,7 +45,7 @@
   "_comment_reflectorInputMaxTokens": "Largest memory snapshot an insight-building or pruning job reads (shared). dropperInputMaxTokens was merged into this key in v3.",
   "observerChunkMaxTokens": 40000,
   "dropperPressureThreshold": 0.7,
-  "_comment_dropperPressureThreshold": "Prune memory when note memory is this fraction full. dropperPoolFullnessThreshold was merged into this key in v3 (new-data floor is the constant 0.10). 1 disables pressure-driven pruning.",
+  "_comment_dropperPressureThreshold": "Prune memory when note memory is this fraction full. dropperPoolFullnessThreshold was merged into this key in v3 (max of the two old values); the new-data floor is derived as clamp(0.15 x value, 0.02, 0.10). 1 disables pressure-driven pruning.",
   "observeAfterTokens": 15000,
   "reflectAfterTokens": 25000,
   "agentMaxTurns": 16,
@@ -54,6 +53,8 @@
   "workerAttemptTimeoutMs": 0,
 
   "memory": true,
+  "fullFoldAlways": true,
+  "_comment_fullFoldAlways": "Keep notes and insights gathered early in a session through its first compaction. false = the first compaction starts memory from scratch.",
   "sessionFallback": true,
   "statusBar": true,
   "showWorkerNotifications": true,

@@ -41,8 +41,11 @@ The per-file algorithm is **two-phase and verified**:
 
 1. Read and parse the file. Invalid JSON or a non-object is left untouched
    (a warning is printed; the file is never rewritten).
-2. If the file already carries a `"configVersion"` stamp, it is left alone —
-   the version is the gate, so a migrated file is never rewritten.
+2. If the file already carries a `"configVersion"` stamp **and no consumed
+   legacy keys remain**, it is left alone — the version is the gate, so a fully
+   migrated file is never rewritten. A stamped file that still has consumed keys
+   is a crash window (phase 1 landed, phase 2 did not): it is *not* skipped, it
+   takes the remove-only path below and gets the leftovers deleted.
 3. Project the migration in memory. A `0` value is the documented "not set"
    sentinel (never an error). A genuinely unrecognized value is **skipped**: its
    key is left untouched and reported through a warning notification, while the

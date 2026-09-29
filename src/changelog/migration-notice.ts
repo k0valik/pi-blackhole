@@ -6,27 +6,42 @@
  * once that the surface changed, and separately whether their config was
  * migrated — so a read-only install (or a clean file) is still informed.
  *
- * Gated by the RUNNING PACKAGE VERSION (via `getPackageVersion()`, same
- * precedence as the changelog viewer — works for npm installs, git installs,
- * and jiti/direct-ts alike) equal to `MIGRATION_NOTICE_VERSION`. Bumping the
- * package version past it self-noops this module; no flag file is ever written,
- * so read-only filesystems are unaffected.
+ * Two gates, both required:
+ *  1. **Version** — the running package version (via `getPackageVersion()`,
+ *     same precedence as the changelog viewer) must be at least
+ *     `MIGRATION_NOTICE_VERSION`. Comparing numerically (`0.6.0` <= `0.6.1`
+ *     <= `0.7.0`, with a prerelease suffix ignored) instead of by string
+ *     equality means a patch bump or an `-rc` of the release that ships the
+ *     migration still fires, while a release cut at a lower version does not.
+ *  2. **Stamp** — a small file in the config directory records that the notice
+ *     was shown, so "exactly once" means once per *install*, not once per pi
+ *     process. Writing it is best-effort: on a read-only filesystem the write
+ *     fails silently and the process-level guard below is the only gate, so
+ *     read-only installs degrade to once-per-session instead of never.
  *
- * Release step: set `MIGRATION_NOTICE_VERSION` to the version that ships the
- * config migration (and the CHANGELOG section for it). Until then this module
- * is inert.
+ * Release step: set `MIGRATION_NOTICE_VERSION` to the earliest version that
+ * ships the config migration (and the CHANGELOG section for it). Until a build
+ * at or past that version runs, this module is inert.
  */
 
+import { existsSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { configPath } from "../core/unified-config.js";
 import { getPackageVersion } from "./changelog.js";
 
-/** The package version whose release carries the config migration. */
+/** The earliest package version whose release carries the config migration. */
 export const MIGRATION_NOTICE_VERSION = "0.6.0";
 
 /** What the on-disk migration actually did this session. */
 export type MigrationOutcome = "migrated" | "none" | "blocked";
 
+/**
+ * Neutral on purpose: it is emitted for every outcome, including a fresh
+ * install where nothing was rewritten, so it must never claim the *user's*
+ * configuration was upgraded. The outcome line below carries that.
+ */
 const UPGRADE_MESSAGE =
-  "pi-blackhole: your configuration was upgraded to the new surface — the compaction engine is now " +
+  "pi-blackhole: the configuration surface changed — the compaction engine is now " +
   "part of `compaction`, the auto-compaction threshold is a shape plus an optional floor/ceiling, " +
   "and redundant memory knobs were merged. Review your settings: /blackhole settings. " +
   "Upgrade guide: docs/MIGRATION-GUIDE.md. Details: /blackhole changelog.";
@@ -50,16 +65,58 @@ export interface MigrationNoticeDeps {
   version?: string;
   /** Override the notify sink (tests). Default: ctx.ui.notify. */
   notify?: (message: string, level: string) => void;
+  /** Override the stamp file location (tests). Default: next to the config. */
+  stampPath?: string;
 }
 
 let notifiedThisProcess = false;
 
+/** Numeric `major.minor.patch` compare; a prerelease suffix is ignored. */
+function versionAtLeast(version: string, atLeast: string): boolean {
+  const parse = (v: string): [number, number, number] | undefined => {
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v.trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
+  };
+  const running = parse(version);
+  const floor = parse(atLeast);
+  if (!running || !floor) return false;
+  for (let i = 0; i < 3; i++) {
+    if (running[i] !== floor[i]) return running[i] > floor[i];
+  }
+  return true;
+}
+
+/** Where "this notice was already shown" is recorded, next to the config. */
+function stampPath(override?: string): string {
+  return override ?? join(dirname(configPath()), "pi-blackhole-migration-notice.json");
+}
+
+function stampExists(path: string): boolean {
+  try {
+    return existsSync(path);
+  } catch {
+    return false;
+  }
+}
+
+function writeStamp(path: string): void {
+  try {
+    writeFileSync(path, `${JSON.stringify({ shownAt: new Date().toISOString() })}\n`, {
+      flag: "w",
+    });
+  } catch {
+    /* read-only filesystem — the once-per-process guard still applies */
+  }
+}
+
 /**
- * Show the config-migration notice at most once per pi process when the running
- * package version is exactly `MIGRATION_NOTICE_VERSION`. Emits two
- * notifications: the upgrade notice, then the outcome. Returns true when a
- * notification was attempted. The guard is set even if the sink throws — a
- * stale extension context must never cause a retry nag.
+ * Show the config-migration notice at most once per install when the running
+ * package version is at least `MIGRATION_NOTICE_VERSION`. Emits two
+ * notifications: the surface-change notice, then the outcome. Returns true when
+ * a notification was attempted. The process guard is set before the first send —
+ * a stale extension context must never cause a retry nag — but each send has its
+ * own try/catch, so one throwing sink cannot swallow the outcome line (the only
+ * notice a blocked install gets).
  */
 export function maybeNotifyConfigMigration(
   ctx: MigrationNoticeCtx | undefined,
@@ -68,19 +125,26 @@ export function maybeNotifyConfigMigration(
 ): boolean {
   if (notifiedThisProcess) return false;
   const version = deps.version ?? getPackageVersion();
-  if (version !== MIGRATION_NOTICE_VERSION) return false;
+  if (!version || !versionAtLeast(version, MIGRATION_NOTICE_VERSION)) return false;
   if (!ctx?.hasUI) return false;
 
   const notify = deps.notify ?? ctx.ui?.notify?.bind(ctx.ui);
   if (typeof notify !== "function") return false;
 
+  const stamp = stampPath(deps.stampPath);
+  if (stampExists(stamp)) return false;
+
   notifiedThisProcess = true;
-  try {
-    notify(UPGRADE_MESSAGE, "info");
-    notify(OUTCOME_MESSAGE[outcome], "info");
-  } catch {
-    // Stale extension context — harmless; the guard stays set.
-  }
+  writeStamp(stamp);
+  const send = (message: string): void => {
+    try {
+      notify(message, "info");
+    } catch {
+      // Stale extension context — harmless; the guard stays set.
+    }
+  };
+  send(UPGRADE_MESSAGE);
+  send(OUTCOME_MESSAGE[outcome] ?? OUTCOME_MESSAGE.none);
   return true;
 }
 

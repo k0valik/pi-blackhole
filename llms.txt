@@ -242,12 +242,12 @@ Both `/blackhole` and auto-triggered default to `"minimal"`. Set explicitly to `
 
 > One more thing: who should handle the actual compaction?
 >
-> - **Blackhole engine (default):** pi-blackhole generates a structured summary with sections (goals, files changed, preferences, etc.) AND injects your durable memories. Everything in one compact block. This is the full experience.
-> - **Pi default engine:** Pi writes its own free-form summary. pi-blackhole only activates when you type `/blackhole`. Useful if you prefer Pi's summarization style and only want blackhole for the memory features.
+> - **Automatic compaction (`compaction: "automatic"`, default):** pi-blackhole generates a structured summary with sections (goals, files changed, preferences, etc.) AND injects your durable memories. Everything in one compact block. This is the full experience.
+> - **Off (`compaction: "off"`):** Pi writes its own free-form summary. pi-blackhole only activates when you type `/blackhole`. Useful if you prefer Pi's summarization style and only want blackhole for the memory features.
 >
-> This only matters if you chose Auto mode. In Manual or Off mode, it doesn't change anything — Pi handles `/compact` and blackhole handles `/blackhole` regardless.
+> This only matters if you chose `automatic`. In `manual` or `off` mode, it doesn't change anything — Pi handles `/compact` and blackhole handles `/blackhole` regardless.
 >
-> Blackhole engine (full structured + memories) or Pi default (free-form)?
+> Automatic compaction (full structured + memories) or off (Pi's free-form summary)?
 
 ---
 

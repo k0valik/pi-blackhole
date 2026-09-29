@@ -19,6 +19,7 @@
  */
 
 import {
+  isAnyCompactionValue,
   isCompactAfterBy,
   isCompactionValue,
   isFixedTokenThreshold,
@@ -184,7 +185,12 @@ const legacyModes: ConfigMigration = {
     }
 
     let changed = false;
-    if (raw.compaction === undefined) {
+    // Gate on *validity*, not presence: an unrecognized `compaction` value must
+    // not suppress the legacy fold (or the `passive` key would be deleted in
+    // phase 2 without ever writing the `compaction: "off"` / `memory: false`
+    // that expresses it). compactionEngineFold has already warned about the
+    // bad value, so overwriting it here loses nothing the user was not told.
+    if (!isAnyCompactionValue(raw.compaction)) {
       if (valid.passive && raw.passive === true) {
         raw.compaction = "off";
         raw.memory = false;
@@ -222,7 +228,13 @@ const legacyModes: ConfigMigration = {
  */
 const thresholdArray: ConfigMigration = {
   id: "threshold-array",
-  consumes: ["compactAfterTokens", "compactAfterRatio", "compactReserveTokens"],
+  consumes: [
+    "compactAfterTokens",
+    "compactAfterRatio",
+    "compactReserveTokens",
+    "compactAfterMinTokens",
+    "compactAfterMaxTokens",
+  ],
   produces: ["compactAfterBy", "compactAfterRatio", "compactAfterTokens", "compactReserveTokens"],
   message: "auto-compaction threshold shape recorded (compactAfterBy); ratio converted to percent",
   apply(raw) {
@@ -283,6 +295,12 @@ const thresholdArray: ConfigMigration = {
 
     let changed = converted;
 
+    // Band bounds use the same `0` "not set" sentinel as the value knobs, so
+    // they are cleaned up by the same rule — one sentinel, one behaviour.
+    for (const k of ["compactAfterMinTokens", "compactAfterMaxTokens"] as const) {
+      dropIfZero(raw[k], k, del);
+    }
+
     let shape: "tokens" | "percent" | "reserve" | undefined;
     if (tokenPin !== undefined) shape = "tokens";
     else if (ratioValid) shape = "percent";
@@ -333,9 +351,13 @@ const dropperFractionMerge: ConfigMigration = {
       return { changed: false, delete: del, warnings: warning.warnings };
     }
     const base = typeof pressure === "number" && pressure > 0 ? pressure : 0.7;
-    raw.dropperPressureThreshold = Math.max(base, fullness);
+    const merged = Math.max(base, fullness);
+    // Only a real value change forces the two-phase path — a pure key deletion
+    // (merged === pressure) is handled by the remove-only path.
+    const changed = merged !== pressure;
+    if (changed) raw.dropperPressureThreshold = merged;
     del.push("dropperPoolFullnessThreshold");
-    return { changed: true, delete: del, warnings: warning.warnings };
+    return { changed, delete: del, warnings: warning.warnings };
   },
 };
 

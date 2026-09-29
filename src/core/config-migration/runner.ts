@@ -25,19 +25,21 @@
  * returns the in-memory projection so the current load still behaves migrated.
  */
 
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
   chmod,
-  copyFile,
+  lstat,
   mkdir,
   open,
   readFile,
+  realpath,
   rename,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { configPath } from "../unified-config.js";
 import { CONFIG_VERSION, type MigrationWarning, projectConfig } from "./steps.js";
 
@@ -81,19 +83,34 @@ export interface MigrateFileResult {
  * fsync, rename over the target. The temp inherits the target's permission bits
  * so migration cannot widen a restricted config. On any failure the original
  * file stays intact and the temp is removed.
+ *
+ * Two durability details the two-phase design rests on:
+ *  - a symlinked config is written *through* (realpath first) so the link is
+ *    preserved and the file it points at is the one that gets migrated —
+ *    every other writer in this codebase (`saveUnifiedConfig`) writes through
+ *    symlinks too;
+ *  - the directory entry created by `rename` is fsynced afterwards, so a crash
+ *    cannot roll the rename back behind the runner's back.
  */
 export async function atomicWrite(path: string, text: string): Promise<void> {
-  const dir = dirname(path);
-  const tmp = join(dir, `.${basename(path)}.tmp-${process.pid}-${Date.now()}`);
+  let target = path;
+  try {
+    target = await realpath(path);
+  } catch {
+    /* target does not exist yet — write at the given path */
+  }
+  const dir = dirname(target);
+  const tmp = join(dir, `.${basename(target)}.tmp-${process.pid}-${Date.now()}`);
   await mkdir(dir, { recursive: true });
   let mode: number | undefined;
   try {
-    mode = (await stat(path)).mode & 0o777;
+    mode = (await stat(target)).mode & 0o777;
   } catch {
     /* target does not exist yet — use the process default */
   }
   try {
-    await writeFile(tmp, text, "utf-8");
+    // `wx` never follows a pre-planted symlink at the temp path.
+    await writeFile(tmp, text, { encoding: "utf-8", flag: "wx" });
     if (mode !== undefined) {
       try {
         await chmod(tmp, mode);
@@ -111,7 +128,8 @@ export async function atomicWrite(path: string, text: string): Promise<void> {
     } catch {
       /* fsync is best-effort */
     }
-    await rename(tmp, path);
+    await rename(tmp, target);
+    await syncDir(dir);
   } catch (error) {
     try {
       await unlink(tmp);
@@ -119,6 +137,20 @@ export async function atomicWrite(path: string, text: string): Promise<void> {
       /* best-effort cleanup */
     }
     throw error;
+  }
+}
+
+/** Best-effort directory fsync so a completed rename survives a crash. */
+async function syncDir(dir: string): Promise<void> {
+  try {
+    const dh = await open(dir, "r");
+    try {
+      await dh.sync();
+    } finally {
+      await dh.close();
+    }
+  } catch {
+    /* fsync of a directory is best-effort (and unsupported on some platforms) */
   }
 }
 
@@ -130,9 +162,17 @@ export async function atomicWrite(path: string, text: string): Promise<void> {
  * silently disabled by a corrupt residue. When it has to be created, it is
  * verified byte-identical to the original, and a failure abandons the migration
  * before any write.
+ *
+ * Created with `wx` so it never follows — and therefore never overwrites
+ * through — a symlink planted at the backup path, and so two concurrent
+ * migrations cannot clobber each other's snapshot.
+ *
+ * @param dest Backup path. Defaults to `<path>.bak`; callers pass an explicit
+ * destination when the default would land somewhere the user does not want
+ * extra files (e.g. inside a git working tree).
  */
-async function defaultBackup(path: string): Promise<void> {
-  const bak = `${path}.bak`;
+async function defaultBackup(path: string, dest?: string): Promise<void> {
+  const bak = dest ?? `${path}.bak`;
   try {
     const existing = await readFile(bak, "utf-8");
     if (isRestorable(existing)) return; // write-once — keep the original snapshot
@@ -140,7 +180,27 @@ async function defaultBackup(path: string): Promise<void> {
     /* no backup yet */
   }
   const original = await readFile(path, "utf-8");
-  await copyFile(path, bak);
+  // A non-restorable residue (crash leftover) may be replaced, but never
+  // *through* a symlink planted at the backup path: unlinking only ever removes
+  // the link itself, never its target, and the `wx` write below refuses to
+  // follow one either. Abort before any write if the path is linked.
+  try {
+    const st = await lstat(bak);
+    if (st.isSymbolicLink()) {
+      throw new Error(`backup path ${bak} is a symlink — refusing to write through it`);
+    }
+    await unlink(bak);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await mkdir(dirname(bak), { recursive: true });
+  try {
+    await writeFile(bak, original, { encoding: "utf-8", flag: "wx" });
+  } catch (error) {
+    // EEXIST: a concurrent writer got there first — the byte-identical check
+    // below decides whether that snapshot is acceptable.
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
   const written = await readFile(bak, "utf-8");
   if (written !== original) {
     throw new Error("backup verification failed");
@@ -197,6 +257,27 @@ function warningMessage(path: string, warnings: MigrationWarning[]): string {
   );
 }
 
+/**
+ * Re-read the file and confirm the destructive half of the migration landed:
+ * every consumed key is gone and the stamp (when there is one) is present.
+ */
+async function phase2Verified(
+  readText: (p: string) => Promise<string>,
+  path: string,
+  consumed: readonly string[],
+  stamp: number | undefined,
+): Promise<boolean> {
+  try {
+    const after: unknown = JSON.parse(await readText(path));
+    if (!isRecord(after)) return false;
+    if (consumed.some((k) => k in after)) return false;
+    if (stamp !== undefined && after.configVersion !== stamp) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Per-file runner ──────────────────────────────────────────────────────────
 
 /**
@@ -228,8 +309,12 @@ export async function migrateConfigFile(
   let rawText: string;
   try {
     rawText = await readText(path);
-  } catch {
-    return base;
+  } catch (error) {
+    // An unreadable file (EACCES/EIO) is not the same as a missing one: the
+    // loader will fall back to defaults, so say so instead of staying silent.
+    warn(`blackhole: could not read ${path} (${String(error)})`);
+    notify?.(`blackhole: could not read ${path} — running on defaults.`, "warning");
+    return { ...base, error: String(error) };
   }
 
   let raw: unknown;
@@ -237,10 +322,12 @@ export async function migrateConfigFile(
     raw = JSON.parse(rawText);
   } catch {
     warn(`blackhole: config migration skipped — ${path} is not valid JSON`);
+    notify?.(`blackhole: could not read ${path} (invalid JSON) — running on defaults.`, "warning");
     return { ...base, error: "invalid JSON" };
   }
   if (!isRecord(raw)) {
     warn(`blackhole: config migration skipped — ${path} is not a JSON object`);
+    notify?.(`blackhole: ${path} is not a config object — running on defaults.`, "warning");
     return { ...base, error: "not an object" };
   }
 
@@ -304,15 +391,6 @@ export async function migrateConfigFile(
   if (!proj.valueChanged) {
     try {
       await write(path, serialize(phase2));
-      return {
-        ...base,
-        changed: true,
-        persisted: true,
-        applied: proj.applied,
-        messages: proj.messages,
-        warnings: proj.warnings,
-        config: phase2,
-      };
     } catch (error) {
       const suffix = isReadOnlyError(error) ? "read-only filesystem" : String(error);
       warn(`blackhole: could not migrate ${path} (${suffix})`);
@@ -330,6 +408,37 @@ export async function migrateConfigFile(
         error: String(error),
       };
     }
+    // The destructive write gets the same re-read verification as phase 1: this
+    // is the step that actually deletes data, so `persisted` must not be
+    // claimed before the keys are known to be gone.
+    if (!(await phase2Verified(readText, path, proj.consumedToDelete, stamp))) {
+      warn(
+        `blackhole: config migration verification failed for ${path}; keeping the old keys (will retry next load)`,
+      );
+      notify?.(
+        "blackhole: could not finish writing your config; it will retry next session.",
+        "warning",
+      );
+      return {
+        ...base,
+        changed: true,
+        persisted: false,
+        applied: proj.applied,
+        messages: proj.messages,
+        warnings: proj.warnings,
+        config: proj.config,
+        error: "verification failed",
+      };
+    }
+    return {
+      ...base,
+      changed: true,
+      persisted: true,
+      applied: proj.applied,
+      messages: proj.messages,
+      warnings: proj.warnings,
+      config: phase2,
+    };
   }
 
   // PHASE 1 — write the new keys, keep the old ones.
@@ -355,12 +464,14 @@ export async function migrateConfigFile(
     };
   }
 
-  // VERIFY — every changed key must be readable back before we delete anything.
-  const changedKeys = Object.keys(phase1).filter((k) => !deepEqual(phase1[k], raw[k]));
+  // VERIFY — the whole document must read back byte-for-structure identical to
+  // what we wrote. Comparing the whole file (not just the changed keys) is what
+  // detects a concurrent writer between our read and our write; only then is it
+  // safe to delete the consumed keys.
   let verified = false;
   try {
-    const reRead = JSON.parse(await readText(path));
-    verified = isRecord(reRead) && changedKeys.every((k) => deepEqual(reRead[k], phase1[k]));
+    const reRead: unknown = JSON.parse(await readText(path));
+    verified = isRecord(reRead) && deepEqual(reRead, phase1);
   } catch {
     verified = false;
   }
@@ -371,7 +482,9 @@ export async function migrateConfigFile(
     return {
       ...base,
       changed: true,
-      persisted: true,
+      // Phase 2 never ran: the consumed keys are still on disk, so this is not
+      // a completed migration and must not be reported as one.
+      persisted: false,
       applied: proj.applied,
       messages: proj.messages,
       warnings: proj.warnings,
@@ -410,6 +523,25 @@ export async function migrateConfigFile(
       error: String(error),
     };
   }
+  if (!(await phase2Verified(readText, path, proj.consumedToDelete, stamp))) {
+    warn(
+      `blackhole: config migration verification failed for ${path}; keeping the old keys (will retry next load)`,
+    );
+    notify?.(
+      "blackhole: could not finish writing your config; it will retry next session.",
+      "warning",
+    );
+    return {
+      ...base,
+      changed: true,
+      persisted: false,
+      applied: proj.applied,
+      messages: proj.messages,
+      warnings: proj.warnings,
+      config: proj.config,
+      error: "verification failed",
+    };
+  }
 
   return {
     ...base,
@@ -426,16 +558,36 @@ export async function migrateConfigFile(
 
 /**
  * Migrate the global and project-local config files independently (plan-10 §6).
- * A tracked project config is the user's problem (plan-10 §8.5).
+ * A tracked project config is the user's problem (plan-10 §8.5) — but its
+ * backup is not written into their working tree: a `.pi/*.bak` next to their
+ * source is untracked noise that `git add -A` would commit. Project backups
+ * land in the global config directory under a per-project name instead, so the
+ * verified-backup gate still applies without touching the repo.
  */
 export async function migrateConfigFiles(
   cwd: string,
   deps: MigrateFileDeps = {},
 ): Promise<MigrateFileResult[]> {
-  const paths = [...new Set([configPath(), join(cwd, ".pi", CONFIG_FILE)])];
+  const globalPath = configPath();
+  const projectPath = join(cwd, ".pi", CONFIG_FILE);
+  const paths = [...new Set([globalPath, projectPath])];
   const results: MigrateFileResult[] = [];
   for (const p of paths) {
-    results.push(await migrateConfigFile(p, deps));
+    const fileDeps =
+      p === projectPath && deps.backup === undefined
+        ? { ...deps, backup: (path: string) => defaultBackup(path, projectBackupPath(cwd)) }
+        : deps;
+    results.push(await migrateConfigFile(p, fileDeps));
   }
   return results;
+}
+
+/**
+ * Where a project config's `.bak` goes: the global config directory, keyed by
+ * a stable hash of the project path so each project keeps its own write-once
+ * snapshot and two projects never share (or clobber) one.
+ */
+function projectBackupPath(cwd: string): string {
+  const hash = createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 12);
+  return join(dirname(configPath()), `${CONFIG_FILE}.project-${hash}.bak`);
 }

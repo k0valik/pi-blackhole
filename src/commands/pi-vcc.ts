@@ -249,7 +249,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             // returning { cancel: true }, and Pi renders "Compaction cancelled"
             // itself for manual aborts. A second toast adds nothing.
           } else {
-            ctx.ui.notify(`Compaction failed: ${message}`, "error");
+            ctx.ui.notify(`blackhole: compaction failed — ${message}`, "error");
           }
         },
       });
