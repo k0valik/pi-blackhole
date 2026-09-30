@@ -51,7 +51,7 @@ export type ConsolidationPhase = "observer" | "reflector" | "dropper";
  * User-facing name for a memory pipeline stage, so notifications state the
  * user outcome rather than the internal worker name (plan-09 §4.7).
  */
-export function stageOutcome(stage: string): string {
+export function stageOutcome(stage: ConsolidationPhase | "unknown"): string {
   if (stage === "observer") return "note-taking";
   if (stage === "reflector") return "insight-building";
   if (stage === "dropper") return "pruning";

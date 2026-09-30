@@ -10,6 +10,7 @@ import {
   BUILTIN_PRESETS,
   autoCompactThreshold,
   effectivePresets,
+  effectiveShapeSelector,
   presetRatioForWindow,
   sessionContextWindow,
   type CompactThresholdConfig,
@@ -38,6 +39,7 @@ import {
   isManualMode,
   isReserveTokens,
   isWindowPercent,
+  windowPercent,
 } from "../core/unified-config.js";
 
 function firstArg(args: unknown): string | undefined {
@@ -67,36 +69,18 @@ function pruneBarHint(config: { dropperPressureThreshold: number }): string {
  * fallback, so display and trigger cannot disagree.
  */
 function compactThresholdSuffix(cfg: CompactThresholdConfig, window: number): string {
-  // Validity (not mere presence) decides the tier — mirrors compactThresholdTokens
-  // so display and trigger cannot disagree, even for unnormalized configs.
-  const tokens = isFixedTokenThreshold(cfg.compactAfterTokens);
-  const percent = isWindowPercent(cfg.compactAfterRatio);
-  const reserve = isReserveTokens(cfg.compactReserveTokens);
-  const shape = cfg.compactAfterBy;
-  const effective =
-    shape === "tokens" && tokens
-      ? "tokens"
-      : shape === "percent" && percent
-        ? "percent"
-        : shape === "reserve" && reserve
-          ? "reserve"
-          : shape === "preset"
-            ? "preset"
-            : tokens
-              ? "tokens"
-              : percent
-                ? "percent"
-                : reserve
-                  ? "reserve"
-                  : "preset";
+  // Validity (not mere presence) decides the tier — the same resolver the
+  // trigger uses, so display and trigger cannot disagree, even for
+  // unnormalized configs.
+  const effective = effectiveShapeSelector(cfg);
 
   let suffix: string;
   if (effective === "tokens") {
     suffix = ""; // explicit fixed token threshold
-  } else if (effective === "percent" && percent) {
-    suffix = ` · ${Math.round(cfg.compactAfterRatio as number)}% of ${window.toLocaleString()}-token window`;
-  } else if (effective === "reserve" && reserve) {
-    suffix = ` · keeps ${(cfg.compactReserveTokens as number).toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
+  } else if (effective === "percent" && isWindowPercent(cfg.compactAfterRatio)) {
+    suffix = ` · ${Math.round(windowPercent(cfg.compactAfterRatio))}% of ${window.toLocaleString()}-token window`;
+  } else if (effective === "reserve" && isReserveTokens(cfg.compactReserveTokens)) {
+    suffix = ` · keeps ${cfg.compactReserveTokens.toLocaleString()} headroom in ${window.toLocaleString()}-token window`;
   } else {
     // Preset curve (incl. the out-of-box default preset): describe the effective
     // ratio at this window, resolved by the same pure functions as the trigger.

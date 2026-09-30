@@ -61,7 +61,11 @@ export default async (pi: ExtensionAPI) => {
       try {
         const cwd = typeof ctx?.cwd === "string" && ctx.cwd.length > 0 ? ctx.cwd : process.cwd();
         const notify = (message: string, level?: "info" | "warning") => {
-          if (ctx?.hasUI) ctx.ui?.notify?.(message, level);
+          try {
+            if (ctx?.hasUI) ctx.ui?.notify?.(message, level);
+          } catch {
+            /* stale ctx — drop the toast, never the migration */
+          }
         };
         const results = await migrateConfigFiles(cwd, { notify });
         const outcome = results.some((r) => r.persisted)

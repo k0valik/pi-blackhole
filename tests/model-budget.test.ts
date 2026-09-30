@@ -10,6 +10,7 @@ import {
   compactThresholdTokens,
   effectiveContextWindow,
   effectivePresets,
+  effectiveShapeSelector,
   presetRatioForWindow,
   sessionContextWindow,
 } from "../src/om/model-budget.js";
@@ -301,7 +302,7 @@ describe("compactThresholdTokens — shape + band (plan-09 §3.2)", () => {
     expect(compactThresholdTokens(cfg, 1_048_576)).toBe(180_000);
   });
 
-  it("floor wins when it exceeds the ceiling", () => {
+  it("an inverted band resolves to the ceiling, so the ceiling label holds", () => {
     expect(
       compactThresholdTokens(
         {
@@ -312,7 +313,7 @@ describe("compactThresholdTokens — shape + band (plan-09 §3.2)", () => {
         },
         1_000_000,
       ),
-    ).toBe(200_000);
+    ).toBe(150_000);
   });
 
   it.each([
@@ -570,5 +571,32 @@ describe("sessionContextWindow", () => {
       model: { provider: "openrouter", id: "big:free", contextWindow: 64_000 },
     };
     expect(sessionContextWindow(undefined, config as any)).toBe(128_000);
+  });
+});
+
+describe("effectiveShapeSelector", () => {
+  it.each([
+    [
+      "an explicit selector with a usable value",
+      { compactAfterBy: "percent", compactAfterRatio: 65 },
+      "percent",
+    ],
+    ["an explicit preset", { compactAfterBy: "preset" }, "preset"],
+    [
+      "an explicit preset beside a pinned value (the selector wins)",
+      { compactAfterBy: "preset", compactAfterTokens: 40_000 },
+      "preset",
+    ],
+    [
+      "an explicit shape whose value is missing/invalid (legacy precedence)",
+      { compactAfterBy: "tokens", compactAfterTokens: 0, compactAfterRatio: 65 },
+      "percent",
+    ],
+    ["an unset selector with a fixed token threshold", { compactAfterTokens: 40_000 }, "tokens"],
+    ["an unset selector with a percent", { compactAfterRatio: 65 }, "percent"],
+    ["an unset selector with a reserve", { compactReserveTokens: 32_768 }, "reserve"],
+    ["an unset selector with no value keys", {}, "preset"],
+  ])("resolves %s to %s", (_label, cfg, expected) => {
+    expect(effectiveShapeSelector(cfg as Record<string, never>)).toBe(expected);
   });
 });

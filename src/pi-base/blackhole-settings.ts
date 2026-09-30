@@ -25,8 +25,9 @@ import {
   normalizeCacheRetention,
   normalizeThresholdKnobs,
   type UnifiedConfig,
+  windowPercent,
 } from "../core/unified-config.js";
-import { effectivePresets } from "../om/model-budget.js";
+import { effectivePresets, effectiveShapeSelector } from "../om/model-budget.js";
 import { openChangelogView } from "../changelog/changelog.js";
 
 const CONFIG_FILENAME = "pi-blackhole-config.json";
@@ -155,7 +156,10 @@ export const config = new ConfigManager<UnifiedConfig>({
       label: "Auto-compact when",
       description:
         "How the auto-compaction point is chosen. A preset adapts to each model's context window; percent, fixed, and reserve are simple overrides.",
-      value: cfg.compactAfterBy ?? "preset",
+      // Show the shape in effect, not the raw selector: with no selector on
+      // disk this used to read "preset" and be written back on save, silently
+      // discarding a pinned compactAfterTokens/Ratio/Reserve value.
+      value: effectiveShapeSelector(cfg),
       options: ["preset", "percent", "tokens", "reserve"],
       optionLabels: {
         preset: "preset",
@@ -185,8 +189,12 @@ export const config = new ConfigManager<UnifiedConfig>({
       depth: 1,
       visibleWhen: (v) => v.get("compactAfterBy") === "percent",
       valueDescription: (v) => {
-        const n = Number(v);
-        if (!Number.isFinite(n) || n <= 0) return "Not set — pick a percentage to use this shape.";
+        const raw = Number(v);
+        if (!Number.isFinite(raw) || raw <= 0)
+          return "Not set — pick a percentage to use this shape.";
+        // Same conversion the loader and resolver apply, so a stored pre-plan
+        // fraction (0, 1] is previewed as the percent it will act as.
+        const n = windowPercent(raw);
         const small = Math.round((256_000 * n) / 100);
         const big = Math.round((1_000_000 * n) / 100);
         return `At ${n}% — a 256k-token model compacts near ${fmtTokens(small)} tokens; a 1M model near ${fmtTokens(big)} unless a ceiling is set.`;

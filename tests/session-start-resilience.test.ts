@@ -50,24 +50,22 @@ describe("session_start migration + notice resilience", () => {
     expect(handler).toMatch(/\}\s*catch\s*\{/);
   });
 
-  test("ctx access inside the deferred body is disposal-guarded or try/caught", () => {
+  test("ctx access inside the deferred body is null-guarded", () => {
     const handler = sessionStartHandler();
-    // Either an explicit liveness check, an async IIFE with try/catch, or a
-    // `.catch()` on the chain.
-    const guarded =
-      /ctx\?\./.test(handler) ||
-      /\bif\s*\(\s*disposed\b/.test(handler) ||
-      /try\s*\{/.test(handler) ||
-      /\.catch\(/.test(handler);
-    expect(guarded).toBe(true);
+    // The specific guard the handler relies on. A disjunction with /try\s*\{/
+    // could never fail here — test 1 already requires that — so it would pin
+    // nothing.
+    expect(handler, "ctx must be reached through optional chaining").toMatch(/ctx\?\./);
   });
 
-  test("no bare `void import(...).then(...)` without a catch anywhere in index.ts", () => {
+  test("every deferred dynamic import in index.ts carries a catch", () => {
     const src = source();
-    // Find every `void import(` ... capture to the end of its statement chain.
-    const re = /void\s+import\([^)]*\)/g;
+    // Find every deferred `import(` ... capture the rest of its statement chain.
+    const re = /(void\s+|await\s+)import\([^)]*\)/g;
+    let checked = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src)) !== null) {
+      checked++;
       // Look ahead for the terminating `;` or `);` of the chain.
       const rest = src.slice(m.index, m.index + 800);
       const chainEnd = rest.indexOf("\n  });");
@@ -77,5 +75,11 @@ describe("session_start migration + notice resilience", () => {
         /\.catch\(/,
       );
     }
+    // The pattern drifts whenever the deferred import changes shape; without
+    // this the loop would silently match nothing and pass.
+    expect(
+      checked,
+      "no deferred import matched — the pattern no longer sees index.ts",
+    ).toBeGreaterThan(0);
   });
 });

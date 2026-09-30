@@ -295,7 +295,7 @@ export function buildOwnCut(
 const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
   no_live_messages: "blackhole: nothing to compact",
   too_few_live_messages:
-    "blackhole: too few messages to compact — Pi keeps a larger recent window; choose a smaller 'Recent messages kept visible' to force it",
+    "blackhole: too few messages to compact — fewer than 3 live messages remain, or Pi's kept window leaves too little for blackhole to cut; deferring to Pi's own compaction",
 };
 
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {

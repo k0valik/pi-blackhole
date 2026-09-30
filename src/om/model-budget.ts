@@ -136,15 +136,43 @@ function shapeThreshold(cfg: CompactThresholdConfig, contextWindow: number): num
 }
 
 /**
+ * The shape `shapeThreshold` will actually consult: the explicit selector
+ * when it names a shape whose value is valid, otherwise the legacy precedence
+ * (tokens > percent > reserve > preset) that an unset selector resolves to.
+ *
+ * Display code (the settings modal, the `/blackhole-memory` threshold line)
+ * shows this instead of the raw `compactAfterBy`, so an unset selector reads
+ * as the shape already in effect instead of as "preset" — which would
+ * otherwise be written back on save and silently discard a pinned value.
+ */
+export function effectiveShapeSelector(
+  cfg: CompactThresholdConfig,
+): "preset" | "percent" | "tokens" | "reserve" {
+  const shape = cfg.compactAfterBy;
+  if (shape === "preset") return "preset";
+  if (shape === "tokens" && isFixedTokenThreshold(cfg.compactAfterTokens)) return "tokens";
+  if (shape === "percent" && isWindowPercent(cfg.compactAfterRatio)) return "percent";
+  if (shape === "reserve" && isReserveTokens(cfg.compactReserveTokens)) return "reserve";
+  if (isFixedTokenThreshold(cfg.compactAfterTokens)) return "tokens";
+  if (isWindowPercent(cfg.compactAfterRatio)) return "percent";
+  if (isReserveTokens(cfg.compactReserveTokens)) return "reserve";
+  return "preset";
+}
+
+/**
  * Resolve the effective auto-compaction threshold.
  *
- * `effective = max(1, compactAfterMinTokens, min(shape(window), compactAfterMaxTokens))`
+ * `effective = max(1, min(max(shape(window), compactAfterMinTokens), compactAfterMaxTokens))`
  *
  * The shape is chosen by `compactAfterBy` (preset | percent | tokens |
  * reserve); when unset, the legacy precedence applies (tokens > percent >
  * reserve > preset). Both band bounds are optional and orthogonal to the
  * shape: the floor protects against a model downgrade when a percent shape is
  * pinned, the ceiling pins an absolute operating point on a huge window.
+ *
+ * An inverted band (floor above ceiling) resolves to the ceiling: a clamp
+ * takes its second argument only when it fits the bounds, so "never later
+ * than" keeps its meaning instead of the floor silently discarding it.
  *
  * Always returns a positive integer ≥ 1 — never undefined (an undefined
  * threshold would invert the trigger gate and compact on every event).
@@ -155,7 +183,7 @@ export function compactThresholdTokens(cfg: CompactThresholdConfig, contextWindo
   const max = isFixedTokenThreshold(cfg.compactAfterMaxTokens)
     ? cfg.compactAfterMaxTokens
     : Number.POSITIVE_INFINITY;
-  return Math.max(1, min, Math.min(base, max));
+  return Math.max(1, Math.min(Math.max(base, min), max));
 }
 
 /**
