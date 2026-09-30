@@ -1857,10 +1857,16 @@ describe("repeated consolidation pipeline cycles", () => {
 });
 
 describe("capSourceEntriesToTokens", () => {
+  // F1 (work_docs/plan-observer-coverage-completion.md): the cap keeps the
+  // OLDEST contiguous prefix, so the stage's coversUpToId — the last kept
+  // entry — can never claim entries the model was never shown. The old
+  // newest-first suffix kept the branch tip while silently dropping older
+  // entries, and the cursor then jumped over them.
+
   test("custom_message with string content contributes tokens (not 0)", () => {
     // Before the fix, custom_message counted as 0 tokens, so the cap
-    // would keep all of these. After the fix, each custom_message is sized
-    // correctly and the cap drops older ones once the budget is exceeded.
+    // would keep all of these. With the prefix walk each custom_message is
+    // sized correctly and the cap stops at the entry that overflows.
     const entries = [
       rawMessage("m0", "x".repeat(200)),
       textCustomMessage("cm-1", "y".repeat(100)),
@@ -1870,10 +1876,9 @@ describe("capSourceEntriesToTokens", () => {
       textCustomMessage("cm-5", "y".repeat(100)),
     ];
     const result = capSourceEntriesToTokens(entries, 80);
-    // 5 custom_message entries × ~25 tokens each = 125 tokens. rawMessage ≈ 50 tokens.
-    // Total ≈ 175 > 80. Newest (cm-5) always kept; cm-4 → 50; cm-3 → 75;
-    // cm-2 would push to 100 > 80 and kept.length > 0 → stop.
-    expect(result.map((e) => e.id)).toEqual(["cm-3", "cm-4", "cm-5"]);
+    // Prefix walk: rawMessage ≈ 50, cm-1 → 75 ≤ 80, cm-2 would push to
+    // 100 > 80 → stop. A 0-token custom_message estimate would keep all five.
+    expect(result.map((e) => e.id)).toEqual(["m0", "cm-1"]);
   });
 
   test("custom_message with array content contributes tokens", () => {
@@ -1888,30 +1893,33 @@ describe("capSourceEntriesToTokens", () => {
         { type: "text", text: "part four" },
       ]),
     ];
-    const result = capSourceEntriesToTokens(entries, 8);
+    const result = capSourceEntriesToTokens(entries, 55);
     // Each array custom_message ≈ 5 tokens. rawMessage ≈ 50 tokens.
-    // Budget 8: cm-2 (5) kept; cm-1 would push to 10 > 8 → stop.
-    expect(result.map((e) => e.id)).toEqual(["cm-2"]);
+    // Prefix: m0 → 50, cm-1 → 55 ≤ 55, cm-2 would push to 60 > 55 → stop.
+    // A 0-token estimate would keep cm-2 as well.
+    expect(result.map((e) => e.id)).toEqual(["m0", "cm-1"]);
   });
 
   test("message entries are still capped correctly", () => {
     const entries = [
-      rawMessage("old", "ignored old message"),
-      rawMessage("new", "x".repeat(1200)), // ~300 tokens
+      rawMessage("m1", "x".repeat(200)), // ~50 tokens
+      rawMessage("m2", "x".repeat(200)), // ~50 tokens
+      rawMessage("m3", "x".repeat(200)), // ~50 tokens
     ];
     const result = capSourceEntriesToTokens(entries, 100);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBe("new");
+    // Prefix: m1 → 50, m2 → 100 ≤ 100, m3 would push to 150 > 100 → stop.
+    expect(result.map((e) => e.id)).toEqual(["m1", "m2"]);
   });
 
   test("branch_summary entries are still capped correctly", () => {
     const entries = [
-      rawMessage("old", "ignored old message"),
+      rawMessage("old", "ignored old message"), // ~5 tokens
       branchSummary("bs-1", "x".repeat(800)), // ~200 tokens
     ];
     const result = capSourceEntriesToTokens(entries, 100);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBe("bs-1");
+    // The small old message fits; bs-1 (≈200) overflows the 100-token budget.
+    // A 0-token branch_summary estimate would keep bs-1 as well.
+    expect(result.map((e) => e.id)).toEqual(["old"]);
   });
 
   test("cap respects maxTokens across mixed entry types", () => {
@@ -1919,21 +1927,22 @@ describe("capSourceEntriesToTokens", () => {
       rawMessage("m1", "a".repeat(400)), // ~100 tokens
       textCustomMessage("cm1", "b".repeat(400)), // ~100 tokens
       branchSummary("bs1", "c".repeat(400)), // ~100 tokens
-      rawMessage("m2", "d".repeat(400)), // ~100 tokens — newest, should be kept
+      rawMessage("m2", "d".repeat(400)), // ~100 tokens
     ];
-    // 300 token budget: newest (m2) always kept, then walk backwards
+    // Prefix walk: m1 → 100, cm1 → 200, bs1 → 300 ≤ 300; m2 would push to 400.
     const result = capSourceEntriesToTokens(entries, 300);
-    expect(result.map((e) => e.id)).toEqual(["cm1", "bs1", "m2"]);
+    expect(result.map((e) => e.id)).toEqual(["m1", "cm1", "bs1"]);
   });
 
-  test("oversized newest entry is still included (first-entry guard)", () => {
+  test("oversized first entry is still included (first-entry guard)", () => {
     const entries = [
-      rawMessage("old", "ignored"),
-      rawMessage("new", "x".repeat(12_000)), // ~3000 tokens, far exceeds budget
+      rawMessage("big", "x".repeat(12_000)), // ~3000 tokens, far exceeds budget
+      rawMessage("after", "y"),
     ];
     const result = capSourceEntriesToTokens(entries, 100);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.id).toBe("new");
+    // A single oversized FIRST entry is kept (kept.length === 0) so a model
+    // that can fit it still makes progress; the walk stops right after it.
+    expect(result.map((e) => e.id)).toEqual(["big"]);
   });
 
   test("blackhole-pre-compaction-output custom entries contribute 0 tokens", () => {
@@ -1958,10 +1967,11 @@ describe("capSourceEntriesToTokens", () => {
       rawMessage("new", "x".repeat(200)), // ~50 tokens
     ];
     const result = capSourceEntriesToTokens(entries, 50);
-    // cosmeticEntry contributes 0 tokens, so it does not displace the new message.
-    // The cap keeps the newest source entry; older source entries are dropped once
-    // the budget is exceeded.
-    expect(result.map((e) => e.id)).toEqual(["cosmetic-1", "new"]);
+    // cosmeticEntry contributes 0 tokens, so it rides along inside the budget
+    // instead of pushing the walk past it; the message after it overflows.
+    // A mis-sized cosmetic entry (4000 chars ≈ 1000 tokens) would stop the
+    // walk before it and drop the trailing message.
+    expect(result.map((e) => e.id)).toEqual(["old", "cosmetic-1"]);
   });
 });
 
@@ -2058,10 +2068,14 @@ describe("observer preamble cap", () => {
 
     await fixture.run();
 
-    expect(agents.runObserver).toHaveBeenCalledTimes(1);
+    // This fixture has no observation marker, so the stage starts at the top
+    // of the branch: the prefix cap covers src-1 first, then the drain picks
+    // up src-2 in a second batch. (The old suffix cap jumped straight to
+    // src-2 — one call that orphaned src-1 forever.)
+    expect(agents.runObserver).toHaveBeenCalledTimes(2);
     const input = observerChunkArg();
     // 20 reflections at ~60 tokens each would exceed the 500-token preamble
-    // budget; the newest-first cap must trim them down without emptying them.
+    // budget; the preamble cap must trim them down without emptying them.
     expect(input.priorReflections.length).toBeLessThan(reflections.length);
     expect(input.priorReflections.length).toBeGreaterThan(0);
   });

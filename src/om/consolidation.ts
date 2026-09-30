@@ -101,31 +101,45 @@ type ReflectorStageResult = {
 // a retryable error, we record cooldown and call resolveModel again (up to this many times).
 const MAX_STAGE_ATTEMPTS = 10;
 
+/**
+ * How many drain batches one observer pipeline run may add after its initial
+ * batch. The backlog beyond this bound waits for the next cycle with the
+ * cursor at the last delivered entry — a delay, never a loss (F1 of
+ * work_docs/plan-observer-coverage-completion.md).
+ */
+export const OBSERVER_DRAIN_MAX_BATCHES = 3;
+
 function sourceEntriesAfter(entries: Entry[], index: number): Entry[] {
   return entries.slice(index + 1).filter(isSourceEntry);
 }
 
 /**
- * Cap source entries to maxTokens by keeping newest entries first,
- * walking backwards until the token budget is exceeded.
+ * Cap source entries to maxTokens by keeping the OLDEST contiguous prefix,
+ * walking forward until the token budget is exceeded.
  * Reuses estimateEntryTokens (the same estimator rawTokensAfterIndex uses for
  * the trigger) so the cap and the trigger never drift apart (#110).
+ *
+ * The prefix direction is a correctness requirement, not a preference: the
+ * stage's coversUpToId is the last kept entry, so a suffix cap (newest first)
+ * would let coverage claim the branch tip while the older entries it skipped
+ * were never sent to the model — and never observed again. With a prefix,
+ * everything from the cursor up to coversUpToId has been delivered, and the
+ * rest stays in the backlog for the drain batches.
  */
 export function capSourceEntriesToTokens(entries: Entry[], maxTokens: number): Entry[] {
   let totalTokens = 0;
   const kept: Entry[] = [];
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i];
+  for (const entry of entries) {
     const estTokens = estimateEntryTokens(entry);
     if (totalTokens + estTokens > maxTokens) {
-      // Newest-first walk stops as soon as the budget is exceeded — except
-      // for the newest entry itself: a single oversized entry is still
-      // included (kept.length === 0) so the newest data is never lost.
+      // Prefix walk stops as soon as the budget is exceeded — except for the
+      // first entry itself: a single oversized first entry is still included
+      // (kept.length === 0) so a model that can fit it still makes progress.
       if (kept.length > 0) break;
-      kept.unshift(entry);
+      kept.push(entry);
       break;
     }
-    kept.unshift(entry);
+    kept.push(entry);
     totalTokens += estTokens;
   }
   return kept;
@@ -764,6 +778,8 @@ export async function runObserverStage(
   ctx: ConsolidationCtx,
   generation: RuntimeGeneration,
   resolveModel: (stage: "observer") => Promise<ResolvedModel | undefined>,
+  drain = false,
+  drainRemaining: number = OBSERVER_DRAIN_MAX_BATCHES,
 ): Promise<StageOutcome> {
   if (!runtime.isGenerationActive(generation)) return "abort";
   let entries: Entry[];
@@ -799,7 +815,11 @@ export async function runObserverStage(
   // Anchor -1 (no cursor, no marker, no compaction) measures the full history:
   // rawTokensAfterIndex clamps -1 to index 0 (issue #87).
   const tokens = rawTokensAfterIndex(entries, effectiveStart);
-  if (tokens < runtime.config.observeAfterTokens) {
+  // A drain batch bypasses the trigger: it is the continuation of a run that
+  // already fired, and the remainder of its backlog is often below the
+  // threshold. Holding it back until more content arrives would re-cap the
+  // same backlog instead of finishing what the first batch started.
+  if (tokens < runtime.config.observeAfterTokens && !drain) {
     // Not due. Keep the anchor at the measured coverage point rather than the
     // newest entry: below-threshold content is still unobserved, so moving the
     // cursor past it would drop it permanently instead of letting it accumulate.
@@ -810,22 +830,36 @@ export async function runObserverStage(
 
   let chunkEntries = sourceEntriesAfter(entries, effectiveStart);
 
-  // Cap observer input to observerChunkMaxTokens (newest-to-oldest)
+  // Cap observer input to observerChunkMaxTokens (oldest prefix first)
   const maxChunkTokens = runtime.config.observerChunkMaxTokens;
   if (tokens > maxChunkTokens) {
     chunkEntries = capSourceEntriesToTokens(chunkEntries, maxChunkTokens);
   }
-
-  // coversUpToId must point to the LAST entry AFTER capping, not before
-  const coversUpToId = chunkEntries.at(-1)?.id;
-  if (!coversUpToId) return "continue";
 
   const {
     text: chunk,
     sourceEntryIds,
     sourceEntryTimestamps,
   } = serializeSourceAddressedBranchEntries(chunkEntries);
-  if (!chunk.trim() || sourceEntryIds.length === 0) return "continue";
+  // Coverage claims only what was actually delivered: the id the serializer
+  // emitted last, not the last entry of the capped slice (the serializer
+  // skips entries it cannot render). With the oldest-first cap that is the
+  // end of the prefix — everything from the cursor to here was sent, and
+  // entries beyond it stay in the backlog.
+  const coversUpToId = sourceEntryIds.at(-1);
+  if (!coversUpToId || !chunk.trim()) return "continue";
+
+  // The branch's last source entry as of this run's snapshot: the drain keeps
+  // going until coverage reaches it. Entries arriving after the snapshot belong
+  // to the next cycle; a trailing entry the serializer cannot render keeps the
+  // cursor before it (the recursion below serializes it empty and returns
+  // before resolving a model), so this condition alone terminates.
+  const lastSourceEntryId = entries.filter(isSourceEntry).at(-1)?.id;
+  const continueSources = (): StageOutcome | Promise<StageOutcome> => {
+    if (drainRemaining <= 0) return "continue";
+    if (!coversUpToId || coversUpToId === lastSourceEntryId) return "continue";
+    return runObserverStage(pi, runtime, ctx, generation, resolveModel, true, drainRemaining - 1);
+  };
   const chunkTokens = Math.ceil(chunk.length / 4);
   // Issue #110 follow-up: expose the post-cap size on the normal path (the
   // exceptional context_window_exceeded path already logs estimatedInput).
@@ -1035,7 +1069,9 @@ export async function runObserverStage(
           ctx.ui,
           `Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`,
         );
-        return "continue";
+        // Recorded and covered up to the delivered point — drain the rest of
+        // the backlog now instead of waiting for the next turn_end.
+        return continueSources();
       }
 
       // No observations — diagnose the reason for the warning
@@ -1068,7 +1104,9 @@ export async function runObserverStage(
           `Observational memory: no observations — ${reasonLabel}`,
         );
       }
-      return "continue";
+      // A clean "nothing new" close still proves coverage up to the delivered
+      // point, so the rest of the backlog can drain in this same run.
+      return continueSources();
     } catch (error) {
       if (!runtime.isGenerationActive(generation)) return "abort";
       if (isStaleExtensionContextError(error)) {
