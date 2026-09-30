@@ -11,6 +11,7 @@
  */
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import { readBooleanEnv, readPositiveIntEnv } from "../pi-base/config.js";
+import { windowPercent } from "./config-validators.js";
 
 export interface EnvParser {
   /** Env var name */
@@ -131,14 +132,16 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
   },
   // Percent in (0, 100] — window-derived threshold ratio (issue #60). Also
   // accepts the pre-plan fraction form (0, 1] and converts it to a percent,
-  // since env vars are never migrated.
+  // since env vars are never migrated. windowPercent is the same conversion
+  // the file loader and the resolver apply, so `=0.5` and `=1` mean here what
+  // they mean in pi-blackhole-config.json.
   compactAfterRatio: {
     var: "PI_BLACKHOLE_COMPACT_AFTER_RATIO",
     parse: (raw: string) => {
       const n = Number.parseFloat(raw);
       if (!Number.isFinite(n) || n <= 0) return undefined;
-      if (n <= 1) return Math.round(n * 100);
-      return n <= 100 ? n : undefined;
+      const pct = windowPercent(n);
+      return pct <= 100 ? pct : undefined;
     },
   },
   // Positive integer — window headroom reserve (issue #60)
@@ -246,3 +249,21 @@ export const DECLARATIVE_ENV_OVERRIDES: Record<string, EnvOverride> = {
     parse: (raw: string) => normalizeCacheRetention(raw),
   },
 };
+
+/**
+ * True when the declarative env map would actually write `key` from the
+ * current environment — the same three conditions `applyEnvOverrides` uses:
+ * the var is set, is non-empty after trim, and parses to a defined value.
+ *
+ * The runtime used `process.env.X !== undefined` to pick which threshold
+ * shape an env var selects, so `PI_BLACKHOLE_COMPACT_AFTER_TOKENS=""` or
+ * `=abc` selected a shape no override had applied. `current` is not consulted
+ * (the threshold parsers read the raw string only).
+ */
+export function envOverrideApplies(key: string): boolean {
+  const spec = DECLARATIVE_ENV_OVERRIDES[key];
+  if (spec === undefined || typeof spec === "string") return false;
+  const raw = process.env[spec.var]?.trim();
+  if (!raw) return false;
+  return spec.parse(raw, undefined) !== undefined;
+}

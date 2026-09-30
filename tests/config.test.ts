@@ -811,6 +811,31 @@ describe("Declarative env overrides apply at runtime", () => {
     expect(config.compactAfterTokens).toBeUndefined();
   });
 
+  it("a bare 1 in the ratio env var means 1%, exactly like the file", async () => {
+    // The env parser converted (0, 1] by a different rule than windowPercent,
+    // so `=1` selected 100% here and 1% in pi-blackhole-config.json.
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO = "1";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({});
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterRatio).toBe(1);
+    expect(config.compactAfterBy).toBe("percent");
+  });
+
+  it("an unparsable threshold env var selects no shape", async () => {
+    // Presence alone used to force the shape, so an empty (or invalid) value
+    // pinned compactAfterBy to a shape no override had actually written.
+    process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS = "";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ compactAfterRatio: 65 });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.compactAfterTokens).toBeUndefined();
+    // The migration records "percent" from the file's own value keys; an empty
+    // env var used to overwrite that with "tokens".
+    expect(config.compactAfterBy).toBe("percent");
+    expect(config.compactAfterRatio).toBe(65);
+  });
+
   it("env compactAfterPreset engages a preset selection", async () => {
     process.env.PI_BLACKHOLE_COMPACT_AFTER_PRESET = "balanced";
     const { loadUnifiedConfig } = await import("../src/core/unified-config.js");

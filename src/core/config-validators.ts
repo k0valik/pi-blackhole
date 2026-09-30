@@ -55,7 +55,7 @@ export function isReserveTokens(v: unknown): v is number {
 }
 
 /** Shape selector for the auto-compaction threshold (plan-09 §3.2). */
-export const COMPACT_AFTER_BY_VALUES = ["preset", "percent", "tokens", "reserve"] as const;
+const COMPACT_AFTER_BY_VALUES = ["preset", "percent", "tokens", "reserve"] as const;
 export type CompactAfterBy = (typeof COMPACT_AFTER_BY_VALUES)[number];
 export function isCompactAfterBy(v: unknown): v is CompactAfterBy {
   return typeof v === "string" && (COMPACT_AFTER_BY_VALUES as readonly string[]).includes(v);
@@ -72,8 +72,7 @@ export function isUnsetZero(v: unknown): boolean {
 }
 
 /** The single `compaction` enum (plan-09 §3.1). `auto` is the legacy alias. */
-export const COMPACTION_VALUES = ["automatic", "manual", "off"] as const;
-export const LEGACY_COMPACTION_VALUES = ["auto"] as const;
+const COMPACTION_VALUES = ["automatic", "manual", "off"] as const;
 export function isCompactionValue(v: unknown): v is "automatic" | "manual" | "off" {
   return typeof v === "string" && (COMPACTION_VALUES as readonly string[]).includes(v);
 }

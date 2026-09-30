@@ -11,6 +11,7 @@ import {
   applyEnvOverrides,
   CACHE_RETENTION_VALUES,
   DECLARATIVE_ENV_OVERRIDES,
+  envOverrideApplies,
   MAX_TIMER_DELAY_MS,
   normalizeCacheRetention,
 } from "./config-env.js";
@@ -344,15 +345,11 @@ import {
 } from "./config-validators.js";
 
 export {
-  COMPACT_AFTER_BY_VALUES,
-  isCompactAfterBy,
   isFixedTokenThreshold,
   isReserveTokens,
   isWindowPercent,
-  legacyFractionToPercent,
   windowPercent,
 } from "./config-validators.js";
-export type { CompactAfterBy } from "./config-validators.js";
 
 /** Warn once per process when a legacy fraction is auto-scaled. */
 let warnedLegacyRatioFraction = false;
@@ -362,6 +359,27 @@ function warnLegacyRatioFraction(): void {
   console.warn(
     "blackhole: compactAfterRatio held a pre-plan fraction; treated values in (0, 1] as a " +
       "percent (×100). Re-save your config (or let the on-disk migration run) to persist it.",
+  );
+}
+
+let warnedUnknownCompactAfterBy = false;
+function warnUnknownCompactAfterBy(value: unknown): void {
+  if (warnedUnknownCompactAfterBy) return;
+  warnedUnknownCompactAfterBy = true;
+  console.warn(
+    `blackhole: unrecognized compactAfterBy ${JSON.stringify(value)} ignored; ` +
+      `expected preset | percent | tokens | reserve (falling back to the file's value keys).`,
+  );
+}
+
+let warnedPresetShadowsValues = false;
+function warnPresetShadowsValues(): void {
+  if (warnedPresetShadowsValues) return;
+  warnedPresetShadowsValues = true;
+  console.warn(
+    "blackhole: compactAfterBy=preset pins the preset curve, so compactAfterTokens, " +
+      "compactAfterRatio and compactReserveTokens are ignored. Drop the selector to let the " +
+      "value keys decide, or drop the value keys you meant to use.",
   );
 }
 
@@ -501,6 +519,9 @@ function parsePresetDefinitions(v: unknown): Record<string, PresetAnchorDef[]> |
  */
 export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
   if (!isCompactAfterBy(rec.compactAfterBy)) {
+    // A present-but-unrecognized selector would otherwise be dropped without a
+    // trace, leaving the reader with no idea why the value keys took over.
+    if (rec.compactAfterBy !== undefined) warnUnknownCompactAfterBy(rec.compactAfterBy);
     delete rec.compactAfterBy;
   }
   const tokens = rec.compactAfterTokens;
@@ -521,6 +542,17 @@ export function normalizeThresholdKnobs(rec: Record<string, unknown>): void {
   }
   if (!isReserveTokens(rec.compactReserveTokens)) {
     delete rec.compactReserveTokens;
+  }
+  // An explicit selector is authoritative: a value coexisting with an explicit
+  // preset is never consulted (see shapeThreshold), so say so once instead of
+  // letting the setting read as ignored-but-working.
+  if (
+    rec.compactAfterBy === "preset" &&
+    (isFixedTokenThreshold(rec.compactAfterTokens) ||
+      isWindowPercent(rec.compactAfterRatio) ||
+      isReserveTokens(rec.compactReserveTokens))
+  ) {
+    warnPresetShadowsValues();
   }
   if (!isFixedTokenThreshold(rec.compactAfterMinTokens)) {
     delete rec.compactAfterMinTokens;
@@ -914,12 +946,15 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   );
 
   // An explicit threshold env var selects its shape, so it keeps winning over
-  // a migrated file's compactAfterBy (env vars are never migrated).
-  if (process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS !== undefined) {
+  // a migrated file's compactAfterBy (env vars are never migrated). Gated on
+  // the override actually applying, not merely on the var being present: an
+  // empty or unparsable value would otherwise select a shape no override
+  // wrote, silently taking precedence over the file's own selector.
+  if (envOverrideApplies("compactAfterTokens")) {
     withEnv.compactAfterBy = "tokens";
-  } else if (process.env.PI_BLACKHOLE_COMPACT_AFTER_RATIO !== undefined) {
+  } else if (envOverrideApplies("compactAfterRatio")) {
     withEnv.compactAfterBy = "percent";
-  } else if (process.env.PI_BLACKHOLE_COMPACT_RESERVE_TOKENS !== undefined) {
+  } else if (envOverrideApplies("compactReserveTokens")) {
     withEnv.compactAfterBy = "reserve";
   }
 

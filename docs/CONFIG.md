@@ -302,7 +302,7 @@ switching models mid-session (`/model`) takes effect on the next check.
 Examples on common windows at `46`:
 
 ```text
-128k model → ~59k   256k model → ~118k   1M model → ~482k
+128k model → ~60k   256k model → ~121k   1M model → ~482k
 ```
 
 > **Upgrade note.** The key was a fraction (0.46) in earlier releases; it is now

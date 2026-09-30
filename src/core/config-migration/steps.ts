@@ -419,7 +419,7 @@ const deadKnobs: ConfigMigration = {
 };
 
 /** Ordered steps. Order matters: the engine fold must precede legacy modes. */
-export const STEPS: readonly ConfigMigration[] = [
+const STEPS: readonly ConfigMigration[] = [
   compactionEngineFold,
   legacyModes,
   thresholdArray,
