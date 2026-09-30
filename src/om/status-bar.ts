@@ -43,6 +43,14 @@ type ThemeShim = { fg: (style: string, text: string) => string };
 const EMPTY_THEME: ThemeShim = { fg: (_style, text) => text };
 
 type WorkerType = ConsolidationPhase | "compact";
+
+/** User-facing worker label for the status spinner (plan-09 §4.7). */
+function workerLabel(type: WorkerType): string {
+  if (type === "observer") return "notes";
+  if (type === "reflector") return "insights";
+  if (type === "dropper") return "pruning";
+  return "compacting";
+}
 type WorkerState = { kind: "running" } | { kind: "done"; delta?: number; note?: string };
 
 interface WorkerEntry {
@@ -131,12 +139,16 @@ export function registerStatusBar(pi: ExtensionAPI, runtime: Runtime): void {
     const parts: string[] = [];
     for (const w of workers) {
       if (w.state.kind === "running") {
-        parts.push(`${t.fg("accent", SPINNER_FRAMES[frame])} ${t.fg("accent", `[${w.type}]`)}`);
+        parts.push(
+          `${t.fg("accent", SPINNER_FRAMES[frame])} ${t.fg("accent", `[${workerLabel(w.type)}]`)}`,
+        );
       } else {
         const delta =
           w.state.delta && w.state.delta > 0 ? ` ${t.fg("success", `+${w.state.delta}`)}` : "";
         const note = w.state.note ? ` ${t.fg("muted", w.state.note)}` : "";
-        parts.push(`${t.fg("success", "✓")} ${t.fg("muted", `[${w.type}]`)}${delta}${note}`);
+        parts.push(
+          `${t.fg("success", "✓")} ${t.fg("muted", `[${workerLabel(w.type)}]`)}${delta}${note}`,
+        );
       }
     }
     if (parts.length > 0) s += `  ${parts.join(" ")}`;

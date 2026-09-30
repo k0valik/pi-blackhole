@@ -46,4 +46,6 @@ jobs:
           format: compact
           comment: true
           review-comments: true
+          max-comments: 10
+          summary-scope: diff
           sarif: false

@@ -158,7 +158,6 @@ The `session_before_compact` hook is the integration point between VCC and OM. D
 The hook checks several conditions before proceeding:
 
 - `compaction: "off"` → Skip auto-triggered compaction (`/blackhole` still works)
-- `compactionEngine: "pi-default"` → Let Pi handle auto-compaction
 - `compaction: "manual"` → `/compact` falls through to Pi, only `/blackhole` uses VCC
 
 ### buildOwnCut
@@ -175,7 +174,7 @@ The `buildOwnCut()` function determines which messages to compile:
 
 ### Ownership and native fallback
 
-When blackhole is active (`compactionEngine: "blackhole"`), the hook owns the summary for every Pi-initiated compaction — threshold auto-compact, overflow recovery, and manual `/compact` — and returns `{ compaction: { ... } }` to take ownership. In `manual`/`off` modes and for `compactionEngine: "pi-default"` it returns `undefined` so Pi handles the compaction natively (only `/blackhole` forces VCC).
+When blackhole is active (`compaction: "automatic"`), the hook owns the summary for every Pi-initiated compaction — threshold auto-compact, overflow recovery, and manual `/compact` — and returns `{ compaction: { ... } }` to take ownership. In `manual`/`off` modes it returns `undefined` so Pi handles the compaction natively (only `/blackhole` forces VCC).
 
 Defensive delegation: `compile()` returns `""` when everything before the cut is noise-filtered and no previous summary exists. If the VCC summary is empty **and** the OM projection produced no reflections/observations, the hook returns `undefined` (emitting a `before_compact.native_fallback` trace) so Pi's native summarizer writes the summary instead of blackhole replacing the context with a footer-only block. `ExtensionHandler` permits `void`, and Pi only acts on `result?.compaction`, so the bare return is a safe fall-through.
 
@@ -217,7 +216,7 @@ Before pi 0.84.3, `_checkCompaction` early-returned when no assistant message ha
 
 ## Tail behavior
 
-Controls how much of the recent transcript stays visible after compaction. Only applies when `compactionEngine: "blackhole"`.
+Controls how much of the recent transcript stays visible after compaction. Only applies when `compaction: "automatic"`.
 
 | Invocation | Config | Effective |
 |------------|--------|-----------|

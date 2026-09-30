@@ -78,10 +78,8 @@ function baseConfig(overrides: Record<string, unknown> = {}) {
     compactAfterTokens: 81_000,
     observationsPoolMaxTokens: POOL_MAX,
     dropperPressureThreshold: 1,
-    dropperPoolFullnessThreshold: 0.4,
     reflectorInputMaxTokens: 1_000_000,
     observerChunkMaxTokens: 40_000,
-    observerPreambleMaxTokens: 0,
     passive: false,
     noAutoCompact: false,
     ...overrides,
@@ -300,11 +298,100 @@ describe("dropper pool pressure", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
 
+  it.each([
+    ["0.01", 0.01],
+    ["0.1", 0.1],
+    ["0.3", 0.3],
+    ["0.49", 0.49],
+    ["0.5 (at the boundary)", 0.5],
+  ])(
+    "fires when the pool fraction is at or above the pressure line (%s threshold)",
+    (_name, threshold) => {
+      const entries = asEntries(observationBranch()); // 1,400 / 2,800 = 50%
+      const runtime = pressureRuntime(threshold);
+      // Advance the dropper cursor so only the pressure path can fire.
+      runtime.advanceCursor("dropper", lastId(entries), "skipped");
+      expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+    },
+  );
+
+  it.each([
+    ["0.51", 0.51],
+    ["0.7", 0.7],
+    ["0.9", 0.9],
+    ["0.99", 0.99],
+  ])("stays idle when the pool fraction is below the pressure line (%s)", (_name, threshold) => {
+    const entries = asEntries(observationBranch());
+    const runtime = pressureRuntime(threshold);
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+
   it("treats a threshold of 1 as pressure disabled", () => {
     const entries = asEntries(observationBranch());
     const runtime = pressureRuntime(1, 1_400);
     runtime.advanceCursor("dropper", lastId(entries), "skipped");
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+});
+
+describe("dropper one-bar gate (plan-09 §3.3 / plan-11 §4)", () => {
+  // Pool is 1,400 tokens; observationsPoolMaxTokens moves the fullness fraction.
+  // One number is both the pressure trigger and the new-data floor, so the old
+  // two-fraction floor is gone: a pool that used to clear the old 0.10 floor
+  // now has to clear the pressure line itself.
+  function barRuntime(poolMax: number, pressure = 0.7): Runtime {
+    return triggerRuntime({
+      reflectAfterTokens: 1,
+      reflectorInputMaxTokens: 1_000_000,
+      observationsPoolMaxTokens: poolMax,
+      dropperPressureThreshold: pressure,
+    });
+  }
+
+  function dueAt(poolMax: number, pressure?: number): boolean {
+    const entries = asEntries(observationBranch());
+    const runtime = barRuntime(poolMax, pressure);
+    // Silence the reflector so the dropper short-circuit does not fire it.
+    runtime.advanceCursor("reflector", lastId(entries), "skipped");
+    // No dropper cursor → the new-data path uses tokens since last drop coverage.
+    return anyStageDue(entries, runtime, undefined);
+  }
+
+  it.each([
+    ["10% (the old two-fraction floor, below the bar)", 14_000, false],
+    ["50% (well above the old floor, below the bar)", 2_800, false],
+    ["69% (just below the bar)", 2_029, false],
+    ["70% (at the bar)", 2_000, true],
+    ["100% (pool full)", 1_400, true],
+  ])("new data with %s pool fullness → due=%s", (_name, poolMax, expected) => {
+    expect(dueAt(poolMax)).toBe(expected);
+  });
+
+  it("a threshold of 1 holds a half-full pool idle", () => {
+    expect(dueAt(POOL_MAX, 1)).toBe(false);
+  });
+
+  it("a threshold of 1 still runs once the pool is full", () => {
+    expect(dueAt(1_400, 1)).toBe(true);
+  });
+
+  it("the new-data path stops once the dropper cursor has caught up", () => {
+    const entries = asEntries(observationBranch());
+    // Full pool with pressure off → only the new-data path can fire.
+    const runtime = barRuntime(1_400, 1);
+    runtime.advanceCursor("reflector", lastId(entries), "skipped");
+    runtime.advanceCursor("dropper", lastId(entries), "skipped");
+    expect(anyStageDue(entries, runtime, undefined)).toBe(false);
+  });
+
+  it("lowering the pressure lowers the bar, so pruning starts earlier", () => {
+    // 25% fullness: above a bar lowered to 20%.
+    expect(dueAt(5_600, 0.2)).toBe(true);
+  });
+
+  it("leaves the same 25% pool idle at the default 70% bar", () => {
+    expect(dueAt(5_600)).toBe(false);
   });
 });
 
@@ -315,12 +402,14 @@ describe("trigger / display pool agreement", () => {
     // Pool is 1,400 / 2,800 = 50%.
     expect(observationPoolTokens(entries).tokens).toBe(1_400);
 
-    const below = triggerRuntime({ dropperPoolFullnessThreshold: 0.49 });
+    const below = triggerRuntime({ dropperPressureThreshold: 0.49 });
     below.advanceCursor("reflector", tip, "skipped");
+    below.advanceCursor("dropper", tip, "skipped");
     expect(anyStageDue(entries, below, undefined)).toBe(true);
 
-    const above = triggerRuntime({ dropperPoolFullnessThreshold: 0.51 });
+    const above = triggerRuntime({ dropperPressureThreshold: 0.51 });
     above.advanceCursor("reflector", tip, "skipped");
+    above.advanceCursor("dropper", tip, "skipped");
     expect(anyStageDue(entries, above, undefined)).toBe(false);
 
     const message = await memoryStatus(entries, baseConfig());
@@ -345,7 +434,7 @@ describe("trigger / display pool agreement", () => {
     expect(observationPoolTokens(entries).tokens).toBe(0);
     expect(observationPoolTokens(entries, pending).tokens).toBe(1_400);
 
-    const config = baseConfig({ compaction: "manual", dropperPoolFullnessThreshold: 0.49 });
+    const config = baseConfig({ compaction: "manual", dropperPressureThreshold: 0.49 });
     const runtime = triggerRuntime(config);
     runtime.advanceCursor("reflector", "raw-1", "skipped");
     expect(anyStageDue(entries, runtime, pending)).toBe(true);

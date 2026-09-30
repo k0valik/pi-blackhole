@@ -94,6 +94,12 @@ export interface FieldBase {
    * Thunk form is re-evaluated on every render (mirrors `dim`).
    */
   valueNote?: string | (() => string | undefined);
+  /**
+   * Value-aware second help line (slot 2), rendered in the valueDescription
+   * slot. Use for numeric knobs where keying `valueDescriptions` by the exact
+   * stringified value is unusable.
+   */
+  valueDescription?: (value: unknown) => string | undefined;
 }
 
 export interface BooleanField extends FieldBase {

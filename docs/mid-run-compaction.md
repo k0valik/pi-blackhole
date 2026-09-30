@@ -56,7 +56,7 @@ Entry points: [[src/om/inline-compaction.ts]] (`compactInlineAtTurnBoundary`, `i
 
 ## Config matrix
 
-Effective behavior per session kind. The shared gates — `compaction: off/manual`, `compactionEngine: pi-default`, legacy `passive`/`noAutoCompact`/`overrideDefaultCompaction` guards, `compactInFlight`, threshold, retry backoff, eligibility — apply identically on both paths. The aborted-run-signal check (`signal.aborted`) exists **only on the `turn_end` path**; the settled path instead relies on the `isIdle()` wait and the `agent_start` abort of the pending wait. Every permutation therefore stays coherent, with the mode decision made after the shared gates:
+Effective behavior per session kind. The shared gates — `compaction: off/manual`, legacy `passive`/`noAutoCompact`/`overrideDefaultCompaction`/`compactionEngine` guards, `compactInFlight`, threshold, retry backoff, eligibility — apply identically on both paths. The aborted-run-signal check (`signal.aborted`) exists **only on the `turn_end` path**; the settled path instead relies on the `isIdle()` wait and the `agent_start` abort of the pending wait. Every permutation therefore stays coherent, with the mode decision made after the shared gates:
 
 | `midRunCompaction` | Persisted (TUI, file-backed) | Non-persisted (`SessionManager.inMemory()`) |
 |---|---|---|
@@ -70,7 +70,7 @@ The settled `agent_end` path remains unchanged for persisted sessions, and serve
 
 ### Threshold
 
-Derived per evaluation (issue [#60](https://github.com/k0valik/pi-blackhole/issues/60)): explicit `compactAfterTokens` > `compactAfterRatio` × context window > `compactReserveTokens` derivation > preset curve. A legacy file-level `81000` is treated as scaffold residue and dropped. The threshold is re-derived on every event, so a mid-session `/model` switch is picked up on the next check.
+Derived per evaluation (issue [#60](https://github.com/k0valik/pi-blackhole/issues/60)): the `compactAfterBy` shape (`preset` curve, `percent` × window, fixed `tokens`, or `window − reserve`) clamped to `compactAfterMinTokens` / `compactAfterMaxTokens`. A legacy file-level `81000` is treated as scaffold residue and dropped. The threshold is re-derived on every event, so a mid-session `/model` switch is picked up on the next check.
 
 ### Retry / backoff
 
