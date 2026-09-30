@@ -22,13 +22,38 @@
  * ends the run after a tool receipt leaves a `toolResult` (no stopReason) at
  * the tail, and the decision lives on the assistant message behind it.
  */
+/**
+ * The last message the host gave a `stopReason` to, if any. Reverse-found: a
+ * host that ends the run after a tool receipt leaves a `stopReason`-less
+ * `toolResult` at the tail, and the decision lives on the assistant message
+ * behind it.
+ */
+function lastMessageWithStopReason<T extends { stopReason?: string }>(
+  messages: readonly T[],
+): T | undefined {
+  return [...messages].reverse().find((message) => typeof message?.stopReason === "string");
+}
+
+/**
+ * The last `stopReason` the host reported on this run, if any. Agents read
+ * this alongside `agentCompletionError` to rank overlapping failures: a
+ * provider `error` keeps its own classification (deterministic cooldown
+ * depends on its message) even when the turn cap had fired earlier — `error`
+ * turns never spend budget, so the cap did not cause them.
+ */
+export function agentFailureStopReason(
+  messages: readonly { stopReason?: string }[],
+): string | undefined {
+  return lastMessageWithStopReason(messages)?.stopReason;
+}
+
 export function agentCompletionError(
   messages: readonly { stopReason?: string; errorMessage?: string }[],
   signal?: AbortSignal,
   completedByTool = false,
 ): string | undefined {
   if (signal?.aborted) return "aborted";
-  const last = [...messages].reverse().find((message) => typeof message?.stopReason === "string");
+  const last = lastMessageWithStopReason(messages);
   if (!last?.stopReason) return undefined;
   if (last.stopReason === "toolUse" && completedByTool) return undefined;
   if (

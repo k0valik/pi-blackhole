@@ -879,7 +879,8 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
   // pass runs as multiple capped+drained batches. That combination is
   // loss-free after the F1 drain — warn so the user knows, but never clamp
   // their threshold (work_docs/plan-observer-coverage-completion.md, Tier 1).
-  if (withEnv.observeAfterTokens > withEnv.observerChunkMaxTokens) {
+  // Skipped when memory is off: the observer never runs, so the pair is moot.
+  if (withEnv.memory !== false && withEnv.observeAfterTokens > withEnv.observerChunkMaxTokens) {
     const msg =
       `blackhole: observeAfterTokens (${withEnv.observeAfterTokens}) exceeds ` +
       `observerChunkMaxTokens (${withEnv.observerChunkMaxTokens}); the observer ` +

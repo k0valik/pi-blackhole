@@ -13,7 +13,7 @@
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { agentCompletionError } from "../completion.js";
+import { agentCompletionError, agentFailureStopReason } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -305,6 +305,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
   const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
+  let failureKind: string | undefined;
   try {
     for await (const event of stream) {
       // Tool execution collects records.
@@ -323,6 +324,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
           signal,
           closedByCompleteBatch || turnCap?.exhausted,
         );
+        failureKind = agentFailureStopReason(msgs);
       }
     }
     await stream.result();
@@ -330,6 +332,29 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
     // A stream that breaks outright never emits agent_end, so the guard below
     // never sees it — yet the run still holds everything recorded so far.
     throw withDiscardedCount(error, accumulated.size);
+  }
+
+  // The cap ended the run before the model closed the review. Throwing keeps
+  // the cursor where it is; the message names no status code, because this is a
+  // config limit rather than a provider failure and must not cool a session
+  // model as deterministic. This check runs BEFORE the completion check below:
+  // a length cut can land on the same turn the cap fires (turn-cap.ts only
+  // exempts error/aborted turns), and the stage's session-model break-glass
+  // keys on turnCapExhausted. A provider `error` is carved out: it keeps its
+  // own classification, and error turns never spend budget, so the cap did
+  // not cause it. A cap firing before anything was recorded is still
+  // an empty success (the stage advances the cursor as "empty").
+  if (
+    turnCap?.exhausted &&
+    accumulated.size > 0 &&
+    !closedByCompleteBatch &&
+    failureKind !== "error"
+  ) {
+    throw new WorkerStreamError(
+      `Reflector turn cap exhausted: ${accumulated.size} reflection${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
+      accumulated.size,
+      true,
+    );
   }
 
   // The stage records these reflections and advances the reflector cursor to
@@ -343,19 +368,6 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
     throw new WorkerStreamError(
       workerStreamErrorMessage("Reflector", agentError),
       accumulated.size,
-    );
-  }
-
-  // The cap ended the run before the model closed the review. Throwing keeps
-  // the cursor where it is; the message names no status code, because this is a
-  // config limit rather than a provider failure and must not cool a session
-  // model as deterministic. A cap firing before anything was recorded is still
-  // an empty success (the stage advances the cursor as "empty").
-  if (turnCap?.exhausted && accumulated.size > 0 && !closedByCompleteBatch) {
-    throw new WorkerStreamError(
-      `Reflector turn cap exhausted: ${accumulated.size} reflection${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
-      accumulated.size,
-      true,
     );
   }
 

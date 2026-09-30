@@ -12,7 +12,7 @@
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { agentCompletionError } from "../completion.js";
+import { agentCompletionError, agentFailureStopReason } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -402,6 +402,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
+  let failureKind: string | undefined;
   try {
     for await (const event of stream) {
       // Tool execution collects candidate ids.
@@ -416,6 +417,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
         // observations past the cut. `drop_observations` carries no complete
         // flag, so only a turn-cap end on a tool-work turn is exempt.
         agentError = agentCompletionError(msgs, signal, turnCap?.exhausted);
+        failureKind = agentFailureStopReason(msgs);
       }
     }
     await stream.result();
@@ -423,6 +425,23 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     // A stream that breaks outright never emits agent_end, so the guard below
     // never sees it — yet the run still holds every candidate proposed so far.
     throw withDiscardedCount(error, proposedDropIds.length);
+  }
+
+  // The cap ended the run mid-evaluation for the same reason. The message names
+  // no status code: this is a config limit rather than a provider failure, so it
+  // must not cool a session model as deterministic. This check runs BEFORE the
+  // completion check below: a length cut can land on the same turn the cap
+  // fires (turn-cap.ts only exempts error/aborted turns), and the stage's
+  // session-model break-glass keys on turnCapExhausted. A provider `error` is
+  // carved out: it keeps its own classification, and error turns never spend
+  // budget, so the cap did not cause it. A cap firing before any
+  // candidate was proposed is still an empty success (returns undefined).
+  if (turnCap?.exhausted && proposedDropIds.length > 0 && failureKind !== "error") {
+    throw new WorkerStreamError(
+      `Dropper turn cap exhausted: ${proposedDropIds.length} drop candidate${proposedDropIds.length === 1 ? "" : "s"} recorded before the run ended`,
+      proposedDropIds.length,
+      true,
+    );
   }
 
   // `drop_observations` carries no complete flag, so no batch can prove the
@@ -434,18 +453,6 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     throw new WorkerStreamError(
       workerStreamErrorMessage("Dropper", agentError),
       proposedDropIds.length,
-    );
-  }
-
-  // The cap ended the run mid-evaluation for the same reason. The message names
-  // no status code: this is a config limit rather than a provider failure, so it
-  // must not cool a session model as deterministic. A cap firing before any
-  // candidate was proposed is still an empty success (returns undefined).
-  if (turnCap?.exhausted && proposedDropIds.length > 0) {
-    throw new WorkerStreamError(
-      `Dropper turn cap exhausted: ${proposedDropIds.length} drop candidate${proposedDropIds.length === 1 ? "" : "s"} recorded before the run ended`,
-      proposedDropIds.length,
-      true,
     );
   }
 

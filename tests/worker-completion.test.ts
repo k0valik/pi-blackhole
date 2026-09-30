@@ -216,6 +216,43 @@ describe("observer completion strictness", () => {
       discardedCount: 1,
     });
   });
+
+  it("routes an output-length cut on a capped run to the turn-cap guard", async () => {
+    const error = await runObserver({
+      ...observerArgs,
+      agentLoop: scriptedLoop([partialObserverBatch], {
+        capEndsRun: true,
+        agentEnd: endMessages(assistantStop("length")),
+      }),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // The cap cut off pending tool work on the same turn the provider hit its
+    // output limit: a config limit (no retry, session-model break-glass), not
+    // a provider failure. The completion check must not claim it first.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error?.message).toContain("turn cap");
+    expect(error).toMatchObject({ turnCapExhausted: true, discardedCount: 1 });
+  });
+
+  it("still throws the length failure when a capped run recorded nothing", async () => {
+    const error = await runObserver({
+      ...observerArgs,
+      agentLoop: scriptedLoop([], {
+        capEndsRun: true,
+        agentEnd: endMessages(assistantStop("length")),
+      }),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // No recordings: the turn-cap guard has nothing to report, so the length
+    // cut stays visible instead of degrading into a silent empty success.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Observer API error: Incomplete agent response (length); coverage not advanced.",
+      discardedCount: 0,
+    });
+  });
 });
 
 describe("reflector completion strictness", () => {
@@ -317,6 +354,46 @@ describe("reflector completion strictness", () => {
       }),
     ).resolves.toEqual({ reflections: undefined });
   });
+
+  it("routes an output-length cut on a capped run to the turn-cap guard", async () => {
+    const error = await runReflector({
+      ...reflectorArgs,
+      agentLoop: scriptedLoop([partialReflectionBatch], {
+        capEndsRun: true,
+        agentEnd: endMessages(assistantStop("length")),
+      }),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // Same contract as the observer: cap + length is the config limit, and
+    // the stage's session-model break-glass keys on turnCapExhausted.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error?.message).toContain("turn cap");
+    expect(error).toMatchObject({ turnCapExhausted: true, discardedCount: 1 });
+  });
+
+  it("reports the stream error rather than the turn cap when both end the run", async () => {
+    const error = await runReflector({
+      ...reflectorArgs,
+      agentLoop: scriptedLoop([partialReflectionBatch], {
+        capEndsRun: true,
+        agentEnd: endMessages(
+          assistantStop("error", { errorMessage: "Stream connection severed" }),
+        ),
+      }),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // A provider error keeps its own classification (deterministic cooldown
+    // depends on its message): error turns never spend budget, so the cap did
+    // not cause it, and the run must not masquerade as a config limit.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Reflector API error: Stream connection severed",
+      turnCapExhausted: false,
+      discardedCount: 1,
+    });
+  });
 });
 
 describe("dropper completion strictness", () => {
@@ -376,6 +453,45 @@ describe("dropper completion strictness", () => {
         maxTurns: 1,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("routes an output-length cut on a capped run to the turn-cap guard", async () => {
+    const error = await runDropper({
+      ...dropperArgs,
+      agentLoop: scriptedLoop([dropperBatch], {
+        capEndsRun: true,
+        agentEnd: endMessages(assistantStop("length")),
+      }),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // The dropper has no complete flag, but a cap end on a tool-work turn is
+    // still the sanctioned config-limit report — not a generic provider cut.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error?.message).toContain("turn cap");
+    expect(error).toMatchObject({ turnCapExhausted: true, discardedCount: 1 });
+  });
+
+  it("reports the stream error rather than the turn cap when both end the run", async () => {
+    const error = await runDropper({
+      ...dropperArgs,
+      agentLoop: scriptedLoop([dropperBatch], {
+        capEndsRun: true,
+        agentEnd: endMessages(
+          assistantStop("error", { errorMessage: "Stream connection severed" }),
+        ),
+      }),
+      maxTurns: 1,
+    }).catch((caught: unknown) => caught);
+
+    // Same carve-out as observer/reflector: the provider failure is classified
+    // on its own message, never hidden behind the cap.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Dropper API error: Stream connection severed",
+      turnCapExhausted: false,
+      discardedCount: 1,
+    });
   });
 
   it("throws when the attempt signal is already aborted when the run reports back", async () => {

@@ -11,7 +11,7 @@
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { agentCompletionError } from "../completion.js";
+import { agentCompletionError, agentFailureStopReason } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
@@ -373,6 +373,7 @@ ${conversation}`;
   const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
+  let failureKind: string | undefined;
   try {
     for await (const event of stream) {
       // Drain events; the tool's execute already collects records.
@@ -390,6 +391,7 @@ ${conversation}`;
           signal,
           closedByCompleteBatch || turnCap?.exhausted,
         );
+        failureKind = agentFailureStopReason(msgs);
       }
     }
     await stream.result();
@@ -397,6 +399,36 @@ ${conversation}`;
     // A stream that breaks outright never emits agent_end, so the guard below
     // never sees it — yet the run still holds everything recorded so far.
     throw withDiscardedCount(error, accumulated.size);
+  }
+
+  // The turn cap ended the run before the model ever closed the chunk: the
+  // partial batch is not completed coverage, so returning it as success would
+  // advance coversUpToId and silently drop the tail of the chunk. Throwing
+  // keeps the cursor where it is and lets the stage's fallback chain retry.
+  // This check runs BEFORE the completion check below: a length cut can land
+  // on the same turn the cap fires (turn-cap.ts only exempts error/aborted
+  // turns), and the stage's session-model break-glass keys on
+  // turnCapExhausted — letting the completion check claim it first would
+  // misreport a config limit as a retryable provider failure. A provider
+  // `error` is carved out: it keeps its own classification (deterministic
+  // cooldown depends on its message), and error turns never spend budget, so
+  // the cap did not cause it. A valid close
+  // that recorded something already settled the chunk, so a cap
+  // firing after it changes nothing; a cap firing before anything was recorded
+  // is still an empty success (the stage advances the cursor as "empty"). The
+  // message names no status code: this is a config limit,
+  // not a provider failure, so it must not cool a session model as deterministic.
+  if (
+    turnCap?.exhausted &&
+    accumulated.size > 0 &&
+    !closedByCompleteBatch &&
+    failureKind !== "error"
+  ) {
+    throw new WorkerStreamError(
+      `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
+      accumulated.size,
+      true,
+    );
   }
 
   // A run that already closed the chunk with a valid complete=true batch that
@@ -411,23 +443,6 @@ ${conversation}`;
     // The message stays byte-identical: isDeterministicError scans it for bare
     // 4xx codes, so an interpolated observation count could misclassify it.
     throw new WorkerStreamError(workerStreamErrorMessage("Observer", agentError), accumulated.size);
-  }
-
-  // The turn cap ended the run before the model ever closed the chunk: the
-  // partial batch is not completed coverage, so returning it as success would
-  // advance coversUpToId and silently drop the tail of the chunk. Throwing
-  // keeps the cursor where it is and lets the stage's fallback chain retry.
-  // A valid close that recorded something already settled the chunk, so a cap
-  // firing after it changes nothing; a cap firing before anything was recorded
-  // is still an empty success (the stage advances the cursor as "empty"). The
-  // message names no status code: this is a config limit,
-  // not a provider failure, so it must not cool a session model as deterministic.
-  if (turnCap?.exhausted && accumulated.size > 0 && !closedByCompleteBatch) {
-    throw new WorkerStreamError(
-      `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
-      accumulated.size,
-      true,
-    );
   }
 
   if (accumulated.size === 0) {

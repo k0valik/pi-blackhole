@@ -90,4 +90,14 @@ describe("observer threshold config guard", () => {
     expect(msg).toContain("observeAfterTokens");
     expect(msg).toContain("observerChunkMaxTokens");
   });
+
+  it("does not warn when memory is off — the observer never runs", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ memory: false, observeAfterTokens: 90_000, observerChunkMaxTokens: 10_000 });
+    const warn = vi.fn();
+
+    loadUnifiedConfig(testDir, warn);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
