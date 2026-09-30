@@ -316,8 +316,11 @@ const thresholdArray: ConfigMigration = {
 
 /**
  * Merge the two dropper fractions into one knob. `dropperPressureThreshold`
- * survives; the new-data floor is derived from it at runtime (plan-11 §4), so
- * the survivor is `max(oldPressure, oldFullness)`.
+ * survives and is now the bar for *both* paths (plan-11 §4), so the survivor
+ * is `max(oldPressure, oldFullness)` — the exact trigger the old code used.
+ * When the old fullness sat below the pressure, the new-data path therefore
+ * starts at the pressure instead: migration can only defer pruning, never make
+ * it more aggressive than before.
  */
 const dropperFractionMerge: ConfigMigration = {
   id: "dropper-fraction-merge",

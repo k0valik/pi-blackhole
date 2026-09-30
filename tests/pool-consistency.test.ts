@@ -20,7 +20,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 });
 
 import { foldLedger, observationPoolTokens, type Entry } from "../src/om/ledger/index.js";
-import { anyStageDue, dropperNewDataFloor } from "../src/om/consolidation.js";
+import { anyStageDue } from "../src/om/consolidation.js";
 import { Runtime } from "../src/om/runtime.js";
 import {
   clearPendingState,
@@ -335,66 +335,63 @@ describe("dropper pool pressure", () => {
   });
 });
 
-describe("dropper new-data floor (plan-09 §3.3 / plan-11 §4)", () => {
+describe("dropper one-bar gate (plan-09 §3.3 / plan-11 §4)", () => {
   // Pool is 1,400 tokens; observationsPoolMaxTokens moves the fullness fraction.
-  function floorRuntime(poolMax: number): Runtime {
+  // One number is both the pressure trigger and the new-data floor, so the old
+  // two-fraction floor is gone: a pool that used to clear the old 0.10 floor
+  // now has to clear the pressure line itself.
+  function barRuntime(poolMax: number, pressure = 0.7): Runtime {
     return triggerRuntime({
       reflectAfterTokens: 1,
       reflectorInputMaxTokens: 1_000_000,
       observationsPoolMaxTokens: poolMax,
-      dropperPressureThreshold: 1, // disable pressure to isolate the new-data path
+      dropperPressureThreshold: pressure,
     });
   }
 
-  it.each([
-    ["9% (below the floor)", 15_556, false],
-    ["10% (at the floor)", 14_000, true],
-    ["11% (above the floor)", 12_727, true],
-    ["50% (well above)", 2_800, true],
-  ])("new data with %s pool fullness → due=%s", (_name, poolMax, expected) => {
+  function dueAt(poolMax: number, pressure?: number): boolean {
     const entries = asEntries(observationBranch());
-    const runtime = floorRuntime(poolMax);
+    const runtime = barRuntime(poolMax, pressure);
     // Silence the reflector so the dropper short-circuit does not fire it.
     runtime.advanceCursor("reflector", lastId(entries), "skipped");
     // No dropper cursor → the new-data path uses tokens since last drop coverage.
-    expect(anyStageDue(entries, runtime, undefined)).toBe(expected);
+    return anyStageDue(entries, runtime, undefined);
+  }
+
+  it.each([
+    ["10% (the old two-fraction floor, below the bar)", 14_000, false],
+    ["50% (well above the old floor, below the bar)", 2_800, false],
+    ["69% (just below the bar)", 2_029, false],
+    ["70% (at the bar)", 2_000, true],
+    ["100% (pool full)", 1_400, true],
+  ])("new data with %s pool fullness → due=%s", (_name, poolMax, expected) => {
+    expect(dueAt(poolMax)).toBe(expected);
   });
 
-  it("a threshold of 1 disables pressure but leaves the new-data path intact", () => {
+  it("a threshold of 1 holds a half-full pool idle", () => {
+    expect(dueAt(POOL_MAX, 1)).toBe(false);
+  });
+
+  it("a threshold of 1 still runs once the pool is full", () => {
+    expect(dueAt(1_400, 1)).toBe(true);
+  });
+
+  it("the new-data path stops once the dropper cursor has caught up", () => {
     const entries = asEntries(observationBranch());
-    const runtime = floorRuntime(POOL_MAX);
+    // Full pool with pressure off → only the new-data path can fire.
+    const runtime = barRuntime(1_400, 1);
     runtime.advanceCursor("reflector", lastId(entries), "skipped");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
     runtime.advanceCursor("dropper", lastId(entries), "skipped");
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
-});
 
-describe("dropper derived new-data floor (plan-11 §4)", () => {
-  it.each([
-    [0.01, 0.02],
-    [0.2, 0.03],
-    [0.4, 0.06],
-    [0.5, 0.075],
-    [0.7, 0.1],
-    [1, 0.1],
-    [Number.NaN, 0.1],
-  ])("pressure %s → floor %s", (pressure, expected) => {
-    expect(dropperNewDataFloor(pressure)).toBeCloseTo(expected, 10);
+  it("lowering the pressure lowers the bar, so pruning starts earlier", () => {
+    // 25% fullness: above a bar lowered to 20%.
+    expect(dueAt(5_600, 0.2)).toBe(true);
   });
 
-  it("a lowered pressure lowers the floor, so new-data pruning can start earlier", () => {
-    // 5% pool fullness: below the old 0.10 constant floor, above the derived
-    // floor for pressure 0.2 (0.03). The pressure path (20%) is not reached.
-    const runtime = triggerRuntime({
-      reflectAfterTokens: 1,
-      reflectorInputMaxTokens: 1_000_000,
-      observationsPoolMaxTokens: 28_000,
-      dropperPressureThreshold: 0.2,
-    });
-    const entries = asEntries(observationBranch());
-    runtime.advanceCursor("reflector", lastId(entries), "skipped");
-    expect(anyStageDue(entries, runtime, undefined)).toBe(true);
+  it("leaves the same 25% pool idle at the default 70% bar", () => {
+    expect(dueAt(5_600)).toBe(false);
   });
 });
 

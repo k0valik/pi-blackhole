@@ -497,24 +497,25 @@ Max conversation tokens sent to the note-taker per reading pass.
 
 ### `dropperPressureThreshold` *(Prune memory when)*
 
-Fraction of `observationsPoolMaxTokens` at which low-value notes are pruned.
-The new-data floor is derived from this value
-(`dropperNewDataFloor(P) = clamp(0.15 × P, 0.02, 0.10)`); `1.0` disables
-pressure-driven pruning.
+Fraction of `observationsPoolMaxTokens` at which the pruner runs. This one
+number is both bars: the pressure path fires at it, and the new-data path is
+never eligible below it. `1.0` disables pressure-driven pruning and leaves the
+new-data path waiting until the pool is full.
 
 > **Upgrade note.** `dropperPoolFullnessThreshold` was merged into this key
-> (0.6.0); migration sets `max(oldPressure, oldFullness)`. The old independent
-> new-data floor is now derived from the pressure — the default `0.70`
-> reproduces the old `0.10`, and a custom pressure scales the floor with it.
+> (0.6.0); migration sets `dropperPressureThreshold = max(oldPressure,
+> oldFullness)`. There is no second floor any more, so a floor that sat below
+> the pressure now starts at the pressure — migration can only defer pruning,
+> never make it more aggressive.
 
 | Type | Default | Range |
 | --- | --- | --- |
 | number | 0.70 | (0, 1] |
 
-- **0.70** (default): pressure-driven pruning runs when note memory reaches 70% of the budget
+- **0.70** (default): pruning runs when note memory reaches 70% of the budget
 - **Higher** (e.g. 0.90): waits until memory is fuller before pruning
 - **Lower** (e.g. 0.50): prunes more eagerly
-- **1.0**: disables pressure-driven pruning — the pruner only runs when new notes/insights exist and the pool clears 10%
+- **1.0**: no pressure-driven pruning — the pruner only runs once the pool is full
 
 ### `agentMaxTurns`
 

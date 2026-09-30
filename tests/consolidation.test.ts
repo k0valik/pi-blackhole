@@ -205,17 +205,19 @@ describe("anyStageDue with cursors", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(false);
   });
 
-  test("dropper due via the new-data path once the pool clears the constant floor", async () => {
+  test("dropper due via the new-data path once the pool clears the bar", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const { anyStageDue } = await import("../src/om/consolidation.js");
     const runtime = new Runtime();
     runtime.config.observeAfterTokens = 100000;
     runtime.config.reflectAfterTokens = 5;
-    runtime.config.observationsPoolMaxTokens = 10_000;
-    runtime.config.dropperPressureThreshold = 0.7;
-    runtime.config.reflectorInputMaxTokens = 10_000; // pressure needs 7,000 — pool only has 1,400
+    // Pressure off (1) → only the new-data path can fire, and the bar it has to
+    // clear is that same 1.0, so the pool has to be full.
+    runtime.config.observationsPoolMaxTokens = 1_400;
+    runtime.config.dropperPressureThreshold = 1;
+    runtime.config.reflectorInputMaxTokens = 10_000;
     // No dropper cursor → token condition is rawTokensSinceDropCoverage ≥ 5 (msg-1 ≈ 50 tokens).
-    // Pool: 2 obs × 700 = 1,400 / 10,000 = 14% ≥ the constant 10% floor → dropper due.
+    // Pool: 2 obs × 700 = 1,400 / 1,400 = 100% ≥ the bar → dropper due.
     // Reflector is silenced by advancing its cursor past all entries.
     const entries = [
       {
@@ -257,7 +259,7 @@ describe("anyStageDue with cursors", () => {
     expect(anyStageDue(entries, runtime, undefined)).toBe(true);
   });
 
-  test("dropper NOT due when pool fullness is below the constant floor", async () => {
+  test("dropper NOT due when pool fullness is below the bar", async () => {
     const { Runtime } = await import("../src/om/runtime.js");
     const { anyStageDue } = await import("../src/om/consolidation.js");
     const runtime = new Runtime();
@@ -422,7 +424,7 @@ describe("anyStageDue with pending state (manual mode)", () => {
     runtime.config.observeAfterTokens = 100000;
     runtime.config.reflectAfterTokens = 100000;
     runtime.config.observationsPoolMaxTokens = 1000;
-    runtime.config.dropperPressureThreshold = 0.99;
+    runtime.config.dropperPressureThreshold = 0.1;
     runtime.config.reflectorInputMaxTokens = 1000;
     // Branch has conversation entries (normal manual mode), no OM markers.
     const entries = [
@@ -445,9 +447,8 @@ describe("anyStageDue with pending state (manual mode)", () => {
         },
       ],
     };
-    // No cursors → rawTokensSinceDropCoverage on entries with conversation
-    // → some tokens > 0.  Pool from pending: 125/1000 = 12.5% > 10%.
-    // Both gates pass → dropper due.
+    // No cursors → the pending batches are the new-data source. Pool from
+    // pending: 125/1000 = 12.5% ≥ the 10% bar → dropper due.
     expect(anyStageDue(entries, runtime, pending)).toBe(true);
   });
 

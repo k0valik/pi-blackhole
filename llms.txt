@@ -154,7 +154,7 @@ If user picks Off, ask separately whether they also want to disable memory (`mem
 Worker characteristics:
 - **Observer** — most frequent runner (every `observeAfterTokens` tokens). Reads conversation chunk (newest-first up to `observerChunkMaxTokens`) and extracts timestamped observations via an agent loop. Needs speed and structured extraction. A model with `thinking: "low"` helps it produce better structured output. Does NOT need deep reasoning.
 - **Reflector** — runs less often. Takes new observations and existing reflection summaries (compacted to ~15% of `reflectorInputMaxTokens`) and synthesizes durable reflections. Benefits from stronger reasoning (`thinking: "low"` or `"medium"`).
-- **Dropper** — runs when the observation pool exceeds `observationsPoolMaxTokens` or at `dropperPressureThreshold` pressure. Prunes low-value observations while keeping reflections. Needs judgment — similar capability to reflector, but can use `thinking: "off"` since it's mainly prioritization.
+- **Dropper** — runs once the observation pool reaches `dropperPressureThreshold` of `observationsPoolMaxTokens` (70% by default); the same bar gates the new-data path. Prunes low-value observations while keeping reflections. Needs judgment — similar capability to reflector, but can use `thinking: "off"` since it's mainly prioritization.
 
 Each model entry supports these fields (parsed by `parseModel()` in `unified-config.ts`):
 
@@ -306,7 +306,7 @@ Based on interview answers, build the config object. Write it to:
   "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
   "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647)
   "reflectorInputMaxTokens": 80000,    // largest memory snapshot an insight/prune job reads (shared)
-  "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
+  "dropperPressureThreshold": 0.70,    // one bar: pressure trigger AND new-data floor (1 = only when the pool is full)
   // "cacheRetention": "long",     // optional worker prompt cache: "none" | "short" | "long" (omit = inherit pi's effective setting)
   "agentMaxTurns": 16                  // max agent-loop turns per worker per run
 }
@@ -458,7 +458,7 @@ If the user has an old config from pi-vcc or pi-observational-memory, it's auto-
 | `passive: true` | `compaction: "off"` + `memory: false` |
 | `compactAfterRatio: 0.46` | `compactAfterRatio: 46` + `compactAfterBy: "percent"` |
 | `compactAfterTokens` / `compactReserveTokens` | same + `compactAfterBy: "tokens"` / `"reserve"` |
-| `dropperPoolFullnessThreshold` | merged into `dropperPressureThreshold` (`max`) |
+| `dropperPoolFullnessThreshold` | merged into `dropperPressureThreshold` (`max`) — that key is now both bars |
 | `dropperInputMaxTokens` | merged into `reflectorInputMaxTokens` |
 | `observationsPoolTargetTokens`, `observerPreambleMaxTokens` | removed (no effect / derived) |
 

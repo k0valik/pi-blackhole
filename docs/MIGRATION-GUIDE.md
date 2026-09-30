@@ -21,7 +21,7 @@ what moved, what was removed, and how the automatic migration works.
 | `compactAfterRatio: 0.46` (a fraction)   | `compactAfterRatio: 46` (a percent) + `compactAfterBy: "percent"` |
 | `compactAfterTokens: 120000`                | unchanged + `compactAfterBy: "tokens"`                   |
 | `compactReserveTokens: 32768`               | unchanged + `compactAfterBy: "reserve"`                  |
-| `dropperPoolFullnessThreshold` + `dropperPressureThreshold` | one `dropperPressureThreshold = max(...)` |
+| `dropperPoolFullnessThreshold` + `dropperPressureThreshold` | one `dropperPressureThreshold = max(...)`; it is both the trigger and the new-data floor |
 | `dropperInputMaxTokens` + `reflectorInputMaxTokens` | one `reflectorInputMaxTokens`                  |
 | `observationsPoolTargetTokens`              | removed (it had no effect)                               |
 | `observerPreambleMaxTokens`                 | removed (the 30% of the reading batch is now a constant) |
@@ -88,19 +88,20 @@ Consequences worth knowing:
 | `dropperPoolFullnessThreshold` | Merged into `dropperPressureThreshold` (see below). | `dropperPressureThreshold`. |
 | `dropperInputMaxTokens` | Merged into `reflectorInputMaxTokens`. | `reflectorInputMaxTokens`. |
 
-### Dropper merge — one residual divergence
+### Dropper merge — one bar
 
-`dropperPressureThreshold` (UI: **Prune memory when**) survives. Migration sets
-`dropperPressureThreshold = max(oldPressure, oldFullness)`. The old independent
-new-data floor is replaced by a value **derived from the surviving pressure**:
-`dropperNewDataFloor(P) = clamp(0.15 × P, 0.02, 0.10)`.
+`dropperPressureThreshold` (UI: **Prune memory when**) survives and becomes the
+only fullness fraction: it is the pressure trigger **and** the floor below which
+the new-data path never runs. Migration sets
+`dropperPressureThreshold = max(oldPressure, oldFullness)` — the exact trigger
+the old code applied.
 
-This is **exact** for the default posture — `P = 0.70` reproduces the old `0.10`
-floor — and if you had a custom floor above `0.10` at the default pressure, the
-derived floor is close to it. It only differs for a config that paired a custom
-floor with a custom pressure (the two were independent before, and one number
-cannot encode two). No single-knob formulation preserves both exactly; this is
-the one accepted divergence, and it is smoothed rather than stepped.
+One number cannot encode two independent fractions, so a floor that sat
+**below** the pressure now starts at the pressure instead: the new-data path
+becomes eligible later, never earlier. A floor at or above the pressure (a
+raised floor with the default pressure, for instance) is preserved exactly.
+Migration can only defer pruning — it never makes pruning more aggressive than
+it was.
 
 ### Input-budget merge
 

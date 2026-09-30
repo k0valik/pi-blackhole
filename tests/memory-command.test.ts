@@ -201,7 +201,7 @@ describe("/blackhole-memory command", () => {
     expect(msg).toContain("Notes:");
     expect(msg).toContain("Insights:");
     expect(msg).toContain("Pruning:");
-    expect(msg).toContain("eligible at ≥10% with new data; pressure at ≥70% pool");
+    expect(msg).toContain("prunes at ≥70% pool");
     expect(msg).toContain("Compaction:");
     expect(msg).toContain("Note memory:");
     expect(msg).toContain("Insight memory:");

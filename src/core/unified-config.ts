@@ -214,12 +214,12 @@ export interface UnifiedConfig {
    *  rolling window cap. plan-09 §3.5 merged the former
    *  dropperInputMaxTokens into this one — both read the same memory pool. */
   reflectorInputMaxTokens: number;
-  /** Fraction of observationsPoolMaxTokens that triggers pressure-driven
-   *  dropping without new data. A value of 1 disables pressure.
-   *  Default 0.70 (70%). Must be in range (0, 1]. The former
-   *  dropperPoolFullnessThreshold was merged into this (plan-09 §3.3); the
-   *  new-data path derives its floor from this value (dropperNewDataFloor,
-   *  plan-11 §4). */
+  /** Fraction of observationsPoolMaxTokens that gates the dropper: both the
+   *  pressure path and the new-data path use it (one bar — plan-11 §4). A
+   *  value of 1 disables pressure and makes the new-data path wait until the
+   *  pool is full. Default 0.70 (70%). Must be in range (0, 1]. The former
+   *  dropperPoolFullnessThreshold was merged into this (plan-09 §3.3), stored
+   *  as max(oldPressure, oldFullness). */
   dropperPressureThreshold: number;
   /** Max source entries tokens sent to observer per chunk. */
   observerChunkMaxTokens: number;
