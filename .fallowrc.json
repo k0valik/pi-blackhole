@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // Real roots: the published factory entry, the maintenance scripts run from
+  // package.json "scripts", and the test tree (tests are the main consumer of
+  // the src exports).
+  "entry": ["index.ts", "scripts/*.mjs", "tests/**/*.ts"],
+
+  // src/pi-base is a vendored copy of upstream pi-base (see AGENTS.md):
+  // never report dead code inside it.
+  "ignoreFindings": ["src/pi-base/**"],
+
+  // Raise the dead-code bar: an export its own file still references is
+  // internal, not dead, until nothing points at it at all.
+  "ignoreExportsUsedInFile": true,
+
+  // pnpm override pinning a transitive tool version; no source imports it.
+  "ignoreDependencyOverrides": [{ "package": "js-yaml", "source": "pnpm-workspace.yaml" }],
+
+  // Duplication: only copy-paste worth refactoring — 15+ lines, appearing 3+
+  // times. Pair-only clones below that bar are reported nowhere.
+  "duplicates": { "minLines": 15, "minOccurrences": 3 },
+
+  "health": {
+    // CRAP only means something with coverage data; estimated coverage made
+    // every medium function trip the 30.0 default, so gate complexity on
+    // cyclomatic/cognitive instead.
+    "maxCrap": 0,
+    // Established codebase: report hotspots, not the pre-existing backlog.
+    "maxCyclomatic": 30,
+    "maxCognitive": 30,
+    "ignore": ["src/pi-base/**"],
+    "thresholdOverrides": [
+      {
+        "files": ["tests/**/*.ts"],
+        "maxUnitSize": 500,
+        "reason": "describe()/it() suites are whole-file closures; the 60-LOC unit-size bar reports every block."
+      }
+    ]
+  }
+}
