@@ -56,6 +56,13 @@ export interface MigrateFileDeps {
   warn?: (message: string, error?: unknown) => void;
   /** User-facing notification sink (tests / UI). */
   notify?: (message: string, level?: "info" | "warning") => void;
+  /**
+   * Refuse to rewrite `path` when it is itself a symlink. Set for the
+   * project scope: a repository controls that path and could point it at any
+   * file the account can write, and a migration would otherwise rewrite
+   * through it. The loader still projects such a file in memory.
+   */
+  skipSymlink?: boolean;
 }
 
 export interface MigrateFileResult {
@@ -306,6 +313,22 @@ export async function migrateConfigFile(
 
   if (!existsSync(path)) return base;
 
+  // A project controls this path: `atomicWrite` resolves symlinks and writes
+  // through them, so a link planted by the repo would make the migration
+  // rewrite an arbitrary file the account can write. Skip instead — the loader
+  // applies the same projection in memory, so only the on-disk cleanup is
+  // deferred.
+  if (deps.skipSymlink) {
+    try {
+      if ((await lstat(path)).isSymbolicLink()) {
+        warn(`blackhole: ${path} is a symlink — leaving it untouched (migrating in memory only)`);
+        return { ...base, error: "symlink" };
+      }
+    } catch {
+      /* unreadable or vanished — fall through to the normal read path */
+    }
+  }
+
   let rawText: string;
   try {
     rawText = await readText(path);
@@ -384,6 +407,37 @@ export async function migrateConfigFile(
       warnings: proj.warnings,
       config: proj.config,
       error: "backup failed",
+    };
+  }
+
+  // OPTIMISTIC CONCURRENCY — `rawText` is the exact bytes the projection came
+  // from, and the backup above took its own time. If those bytes are gone,
+  // another session's migration or an editor wrote in the meantime; writing now
+  // would discard that version outright (including an edit that turned memory
+  // or compaction off). Verification after the write only compares what we
+  // wrote, so this is the one point that can still see the other writer.
+  let current = "";
+  try {
+    current = await readText(path);
+  } catch {
+    current = "";
+  }
+  if (current !== rawText) {
+    warn(
+      `blackhole: ${path} changed while it was being migrated — keeping the newer version (will retry next load)`,
+    );
+    notify?.(
+      "blackhole: your config changed while migrating; the newer version was kept.",
+      "warning",
+    );
+    return {
+      ...base,
+      changed: true,
+      applied: proj.applied,
+      messages: proj.messages,
+      warnings: proj.warnings,
+      config: proj.config,
+      error: "concurrent modification",
     };
   }
 
@@ -573,10 +627,15 @@ export async function migrateConfigFiles(
   const paths = [...new Set([globalPath, projectPath])];
   const results: MigrateFileResult[] = [];
   for (const p of paths) {
-    const fileDeps =
-      p === projectPath && deps.backup === undefined
-        ? { ...deps, backup: (path: string) => defaultBackup(path, projectBackupPath(cwd)) }
-        : deps;
+    const isProject = p === projectPath;
+    const fileDeps: MigrateFileDeps = {
+      ...deps,
+      // The repo owns this path: never rewrite through a symlink it planted.
+      ...(isProject ? { skipSymlink: true } : {}),
+      ...(isProject && deps.backup === undefined
+        ? { backup: (path: string) => defaultBackup(path, projectBackupPath(cwd)) }
+        : {}),
+    };
     results.push(await migrateConfigFile(p, fileDeps));
   }
   return results;

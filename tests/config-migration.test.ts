@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -688,6 +688,46 @@ describe("runner — guarantees", () => {
     expect(readConfig(GLOBAL).compaction).toBe("off");
     expect(readConfig(PROJECT).compactAfterBy).toBe("percent");
     expect(readConfig(PROJECT).compactAfterRatio).toBe(65);
+  });
+
+  it("keeps a config that changed under it instead of overwriting it", async () => {
+    // The projection is taken from the first read; if someone edits the file
+    // while the backup runs, writing our version would silently discard theirs
+    // (including an edit that turned memory or compaction off). Verification
+    // after the write only compares what we wrote, so the pre-write re-read is
+    // the only point that can still see the other writer.
+    const original = `${JSON.stringify({ compaction: "auto", compactionEngine: "pi-default" }, null, 2)}\n`;
+    writeText(GLOBAL, original);
+    let reads = 0;
+    const res = await migrateConfigFile(GLOBAL, {
+      backup: async () => {},
+      warn: () => {},
+      readText: async () => {
+        reads++;
+        return reads === 1 ? original : original.replace('"auto"', '"manual"');
+      },
+    });
+    expect(res.persisted).toBe(false);
+    expect(res.error).toBe("concurrent modification");
+    expect(readFileSync(GLOBAL, "utf-8")).toBe(original);
+  });
+
+  it("never rewrites through a project-config symlink", async () => {
+    // The repository owns the project path, and atomicWrite resolves symlinks
+    // and writes through them — so a link planted by the repo would otherwise
+    // redirect the migration at any file this account can write.
+    const outside = join(testDir, "elsewhere", "pi-blackhole-config.json");
+    const payload = `${JSON.stringify({ compactionEngine: "blackhole", memory: false }, null, 2)}\n`;
+    writeText(outside, payload);
+    mkdirSync(dirname(PROJECT), { recursive: true });
+    symlinkSync(outside, PROJECT);
+
+    const results = await migrateConfigFiles(testDir, { warn: () => {} });
+    const project = results.find((r) => r.path === PROJECT);
+    expect(project?.error).toBe("symlink");
+    expect(project?.changed).toBe(false);
+    expect(readFileSync(outside, "utf-8")).toBe(payload);
+    expect(readFileSync(PROJECT, "utf-8")).toBe(payload);
   });
 
   it("stamps configVersion once and preserves an existing stamp", async () => {
