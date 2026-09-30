@@ -11,11 +11,13 @@
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { agentCompletionError } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
   createBridgeStreamFn,
   createProviderFetch,
+  neverThrow,
   type ProviderFetchOption,
 } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
@@ -364,7 +366,11 @@ ${conversation}`;
   // other extensions (e.g., claude-bridge). The bridge looks up streamSimple functions
   // via modelRegistry (host-composed facade → registered provider config → global map).
   const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
-  const streamFn = args.streamFn ?? bridgeStreamFn;
+  // Never throws: pi's loop is fire-and-forget, so a sync throw or rejection
+  // here would become an unhandled rejection plus a run that hangs on an open
+  // event stream. Failures arrive as an error stream the completion check
+  // classifies like any provider error.
+  const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
   try {
@@ -375,10 +381,15 @@ ${conversation}`;
           stopReason?: string;
           errorMessage?: string;
         }>;
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg?.stopReason === "error") {
-          agentError = lastMsg.errorMessage ?? "Unknown API error";
-        }
+        // `length`/`aborted`/terminal `toolUse` are not completions either: a
+        // partial review reported as success would advance coversUpToId over
+        // observations the model never finished. The complete=true close and a
+        // turn-cap end on a tool-work turn are the two sanctioned endings.
+        agentError = agentCompletionError(
+          msgs,
+          signal,
+          closedByCompleteBatch || turnCap?.exhausted,
+        );
       }
     }
     await stream.result();

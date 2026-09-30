@@ -6,6 +6,8 @@
  * bridge logic so all OM agents (observer, reflector, dropper) use the same
  * custom-provider resolution instead of each duplicating the 15-line function.
  */
+import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
+
 interface RegisteredProviderConfig {
   api?: string;
   streamSimple?: Function;
@@ -318,5 +320,83 @@ export function createBridgeStreamFn(
       headers,
       transformHeaders: createAttributionTransform(model, sessionId, incomingTransform),
     });
+  };
+}
+
+// ── Never-throw stream guard ──────────────────────────────────────────────────
+//
+// pi's agentLoop is fired as `void runAgentLoop(...).then(...)` with no
+// `.catch` (agent-loop.js:13) and reads the provider response with
+// `const response = await streamFunction(...)` (agent-loop.js:271). A stream
+// function that throws — synchronously, or as a rejected promise — therefore
+// rejects that promise into the void (an unhandled rejection the host never
+// sees) AND leaves the loop's event stream open, so the worker's `for await`
+// and `stream.result()` never settle: the run hangs instead of failing. The
+// design constraint is that nothing may ever throw out of `streamFn`; failures
+// arrive as pi's own terminal error stream instead, and the run's completion
+// check (`agentCompletionError`) turns that into the WorkerStreamError the
+// stage already classifies and falls back from.
+
+/** pi-ai's zeroed usage block for a refusal that never reached a provider. */
+const REFUSAL_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
+
+/**
+ * Terminal `stopReason: "error"` stream shaped exactly like a provider failure
+ * pi-ai would produce (`{type:"error"}` ends the loop's switch and
+ * `result()` resolves through the pushed error event; `end(message)` keeps the
+ * result promise settled even on hosts that only read it after iteration).
+ */
+function refusalStream(model: any, errorMessage: string) {
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: [],
+    api: model?.api ?? "openai-completions",
+    provider: model?.provider ?? "unknown",
+    model: model?.id ?? "unknown",
+    usage: { ...REFUSAL_USAGE, cost: { ...REFUSAL_USAGE.cost } },
+    stopReason: "error",
+    errorMessage,
+    timestamp: Date.now(),
+  };
+  const stream = createAssistantMessageEventStream();
+  stream.push({ type: "error", reason: "error", error: message });
+  stream.end(message);
+  return stream;
+}
+
+function refusalMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Wrap a stream function so it can never throw or reject: a synchronous throw
+ * becomes a refusal stream immediately, a rejected promise becomes one when it
+ * settles, and a healthy response (stream or promise-of-stream) passes through
+ * as the very same object.
+ */
+export function neverThrow(streamFn: Function): (...args: any[]) => any {
+  return (...args: any[]) => {
+    let response: any;
+    try {
+      response = streamFn(...args);
+    } catch (error) {
+      return refusalStream(args[0], refusalMessage(error));
+    }
+    // An async streamFn rejects instead of throwing, and the host's
+    // `await streamFunction(...)` turns that into the same open-stream hang.
+    if (response && typeof response.then === "function") {
+      return response.then(
+        (value: any) => value,
+        (error: unknown) => refusalStream(args[0], refusalMessage(error)),
+      );
+    }
+    return response;
   };
 }

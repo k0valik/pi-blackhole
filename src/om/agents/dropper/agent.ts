@@ -2,19 +2,23 @@
  * Dropper agent — uses agentLoop to propose prunable observations.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/agents/dropper/agent.ts)
- * Modified by pi-vcc-om: detects agent_end stopReason="error" in the stream
- * and always throws, since the tool has no complete flag to prove the
- * evaluation finished: a prefix of the proposed candidates reported as success
- * would be written under an OM_OBSERVATIONS_DROPPED marker that a cadence run
- * never re-evaluates. The same guard covers a run the agent turn cap cut off.
+ * Modified by pi-vcc-om: an agent_end whose run did not complete — stopReason
+ * `error`/`aborted`/`length`, a terminal `toolUse` without the turn cap, or an
+ * aborted attempt signal — always throws, since the tool has no complete flag
+ * to prove the evaluation finished: a prefix of the proposed candidates
+ * reported as success would be written under an OM_OBSERVATIONS_DROPPED marker
+ * that a cadence run never re-evaluates. The same guard covers a run the agent
+ * turn cap cut off.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { agentCompletionError } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
   createBridgeStreamFn,
   createProviderFetch,
+  neverThrow,
   type ProviderFetchOption,
 } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
@@ -391,7 +395,11 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   const loop = args.agentLoop ?? agentLoop;
   // ── Bridge stream function ──
   const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
-  const streamFn = args.streamFn ?? bridgeStreamFn;
+  // Never throws: pi's loop is fire-and-forget, so a sync throw or rejection
+  // here would become an unhandled rejection plus a run that hangs on an open
+  // event stream. Failures arrive as an error stream the completion check
+  // classifies like any provider error.
+  const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
   try {
@@ -402,10 +410,12 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
           stopReason?: string;
           errorMessage?: string;
         }>;
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg?.stopReason === "error") {
-          agentError = lastMsg.errorMessage ?? "Unknown API error";
-        }
+        // `length`/`aborted`/terminal `toolUse` are not completions either: the
+        // stage writes an OM_OBSERVATIONS_DROPPED marker over the whole window,
+        // so a cut-off evaluation reported as success would never revisit the
+        // observations past the cut. `drop_observations` carries no complete
+        // flag, so only a turn-cap end on a tool-work turn is exempt.
+        agentError = agentCompletionError(msgs, signal, turnCap?.exhausted);
       }
     }
     await stream.result();
