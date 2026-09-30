@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- **A warning when `observeAfterTokens` exceeds `observerChunkMaxTokens`.** No single batch can hold a trigger-worth of content in that configuration, so every observation pass necessarily runs as multiple capped + drained batches. `loadUnifiedConfig` now surfaces this through `onWarn` (falling back to `console.warn`) naming both keys — a warning, deliberately **not a clamp**: the combination is loss-free after the coverage drain, and silently rewriting the user's threshold would be worse than informing them.
+
 ### Fixed
 
 - **Observer coverage can no longer advance past entries the model never saw.** The input cap kept the _newest_ entries, but `coversUpToId` claimed the last kept one — so on an over-budget chunk the cursor jumped to the branch tip while older entries were silently dropped from the chunk and never observed again (their content was permanently skipped). `capSourceEntriesToTokens` now keeps the **oldest contiguous prefix**, `coversUpToId` derives from the ids the serializer actually emitted (an entry it cannot render is never claimed), and after a recorded or clean-empty close the stage **drains the remaining backlog in the same run** — bypassing the `observeAfterTokens` trigger for the remainder and bounded by `OBSERVER_DRAIN_MAX_BATCHES` (3), so an oversized backlog waits for the next cycle with the cursor at the last delivered entry. A delay, never a loss.

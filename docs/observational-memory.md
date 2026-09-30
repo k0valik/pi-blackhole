@@ -8,7 +8,7 @@ Three background workers run automatically when `memory: true` (default). Each u
 
 ### Observer
 
-Reads conversation since the last observation marker and extracts timestamped facts. Input capped to `observerChunkMaxTokens` newest-first. Runs most frequently.
+Reads conversation since the last observation marker and extracts timestamped facts. Input capped to `observerChunkMaxTokens` as an oldest-first prefix; overflow stays in the backlog and drains in bounded follow-up batches within the same run, so coverage only ever advances over entries the model was shown. Runs most frequently.
 
 The observer can call `record_observations` multiple times per run to work through a chunk incrementally. Observations include `sourceEntryIds` linking back to the conversation entries they were extracted from.
 

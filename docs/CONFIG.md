@@ -411,6 +411,8 @@ Token thresholds that control when the OM pipeline runs. Unchanged from the prev
 | `observeAfterTokens` | 15000 |
 | `reflectAfterTokens` | 25000 |
 
+Setting `observeAfterTokens` above `observerChunkMaxTokens` makes every observation pass run as multiple capped batches; the loader warns about that combination (it never clamps your values).
+
 ### `observationsPoolMaxTokens`
 
 Stored observation-token pressure threshold for full-fold maintenance, plus a hard cap on estimated rendered observation lines in compaction output. IDs, timestamps, relevance labels and newline separators count. High/critical observations are preferred newest-first, then medium/low by relevance and recency. Oversized records are skipped; selected records stay whole and return to source order. Source history is not deleted.
@@ -455,7 +457,7 @@ Rolling window cap for dropper prompt tokens.
 
 ### `observerChunkMaxTokens`
 
-Max source-entry tokens sent to the observer per chunk.
+Max source-entry tokens sent to the observer per chunk. The chunk is the oldest contiguous prefix of unobserved entries; overflow stays in the backlog and drains in bounded follow-up batches (same run, at most 3), so the coverage cursor never advances past entries the model was not shown.
 
 | Type | Default |
 |------|---------|
