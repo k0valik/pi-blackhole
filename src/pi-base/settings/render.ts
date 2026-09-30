@@ -304,7 +304,7 @@ export function renderBody(
 
   const visibleListRows = Math.max(
     3,
-    innerRows - lines.length - 2 - estimateDescriptionRows(state),
+    innerRows - lines.length - 2 - estimateDescriptionRows(state, width),
   );
   clampSelection(state, visibleListRows);
 
@@ -359,14 +359,14 @@ function valueDescriptionText(field: Field, value: unknown): string | undefined 
   return undefined;
 }
 
-export function renderFieldDesc(
-  state: BodyState,
-  lines: string[],
-  width: number,
-  focused: InternalRow,
-): void {
-  let desc = focused.field.description ?? "";
-  const field = focused.field;
+/**
+ * The static description block renderFieldDesc emits: the field description,
+ * the disabled note, and the number range/values suffix, all folded into one
+ * paragraph. Shared with estimateDescriptionRows so the layout budget is the
+ * text the renderer actually wraps rather than a per-block guess.
+ */
+function fieldDescriptionText(field: Field): string {
+  let desc = field.description ?? "";
   if (field.disabled) {
     const disabledNote = "This setting is currently disabled.";
     desc = desc ? `${desc} (${disabledNote})` : disabledNote;
@@ -390,7 +390,17 @@ export function renderFieldDesc(
       desc = desc ? `${desc} ${suffix}` : suffix;
     }
   }
+  return desc;
+}
 
+export function renderFieldDesc(
+  state: BodyState,
+  lines: string[],
+  width: number,
+  focused: InternalRow,
+): void {
+  const field = focused.field;
+  const desc = fieldDescriptionText(field);
   if (desc) {
     lines.push("");
     for (const line of wrapLine(desc, Math.max(1, width - 4))) {
@@ -435,25 +445,27 @@ export function renderFieldDesc(
   }
 }
 
-/** Tiny heuristic so renderBody knows roughly how much room the
- *  description block will eat. Every block renderFieldDesc emits starts with a
- *  blank line, so count each present block as two rows; over-reserving only
- *  shrinks the list, whereas under-reserving truncates the help copy. */
-export function estimateDescriptionRows(state: BodyState): number {
+/** The exact height renderFieldDesc is about to add at this width: every
+ *  block is a blank line plus its wrapped text, plus the always-on key
+ *  legend. Wrapping the same strings the renderer wraps (wrapLine is
+ *  ANSI-aware, so the themed and plain forms count identically) keeps the
+ *  budget honest — the old two-rows-per-block guess ran short on long help
+ *  copy, and frame() then truncated the key legend the budget existed for. */
+export function estimateDescriptionRows(state: BodyState, width: number): number {
   const focused = focusedRow(state);
   if (!focused) return 0;
   const field = focused.field;
+  const wrapWidth = Math.max(1, width - 4);
   let rows = 0;
-  if (field.description || field.disabled) rows += 2;
-  if (valueDescriptionText(field, focused.value)) rows += 2;
-  if (field.valueDescription?.(focused.value)) rows += 2;
-  if (validateFieldValue(field, focused.value)) rows += 2;
-  if (field.type === "number") {
-    if (typeof field.min === "number" || typeof field.max === "number" || field.integer) {
-      rows += 1;
-    }
-  }
+  const block = (text: string | undefined): void => {
+    if (!text) return;
+    rows += 1 + wrapLine(text, wrapWidth).length;
+  };
+  block(fieldDescriptionText(field));
+  block(valueDescriptionText(field, focused.value));
+  block(field.valueDescription?.(focused.value));
+  block(validateFieldValue(field, focused.value));
   // Key legend is always rendered for data fields (see renderFieldDesc).
-  if (field.type !== "section") rows += 1;
+  if (field.key && field.type !== "section") rows += 1;
   return rows;
 }

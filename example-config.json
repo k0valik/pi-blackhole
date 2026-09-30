@@ -3,6 +3,8 @@
   "_all_settings_in_one_file": true,
   "_new_keys": "compaction, compactionSummaryMode, tailBehavior, compactAfterBy — v3 config surface",
   "_renamed": "The pre-reorg (v2) example is a repo-only migration fixture; for the old→new key mapping see docs/MIGRATION-GUIDE.md. This file is the post-reorg surface.",
+  "configVersion": 1,
+  "_comment_configVersion": "The config-migration stamp (plan-10), stated so a fresh copy carries the current schema version. The migration still normalizes the 0 'not set' placeholders below — that cleanup is driven by the keys, not by the stamp.",
 
   "compaction": "automatic",
   "_comment_compaction": "automatic | manual | off. 'automatic' triggers on threshold, 'manual' only on /blackhole, 'off' leaves compaction to Pi. compactionEngine was folded in (v3): 'blackhole' → 'automatic', 'pi-default' → 'off'; 'auto' is still accepted as an alias.",

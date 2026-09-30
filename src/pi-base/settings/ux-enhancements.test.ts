@@ -411,7 +411,40 @@ describe("UX Enhancements - Submenus and Hints", () => {
     };
     const lines: string[] = [];
     renderFieldDesc(state, lines, 80, row);
-    expect(estimateDescriptionRows(state)).toBeGreaterThanOrEqual(lines.length);
+    expect(estimateDescriptionRows(state, 80)).toBeGreaterThanOrEqual(lines.length);
+  });
+
+  it("reserves the wrapped height of long help copy, not two rows per block", () => {
+    // The floor/ceiling knobs ship ~200-character descriptions plus a dynamic
+    // value line. A fixed two-row budget per block under-reserved by several
+    // rows, and frame() then truncated the key legend the budget was for.
+    const row: any = {
+      field: {
+        key: "compactAfterMinTokens",
+        label: "Never compact below",
+        type: "number",
+        min: 0,
+        max: 2_000_000,
+        step: 1_000,
+        description:
+          "Never let the conversation grow past this many tokens before compacting, whatever the percentage or preset says. Useful on very large windows where a percentage would wait far too long.",
+        valueDescription: (v: unknown) =>
+          `At ${v} — never compacts before ${v} tokens, even on a smaller model.`,
+      },
+      value: 200_000,
+    };
+    const state: any = {
+      rows: [row],
+      cachedVisibleIndices: [0],
+      fieldSelected: 0,
+      args: { theme: mockTheme },
+    };
+    const lines: string[] = [];
+    renderFieldDesc(state, lines, 80, row);
+    // The block really is taller than the old budget: 1 blank + ~3 wrapped
+    // description rows + 1 blank + value line + key legend.
+    expect(lines.length).toBeGreaterThan(6);
+    expect(estimateDescriptionRows(state, 80)).toBeGreaterThanOrEqual(lines.length);
   });
 
   it("modelRenderer submenu formats zero-match empty state and includes ctrl+w hint when filter is active", () => {
