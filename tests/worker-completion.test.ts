@@ -185,6 +185,40 @@ describe("observer completion strictness", () => {
     });
   });
 
+  it("throws when the run ends on a deferred stop reason", async () => {
+    const error = await runObserver({
+      ...observerArgs,
+      agentLoop: scriptedLoop([partialObserverBatch], {
+        agentEnd: endMessages(assistantStop("deferred")),
+      }),
+    }).catch((caught: unknown) => caught);
+
+    // Fail closed: only an explicit `stop` (or an exempt tool close) proves
+    // the work finished. A deferred response lives behind a fetch handle —
+    // the review may never have happened, so the cursor must not advance.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Observer API error: Incomplete agent response (deferred); coverage not advanced.",
+      discardedCount: 1,
+    });
+  });
+
+  it("throws when the run ends on a pending stop reason", async () => {
+    const error = await runObserver({
+      ...observerArgs,
+      agentLoop: scriptedLoop([partialObserverBatch], {
+        agentEnd: endMessages(assistantStop("pending")),
+      }),
+    }).catch((caught: unknown) => caught);
+
+    // A stuck-at-sentinel stream is a contract violation, not a completion.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Observer API error: Incomplete agent response (pending); coverage not advanced.",
+      discardedCount: 1,
+    });
+  });
+
   it("throws with a zero count when an output-length close recorded nothing", async () => {
     const error = await runObserver({
       ...observerArgs,
@@ -198,7 +232,26 @@ describe("observer completion strictness", () => {
     });
   });
 
-  it("throws when the attempt signal is already aborted when the run reports back", async () => {
+  it("reports success when the signal aborts after the run already stopped", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    // A late abort (timeout fire during settle, generation cancel racing the
+    // close) must not void completed work: the run stopped on its own, so
+    // the completed review is kept with no error attached.
+    const result = await runObserver({
+      ...observerArgs,
+      signal: controller.signal,
+      agentLoop: scriptedLoop([partialObserverBatch], {
+        agentEnd: endMessages(assistantStop("stop")),
+      }),
+    });
+
+    expect(result.observations?.map((item) => item.content)).toEqual(["Partial observation"]);
+    expect(result.errorAfterClose).toBeUndefined();
+  });
+
+  it("still reports the abort when the run never stopped on its own", async () => {
     const controller = new AbortController();
     controller.abort();
 
@@ -206,10 +259,12 @@ describe("observer completion strictness", () => {
       ...observerArgs,
       signal: controller.signal,
       agentLoop: scriptedLoop([partialObserverBatch], {
-        agentEnd: endMessages(assistantStop("stop")),
+        agentEnd: endMessages(assistantStop("length")),
       }),
     }).catch((caught: unknown) => caught);
 
+    // The stop check only exempts clean stops: a cut-off run on an aborted
+    // signal still reports the abort rather than advancing.
     expect(error).toBeInstanceOf(WorkerStreamError);
     expect(error).toMatchObject({
       message: "Observer API error: aborted",
@@ -394,6 +449,24 @@ describe("reflector completion strictness", () => {
       discardedCount: 1,
     });
   });
+
+  it("throws when the run ends on a deferred stop reason", async () => {
+    const error = await runReflector({
+      ...reflectorArgs,
+      agentLoop: scriptedLoop([partialReflectionBatch], {
+        agentEnd: endMessages(assistantStop("deferred")),
+      }),
+    }).catch((caught: unknown) => caught);
+
+    // The reflector cursor advances over the whole window: an unfinished
+    // evaluation reported as success would permanently skip crystallizing the
+    // observations past the cut.
+    expect(error).toBeInstanceOf(WorkerStreamError);
+    expect(error).toMatchObject({
+      message: "Reflector API error: Incomplete agent response (deferred); coverage not advanced.",
+      discardedCount: 1,
+    });
+  });
 });
 
 describe("dropper completion strictness", () => {
@@ -494,22 +567,21 @@ describe("dropper completion strictness", () => {
     });
   });
 
-  it("throws when the attempt signal is already aborted when the run reports back", async () => {
+  it("reports success when the signal aborts after the run already stopped", async () => {
     const controller = new AbortController();
     controller.abort();
 
-    const error = await runDropper({
+    // Same contract as the observer: a finished evaluation's proposals are
+    // kept when the run stopped on its own — in batch mode discarding them
+    // would void the whole run over a benign late cancel.
+    const result = await runDropper({
       ...dropperArgs,
       signal: controller.signal,
       agentLoop: scriptedLoop([dropperBatch], {
         agentEnd: endMessages(assistantStop("stop")),
       }),
-    }).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect(error).toMatchObject({
-      message: "Dropper API error: aborted",
-      discardedCount: 1,
     });
+
+    expect(result).toEqual(["aaaaaaaaaaaa"]);
   });
 });

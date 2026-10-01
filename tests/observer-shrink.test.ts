@@ -141,10 +141,12 @@ describe("measured worker prompt budget", () => {
   });
 
   test("a chunk the old formula accepted is skipped once the output allowance is priced", async () => {
-    // 2k-token chunk against a 30k window: the old input-only check
-    // (2k + system + 8000 < 30k) runs the model, but input + the default 32k
-    // output allowance cannot share the window — the provider would 400.
-    const entries = [rawMessage("s0", textForTokens(2000, "SMALL"))];
+    // 20k-token chunk against a 30k window: the old input-only check
+    // (20k + system + 8000 < 30k) runs the model, but input + the output
+    // allowance cannot share the window — the provider would 400. The
+    // allowance is capped at a quarter of the window, so the 20k chunk still
+    // exceeds the ~21.5k clamped budget.
+    const entries = [rawMessage("s0", textForTokens(20_000, "SMALL"))];
     const runtime = makeRuntime(100, 1_000_000);
 
     const outcome = await runStage(runtime, entries, testModel("test-shr", "output-rsv-m", 30_000));
@@ -217,6 +219,116 @@ describe("observer shrink-to-fit", () => {
     // too-small window is not a broken model, and cooling it for an hour
     // would wedge every later cycle too.
     const outcome = await runStage(runtime, entries, testModel("test-shr", "nocool-m", 30_000));
+
+    expect(outcome).toBe("abort");
+    expect(runObserverSpy).not.toHaveBeenCalled();
+    expect(recordCooldownSpy).not.toHaveBeenCalled();
+  });
+
+  test("a many-small-entries backlog shrinks to a serialized-fitting chunk and drains", async () => {
+    const { capSourceEntriesToTokens } = await import("../src/om/consolidation.js");
+    const {
+      WORKER_SAFETY_MARGIN_TOKENS,
+      WORKER_TURN_HEADROOM_TOKENS,
+      workerOutputReserveTokens,
+      workerStaticPromptTokens,
+    } = await import("../src/om/prompt-budget.js");
+    const { estimateStringTokens } = await import("../src/om/tokens.js");
+    const { serializeSourceAddressedBranchEntries } = await import("../src/om/serialize.js");
+
+    const maxTokens = 1000;
+    const staticTokens = workerStaticPromptTokens("observer");
+    const reserve = workerOutputReserveTokens({ maxTokens } as any);
+    // A low-thousands shrink budget: big enough for a real prefix, small
+    // enough that per-entry headers + framing overflow it.
+    const shrinkBudget = 4200;
+    const contextWindow =
+      shrinkBudget +
+      staticTokens +
+      WORKER_TURN_HEADROOM_TOKENS +
+      reserve +
+      WORKER_SAFETY_MARGIN_TOKENS;
+
+    // Grow the backlog until the capped prefix fits the per-entry cap but its
+    // serialized form overflows the same budget — the wedge: without measuring
+    // the serialized text, the best model re-skips and the stage aborts with
+    // the cursor unmoved. Sized adaptively so estimator drift fails loudly
+    // here instead of silently un-wedging the test below.
+    const unitText = textForTokens(100, "UNIT");
+    let entries: TestEntry[] = [];
+    for (let n = 2; n <= 200; n++) {
+      const candidate = Array.from({ length: n }, (_, i) => rawMessage(`k${i}`, unitText));
+      const kept = capSourceEntriesToTokens(candidate as any, shrinkBudget);
+      if (kept.length < n) {
+        const serialized = serializeSourceAddressedBranchEntries(kept as any).text;
+        if (estimateStringTokens(serialized) > shrinkBudget) {
+          entries = candidate;
+          break;
+        }
+      }
+    }
+    expect(entries.length).toBeGreaterThan(0);
+
+    // Real model resolution (not a scripted resolver): the candidate is
+    // size-skipped, the chain exhausts, the chunk shrinks to its serialized
+    // budget, and the un-skipped model is re-offered — then the drain covers
+    // the rest. A scripted always-resolving double would never reach the
+    // shrink branch, so it cannot exercise this path.
+    const runtime = makeRuntime(1, 1_000_000);
+    runtime.config.sessionFallback = false;
+    runtime.config.observerModel = { provider: "test-shr", id: "shrink-ser-m" };
+    const registry = fakeRegistry(contextWindow, maxTokens);
+    const baseCtx = ctxWith(entries);
+    const generation = runtime.captureGeneration("test-session");
+    const { makeModelResolver, runObserverStage: runShrinkStage } =
+      await import("../src/om/consolidation.js");
+    const outcome = await runShrinkStage(
+      { appendEntry: vi.fn() } as any,
+      runtime,
+      ctxWith(entries),
+      generation,
+      makeModelResolver(runtime, { ...baseCtx, modelRegistry: registry }, generation),
+    );
+
+    expect(outcome).toBe("continue");
+    expect(runObserverSpy).toHaveBeenCalled();
+    const firstChunk = (runObserverSpy.mock.calls[0][0] as { chunk: string }).chunk;
+    expect(estimateStringTokens(firstChunk)).toBeLessThanOrEqual(shrinkBudget);
+    const tip = entries[entries.length - 1];
+    expect(runtime.getCursor("observer")?.entryId).toBe(tip.id);
+  });
+
+  test("a CJK chunk is priced CJK-aware, not chars/4", async () => {
+    const { WORKER_SAFETY_MARGIN_TOKENS, WORKER_TURN_HEADROOM_TOKENS, workerStaticPromptTokens } =
+      await import("../src/om/prompt-budget.js");
+
+    const staticTokens = workerStaticPromptTokens("observer");
+    const maxTokens = 500;
+    // The input budget lands between the flat chars/4 price (~313) and the
+    // CJK-aware price (~1213) of the same 1200-char chunk, net of static
+    // overhead + turn headroom: the old estimator admits a prompt that
+    // overflows, the CJK-aware one skips it without cooling the model.
+    const contextWindow =
+      staticTokens + WORKER_TURN_HEADROOM_TOKENS + maxTokens + WORKER_SAFETY_MARGIN_TOKENS + 760;
+    const entries = [rawMessage("c0", "中".repeat(1200))];
+
+    // Real resolution: the candidate size-skips, the chain exhausts, and the
+    // single-entry shrink cannot trim further — abort with no model call.
+    const runtime = makeRuntime(1, 1_000_000);
+    runtime.config.sessionFallback = false;
+    runtime.config.observerModel = { provider: "test-shr", id: "cjk-m" };
+    const registry = fakeRegistry(contextWindow, maxTokens);
+    const baseCtx = ctxWith(entries);
+    const generation = runtime.captureGeneration("test-session");
+    const { makeModelResolver, runObserverStage: runCjkStage } =
+      await import("../src/om/consolidation.js");
+    const outcome = await runCjkStage(
+      { appendEntry: vi.fn() } as any,
+      runtime,
+      ctxWith(entries),
+      generation,
+      makeModelResolver(runtime, { ...baseCtx, modelRegistry: registry }, generation),
+    );
 
     expect(outcome).toBe("abort");
     expect(runObserverSpy).not.toHaveBeenCalled();

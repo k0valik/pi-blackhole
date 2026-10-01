@@ -156,7 +156,11 @@ async function runStage(runtime: Runtime, entries: TestEntry[], registry: unknow
 
 describe("dropper shrink-to-fit batching", () => {
   test("a pool the old formula accepted is skipped once the output allowance is priced", async () => {
-    const { entries } = poolBranch(2, 50);
+    // ~11.5k content tokens against a 20k window: the old input-only check
+    // (11.5k + 8000 < 20k) runs the model, but input + the output allowance
+    // cannot share the window. Stored counts stay tiny, so the pool is far
+    // under the fullness threshold either way.
+    const { entries } = poolBranch(2, 5750, 10);
     const runtime = makeRuntime();
     runtime.config.observationsPoolMaxTokens = 1_000_000;
     runtime.config.dropperModel = { provider: "test-shr", id: "drop-out-rsv-m" };
@@ -197,7 +201,7 @@ describe("dropper shrink-to-fit batching", () => {
   });
 
   test("a size mismatch cools nothing: the model is offered again next cycle", async () => {
-    const { entries } = poolBranch(2, 50);
+    const { entries } = poolBranch(2, 5750, 10);
     const runtime = makeRuntime();
     runtime.config.observationsPoolMaxTokens = 1_000_000;
     runtime.config.dropperModel = { provider: "test-shr", id: "drop-nocool-m" };

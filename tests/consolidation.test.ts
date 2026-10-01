@@ -2085,14 +2085,14 @@ describe("observer preamble cap", () => {
     fixture.runtime.config.compaction = "auto";
     fixture.runtime.config.observerPreambleMaxTokens = 500;
     fixture.runtime.config.observerChunkMaxTokens = 10_000;
-    // Small model window: chunk (~600 tokens) + 8k reserve fits in 11k, but
-    // adding the preamble (~500 tokens) and the ~3.3k system prompt does not.
+    // Small model window: chunk (~600 tokens) + 8k reserve fits in 9k, but
+    // adding the preamble (~500 tokens) and the ~3.8k system prompt does not.
     // The old chunk-only guard would have passed this call through.
     fixture.runtime.resolveModel = async () => ({
       ok: true as const,
       source: "candidate" as const,
       candidateConfig: { provider: "test", id: "model" },
-      model: { provider: "test", id: "model", contextWindow: 11_000 },
+      model: { provider: "test", id: "model", contextWindow: 9_000 },
       apiKey: "test",
     });
 

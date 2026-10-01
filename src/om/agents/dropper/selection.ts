@@ -53,10 +53,17 @@ export function maxDropCountForPool(
   if (fullness < skipFullness) return 0;
 
   const cappedFullness = Math.min(DROP_MAX_FULLNESS, Math.max(skipFullness, fullness));
+  const fullnessSpan = DROP_MAX_FULLNESS - skipFullness;
+  if (!(fullnessSpan > 0)) {
+    // Degenerate threshold at/above the max (the loader accepts (0, 1]): the
+    // pool is at/over target, so grant the maximum ratio instead of dividing
+    // by zero (0/0 = NaN slips past every downstream `<= 0` guard and would
+    // silently disable dropping while still spending a model call per cycle).
+    return Math.max(1, Math.floor(droppableCount * DROP_MAX_RATIO));
+  }
   const dropRatio =
     DROP_MIN_RATIO +
-    ((cappedFullness - skipFullness) / (DROP_MAX_FULLNESS - skipFullness)) *
-      (DROP_MAX_RATIO - DROP_MIN_RATIO);
+    ((cappedFullness - skipFullness) / fullnessSpan) * (DROP_MAX_RATIO - DROP_MIN_RATIO);
   return Math.max(1, Math.floor(droppableCount * dropRatio));
 }
 

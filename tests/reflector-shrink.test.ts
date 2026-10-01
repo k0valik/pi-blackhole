@@ -162,15 +162,16 @@ async function runStage(runtime: Runtime, entries: TestEntry[], registry: unknow
 
 describe("reflector shrink-to-fit batching", () => {
   test("a chunk the old formula accepted is skipped once the output allowance is priced", async () => {
-    const { entries } = poolBranch(2, 50);
+    // A single ~11k observation against a 20k window: the old input-only
+    // check (11k + 8000 < 20k) runs the model, but input + the output
+    // allowance cannot share the window. A single item also defeats the
+    // shrink (its lone batch still overflows), so the stage aborts.
+    const { entries } = poolBranch(1, 11_000);
     const runtime = makeRuntime();
     runtime.config.reflectorModel = { provider: "test-shr", id: "ref-out-rsv-m" };
 
     const { outcome } = await runStage(runtime, entries, fakeRegistry(20_000));
 
-    // ~100 tokens of new items against a 20k window: the old input-only
-    // check runs the model, but input + the default 32k output allowance
-    // cannot share the window.
     expect(outcome.outcome).toBe("abort");
     expect(runReflectorSpy).not.toHaveBeenCalled();
   });
@@ -199,7 +200,7 @@ describe("reflector shrink-to-fit batching", () => {
   });
 
   test("a size mismatch cools nothing: the model is offered again next cycle", async () => {
-    const { entries } = poolBranch(2, 50);
+    const { entries } = poolBranch(1, 11_000);
     const runtime = makeRuntime();
     runtime.config.reflectorModel = { provider: "test-shr", id: "ref-nocool-m" };
 

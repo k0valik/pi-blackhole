@@ -12,7 +12,12 @@
  * Static parts are measured once at import from the same objects the agents
  * send (system prompts, tool-schema modules); only genuinely unknowable
  * pre-hoc quantities stay estimated: later-turn tool traffic
- * (WORKER_TURN_HEADROOM_TOKENS) and a small safety margin.
+ * (WORKER_TURN_HEADROOM_TOKENS) and a small safety margin. Variable content
+ * terms (chunk text, observation/reflection contents) use the same CJK-aware
+ * estimateStringTokens at every fit-check — never a flat chars/4, which
+ * under-prices CJK ~3x relative to the measured side. (The measured schema
+ * stringifies without typebox's symbol-keyed markers, so it prices slightly
+ * below what the provider receives — the safe direction.)
  */
 import type { Model } from "@earendil-works/pi-ai";
 import { DROPPER_SYSTEM } from "./agents/dropper/prompts.js";
@@ -76,9 +81,14 @@ export function workerOutputReserveTokens(model: Model<any> | undefined): number
 
 /**
  * Largest prompt-input estimate a model can take: window minus output
- * allowance minus safety margin. Compare the stage's estimated input
+ * allowance minus safety margin. The output allowance is capped at a quarter
+ * of the window: registries reporting maxTokens near (or above) the window —
+ * and small windows that can never host the full allowance — would otherwise
+ * drive the budget zero or negative and silently disable the stages on that
+ * model. Compare the stage's estimated input
  * (content + preamble + static + turn headroom) against this.
  */
-export function workerInputBudget(window: number, model: Model<any>): number {
-  return window - workerOutputReserveTokens(model) - WORKER_SAFETY_MARGIN_TOKENS;
+export function workerInputBudget(window: number, model: Model<any> | undefined): number {
+  const reserve = Math.min(workerOutputReserveTokens(model), Math.floor(window * 0.25));
+  return Math.max(0, window - reserve - WORKER_SAFETY_MARGIN_TOKENS);
 }

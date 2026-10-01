@@ -388,9 +388,29 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   }
 
   // Batch mode: hand the raw proposals to the caller, which merges across
-  // batches and applies the ranker + global cap once. The per-batch debug
-  // entry below still records what this batch proposed.
-  if (args.rawProposals) return proposedDropIds;
+  // batches and applies the ranker + global cap once. Record the per-batch
+  // result first so multi-batch runs keep their audit trail.
+  if (args.rawProposals) {
+    debugLog("dropper.result", {
+      reason: "raw_batch_proposals",
+      toolCallCount,
+      rawRequestedIdsCount,
+      missingIdsCount,
+      criticalCandidateIdsCount,
+      duplicateInRequestCount,
+      duplicateInRunCount,
+      acceptedCandidateCount: proposedDropIds.length,
+      selectedDropsCount: 0,
+      selectedDropTokens: 0,
+      selectedCoverageSummaryByRelevance: summarizeCoverageByRelevanceForIds(
+        [],
+        observations,
+        coverageById,
+      ),
+      maxDropsAllowed,
+    });
+    return proposedDropIds;
+  }
 
   const droppedIds = selectDropCandidates(
     proposedDropIds,

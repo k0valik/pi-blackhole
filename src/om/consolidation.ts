@@ -28,9 +28,8 @@ import {
 import { effectiveContextWindow } from "./model-budget.js";
 import { maxDropCountForPool, selectDropCandidates } from "./agents/dropper/selection.js";
 import {
-  WORKER_SAFETY_MARGIN_TOKENS,
   WORKER_TURN_HEADROOM_TOKENS,
-  workerOutputReserveTokens,
+  workerInputBudget,
   workerStaticPromptTokens,
 } from "./prompt-budget.js";
 import { estimateEntryTokens, estimateStringTokens } from "./tokens.js";
@@ -872,7 +871,7 @@ export async function runObserverStage(
     if (!coversUpToId || coversUpToId === lastSourceEntryId) return "continue";
     return runObserverStage(pi, runtime, ctx, generation, resolveModel, true, drainRemaining - 1);
   };
-  let chunkTokens = Math.ceil(chunk.length / 4);
+  let chunkTokens = estimateStringTokens(chunk);
   // Issue #110 follow-up: expose the post-cap size on the normal path (the
   // exceptional context_window_exceeded path already logs estimatedInput).
   // capTokens is the exact quantity capSourceEntriesToTokens enforced (the
@@ -964,15 +963,22 @@ export async function runObserverStage(
       if (!didShrink && bestFit && !sawAttemptError) {
         const bestModel = bestFit.resolved.model as any;
         const shrinkBudget =
-          bestFit.ctx -
+          workerInputBudget(bestFit.ctx, bestModel) -
           observerStaticTokens -
           preambleTokens -
-          WORKER_TURN_HEADROOM_TOKENS -
-          workerOutputReserveTokens(bestModel) -
-          WORKER_SAFETY_MARGIN_TOKENS;
+          WORKER_TURN_HEADROOM_TOKENS;
         if (shrinkBudget <= 0) return "abort";
-        const shrunkEntries = capSourceEntriesToTokens(allChunkEntries, shrinkBudget);
-        const shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
+        let shrunkEntries = capSourceEntriesToTokens(allChunkEntries, shrinkBudget);
+        let shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
+        // The fit check prices the serialized chunk (per-entry headers + role
+        // framing + separators), not the raw per-entry estimate the cap
+        // enforces — trim from the tail until the serialized size fits,
+        // retaining at least one entry so a single oversized first entry can
+        // still make progress.
+        while (shrunkEntries.length > 1 && estimateStringTokens(shrunk.text) > shrinkBudget) {
+          shrunkEntries = shrunkEntries.slice(0, -1);
+          shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
+        }
         const shrunkCover = shrunk.sourceEntryIds.at(-1);
         if (!shrunkCover || !shrunk.text.trim()) return "abort";
         chunkEntries = shrunkEntries;
@@ -980,7 +986,7 @@ export async function runObserverStage(
         sourceEntryIds = shrunk.sourceEntryIds;
         sourceEntryTimestamps = shrunk.sourceEntryTimestamps;
         coversUpToId = shrunkCover;
-        chunkTokens = Math.ceil(chunk.length / 4);
+        chunkTokens = estimateStringTokens(chunk);
         capTokens = chunkEntries.reduce((s: number, e) => s + estimateEntryTokens(e), 0);
         didShrink = true;
         // The shrunk chunk has a new coverage point: re-check the manual-mode
@@ -1051,10 +1057,7 @@ export async function runObserverStage(
     if (!bestFit || effectiveObsCtx > bestFit.ctx) bestFit = { resolved, ctx: effectiveObsCtx };
     const observerEstimatedInput =
       chunkTokens + preambleTokens + observerStaticTokens + WORKER_TURN_HEADROOM_TOKENS;
-    const observerInputBudget =
-      effectiveObsCtx -
-      workerOutputReserveTokens(resolved.model as any) -
-      WORKER_SAFETY_MARGIN_TOKENS;
+    const observerInputBudget = workerInputBudget(effectiveObsCtx, resolved.model as any);
     if (observerEstimatedInput > observerInputBudget) {
       debugLog("observer.context_window_exceeded", {
         estimatedInput: observerEstimatedInput,
@@ -1302,11 +1305,9 @@ function computeReflectorInput(
     ? pendingObservationsCreatedAfter(pending, entries, pending.reflection?.coversUpToId)
     : observationsCreatedAfterIndex(entries, lastReflectionIdx);
   const newReflections = pending ? [] : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
-  const newItemsTokens = Math.ceil(
-    (newObservations.reduce((s: number, o: any) => s + o.content.length, 0) +
-      newReflections.reduce((s: number, r: any) => s + r.content.length, 0)) /
-      4,
-  );
+  const newItemsTokens =
+    newObservations.reduce((s: number, o: any) => s + estimateStringTokens(o.content), 0) +
+    newReflections.reduce((s: number, r: any) => s + estimateStringTokens(r.content), 0);
   const summaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
   const reflectorInputTokens = Math.min(
     newItemsTokens + summaryBudget,
@@ -1509,21 +1510,21 @@ export async function runReflectorStage(
     // New reflections travel whole in every batch, so they ride in the fixed
     // per-batch overhead alongside the summaries (mirroring the normal-path
     // fit-check, which prices them inside newItemsTokens).
-    const newReflectionsTokens = Math.ceil(
-      input.newReflections.reduce((s: number, r: any) => s + r.content.length, 0) / 4,
+    const newReflectionsTokens = input.newReflections.reduce(
+      (s: number, r: any) => s + estimateStringTokens(r.content),
+      0,
     );
     const batchFixedOverhead =
       input.summaryTokens +
       newReflectionsTokens +
       reflectorStaticTokens +
       WORKER_TURN_HEADROOM_TOKENS;
-    const batchBudget =
-      best.ctx - workerOutputReserveTokens(bestModel) - WORKER_SAFETY_MARGIN_TOKENS;
+    const batchBudget = workerInputBudget(best.ctx, bestModel);
     const itemBudget = batchBudget - batchFixedOverhead;
     if (itemBudget <= 0) return { outcome: "abort", sameRunReflections: [] };
     const batches = planPrefixBatches(
       input.newObservations,
-      (o) => Math.ceil(o.content.length / 4),
+      (o) => estimateStringTokens(o.content),
       itemBudget,
     );
     if (input.newObservations.length > 0) {
@@ -1534,7 +1535,7 @@ export async function runReflectorStage(
       // retry every cycle. Abort upfront when any batch overflows.
       const oversized = batches.find(
         (batch) =>
-          batch.reduce((s, o) => s + Math.ceil(o.content.length / 4), 0) + batchFixedOverhead >
+          batch.reduce((s, o) => s + estimateStringTokens(o.content), 0) + batchFixedOverhead >
           batchBudget,
       );
       if (oversized) return { outcome: "abort", sameRunReflections: [] };
@@ -1671,10 +1672,7 @@ export async function runReflectorStage(
       input.summaryTokens +
       reflectorStaticTokens +
       WORKER_TURN_HEADROOM_TOKENS;
-    const reflectorInputBudget =
-      effectiveRefCtx -
-      workerOutputReserveTokens(resolved.model as any) -
-      WORKER_SAFETY_MARGIN_TOKENS;
+    const reflectorInputBudget = workerInputBudget(effectiveRefCtx, resolved.model as any);
     if (reflectorEstimatedInput > reflectorInputBudget) {
       debugLog("reflector.context_window_exceeded", {
         estimatedInput: reflectorEstimatedInput,
@@ -1810,8 +1808,9 @@ function computeDropperInput(
     : pending
       ? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
       : observationsCreatedAfterIndex(entries, lastDropIdx);
-  const dropperNewObsTokens = Math.ceil(
-    newObservations.reduce((s: number, o: any) => s + o.content.length, 0) / 4,
+  const dropperNewObsTokens = newObservations.reduce(
+    (s: number, o: any) => s + estimateStringTokens(o.content),
+    0,
   );
   const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
   // Deliberately uncapped: the prompt carries every candidate observation, so
@@ -1975,10 +1974,12 @@ export async function runDropperStage(
   const dropperStaticTokens = workerStaticPromptTokens("dropper");
   // Reflections travel whole in every prompt (normal and batched), so they
   // ride in the estimated input alongside the candidates — mirroring the
-  // reflector's newItemsTokens, which prices both. Content-length/4 matches
-  // the existing candidate approximation (line wrappers ride in the margin).
-  const dropperReflectionsTokens = Math.ceil(
-    input.reflectionsForDropper.reduce((s: number, r: any) => s + r.content.length, 0) / 4,
+  // reflector's newItemsTokens, which prices both. All content terms use the
+  // same CJK-aware estimator as the static side (line wrappers ride in the
+  // margin).
+  const dropperReflectionsTokens = input.reflectionsForDropper.reduce(
+    (s: number, r: any) => s + estimateStringTokens(r.content),
+    0,
   );
 
   // Shared commit tail: normal and batched runs both advance the cursor at
@@ -2050,19 +2051,22 @@ export async function runDropperStage(
     // Fast path: nothing in the pool is droppable (all-critical, or an
     // under-target cadence delta). Commit the empty result without spending
     // model calls — batching a no-drop pool would only re-prove the cap.
+    // This binds no model-dependent verdict: globalMaxDrops derives from the
+    // pool and config alone (stored counts, pool budget, threshold), never
+    // from a window, so a later larger model cannot change it — only a pool
+    // change (new signature) re-arms the run.
     if (globalMaxDrops <= 0) return commitDropperResult(undefined);
     const batchFixedOverhead =
       input.summaryTokens +
       dropperReflectionsTokens +
       dropperStaticTokens +
       WORKER_TURN_HEADROOM_TOKENS;
-    const batchBudget =
-      best.ctx - workerOutputReserveTokens(bestModel) - WORKER_SAFETY_MARGIN_TOKENS;
+    const batchBudget = workerInputBudget(best.ctx, bestModel);
     const itemBudget = batchBudget - batchFixedOverhead;
     if (itemBudget <= 0) return "abort";
     const batches = planPrefixBatches(
       input.newObservations,
-      (o) => Math.ceil(o.content.length / 4),
+      (o) => estimateStringTokens(o.content),
       itemBudget,
     );
     if (input.newObservations.length > 0) {
@@ -2071,7 +2075,7 @@ export async function runDropperStage(
       // the whole run into an identical retry every cycle. Abort upfront.
       const oversized = batches.find(
         (batch) =>
-          batch.reduce((s, o) => s + Math.ceil(o.content.length / 4), 0) + batchFixedOverhead >
+          batch.reduce((s, o) => s + estimateStringTokens(o.content), 0) + batchFixedOverhead >
           batchBudget,
       );
       if (oversized) return "abort";
@@ -2208,10 +2212,7 @@ export async function runDropperStage(
       input.summaryTokens +
       dropperStaticTokens +
       WORKER_TURN_HEADROOM_TOKENS;
-    const dropperInputBudget =
-      effectiveDropCtx -
-      workerOutputReserveTokens(resolved.model as any) -
-      WORKER_SAFETY_MARGIN_TOKENS;
+    const dropperInputBudget = workerInputBudget(effectiveDropCtx, resolved.model as any);
     if (dropperEstimatedInput > dropperInputBudget) {
       debugLog("dropper.context_window_exceeded", {
         estimatedInput: dropperEstimatedInput,
