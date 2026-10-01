@@ -2209,12 +2209,16 @@ describe("dropper pressure valve", () => {
     fixture.runtime.config.dropperModel = { provider: "test", id: "primary", cooldownHours: 0 };
     fixture.runtime.config.dropperFallbackModels = [{ provider: "test", id: "fallback" }];
     let resolutionCount = 0;
+    // Registry models carry their maxTokens (boundedMaxTokens caps generation
+    // at it): the fit-check prices input against window minus output, so the
+    // fixture states both like production registries do. An omitted maxTokens
+    // would reserve the 32k maximum and fit neither window here.
     const resolveModel = vi.fn(async () => ({
       ok: true as const,
       model:
         resolutionCount++ === 0
-          ? { provider: "test", id: "primary", contextWindow: 10_000 }
-          : { provider: "test", id: "fallback", contextWindow: 20_000 },
+          ? { provider: "test", id: "primary", contextWindow: 10_000, maxTokens: 2000 }
+          : { provider: "test", id: "fallback", contextWindow: 20_000, maxTokens: 4000 },
       apiKey: "test",
     }));
     fixture.runtime.resolveModel = resolveModel;
