@@ -22,8 +22,6 @@ import {
   type ProviderFetchOption,
 } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { Type } from "typebox";
-import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
 import {
   withDiscardedCount,
@@ -98,12 +96,7 @@ const RELEVANCE_DROP_RANK: Record<Observation["relevance"], number> = {
   critical: 3,
 };
 
-const DropObservationsSchema = Type.Object({
-  ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  reason: Type.Optional(Type.String()),
-});
-
-type DropObservationsArgs = Static<typeof DropObservationsSchema>;
+import { DropObservationsSchema, type DropObservationsArgs } from "./tool-schema.js";
 
 function joinOrEmpty(items: string[]): string {
   return items.length ? items.join("\n") : "(none yet)";

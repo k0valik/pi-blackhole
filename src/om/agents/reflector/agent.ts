@@ -23,12 +23,11 @@ import {
   type ProviderFetchOption,
 } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { Type } from "typebox";
-import type { Static } from "typebox";
 import { hashId } from "../../ids.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { truncateRecordContent } from "../../serialize.js";
 import { REFLECTOR_SYSTEM } from "./prompts.js";
+import { RecordReflectionsSchema, type RecordReflectionsArgs } from "./tool-schema.js";
 import { estimateStringTokens } from "../../tokens.js";
 import {
   observationToSummaryLine,
@@ -80,29 +79,6 @@ interface RunReflectorArgs {
    */
   cacheRetention?: CacheRetention;
 }
-
-const RecordReflectionsSchema = Type.Object({
-  reflections: Type.Array(
-    Type.Object({
-      content: Type.String({ minLength: 1 }),
-      supportingObservationIds: Type.Array(Type.String({ minLength: 1 }), {
-        minItems: 1,
-      }),
-    }),
-    { minItems: 1 },
-  ),
-  // Optional on purpose: a model that omits the flag must lose only the
-  // early-stop hint, never the batch itself (a required field would fail
-  // host-side validation and drop every reflection in the call).
-  complete: Type.Optional(
-    Type.Boolean({
-      description:
-        "Whether this batch completes reflection review. Set false when more reflections or corrections remain.",
-    }),
-  ),
-});
-
-type RecordReflectionsArgs = Static<typeof RecordReflectionsSchema>;
 
 function joinOrEmpty(items: string[]): string {
   return items.length ? items.join("\n") : "(none yet)";
