@@ -1246,9 +1246,119 @@ export async function runObserverStage(
   return "abort";
 }
 
+/**
+ * Greedy oldest-first partition of sized items into contiguous batches that
+ * each fit `budget`. The first item always starts the first batch even when
+ * oversized on its own (prefix-guard semantics, mirroring
+ * capSourceEntriesToTokens) — the caller treats an over-budget first batch
+ * as unplannable and aborts. Order is preserved; per-item wrapper overhead
+ * (summary-line headers etc.) rides in the caller's fixed overhead.
+ */
+function planPrefixBatches<T>(
+  items: readonly T[],
+  tokenOf: (item: T) => number,
+  budget: number,
+): T[][] {
+  const batches: T[][] = [];
+  let batch: T[] = [];
+  let used = 0;
+  for (const item of items) {
+    const tokens = tokenOf(item);
+    if (batch.length > 0 && used + tokens > budget) {
+      batches.push(batch);
+      batch = [];
+      used = 0;
+    }
+    batch.push(item);
+    used += tokens;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+/**
+ * Snapshot of everything one reflector run needs from the branch: computed
+ * once per stage invocation (entries are fixed for the run) and shared by
+ * the normal attempt loop and the shrink-to-fit batch pass.
+ */
+function computeReflectorInput(
+  runtime: Runtime,
+  entries: Entry[],
+  sessionId: string,
+  reflectionTokens: number,
+) {
+  const folded = foldLedger(entries);
+  const pending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
+  const lastReflectionIdx = pending ? -1 : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
+  const newObservations = pending
+    ? pendingObservationsCreatedAfter(pending, entries, pending.reflection?.coversUpToId)
+    : observationsCreatedAfterIndex(entries, lastReflectionIdx);
+  const newReflections = pending ? [] : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
+  const newItemsTokens = Math.ceil(
+    (newObservations.reduce((s: number, o: any) => s + o.content.length, 0) +
+      newReflections.reduce((s: number, r: any) => s + r.content.length, 0)) /
+      4,
+  );
+  const summaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
+  const reflectorInputTokens = Math.min(
+    newItemsTokens + summaryBudget,
+    runtime.config.reflectorInputMaxTokens,
+  );
+  // Adjust accumulated for pending coverage in manual mode
+  let effectiveReflectionTokens = reflectionTokens;
+  if (isManualMode(runtime.config)) {
+    if (pending?.reflection?.coversUpToId) {
+      const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
+      if (idx >= 0) effectiveReflectionTokens = rawTokensAfterIndex(entries, idx);
+    }
+  }
+  // Existing memory summaries for context (capped).
+  // In manual mode, merge accumulated pending batches with
+  // branch data (preserving pre-switch markers).
+  const sourceReflections = pending
+    ? [
+        ...folded.reflections,
+        ...(pending.reflectionBatches ?? []).flatMap(
+          (b: any) => (b.data as any)?.reflections ?? [],
+        ),
+      ]
+    : folded.reflections;
+  const sourceObservations = pending
+    ? [
+        ...folded.activeObservations,
+        ...(pending.observationBatches ?? []).flatMap(
+          (b: any) => (b.data as any)?.observations ?? [],
+        ),
+      ]
+    : folded.activeObservations;
+  const existingReflectionsSummary = buildExistingReflectionsSummary(
+    sourceReflections,
+    Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
+  );
+  const existingObservationsSummary = buildExistingObservationsSummary(
+    sourceObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
+    Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
+  );
+  const summaryTokens = estimateStringTokens(
+    `${existingReflectionsSummary}\n${existingObservationsSummary}`,
+  );
+  return {
+    folded,
+    pending,
+    newObservations,
+    newReflections,
+    newItemsTokens,
+    reflectorInputTokens,
+    effectiveReflectionTokens,
+    existingReflectionsSummary,
+    existingObservationsSummary,
+    summaryTokens,
+  };
+}
+
 // ── Reflector stage (with fallback) ─────────────────────────────────────────
 
-async function runReflectorStage(
+export async function runReflectorStage(
   pi: ExtensionAPI,
   runtime: Runtime,
   ctx: ConsolidationCtx,
@@ -1313,47 +1423,194 @@ async function runReflectorStage(
     }
   }
 
-  for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
-    const resolved = await resolveModel("reflector");
-    if (!runtime.isGenerationActive(generation) || !resolved)
-      return { outcome: "abort", sameRunReflections: [] };
+  // Snapshot the run input once: entries are fixed for this invocation, and
+  // both the attempt loop and the shrink-to-fit batch pass share it.
+  const input = computeReflectorInput(runtime, entries, sessionId, reflectionTokens);
+  const reflectorStaticTokens = workerStaticPromptTokens("reflector");
 
-    // Compute ahead for an accurate notification
-    const folded = foldLedger(entries);
-    const pending = isManualMode(runtime.config) ? readPendingState(sessionId) : undefined;
-    const lastReflectionIdx = pending ? -1 : latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
-    const newObservations = pending
-      ? pendingObservationsCreatedAfter(pending, entries, pending.reflection?.coversUpToId)
-      : observationsCreatedAfterIndex(entries, lastReflectionIdx);
-    const newReflections = pending ? [] : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
-    const newItemsTokens = Math.ceil(
-      (newObservations.reduce((s: number, o: any) => s + o.content.length, 0) +
-        newReflections.reduce((s: number, r: any) => s + r.content.length, 0)) /
-        4,
-    );
-    const summaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
-    const reflectorInputTokens = Math.min(
-      newItemsTokens + summaryBudget,
-      runtime.config.reflectorInputMaxTokens,
-    );
-    // Adjust accumulated for pending coverage in manual mode
-    let effectiveReflectionTokens = reflectionTokens;
+  // Shared commit tail: normal and batched runs both advance the cursor at
+  // most once, after all work for this invocation is done.
+  const commitReflectorResult = (
+    reflections: Reflection[] | undefined,
+    errorText: string | undefined,
+    resolved: ResolvedModel,
+  ): ReflectorStageResult => {
+    if (errorText) {
+      handleWorkerErrorAfterClose({
+        runtime,
+        ctx,
+        stage: "reflector",
+        worker: "Reflector",
+        keptNoun: "completed review",
+        errorText,
+        resolved,
+        stageModelForThinking:
+          resolved.source === "candidate" ? resolved.candidateConfig : undefined,
+        coverageId: observationCoverageId,
+      });
+    }
+    if (!reflections || reflections.length === 0) {
+      runtime.advanceCursor(
+        "reflector",
+        observationCoverageId ?? entries.at(-1)?.id ?? "unknown",
+        "empty",
+      );
+      return { outcome: "continue", sameRunReflections: [] };
+    }
+    if (!observationCoverageId) {
+      runtime.advanceCursor("reflector", entries.at(-1)?.id ?? "unknown", "empty");
+      return { outcome: "continue", sameRunReflections: [] };
+    }
+    const data = buildReflectionsRecordedData(reflections, observationCoverageId);
+    if (!data) {
+      runtime.advanceCursor("reflector", observationCoverageId, "empty");
+      return { outcome: "continue", sameRunReflections: [] };
+    }
     if (isManualMode(runtime.config)) {
-      if (pending?.reflection?.coversUpToId) {
-        const idx = entryIndexForId(entries, pending.reflection.coversUpToId);
-        if (idx >= 0) effectiveReflectionTokens = rawTokensAfterIndex(entries, idx);
+      savePendingReflection(sessionId, {
+        coversUpToId: data.coversUpToId,
+        data,
+      });
+    } else {
+      if (!appendEntry(pi, runtime, generation, OM_REFLECTIONS_RECORDED, data)) {
+        return { outcome: "abort", sameRunReflections: [] };
       }
     }
+    runtime.advanceCursor("reflector", data.coversUpToId, "recorded");
+    return {
+      outcome: "continue",
+      sameRunReflections: reflections,
+      effectiveReflectionCoverageId: data.coversUpToId,
+    };
+  };
+
+  // Shrink-to-fit batching: partition the new observations into contiguous
+  // batches that each fit the largest resolved window, run them all with that
+  // model, merge, and commit once. Any batch failure voids the whole run with
+  // the cursor unmoved (a partial commit would advance coverage over
+  // unreviewed observations). New reflections travel whole in every batch:
+  // they are prior-cycle outputs, bounded in practice, and splitting them
+  // would change review semantics.
+  const runShrunkBatches = async (best: {
+    resolved: ResolvedModel;
+    ctx: number;
+  }): Promise<ReflectorStageResult> => {
+    const bestModel = best.resolved.model as any;
+    const stageModelForBatch =
+      best.resolved.source === "candidate" ? best.resolved.candidateConfig : undefined;
+    const batchFixedOverhead =
+      input.summaryTokens + reflectorStaticTokens + WORKER_TURN_HEADROOM_TOKENS;
+    const batchBudget =
+      best.ctx - workerOutputReserveTokens(bestModel) - WORKER_SAFETY_MARGIN_TOKENS;
+    const itemBudget = batchBudget - batchFixedOverhead;
+    if (itemBudget <= 0) return { outcome: "abort", sameRunReflections: [] };
+    const batches = planPrefixBatches(
+      input.newObservations,
+      (o) => Math.ceil(o.content.length / 4),
+      itemBudget,
+    );
+    const firstBatchItems =
+      batches.length > 0 ? batches[0].reduce((s, o) => s + Math.ceil(o.content.length / 4), 0) : 0;
+    if (input.newObservations.length > 0 && firstBatchItems + batchFixedOverhead > batchBudget) {
+      // A single leading observation exceeds the window: nothing plannable.
+      return { outcome: "abort", sameRunReflections: [] };
+    }
+    const planned = batches.length > 0 ? batches : [[] as Observation[]];
+    runtime.tryEmitWorkerInfo(
+      ctx.hasUI,
+      ctx.ui,
+      `Observational memory: reflector batching ${input.newObservations.length} observations into ${planned.length} fit-to-window batches on ${bestModel.provider}/${bestModel.id}`,
+    );
+    let merged: Reflection[] = [];
+    let firstError: string | undefined;
+    for (const batch of planned) {
+      if (!runtime.isGenerationActive(generation))
+        return { outcome: "abort", sameRunReflections: [] };
+      try {
+        const { runReflector } = await import("./agents/reflector/agent.js");
+        const result = await runWorkerAttempt(
+          "reflector",
+          runtime.config.workerAttemptTimeoutMs,
+          generation.signal,
+          (signal) =>
+            runReflector({
+              model: bestModel,
+              apiKey: best.resolved.apiKey,
+              headers: withProviderAttributionHeaders(bestModel, best.resolved.headers, sessionId),
+              env: best.resolved.env,
+              reflections: input.newReflections,
+              observations: batch,
+              existingReflectionsSummary: input.existingReflectionsSummary || undefined,
+              existingObservationsSummary: input.existingObservationsSummary || undefined,
+              maxTurns: runtime.config.agentMaxTurns,
+              thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForBatch),
+              providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
+              signal,
+              modelRegistry: ctx.modelRegistry,
+              sessionId,
+              cacheRetention: runtime.config.cacheRetention,
+            }),
+        );
+        if (!runtime.isGenerationActive(generation))
+          return { outcome: "abort", sameRunReflections: [] };
+        if (result.errorAfterClose !== undefined && firstError === undefined) {
+          firstError = result.errorAfterClose;
+        }
+        merged = mergeReflections(merged, result.reflections ?? []);
+      } catch (error) {
+        if (!runtime.isGenerationActive(generation))
+          return { outcome: "abort", sameRunReflections: [] };
+        if (isStaleExtensionContextError(error)) {
+          debugLog("reflector.stale_ctx", { error: String(error) });
+          return { outcome: "abort", sameRunReflections: [] };
+        }
+        // Batch failure voids the run with the cursor unmoved; the next cycle
+        // retries the whole input. Classified like a normal attempt failure so
+        // cooldowns and the retry gate behave identically.
+        const candidateConfig = stageModelForBatch;
+        runtime.recordRetryableError(candidateConfig, error, "reflector");
+        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+        debugLog("reflector.error", {
+          error: String(error),
+          retryable: isRetryableError(error),
+          deterministic: isDeterministicError(error),
+          cooldownWorthy: isCooldownWorthyError(error),
+          discardedCount: getDiscardedCount(error),
+        });
+        runtime.recordConsolidationStageError(ctx, "reflector", error);
+        return { outcome: "abort", sameRunReflections: [] };
+      }
+    }
+    return commitReflectorResult(merged.length > 0 ? merged : undefined, firstError, best.resolved);
+  };
+
+  // Largest-window model resolved so far (shrink target) and whether any
+  // attempt ran a model and failed (which keeps error semantics owning the
+  // outcome — the shrink pass only triggers on a pure size-mismatch record).
+  let bestFit: { resolved: ResolvedModel; ctx: number } | undefined;
+  let sawAttemptError = false;
+
+  for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
+    const resolved = await resolveModel("reflector");
+    if (!runtime.isGenerationActive(generation))
+      return { outcome: "abort", sameRunReflections: [] };
+    if (!resolved) {
+      // Total exhaustion on a pure size-mismatch record: batch the input to
+      // the largest resolved window and commit once, instead of aborting.
+      if (bestFit && !sawAttemptError) return runShrunkBatches(bestFit);
+      return { outcome: "abort", sameRunReflections: [] };
+    }
+
     debugLog("reflector.start", {
-      tokens: effectiveReflectionTokens,
-      inputTokens: reflectorInputTokens,
-      newObsCount: newObservations.length,
-      newRefCount: newReflections.length,
+      tokens: input.effectiveReflectionTokens,
+      inputTokens: input.reflectorInputTokens,
+      newObsCount: input.newObservations.length,
+      newRefCount: input.newReflections.length,
     });
     runtime.tryEmitWorkerInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: reflector running (~${effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${reflectorInputTokens.toLocaleString()}-token input)`,
+      `Observational memory: reflector running (~${input.effectiveReflectionTokens.toLocaleString()} tokens accumulated, ~${input.reflectorInputTokens.toLocaleString()}-token input)`,
     );
 
     // Candidate provenance is captured during resolution so a settings reload
@@ -1361,22 +1618,40 @@ async function runReflectorStage(
     const stageModelForThinking =
       resolved.source === "candidate" ? resolved.candidateConfig : undefined;
 
-    // Check if estimated input fits in model's context window
-    // Use actual computed input size (new items + summary budget) instead of cap
+    // Check if the full estimated prompt fits in the model's context window:
+    // new items + actual (capped) summaries + measured static overhead
+    // (system, the one tool schema, framing) + headroom for later tool turns,
+    // against the window minus the output allowance and a safety margin.
     const effectiveRefCtx = effectiveContextWindow(resolved.model as any, stageModelForThinking);
-    const reflectorEstimatedInput = reflectorInputTokens + AGENT_LOOP_RESERVE;
-    if (reflectorEstimatedInput > effectiveRefCtx) {
+    if (!bestFit || effectiveRefCtx > bestFit.ctx) bestFit = { resolved, ctx: effectiveRefCtx };
+    const reflectorEstimatedInput =
+      input.newItemsTokens +
+      input.summaryTokens +
+      reflectorStaticTokens +
+      WORKER_TURN_HEADROOM_TOKENS;
+    const reflectorInputBudget =
+      effectiveRefCtx -
+      workerOutputReserveTokens(resolved.model as any) -
+      WORKER_SAFETY_MARGIN_TOKENS;
+    if (reflectorEstimatedInput > reflectorInputBudget) {
       debugLog("reflector.context_window_exceeded", {
         estimatedInput: reflectorEstimatedInput,
+        inputBudget: reflectorInputBudget,
+        newItemsTokens: input.newItemsTokens,
+        summaryTokens: input.summaryTokens,
+        staticTokens: reflectorStaticTokens,
         effectiveCtx: effectiveRefCtx,
         model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`,
       });
-      runtime.recordRetryableError(
-        stageModelForThinking,
-        new Error(
-          `context window ${effectiveRefCtx} too small for estimated input ${reflectorEstimatedInput}`,
-        ),
-        "reflector",
+      // Size-skip only: a too-small window is not a broken model, so this
+      // never writes a persisted cooldown. The in-cycle skip advances the
+      // fallback chain within this run.
+      const resolvedIdentity = resolved.model as { provider?: unknown; id?: unknown };
+      runtime.skipOversizedForCycle(
+        stageModelForThinking ??
+          (typeof resolvedIdentity.provider === "string" && typeof resolvedIdentity.id === "string"
+            ? { provider: resolvedIdentity.provider, id: resolvedIdentity.id }
+            : undefined),
       );
       runtime.tryEmitInfo(
         ctx.hasUI,
@@ -1387,34 +1662,6 @@ async function runReflectorStage(
     }
 
     try {
-      // Existing memory summaries for context (capped).
-      // In manual mode, merge accumulated pending batches with
-      // branch data (preserving pre-switch markers).
-      const sourceReflections = pending
-        ? [
-            ...folded.reflections,
-            ...(pending.reflectionBatches ?? []).flatMap(
-              (b: any) => (b.data as any)?.reflections ?? [],
-            ),
-          ]
-        : folded.reflections;
-      const sourceObservations = pending
-        ? [
-            ...folded.activeObservations,
-            ...(pending.observationBatches ?? []).flatMap(
-              (b: any) => (b.data as any)?.observations ?? [],
-            ),
-          ]
-        : folded.activeObservations;
-      const existingReflectionsSummary = buildExistingReflectionsSummary(
-        sourceReflections,
-        Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
-      );
-      const existingObservationsSummary = buildExistingObservationsSummary(
-        sourceObservations.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
-        Math.floor(runtime.config.reflectorInputMaxTokens * 0.15),
-      );
-
       const { runReflector } = await import("./agents/reflector/agent.js");
       const result = await runWorkerAttempt(
         "reflector",
@@ -1430,10 +1677,10 @@ async function runReflectorStage(
               sessionId,
             ),
             env: resolved.env,
-            reflections: newReflections,
-            observations: newObservations,
-            existingReflectionsSummary: existingReflectionsSummary || undefined,
-            existingObservationsSummary: existingObservationsSummary || undefined,
+            reflections: input.newReflections,
+            observations: input.newObservations,
+            existingReflectionsSummary: input.existingReflectionsSummary || undefined,
+            existingObservationsSummary: input.existingObservationsSummary || undefined,
             maxTurns: runtime.config.agentMaxTurns,
             thinkingLevel: stageThinkingLevel(runtime, "reflector", stageModelForThinking),
             providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
@@ -1446,58 +1693,7 @@ async function runReflectorStage(
       if (!runtime.isGenerationActive(generation))
         return { outcome: "abort", sameRunReflections: [] };
 
-      // A kept close carries the trailing failure with it (mirroring the
-      // observer): transient warns only, deterministic cools the model so the
-      // next cycle falls back instead of burning one more full attempt.
-      if (result.errorAfterClose) {
-        handleWorkerErrorAfterClose({
-          runtime,
-          ctx,
-          stage: "reflector",
-          worker: "Reflector",
-          keptNoun: "completed review",
-          errorText: result.errorAfterClose,
-          resolved,
-          stageModelForThinking,
-          coverageId: observationCoverageId,
-        });
-      }
-
-      const reflections = result.reflections;
-      if (!reflections || reflections.length === 0) {
-        runtime.advanceCursor(
-          "reflector",
-          observationCoverageId ?? entries.at(-1)?.id ?? "unknown",
-          "empty",
-        );
-        return { outcome: "continue", sameRunReflections: [] };
-      }
-      if (!observationCoverageId) {
-        runtime.advanceCursor("reflector", entries.at(-1)?.id ?? "unknown", "empty");
-        return { outcome: "continue", sameRunReflections: [] };
-      }
-
-      const data = buildReflectionsRecordedData(reflections, observationCoverageId);
-      if (!data) {
-        runtime.advanceCursor("reflector", observationCoverageId, "empty");
-        return { outcome: "continue", sameRunReflections: [] };
-      }
-      if (isManualMode(runtime.config)) {
-        savePendingReflection(sessionId, {
-          coversUpToId: data.coversUpToId,
-          data,
-        });
-      } else {
-        if (!appendEntry(pi, runtime, generation, OM_REFLECTIONS_RECORDED, data)) {
-          return { outcome: "abort", sameRunReflections: [] };
-        }
-      }
-      runtime.advanceCursor("reflector", data.coversUpToId, "recorded");
-      return {
-        outcome: "continue",
-        sameRunReflections: reflections,
-        effectiveReflectionCoverageId: data.coversUpToId,
-      };
+      return commitReflectorResult(result.reflections, result.errorAfterClose, resolved);
     } catch (error) {
       if (!runtime.isGenerationActive(generation))
         return { outcome: "abort", sameRunReflections: [] };
@@ -1505,6 +1701,9 @@ async function runReflectorStage(
         debugLog("reflector.stale_ctx", { error: String(error) });
         return { outcome: "abort", sameRunReflections: [] };
       }
+      // Any error reaching this point ran a model that fit: error semantics
+      // own the outcome from here, so the shrink-to-fit pass stays out.
+      sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "reflector");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
