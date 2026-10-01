@@ -22,12 +22,6 @@
  * ends the run after a tool receipt leaves a `toolResult` (no stopReason) at
  * the tail, and the decision lives on the assistant message behind it.
  */
-/**
- * The last message the host gave a `stopReason` to, if any. Reverse-found: a
- * host that ends the run after a tool receipt leaves a `stopReason`-less
- * `toolResult` at the tail, and the decision lives on the assistant message
- * behind it.
- */
 function lastMessageWithStopReason<T extends { stopReason?: string }>(
   messages: readonly T[],
 ): T | undefined {

@@ -122,7 +122,10 @@ afterEach(() => {
 describe("measured worker prompt budget", () => {
   test("the observer static overhead is measured and far below the flat reserve", async () => {
     const { workerStaticPromptTokens } = await import("../src/om/prompt-budget.js");
-    const { AGENT_LOOP_RESERVE } = await import("../src/om/consolidation.js");
+    // The former flat reserve lived in consolidation.ts as AGENT_LOOP_RESERVE
+    // (8000); it is removed now that the budget is measured, so the baseline
+    // is hardcoded here.
+    const FLAT_RESERVE = 8_000;
     const { OBSERVER_SYSTEM } = await import("../src/om/agents/observer/prompts.js");
     const { estimateStringTokens } = await import("../src/om/tokens.js");
 
@@ -133,7 +136,7 @@ describe("measured worker prompt budget", () => {
     // exceeds the system prompt alone) and the total must free budget versus
     // the flat reserve it replaces.
     expect(overhead).toBeGreaterThan(systemTokens);
-    expect(overhead).toBeLessThan(AGENT_LOOP_RESERVE);
+    expect(overhead).toBeLessThan(FLAT_RESERVE);
     expect(workerStaticPromptTokens("observer")).toBe(overhead);
   });
 

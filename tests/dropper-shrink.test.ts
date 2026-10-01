@@ -163,7 +163,10 @@ describe("dropper shrink-to-fit batching", () => {
 
     const { outcome } = await runStage(runtime, entries, fakeRegistry(20_000));
 
-    expect(outcome).toBe("abort");
+    // Nothing in the pool is droppable (far under the fullness threshold),
+    // so the stage commits empty without spending model calls — even though
+    // no model fits the input.
+    expect(outcome).toBe("continue");
     expect(runDropperSpy).not.toHaveBeenCalled();
   });
 
@@ -201,7 +204,9 @@ describe("dropper shrink-to-fit batching", () => {
 
     const { outcome } = await runStage(runtime, entries, fakeRegistry(20_000));
 
-    expect(outcome).toBe("abort");
+    // Settles instead of wedging: the under-target pool commits empty (no
+    // model call, no cooldown), so the model stays available next cycle.
+    expect(outcome).toBe("continue");
     expect(runDropperSpy).not.toHaveBeenCalled();
     expect(recordCooldownSpy).not.toHaveBeenCalled();
   });

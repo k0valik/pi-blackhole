@@ -714,7 +714,8 @@ export class Runtime {
    * When cooldownHours is explicitly 0, the model is tracked in-memory for the
    * current consolidation stage (no disk writes). Otherwise a persisted cooldown
    * is recorded.
-   */ recordRetryableError(
+   */
+  recordRetryableError(
     modelConfig: ConfiguredModel | undefined,
     error: unknown,
     stage: ConsolidationPhase,

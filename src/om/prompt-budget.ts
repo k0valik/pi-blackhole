@@ -34,7 +34,10 @@ export type WorkerPromptStage = "observer" | "reflector" | "dropper";
  */
 export const WORKER_FRAMING_TOKENS = 256;
 
-/** Headroom for turns after the first (tool calls + receipts), unknowable pre-hoc. */
+/** Headroom for turns after the first (tool calls + receipts), unknowable pre-hoc.
+ * Sized for the shared agentMaxTurns budget (16 turns): a tool call plus its
+ * receipt runs a few hundred tokens, so 2048 covers several follow-up turns
+ * with margin while staying small enough not to squeeze the first-turn fit-check. */
 export const WORKER_TURN_HEADROOM_TOKENS = 2048;
 
 /** Safety margin applied on top of every fit-check. */
