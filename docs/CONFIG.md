@@ -388,7 +388,7 @@ Controls whether observational memory workers run and whether OM content is inje
 
 ### `sessionFallback`
 
-When `false`, skip the session-model fallback when all OM model candidates are exhausted. The stage is skipped entirely instead of falling back to the main coding model.
+Defaults to `true`: when all OM model candidates are exhausted, the stage falls back to the main coding (session) model as a last resort instead of being skipped. Set to `false` to skip the stage entirely instead — recommended once cheap worker models are configured, since worker runs on the session model add cost and bust its prompt cache.
 
 | Type | Default |
 |------|---------|
