@@ -35,8 +35,10 @@ import {
 import { autoCompactThreshold } from "./model-budget.js";
 
 const STATUS_KEY = "blackhole";
-const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"] as const;
-const SPINNER_INTERVAL_MS = 120;
+// Match pi's own working spinner (pi-tui Loader): 10 braille frames at 80 ms,
+// so the footer never shows a second, out-of-sync spinner style.
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const SPINNER_INTERVAL_MS = 80;
 const SETTLE_MS = 5000;
 const GAUGE_CELLS = 8;
 // Fraction of a gauge's max at which it starts warning (orange).

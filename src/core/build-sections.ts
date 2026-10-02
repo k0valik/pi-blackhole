@@ -51,11 +51,32 @@ const SENTENCE_START_RE = /^\s*["'`*_【『「]?[A-Z`\u3400-\u4DBF\u4E00-\u9FFF\
 
 const OUTSTANDING_CLIP = 200;
 
+// Bounds for path-token scanning: tool results can carry multi-megabyte
+// encoded blobs, so neither the scanned length nor the collected token set
+// may grow without bound. Real paths are short, so a head+tail window still
+// reaches a relevant path at either end of a result while the blob middle is
+// skipped; the token cap additionally bounds the error/success intersection.
+const MAX_PATH_TOKENS = 200;
+const PATH_SCAN_HEAD = 8000;
+const PATH_SCAN_TAIL = 8000;
+
 /** Path-like tokens (`src/a.ts`, `/repo/b.md`) used to match an error to its retry. */
-const pathTokens = (text: string): Set<string> => {
+export const pathTokens = (text: string): Set<string> => {
   const out = new Set<string>();
-  for (const m of text.matchAll(/[A-Za-z0-9_.$/-]*[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,5}\b/g)) {
-    out.add(m[0].toLowerCase());
+  // Scan each token once without overlapping repetitions that backtrack on encoded blobs.
+  const scan = (chunk: string): void => {
+    for (const m of chunk.matchAll(
+      /(?<![A-Za-z0-9_.$/-])[A-Za-z0-9_.$/-]*(?<=[A-Za-z0-9_-])\.[A-Za-z0-9]{1,5}\b/g,
+    )) {
+      out.add(m[0].toLowerCase());
+      if (out.size >= MAX_PATH_TOKENS) break;
+    }
+  };
+  if (text.length <= PATH_SCAN_HEAD + PATH_SCAN_TAIL) {
+    scan(text);
+  } else {
+    scan(text.slice(0, PATH_SCAN_HEAD));
+    if (out.size < MAX_PATH_TOKENS) scan(text.slice(-PATH_SCAN_TAIL));
   }
   return out;
 };

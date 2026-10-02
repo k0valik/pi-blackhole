@@ -365,7 +365,7 @@ describe("status bar", () => {
       h.runtime.consolidationPhase = "observer";
       await h.fire("agent_end", {}, h.ctx);
       const before = h.setStatus.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(480);
+      await vi.advanceTimersByTimeAsync(80);
       expect(h.setStatus.mock.calls.length).toBeGreaterThan(before);
     });
 
@@ -380,7 +380,7 @@ describe("status bar", () => {
       h.runtime.consolidationPhase = "observer";
       await vi.advanceTimersByTimeAsync(1_000);
       const s = h.lastStatus();
-      expect(s).toMatch(/[◐◓◑◒]/);
+      expect(s).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       expect(s).toContain("accent:[observer]");
     });
 
@@ -388,7 +388,7 @@ describe("status bar", () => {
       const h = setup();
       await startWithObserver(h);
       const s = h.lastStatus();
-      expect(s).toMatch(/[◐◓◑◒]/);
+      expect(s).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       expect(s).toContain("accent:[observer]");
     });
 
@@ -428,7 +428,7 @@ describe("status bar", () => {
       const s = h.lastStatus();
       expect(s).toContain("success:✓");
       expect(s).toContain("success:+1");
-      expect(s).not.toMatch(/[◐◓◑◒]/);
+      expect(s).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     });
 
     it("clears a settled worker after 5 seconds", async () => {
@@ -448,9 +448,9 @@ describe("status bar", () => {
       const h = setup();
       await startWithObserver(h);
       const before = h.lastStatus();
-      await vi.advanceTimersByTimeAsync(120);
+      await vi.advanceTimersByTimeAsync(80);
       const after = h.lastStatus();
-      const frameOf = (s: string) => /[◐◓◑◒]/.exec(s)![0];
+      const frameOf = (s: string) => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.exec(s)![0];
       expect(frameOf(after!)).not.toBe(frameOf(before!));
     });
 
@@ -462,9 +462,9 @@ describe("status bar", () => {
       // first stage a moment later.
       h.runtime.consolidationInFlight = true;
       await h.fire("agent_start", {}, h.ctx);
-      expect(h.lastStatus()).not.toMatch(/[◐◓◑◒]/);
+      expect(h.lastStatus()).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       h.runtime.consolidationPhase = "observer";
-      await vi.advanceTimersByTimeAsync(120);
+      await vi.advanceTimersByTimeAsync(80);
       expect(h.lastStatus()).toContain("accent:[observer]");
     });
 
@@ -478,7 +478,7 @@ describe("status bar", () => {
       const branch = [...h.entries(), obsRecorded("m1", "e1", [observation("aabbccddeeff", 100)])];
       h.setEntries(branch);
       h.runtime.consolidationPhase = "reflector";
-      await vi.advanceTimersByTimeAsync(120);
+      await vi.advanceTimersByTimeAsync(80);
       expect(h.lastStatus()).toContain("muted:[observer]");
       expect(h.lastStatus()).toContain("success:+1");
     });
