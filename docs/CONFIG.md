@@ -430,7 +430,7 @@ Controls whether observational memory workers run and whether OM content is inje
 
 ### `sessionFallback`
 
-When `false`, skip the session-model fallback when all OM model candidates are exhausted. The stage is skipped entirely instead of falling back to the main coding model.
+Defaults to `true`: when all OM model candidates are exhausted, the stage falls back to the main coding (session) model as a last resort instead of being skipped. Set to `false` to skip the stage entirely instead — recommended once cheap worker models are configured, since worker runs on the session model add cost and bust its prompt cache.
 
 | Type | Default |
 |------|---------|
@@ -452,6 +452,8 @@ Token thresholds that control when the OM pipeline runs. Unchanged from the prev
 |-----|---------|
 | `observeAfterTokens` | 15000 |
 | `reflectAfterTokens` | 25000 |
+
+Setting `observeAfterTokens` above `observerChunkMaxTokens` makes every observation pass run as multiple capped batches; the loader warns about that combination (it never clamps your values).
 
 ### `observationsPoolMaxTokens`
 
@@ -489,7 +491,7 @@ fixed `30%` of `observerChunkMaxTokens`.
 
 ### `observerChunkMaxTokens`
 
-Max conversation tokens sent to the note-taker per reading pass.
+Max source-entry tokens sent to the note-taker per chunk. The chunk is the oldest contiguous prefix of unobserved entries; overflow stays in the backlog and drains in bounded follow-up batches (same run, at most 3), so the coverage cursor never advances past entries the model was not shown.
 
 | Type | Default |
 | --- | --- |
@@ -623,7 +625,7 @@ Each model config supports the following fields:
 
 ### `statusBar`
 
-Show the footer status bar: three token gauges — O (transcript since last observer run), P (observation pool fill), X (context since last compaction) — plus worker spinners and `✓ +N` completion events.
+Show the footer status bar: three token gauges — O (transcript since last observer run), P (observation pool fill), X (context since last compaction) — plus worker spinners and `✓ +N` completion events. O and P render only while [`memory`](#memory) is `true`: with observational memory disabled the pipeline hard-returns before any observer runs, so a filling gauge would imply a note-taking pass that is never due. The gauges return on the next render after `/blackhole om-on` re-enables memory.
 
 | Type | Default |
 |------|---------|

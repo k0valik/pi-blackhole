@@ -46,6 +46,7 @@ export interface ConfigFlowParams {
 // Re-export engine types the flow references directly.
 export type { ConfigInspection, ScopeSource } from "../config-manager.js";
 import type { ConfigInspection } from "../config-manager.js";
+import type { ConfigLayer } from "../config-manager.js";
 import type { ScopeSource } from "../config-manager.js";
 import type { Field } from "../settings/types.js";
 import type { EnvParser } from "../config-manager.js";
@@ -130,6 +131,44 @@ function winnerLabel(winner: string): string {
   return SCOPE_LABELS[winner] ?? winner;
 }
 
+/**
+ * Highest precedence first (0). A total `Record<ConfigLayer, …>` so a layer
+ * added, renamed or removed in ConfigManager — which owns the authoritative
+ * order in `inspect()` (config-manager.ts) — is a compile error here.
+ */
+const LAYER_PRECEDENCE: Record<ConfigLayer, number> = {
+  session: 0,
+  env: 1,
+  project: 2,
+  global: 3,
+  defaults: 4,
+};
+
+/**
+ * Rank a layer id by precedence: 0 = highest. An id outside `ConfigLayer`
+ * ranks above every known layer (fail-safe), so an unrecognised winner is
+ * reported as overriding the row rather than credited with supplying a value
+ * it was never observed to set.
+ */
+function precedenceRank(layer: string): number {
+  const rank: number | undefined = (LAYER_PRECEDENCE as Record<string, number | undefined>)[layer];
+  return rank ?? -1;
+}
+
+/**
+ * Provenance note for a row showing `layer`'s own value while a different
+ * layer wins the key. Shared by display-all and edit mode so the two views
+ * cannot disagree about the same key.
+ */
+function layerValueNote(winner: string, layer: string): string {
+  // Only a lower-precedence layer can be the source of what this row shows;
+  // a higher one overrides it (see displayValueNote).
+  if (precedenceRank(winner) < precedenceRank(layer)) {
+    return `overridden by ${winnerLabel(winner)}`;
+  }
+  return `(from ${winnerLabel(winner)})`;
+}
+
 // ── Entry point ────────────────────────────────────────────────────────
 
 export async function openConfigFlow(
@@ -205,12 +244,17 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
   const currentValues: Record<string, unknown> = { ...values };
   const dirtyKeys = new Set<string>();
 
+  /**
+   * Edit-mode provenance note: what the row displays is this scope's own
+   * value, so only a higher layer can be overriding it. Shared helper keeps
+   * this view in step with display-all's row notes.
+   */
   function valueNote(field: Field): string | undefined {
     const key = String(field.key);
     const winner = inspection.winners[key];
     if (!winner || winner === scope) return undefined;
-    if (!dirtyKeys.has(key)) return `(from ${winnerLabel(winner)})`;
-    return undefined;
+    if (dirtyKeys.has(key)) return undefined;
+    return layerValueNote(winner, scope);
   }
 
   const scopeLabel = EDIT_MODE_TITLES[scope] ?? scope;
@@ -605,8 +649,13 @@ function displayValueNote(
 
   if (winner === tabId) return "▸ effective";
 
-  if (winner) return `(from ${winnerLabel(winner)})`;
-  return undefined;
+  if (!winner) return undefined;
+  // The row shows this tab's own layer's value, so its provenance follows the
+  // same rule edit mode uses (layerValueNote): only a LOWER-precedence layer
+  // can be its source. A higher layer wins the key and overrides what this
+  // tab shows — crediting it as the source would read as "the displayed value
+  // came from X", the opposite of the precedence that actually applies.
+  return layerValueNote(winner, tabId);
 }
 
 // ── Overlay defaults ───────────────────────────────────────────────────

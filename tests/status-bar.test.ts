@@ -1,7 +1,8 @@
 /**
  * Tests for the footer status bar (src/om/status-bar.ts).
  *
- * Covers: gauge rendering (fill, warning state), worker lifecycle derived
+ * Covers: gauge rendering (fill, warning state), the memory === false gate
+ * that hides the O/P gauges, worker lifecycle derived
  * from runtime state (running spinner, settled ✓ +N, silent skip, 5s clear),
  * the session_compact event note, the statusBar config gate, and shutdown
  * cleanup. Timers run under vi.useFakeTimers.
@@ -94,6 +95,7 @@ function setup(configOverrides: Record<string, unknown> = {}): Harness {
   const runtime = {
     config: {
       statusBar: true,
+      memory: true,
       observeAfterTokens: 15_000,
       observationsPoolMaxTokens: 20_000,
       compactAfterTokens: 100_000,
@@ -232,6 +234,83 @@ describe("status bar", () => {
     });
   });
 
+  // O and P describe observational-memory work the consolidation pipeline
+  // never launches while memory === false, so they must not fill.
+  describe("memory gate", () => {
+    it("hides the O and P gauges when memory is false", async () => {
+      const h = setup({ memory: false });
+      // 20k tokens ≥ the 15k observe threshold: O would render error-colored.
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      const s = h.lastStatus();
+      expect(s).toContain("success:bh");
+      expect(s).toContain("muted:X");
+      expect(s).not.toContain("muted:O");
+      expect(s).not.toContain("muted:P");
+    });
+
+    it("never warning- or error-colors a gauge while memory is false", async () => {
+      const h = setup({ memory: false });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      const s = h.lastStatus();
+      // Pin the positive shape first: a gauge still renders (X, dim at
+      // 20k/100k), so the negatives below can only be about O/P being hidden.
+      expect(s).toContain("dim:▕");
+      expect(s).not.toContain("muted:O");
+      expect(s).not.toContain("warning:█");
+      expect(s).not.toContain("error:█");
+    });
+
+    it("renders O and P when memory is true", async () => {
+      const h = setup({ memory: true });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      const s = h.lastStatus();
+      expect(s).toContain("muted:O");
+      expect(s).toContain("muted:P");
+      // O at 20k/15k ≥ 100% still fills error-colored when memory is on.
+      expect(s).toContain("error:█");
+    });
+
+    it("drops the gauges when memory is turned off mid-session", async () => {
+      const h = setup({ memory: true });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      expect(h.lastStatus()).toContain("muted:O");
+      h.runtime.config.memory = false;
+      await h.fire("agent_end", {}, h.ctx);
+      expect(h.lastStatus()).not.toContain("muted:O");
+      expect(h.lastStatus()).not.toContain("muted:P");
+    });
+
+    it("restores the gauges when memory is turned back on mid-session", async () => {
+      const h = setup({ memory: false });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      expect(h.lastStatus()).not.toContain("muted:O");
+      h.runtime.config.memory = true;
+      await h.fire("agent_end", {}, h.ctx);
+      expect(h.lastStatus()).toContain("muted:O");
+      expect(h.lastStatus()).toContain("muted:P");
+    });
+
+    it("re-measures the gauges on the idle poll when memory flips alone", async () => {
+      const h = setup({ memory: false });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      expect(h.lastStatus()).not.toContain("muted:O");
+      h.runtime.config.memory = true;
+      // No agent_end and no new branch entries — only the 1s idle poll runs.
+      await vi.advanceTimersByTimeAsync(1_000);
+      const s = h.lastStatus();
+      expect(s).toContain("muted:O");
+      // O at 20k/15k renders error-colored only if it was re-measured; the
+      // 0 written while memory was off would repaint dim instead.
+      expect(s).toContain("error:█");
+    });
+  });
+
   describe("worker lifecycle", () => {
     async function startWithObserver(h: Harness) {
       h.setEntries([msg("e1", 1_000)]);
@@ -286,7 +365,7 @@ describe("status bar", () => {
       h.runtime.consolidationPhase = "observer";
       await h.fire("agent_end", {}, h.ctx);
       const before = h.setStatus.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(480);
+      await vi.advanceTimersByTimeAsync(80);
       expect(h.setStatus.mock.calls.length).toBeGreaterThan(before);
     });
 
@@ -301,7 +380,7 @@ describe("status bar", () => {
       h.runtime.consolidationPhase = "observer";
       await vi.advanceTimersByTimeAsync(1_000);
       const s = h.lastStatus();
-      expect(s).toMatch(/[◐◓◑◒]/);
+      expect(s).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       expect(s).toContain("accent:[notes]");
     });
 
@@ -309,7 +388,7 @@ describe("status bar", () => {
       const h = setup();
       await startWithObserver(h);
       const s = h.lastStatus();
-      expect(s).toMatch(/[◐◓◑◒]/);
+      expect(s).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       expect(s).toContain("accent:[notes]");
     });
 
@@ -349,7 +428,7 @@ describe("status bar", () => {
       const s = h.lastStatus();
       expect(s).toContain("success:✓");
       expect(s).toContain("success:+1");
-      expect(s).not.toMatch(/[◐◓◑◒]/);
+      expect(s).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
     });
 
     it("clears a settled worker after 5 seconds", async () => {
@@ -369,9 +448,9 @@ describe("status bar", () => {
       const h = setup();
       await startWithObserver(h);
       const before = h.lastStatus();
-      await vi.advanceTimersByTimeAsync(120);
+      await vi.advanceTimersByTimeAsync(80);
       const after = h.lastStatus();
-      const frameOf = (s: string) => /[◐◓◑◒]/.exec(s)![0];
+      const frameOf = (s: string) => /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.exec(s)![0];
       expect(frameOf(after!)).not.toBe(frameOf(before!));
     });
 
@@ -383,9 +462,9 @@ describe("status bar", () => {
       // first stage a moment later.
       h.runtime.consolidationInFlight = true;
       await h.fire("agent_start", {}, h.ctx);
-      expect(h.lastStatus()).not.toMatch(/[◐◓◑◒]/);
+      expect(h.lastStatus()).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       h.runtime.consolidationPhase = "observer";
-      await vi.advanceTimersByTimeAsync(120);
+      await vi.advanceTimersByTimeAsync(80);
       expect(h.lastStatus()).toContain("accent:[notes]");
     });
 
@@ -399,7 +478,7 @@ describe("status bar", () => {
       const branch = [...h.entries(), obsRecorded("m1", "e1", [observation("aabbccddeeff", 100)])];
       h.setEntries(branch);
       h.runtime.consolidationPhase = "reflector";
-      await vi.advanceTimersByTimeAsync(120);
+      await vi.advanceTimersByTimeAsync(80);
       expect(h.lastStatus()).toContain("muted:[notes]");
       expect(h.lastStatus()).toContain("success:+1");
     });
@@ -466,6 +545,21 @@ describe("status bar", () => {
       await h.fire("session_start", {}, h.ctx);
       await h.fire("agent_end", {}, h.ctx);
       for (const call of h.setStatus.mock.calls) expect(call[1]).toBeUndefined();
+    });
+
+    it("writes nothing while statusBar is false, even with memory false", async () => {
+      const h = setup({ statusBar: false, memory: false });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, h.ctx);
+      await h.fire("agent_end", {}, h.ctx);
+      for (const call of h.setStatus.mock.calls) expect(call[1]).toBeUndefined();
+    });
+
+    it("writes nothing when hasUI is false, even with memory false", async () => {
+      const h = setup({ memory: false });
+      h.setEntries([msg("e1", 20_000)]);
+      await h.fire("session_start", {}, { ...h.ctx, hasUI: false });
+      expect(h.setStatus).not.toHaveBeenCalled();
     });
 
     it("clears the footer when statusBar is turned off mid-session", async () => {

@@ -666,6 +666,9 @@ export class ConfigManager<T extends object> {
     }
 
     const winners: Record<string, ConfigLayer> = {};
+    // Highest precedence first — the authoritative winner order. The settings
+    // modal mirrors this list for its row notes (settings/config-flow.ts
+    // LAYER_PRECEDENCE); update both together.
     const precedence: ConfigLayer[] = ["session", "env", "project", "global", "defaults"];
     for (const key of allKeys) {
       for (const layer of precedence) {

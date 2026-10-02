@@ -2,7 +2,19 @@
 
 **Deterministic compaction + session-aware observational memory for [Pi](https://github.com/earendil-works/pi) — in one unified extension.**
 
-`/blackhole` replaces Pi's LLM-based `/compact` with an algorithmic structural summary — fast, zero-cost. Three background workers (Observer, Reflector, Dropper) capture durable facts and decisions that survive across compactions. Per-worker model fallback chains with persisted cooldowns. Manual flush mode. One JSON file to configure it all.
+`/blackhole` replaces Pi's LLM-based `/compact` with an algorithmic structural summary — fast, and the compaction step itself is zero-cost. Three background workers (Observer, Reflector, Dropper) run as separate billed model calls to capture durable facts and decisions that survive across compactions. Per-worker model fallback chains with persisted cooldowns. Manual flush mode. One JSON file to configure it all.
+
+> **A note from the maintainer: this is experimental.**
+>
+> It won't save you tokens by itself. Compacting is free — no model call, just structure. Remembering is not: the background workers wake up as your session grows, read what happened, and write down what seems worth keeping. Those are real billed calls. Untuned, on your main coding model, this costs more than doing nothing. It only earns its keep with the workers on something cheap or free.
+>
+> It also doesn't solve compaction — nobody has, as far as I know. It takes a different approach ([observational memory](https://mastra.ai/blog/observational-memory), via [pi-observational-memory](https://github.com/elpapi42/pi-observational-memory)) and merges it with [pi-vcc](https://github.com/sting8k/pi-vcc), because the two conflicted when installed together. I merged them and vibeslopped a lot on top: robustness work, new behavior, and bugfixes ported from both upstreams. The recap is pattern-matching, not understanding: it guesses at goals and preferences from their shape. The memory is model-written, so it has the opposite weakness: it can keep what sounds right but isn't. Assume both need the search tool as a backstop.
+>
+> Want only one half? Use the project that does just that half. No hard feelings.
+>
+> Scope stays tight on purpose: forks welcome, bug fixes welcome and reviewed, new features only if they serve conversation compaction itself — not the week's AI fad bolted on. Almost everything is a toggle, which I'll admit is tiring; I use a small slice myself. Memory on most days, off some days. Workers on free models, waking rarely, size-based auto-compaction as a backstop. Most days I don't compact at all — fresh sessions beat resumed ones.
+>
+> Best fit is someone who doesn't count every token: code locally and push the workers to free hosted models, or code on a top model and run the workers on a local card — knowing each worker's different instructions wipe the local prompt cache for the next one. No measurements, no comparisons against other methods. Fast and nearly free the way I run it, good enough for what I need.
 
 ---
 
@@ -34,14 +46,12 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.9](CHANGELOG.md)**
+> **Latest release: [0.5.10](CHANGELOG.md)**
 >
-> - **Recall drill-downs can no longer flood your context** — every `#N:path` / `#N:text` expansion is capped by `recallResponseMaxChars`, and the cap names where to pick up (`continue at #42:src/auth.ts:412:30`), so a minified bundle or a huge write no longer dumps itself into the prompt.
-> - **Quiet sessions** — `showWorkerNotifications: false` silences routine observer/reflector/dropper progress toasts; warnings, errors, and `/blackhole*` command output stay visible.
-> - **Worker prompt caching is tunable per install** — `cacheRetention: none | short | long` is forwarded to all three worker streams, and unset inherits Pi's effective setting.
-> - **A hung worker model fails on a clock, not a hope** — new `workerAttemptTimeoutMs` bounds the whole agent loop (header waits, heartbeats, tool turns) per attempt; configured candidates then enter their normal cooldown and fallback chain.
-> - **Finished worker runs stop early** — `record_observations` / `record_reflections` accept a `complete` flag, so a fully-processed run ends instead of spending its `agentMaxTurns` budget.
-> - **Dropper pool pressure now works end to end** — gated on `observationsPoolMaxTokens` (the same pool the footer P gauge shows), it bypasses new-data gates and `1.0` disables it.
+> - **Memory workers that fail now fall back instead of silently skipping** — observer/reflector/dropper stream errors and turn-cap cutoffs throw into the model fallback chain, so a failed run no longer advances the cursor over work it never finished.
+> - **The turn cap only ends runs that did tool work** — a run that stops naturally on exactly its last allowed turn keeps its result instead of failing as cap-cut, and a capped session model is not retried on an identical budget.
+> - **`/blackhole` on an ineligible branch reports nothing-to-compact** — instead of Pi's error card plus a second failure toast when the branch already fits inside the keep-recent budget.
+> - **A cancelled `/blackhole` stays quiet, and the command loads the config first** — no second vaguer toast on cancel, and a `manual`-mode session flushes pending memory instead of reading defaults.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 
@@ -158,7 +168,7 @@ Defaults target ~128k context models and work out of the box — no tuning requi
 }
 ```
 
-Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the workers **do not** fall back to your session model — this avoids surprise cost and cache busting. Enable it with `sessionFallback: true` (default) or set `model` as a shared fallback. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
+Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the session model **is** the last-resort fallback (`sessionFallback: true`), so workers keep running even with no worker models configured. If you don't want worker runs to touch your session model (extra cost and prompt-cache busting), configure cheap worker models (above) and set `sessionFallback: false` — or set `model` as a shared fallback so the session model is never reached. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
 
 Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
 
@@ -180,7 +190,7 @@ https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
 
 Three background workers (separate LLM calls) run automatically during the session when `memory: true` (the default):
 
-- **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` newest-first to prevent context blowup on long sessions. Runs most frequently.
+- **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` as an oldest-first prefix (overflow drains in bounded follow-up batches) to prevent context blowup on long sessions — the coverage cursor never advances past entries the model was not shown. Runs most frequently.
 - **Reflector** — distills new observations into durable reflections: stable facts, patterns, and constraints that survive future compactions. Runs less often.
 - **Dropper** — prunes low-value observations from active memory when the pool exceeds `observationsPoolMaxTokens`, while keeping reflections and other long-term elements safely in the session ledger.
 
