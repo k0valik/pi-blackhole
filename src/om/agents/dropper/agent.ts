@@ -322,7 +322,9 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     typeof args.maxOutputTokens === "number" &&
     Number.isFinite(args.maxOutputTokens) &&
     args.maxOutputTokens > 0
-      ? Math.floor(args.maxOutputTokens)
+      ? // Floor first, clamp after: Math.floor(0.5) is 0, the very empty-cap
+        // case this guard prevents.
+        Math.max(1, Math.floor(args.maxOutputTokens))
       : boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS);
   const config: AgentLoopConfig & ProviderFetchOption & LegacyTurnCapOption = {
     model,

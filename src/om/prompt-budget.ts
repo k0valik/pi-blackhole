@@ -88,7 +88,9 @@ export function workerOutputReserveTokens(model: Model<any> | undefined): number
  * empty completion (silent empty success with coverage advanced on some
  * providers) or a malformed request. The floor never inflates past the model
  * reserve itself, and the fit-check still admits nothing unhostable — it only
- * keeps generation valid where the clamp would collapse.
+ * keeps generation valid where the clamp would collapse. The floor only binds
+ * below ~4k windows, where static overhead (1.6k–3.8k) plus turn headroom
+ * already exceeds any budget — so it never takes a usable window out of play.
  */
 export const MIN_WORKER_OUTPUT_ALLOWANCE_TOKENS = 1024;
 

@@ -204,4 +204,23 @@ describe("maxOutputTokens boundary validation", () => {
     await runObserver({ ...observerArgs, maxOutputTokens: 1234, agentLoop: capturingLoop(seen) });
     expect(seen.maxTokens).toBe(1234);
   });
+
+  it("observer clamps a fractional allowance to 1, not 0", async () => {
+    // Math.floor(0.5) is 0 — the empty-cap case the guard prevents.
+    const seen: { maxTokens?: unknown } = {};
+    await runObserver({ ...observerArgs, maxOutputTokens: 0.5, agentLoop: capturingLoop(seen) });
+    expect(seen.maxTokens).toBe(1);
+  });
+
+  it("reflector clamps a fractional allowance to 1, not 0", async () => {
+    const seen: { maxTokens?: unknown } = {};
+    await runReflector({ ...reflectorArgs, maxOutputTokens: 0.5, agentLoop: capturingLoop(seen) });
+    expect(seen.maxTokens).toBe(1);
+  });
+
+  it("dropper clamps a fractional allowance to 1, not 0", async () => {
+    const seen: { maxTokens?: unknown } = {};
+    await runDropper({ ...dropperArgs, maxOutputTokens: 0.5, agentLoop: capturingLoop(seen) });
+    expect(seen.maxTokens).toBe(1);
+  });
 });
