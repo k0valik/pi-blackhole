@@ -80,15 +80,24 @@ export function workerOutputReserveTokens(model: Model<any> | undefined): number
 }
 
 /**
+ * Output allowance sharing the context window with the prompt. The agent loop
+ * caps generation at this value, so the fit-check reserve and the dispatched
+ * cap must be the same number — otherwise a prompt that "fits" still 400s on
+ * generation overflow. Capped at a quarter of the window (floored at zero by
+ * the caller): registries reporting maxTokens near the window — and small
+ * windows that can never host the full allowance — would otherwise either
+ * disable the stages or dispatch an unhonorable cap. An unknown model assumes
+ * the maximum allowance (safe direction for a pre-flight guard).
+ */
+export function workerOutputAllowance(window: number, model: Model<any> | undefined): number {
+  return Math.min(workerOutputReserveTokens(model), Math.floor(window * 0.25));
+}
+
+/**
  * Largest prompt-input estimate a model can take: window minus output
- * allowance minus safety margin. The output allowance is capped at a quarter
- * of the window: registries reporting maxTokens near (or above) the window —
- * and small windows that can never host the full allowance — would otherwise
- * drive the budget zero or negative and silently disable the stages on that
- * model. Compare the stage's estimated input
+ * allowance minus safety margin. Compare the stage's estimated input
  * (content + preamble + static + turn headroom) against this.
  */
 export function workerInputBudget(window: number, model: Model<any> | undefined): number {
-  const reserve = Math.min(workerOutputReserveTokens(model), Math.floor(window * 0.25));
-  return Math.max(0, window - reserve - WORKER_SAFETY_MARGIN_TOKENS);
+  return Math.max(0, window - workerOutputAllowance(window, model) - WORKER_SAFETY_MARGIN_TOKENS);
 }

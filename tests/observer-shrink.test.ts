@@ -26,6 +26,18 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 
 const recordCooldownSpy = vi.hoisted(() => vi.fn());
 
+const debugEvents = vi.hoisted(() => [] as Array<{ event: string; data: any }>);
+
+vi.mock("../src/om/debug-log.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    debugLog: (event: string, data: Record<string, unknown> = {}) => {
+      debugEvents.push({ event, data });
+    },
+  };
+});
+
 vi.mock("../src/om/cooldown.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -112,6 +124,7 @@ beforeEach(() => {
   runObserverSpy.mockReset();
   runObserverSpy.mockResolvedValue(emptyResult());
   recordCooldownSpy.mockClear();
+  debugEvents.length = 0;
 });
 
 afterEach(() => {
@@ -208,6 +221,12 @@ describe("observer shrink-to-fit", () => {
     const seen = runObserverSpy.mock.calls.map((call) => call[0].allowedSourceEntryIds);
     expect(seen).toEqual([["m0"], ["m1"], ["m2"]]);
     expect(runtime.getCursor("observer")?.entryId).toBe("m2");
+    // The dispatched generation cap matches the preflight allowance: the
+    // 40k window with a 2000-token model caps output at 2000, not 32k.
+    const { workerOutputAllowance } = await import("../src/om/prompt-budget.js");
+    expect((runObserverSpy.mock.calls[0][0] as any).maxOutputTokens).toBe(
+      workerOutputAllowance(40_000, { maxTokens: 2000 } as any),
+    );
   });
 
   test("a size mismatch cools nothing: the model is offered again next cycle", async () => {
@@ -333,5 +352,65 @@ describe("observer shrink-to-fit", () => {
     expect(outcome).toBe("abort");
     expect(runObserverSpy).not.toHaveBeenCalled();
     expect(recordCooldownSpy).not.toHaveBeenCalled();
+    // A single entry the largest window cannot hold aborts every cycle with
+    // the cursor unmoved — surfaced as a diagnostic, not silent.
+    expect(debugEvents.some((entry) => entry.event === "observer.shrink_single_oversized")).toBe(
+      true,
+    );
+  });
+});
+
+describe("trimSerializedPrefix", () => {
+  const unitEntries = () =>
+    Array.from({ length: 4 }, (_, i) => rawMessage(`q${i}`, textForTokens(100, `Q${i}`)));
+
+  test("returns the whole prefix when it already fits", async () => {
+    const { trimSerializedPrefix } = await import("../src/om/consolidation.js");
+    const { serializeSourceAddressedBranchEntries } = await import("../src/om/serialize.js");
+    const { estimateStringTokens } = await import("../src/om/tokens.js");
+
+    const entries = unitEntries();
+    const full = estimateStringTokens(serializeSourceAddressedBranchEntries(entries as any).text);
+    expect(trimSerializedPrefix(entries as any, full + 100)).toHaveLength(4);
+  });
+
+  test("trims the tail to the largest serialized-fitting prefix", async () => {
+    const { trimSerializedPrefix } = await import("../src/om/consolidation.js");
+    const { serializeSourceAddressedBranchEntries } = await import("../src/om/serialize.js");
+    const { estimateStringTokens } = await import("../src/om/tokens.js");
+
+    const entries = unitEntries();
+    const sized = (list: TestEntry[]) =>
+      estimateStringTokens(serializeSourceAddressedBranchEntries(list as any).text);
+    const budget = sized(entries.slice(0, 2));
+    const trimmed = trimSerializedPrefix(entries as any, budget);
+
+    // A prefix, in order, fitting the budget — and maximal: the next entry
+    // back overflows (unless nothing was trimmed at all).
+    expect(trimmed.length).toBeGreaterThanOrEqual(1);
+    expect(trimmed.map((entry) => entry.id)).toEqual(
+      entries.slice(0, trimmed.length).map((entry) => entry.id),
+    );
+    expect(sized(trimmed)).toBeLessThanOrEqual(budget);
+    if (trimmed.length < entries.length) {
+      expect(sized([...trimmed, entries[trimmed.length]])).toBeGreaterThan(budget);
+    }
+  });
+
+  test("retains one entry when even that overflows", async () => {
+    const { trimSerializedPrefix } = await import("../src/om/consolidation.js");
+    const { serializeSourceAddressedBranchEntries } = await import("../src/om/serialize.js");
+    const { estimateStringTokens } = await import("../src/om/tokens.js");
+
+    const entries = unitEntries().slice(0, 1);
+    const single = estimateStringTokens(serializeSourceAddressedBranchEntries(entries as any).text);
+    const trimmed = trimSerializedPrefix(entries as any, single - 1);
+    expect(trimmed).toHaveLength(1);
+    expect(trimmed[0].id).toBe("q0");
+  });
+
+  test("returns empty for empty input", async () => {
+    const { trimSerializedPrefix } = await import("../src/om/consolidation.js");
+    expect(trimSerializedPrefix([], 1000)).toEqual([]);
   });
 });

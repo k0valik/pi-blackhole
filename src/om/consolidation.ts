@@ -30,6 +30,7 @@ import { maxDropCountForPool, selectDropCandidates } from "./agents/dropper/sele
 import {
   WORKER_TURN_HEADROOM_TOKENS,
   workerInputBudget,
+  workerOutputAllowance,
   workerStaticPromptTokens,
 } from "./prompt-budget.js";
 import { estimateEntryTokens, estimateStringTokens } from "./tokens.js";
@@ -147,6 +148,31 @@ export function capSourceEntriesToTokens(entries: Entry[], maxTokens: number): E
     totalTokens += estTokens;
   }
   return kept;
+}
+
+/**
+ * Trim source entries from the tail until the serialized chunk fits
+ * maxTokens, keeping prefix order. Bisected (logarithmic serializations),
+ * not one-entry-at-a-time: a backlog of many small entries would otherwise
+ * re-serialize the whole retained prefix per peeled entry on the compaction
+ * hot path. Always retains at least one entry — a single oversized head
+ * entry still reaches the fit check, which then skips it and aborts with
+ * the cursor unmoved rather than claiming progress it cannot make.
+ */
+export function trimSerializedPrefix(entries: Entry[], maxTokens: number): Entry[] {
+  if (entries.length === 0) return entries;
+  const fits = (count: number): boolean =>
+    estimateStringTokens(serializeSourceAddressedBranchEntries(entries.slice(0, count)).text) <=
+    maxTokens;
+  if (fits(entries.length)) return entries;
+  let lo = 1;
+  let hi = entries.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (fits(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return entries.slice(0, lo);
 }
 
 function appendEntry(
@@ -968,16 +994,22 @@ export async function runObserverStage(
           preambleTokens -
           WORKER_TURN_HEADROOM_TOKENS;
         if (shrinkBudget <= 0) return "abort";
-        let shrunkEntries = capSourceEntriesToTokens(allChunkEntries, shrinkBudget);
+        let shrunkEntries = trimSerializedPrefix(
+          capSourceEntriesToTokens(allChunkEntries, shrinkBudget),
+          shrinkBudget,
+        );
         let shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
-        // The fit check prices the serialized chunk (per-entry headers + role
-        // framing + separators), not the raw per-entry estimate the cap
-        // enforces — trim from the tail until the serialized size fits,
-        // retaining at least one entry so a single oversized first entry can
-        // still make progress.
-        while (shrunkEntries.length > 1 && estimateStringTokens(shrunk.text) > shrinkBudget) {
-          shrunkEntries = shrunkEntries.slice(0, -1);
-          shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
+        if (shrunkEntries.length === 1 && estimateStringTokens(shrunk.text) > shrinkBudget) {
+          // A single entry the largest window cannot hold: the re-offered fit
+          // check skips it and the stage aborts with the cursor unmoved every
+          // cycle. No coverage is claimed — just a diagnostic, since nothing
+          // downstream can distinguish this wedge from an ordinary abort.
+          debugLog("observer.shrink_single_oversized", {
+            shrinkBudget,
+            chunkTokens: estimateStringTokens(shrunk.text),
+            coversUpToId: shrunk.sourceEntryIds.at(-1),
+            model: `${bestModel.provider}/${bestModel.id}`,
+          });
         }
         const shrunkCover = shrunk.sourceEntryIds.at(-1);
         if (!shrunkCover || !shrunk.text.trim()) return "abort";
@@ -1103,6 +1135,7 @@ export async function runObserverStage(
               sessionId,
             ),
             env: resolved.env,
+            maxOutputTokens: workerOutputAllowance(effectiveObsCtx, resolved.model as any),
             priorReflections,
             priorObservations,
             chunk,
@@ -1581,6 +1614,7 @@ export async function runReflectorStage(
               apiKey: best.resolved.apiKey,
               headers: withProviderAttributionHeaders(bestModel, best.resolved.headers, sessionId),
               env: best.resolved.env,
+              maxOutputTokens: workerOutputAllowance(best.ctx, bestModel),
               reflections: input.newReflections,
               observations: batch,
               existingReflectionsSummary: input.existingReflectionsSummary || undefined,
@@ -1717,6 +1751,7 @@ export async function runReflectorStage(
               sessionId,
             ),
             env: resolved.env,
+            maxOutputTokens: workerOutputAllowance(effectiveRefCtx, resolved.model as any),
             reflections: input.newReflections,
             observations: input.newObservations,
             existingReflectionsSummary: input.existingReflectionsSummary || undefined,
@@ -2125,6 +2160,7 @@ export async function runDropperStage(
               skipFullness: runtime.config.dropperPoolFullnessThreshold,
               pressure: { tokens: poolTokens, maxDrops: globalMaxDrops },
               rawProposals: true,
+              maxOutputTokens: workerOutputAllowance(best.ctx, bestModel),
               maxTurns: runtime.config.agentMaxTurns,
               thinkingLevel: stageThinkingLevel(runtime, "dropper", stageModelForBatch),
               providerIdleTimeoutMs: runtime.config.providerIdleTimeoutMs,
@@ -2258,6 +2294,7 @@ export async function runDropperStage(
               sessionId,
             ),
             env: resolved.env,
+            maxOutputTokens: workerOutputAllowance(effectiveDropCtx, resolved.model as any),
             reflections: input.reflectionsForDropper,
             observations: input.newObservations,
             existingObservationsSummary: input.existingObservationsSummary || undefined,

@@ -65,6 +65,13 @@ interface RunDropperArgs {
    * and selects once globally. Unset for normal single runs.
    */
   rawProposals?: boolean;
+  /**
+   * Generation cap wired by the consolidation stage from the effective window
+   * (`workerOutputAllowance`): the dispatched `maxTokens` must equal the output
+   * allowance the preflight reserved, or a fitting prompt still overflows at
+   * generation time. Absent, the legacy unclamped bound applies.
+   */
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   agentLoop?: typeof agentLoop;
   /** Optional custom stream function bypassing agentLoop's default streamSimple.
@@ -314,7 +321,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
-    maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
+    maxTokens: args.maxOutputTokens ?? boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),

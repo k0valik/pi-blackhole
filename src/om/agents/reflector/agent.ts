@@ -60,6 +60,13 @@ interface RunReflectorArgs {
    *  from jiti-loaded consolidation agents. */
   streamFn?: (model: any, context: any, options: any) => any;
   maxTurns?: number;
+  /**
+   * Generation cap wired by the consolidation stage from the effective window
+   * (`workerOutputAllowance`): the dispatched `maxTokens` must equal the output
+   * allowance the preflight reserved, or a fitting prompt still overflows at
+   * generation time. Absent, the legacy unclamped bound applies.
+   */
+  maxOutputTokens?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
   /** Model registry for streamSimple resolution (custom providers, OAuth). */
@@ -262,7 +269,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
-    maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
+    maxTokens: args.maxOutputTokens ?? boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),

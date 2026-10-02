@@ -198,6 +198,13 @@ describe("dropper shrink-to-fit batching", () => {
     const data = appendEntry.mock.calls[0][1] as { observationIds: string[] };
     expect(data.observationIds).toHaveLength(6);
     expect(runtime.getCursor("dropper")?.state).toBe("recorded");
+    // Every batch dispatches the preflight allowance for the largest window.
+    const { workerOutputAllowance } = await import("../src/om/prompt-budget.js");
+    for (const call of runDropperSpy.mock.calls) {
+      expect((call[0] as any).maxOutputTokens).toBe(
+        workerOutputAllowance(50_000, { maxTokens: 2000 } as any),
+      );
+    }
   });
 
   test("a size mismatch cools nothing: the model is offered again next cycle", async () => {
@@ -213,5 +220,23 @@ describe("dropper shrink-to-fit batching", () => {
     expect(outcome).toBe("continue");
     expect(runDropperSpy).not.toHaveBeenCalled();
     expect(recordCooldownSpy).not.toHaveBeenCalled();
+  });
+
+  test("a fitting run dispatches the preflight output allowance", async () => {
+    const { entries } = poolBranch(2, 50);
+    const runtime = makeRuntime();
+    runtime.config.dropperModel = { provider: "test-shr", id: "drop-cap-m" };
+
+    const { outcome } = await runStage(runtime, entries, fakeRegistry(20_000));
+
+    // ~100 content tokens against a 20k window: the normal path runs (no
+    // shrink), and the dispatched generation cap is the preflight allowance
+    // — a quarter of the window here, not the legacy 32k.
+    expect(outcome).toBe("continue");
+    expect(runDropperSpy).toHaveBeenCalledTimes(1);
+    const { workerOutputAllowance } = await import("../src/om/prompt-budget.js");
+    expect((runDropperSpy.mock.calls[0][0] as any).maxOutputTokens).toBe(
+      workerOutputAllowance(20_000, undefined),
+    );
   });
 });
