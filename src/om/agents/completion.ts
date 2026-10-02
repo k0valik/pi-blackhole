@@ -61,14 +61,15 @@ export function agentCompletionError(
   // A run that stopped on its own finished: report success even if the
   // attempt signal aborted in the settle window.
   if (last?.stopReason === "stop") return undefined;
-  if (!last?.stopReason) return undefined;
   // A terminating tool batch the stage already reports itself (a complete=true
   // close, or the turn cap cutting the run on a tool-work turn) is a
   // sanctioned ending, not a cut-off evaluation — and it stays sanctioned
-  // when the abort lands after the close (`stop` beats abort above; tool-close
-  // beats it here). Only then does a live abort report `aborted`.
-  if (last.stopReason === "toolUse" && completedByTool) return undefined;
+  // when the abort lands after the close. Only then does a live abort report
+  // `aborted`, and it still beats "no message at all": an abort landing before
+  // the first assistant message must not read as an empty success.
+  if (last?.stopReason === "toolUse" && completedByTool) return undefined;
   if (signal?.aborted) return "aborted";
+  if (!last?.stopReason) return undefined;
   // Byte-identical to the pre-existing error fallback: isDeterministicError
   // strips the worker framing and scans the rest for bare 4xx codes, so the
   // text must not drift on the path that already existed.

@@ -7,6 +7,7 @@
  * custom-provider resolution instead of each duplicating the 15-line function.
  */
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
+import { debugLog } from "./debug-log.js";
 
 interface RegisteredProviderConfig {
   api?: string;
@@ -218,38 +219,37 @@ export function createProviderFetch(timeoutMs?: number): typeof fetch | undefine
   // caller setup apply.
   if (timeoutMs === undefined || !(timeoutMs > 0)) return undefined;
 
-  let global: Dispatcher | undefined;
   try {
-    global = getGlobalDispatcher();
-  } catch {
-    // No Undici globals (mocked-fetch harnesses): degrade to plain fetch with
-    // the timeout ignored rather than failing every request in the run.
-    return undefined;
-  }
+    const global: Dispatcher = getGlobalDispatcher();
+    const dispatcher: Dispatcher = {
+      dispatch(options, handler) {
+        return global.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
+      },
+    };
 
-  const dispatcher: Dispatcher = {
-    dispatch(options, handler) {
-      return (global as Dispatcher).dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
-    },
-  };
-
-  return (input, init) => {
-    const callerDispatcher = (init as any)?.dispatcher;
-    if (typeof callerDispatcher?.dispatch === "function") {
-      // Respect caller-provided dispatcher by chaining our timeout through it.
-      const chained: Dispatcher = {
-        dispatch(options, handler) {
-          return callerDispatcher.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
-        },
-      };
-      return fetch(input, { ...init, dispatcher: chained } as RequestInit & {
+    return (input, init) => {
+      const callerDispatcher = (init as any)?.dispatcher;
+      if (typeof callerDispatcher?.dispatch === "function") {
+        // Respect caller-provided dispatcher by chaining our timeout through it.
+        const chained: Dispatcher = {
+          dispatch(options, handler) {
+            return callerDispatcher.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
+          },
+        };
+        return fetch(input, { ...init, dispatcher: chained } as RequestInit & {
+          dispatcher: Dispatcher;
+        });
+      }
+      return fetch(input, { ...init, dispatcher } as RequestInit & {
         dispatcher: Dispatcher;
       });
-    }
-    return fetch(input, { ...init, dispatcher } as RequestInit & {
-      dispatcher: Dispatcher;
-    });
-  };
+    };
+  } catch (error) {
+    // No Undici globals (mocked-fetch harnesses): degrade to plain fetch with
+    // the timeout ignored rather than failing every request in the run.
+    debugLog("provider.idle_timeout_unavailable", { message: String(error) });
+    return undefined;
+  }
 }
 
 export function createBridgeStreamFn(
