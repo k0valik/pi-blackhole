@@ -161,6 +161,14 @@ export class Runtime {
    * Cleared between stages at the pipeline level.
    */
   failedInCycle: Set<string> = new Set();
+  /**
+   * Models skipped in the current consolidation stage because the sized input
+   * does not fit their context window (in-memory only). A too-small window is
+   * not a broken model, so — unlike recordRetryableError — this never writes
+   * a persisted cooldown: the model stays available for smaller inputs and
+   * for the shrink-to-fit pass. Cleared between stages alongside failedInCycle.
+   */
+  sizeSkippedInCycle: Set<string> = new Set();
   compactInFlight = false;
   compactHookInFlight = false;
   /** AbortController for the pending auto-compaction wait loop, or null if none.
@@ -409,6 +417,7 @@ export class Runtime {
 
     // Try configured candidates
     for (const candidate of candidates) {
+      signal?.throwIfAborted();
       const key = modelKey(candidate);
 
       // In-memory skip: model failed earlier in this stage with cooldownHours 0
@@ -419,6 +428,18 @@ export class Runtime {
           `Observational memory: ${stageName} skipping ${key} (failed this cycle, cooldown disabled)`,
         );
         debugLog("model.failed_this_cycle", { stage: stageName, model: key });
+        continue;
+      }
+
+      // In-memory skip: the sized input does not fit this model's window. No
+      // persisted cooldown — the model is tried again for smaller inputs.
+      if (this.sizeSkippedInCycle.has(key)) {
+        this.tryEmitInfo(
+          ctx.hasUI,
+          ctx.ui,
+          `Observational memory: ${stageName} skipping ${key} (context window too small for this input)`,
+        );
+        debugLog("model.size_skipped_this_cycle", { stage: stageName, model: key });
         continue;
       }
 
@@ -537,6 +558,21 @@ export class Runtime {
         };
       }
 
+      // Same for a size-skipped session model: the sized input did not fit it
+      // earlier in this stage run.
+      if (
+        typeof sessionIdentity.provider === "string" &&
+        typeof sessionIdentity.id === "string" &&
+        this.sizeSkippedInCycle.has(
+          modelKey({ provider: sessionIdentity.provider, id: sessionIdentity.id }),
+        )
+      ) {
+        return {
+          ok: false,
+          reason: `no model available for ${stageName} (all candidates exhausted, session model ${sessionIdentity.provider}/${sessionIdentity.id} too small for this input)`,
+        };
+      }
+
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(sessionModel);
       signal?.throwIfAborted();
       let hasAuth = ctx.modelRegistry.hasConfiguredAuth?.(sessionModel) ?? true;
@@ -648,6 +684,28 @@ export class Runtime {
       ...(refreshError ? { refreshError } : {}),
     });
     return recovered;
+  }
+
+  /**
+   * Mark a model as too small for the current sized input for the rest of this
+   * stage run. In-memory only, never a persisted cooldown: the window, not the
+   * model, is at fault, so it stays available for smaller inputs and for the
+   * shrink-to-fit pass (which re-offers it via unskipOversizedForCycle).
+   * Accepts a candidate config or a resolved model identity; undefined (e.g. an
+   * unresolvable session model) is a no-op.
+   */
+  skipOversizedForCycle(model: { provider: string; id: string } | undefined): void {
+    if (!model || typeof model.provider !== "string" || typeof model.id !== "string") return;
+    this.sizeSkippedInCycle.add(modelKey(model));
+  }
+
+  /**
+   * Re-offer a size-skipped model. The shrink-to-fit pass calls this for the
+   * largest-window model before re-resolving: the shrunk input fits it now.
+   */
+  unskipOversizedForCycle(model: { provider: string; id: string } | undefined): void {
+    if (!model || typeof model.provider !== "string" || typeof model.id !== "string") return;
+    this.sizeSkippedInCycle.delete(modelKey(model));
   }
 
   /**

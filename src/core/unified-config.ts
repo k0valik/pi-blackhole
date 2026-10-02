@@ -874,6 +874,23 @@ export function loadUnifiedConfig(cwd: string, onWarn?: WarnFn): UnifiedConfig {
     DEFAULTS as unknown as Record<string, unknown>,
   );
 
+  // Cross-key guard: a trigger threshold above the per-batch cap means no
+  // single batch can hold a trigger-worth of content, so every observation
+  // pass runs as multiple capped+drained batches. That combination is
+  // loss-free after the F1 drain — warn so the user knows, but never clamp
+  // their threshold (work_docs/plan-observer-coverage-completion.md, Tier 1).
+  // Skipped when memory is off: the observer never runs, so the pair is moot.
+  if (withEnv.memory !== false && withEnv.observeAfterTokens > withEnv.observerChunkMaxTokens) {
+    const msg =
+      `blackhole: observeAfterTokens (${withEnv.observeAfterTokens}) exceeds ` +
+      `observerChunkMaxTokens (${withEnv.observerChunkMaxTokens}); the observer ` +
+      `cannot see a full trigger's worth of content in one batch, so each ` +
+      `observation pass runs in multiple batches. Raise observerChunkMaxTokens ` +
+      `or lower observeAfterTokens if a single batch was intended.`;
+    if (onWarn) onWarn(msg);
+    else console.warn(msg);
+  }
+
   // Legacy-81000 note: file residue never reaches this point — parseConfig
   // already ran it through normalizeThresholdKnobs, which drops a file-level
   // 81000 unconditionally (it always meant "default posture", never a true

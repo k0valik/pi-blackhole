@@ -39,9 +39,10 @@ export interface CooldownEntry {
 
 type CooldownMap = Record<string, CooldownEntry>;
 
-/** Provider/id key for cooldown lookup. */
+/** Provider/id key for cooldown lookup (trimmed + case-folded: a host may
+ * return a differently-cased id from `find()` than the candidate declares). */
 export function modelKey(model: OmModelConfig): string {
-  return `${model.provider}/${model.id}`;
+  return `${model.provider.trim().toLowerCase()}/${model.id.trim().toLowerCase()}`;
 }
 
 // ── Load / save ─────────────────────────────────────────────────────────────
@@ -50,7 +51,15 @@ function readCooldownMap(): CooldownMap {
   const path = cooldownPath();
   if (!existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, "utf-8"));
+    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, CooldownEntry>;
+    // Fold-on-read: files written before modelKey normalization keep
+    // case-preserved (or padded) keys that would otherwise miss every lookup —
+    // including still-active cooldowns — until rewritten.
+    const map: CooldownMap = {};
+    for (const [key, entry] of Object.entries(raw)) {
+      if (entry) map[key.trim().toLowerCase()] = entry;
+    }
+    return map;
   } catch {
     return {};
   }

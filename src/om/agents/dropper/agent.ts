@@ -2,26 +2,29 @@
  * Dropper agent — uses agentLoop to propose prunable observations.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/agents/dropper/agent.ts)
- * Modified by pi-vcc-om: detects agent_end stopReason="error" in the stream
- * and always throws, since the tool has no complete flag to prove the
- * evaluation finished: a prefix of the proposed candidates reported as success
- * would be written under an OM_OBSERVATIONS_DROPPED marker that a cadence run
- * never re-evaluates. The same guard covers a run the agent turn cap cut off.
+ * Modified by pi-vcc-om: an agent_end whose run did not complete — stopReason
+ * `error`/`aborted`/`length`, a terminal `toolUse` without the turn cap, or an
+ * aborted attempt signal — always throws, since the tool has no complete flag
+ * to prove the evaluation finished: a prefix of the proposed candidates
+ * reported as success would be written under an OM_OBSERVATIONS_DROPPED marker
+ * that a cadence run never re-evaluates. The same guard covers a run the agent
+ * turn cap cut off.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { agentCompletionError, agentFailureStopReason } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
   createBridgeStreamFn,
   createProviderFetch,
+  neverThrow,
   type ProviderFetchOption,
 } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { Type } from "typebox";
-import type { Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
 import {
+  isDeterministicError,
   withDiscardedCount,
   WorkerStreamError,
   workerStreamErrorMessage,
@@ -30,7 +33,6 @@ import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { reflectionToSummaryLine, type Observation, type Reflection } from "../../ledger/index.js";
 import { DROPPER_SYSTEM } from "./prompts.js";
 import {
-  REFLECTION_COVERAGE_DROP_RANK,
   coverageTierForObservation,
   observationToDropperLine,
   reflectionCoverageMap,
@@ -51,6 +53,26 @@ interface RunDropperArgs {
   /** Minimum pool fullness (fraction of budget) before dropping is allowed.
    *  Defaults to DROP_SKIP_FULLNESS (0.1) when unset. */
   skipFullness?: number;
+  /**
+   * Batch-mode pressure override for shrink-to-fit runs: the caller evaluates
+   * a subset of the candidate pool per batch but the prompt must still quote
+   * the pool-wide pressure numbers (same fullness/urgency/maximum the
+   * whole-pool run would show). Unset for normal single runs.
+   */
+  pressure?: { tokens: number; maxDrops: number };
+  /**
+   * Batch mode: return the raw proposed ids without applying the
+   * deterministic ranker + cap. The caller merges proposals across batches
+   * and selects once globally. Unset for normal single runs.
+   */
+  rawProposals?: boolean;
+  /**
+   * Generation cap wired by the consolidation stage from the effective window
+   * (`workerOutputAllowance`): the dispatched `maxTokens` must equal the output
+   * allowance the preflight reserved, or a fitting prompt still overflows at
+   * generation time. Absent, the legacy unclamped bound applies.
+   */
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   agentLoop?: typeof agentLoop;
   /** Optional custom stream function bypassing agentLoop's default streamSimple.
@@ -78,65 +100,30 @@ interface RunDropperArgs {
   cacheRetention?: CacheRetention;
 }
 
-const DROP_SKIP_FULLNESS = 0.1;
-const DROP_LOW_URGENCY_FULLNESS = 0.3;
-const DROP_MEDIUM_URGENCY_FULLNESS = 0.6;
-const DROP_MAX_FULLNESS = 1.0;
-const DROP_MIN_RATIO = 0.1;
-const DROP_MAX_RATIO = 0.5;
+export {
+  DROP_LOW_URGENCY_FULLNESS,
+  DROP_MAX_FULLNESS,
+  DROP_MAX_RATIO,
+  DROP_MEDIUM_URGENCY_FULLNESS,
+  DROP_MIN_RATIO,
+  DROP_SKIP_FULLNESS,
+  type DropUrgency,
+  dropUrgencyForFullness,
+  maxDropCountForPool,
+  observationPoolFullness,
+  selectDropCandidates,
+} from "./selection.js";
+import {
+  dropUrgencyForFullness,
+  maxDropCountForPool,
+  observationPoolFullness,
+  selectDropCandidates,
+} from "./selection.js";
 
-export type DropUrgency = "low" | "medium" | "high";
-
-const RELEVANCE_DROP_RANK: Record<Observation["relevance"], number> = {
-  low: 0,
-  medium: 1,
-  high: 2,
-  critical: 3,
-};
-
-const DropObservationsSchema = Type.Object({
-  ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  reason: Type.Optional(Type.String()),
-});
-
-type DropObservationsArgs = Static<typeof DropObservationsSchema>;
+import { DropObservationsSchema, type DropObservationsArgs } from "./tool-schema.js";
 
 function joinOrEmpty(items: string[]): string {
   return items.length ? items.join("\n") : "(none yet)";
-}
-
-export function observationPoolFullness(observationTokens: number, budgetTokens: number): number {
-  if (!Number.isFinite(observationTokens) || observationTokens <= 0) return 0;
-  if (!Number.isFinite(budgetTokens) || budgetTokens <= 0) return 0;
-  return observationTokens / budgetTokens;
-}
-
-export function dropUrgencyForFullness(fullness: number): DropUrgency {
-  if (fullness < DROP_LOW_URGENCY_FULLNESS) return "low";
-  if (fullness < DROP_MEDIUM_URGENCY_FULLNESS) return "medium";
-  return "high";
-}
-
-export function maxDropCountForPool(
-  observations: readonly Observation[],
-  observationTokens: number,
-  budgetTokens: number,
-  skipFullness: number = DROP_SKIP_FULLNESS,
-): number {
-  const droppableCount = observations.filter(
-    (observation) => observation.relevance !== "critical",
-  ).length;
-  if (droppableCount === 0) return 0;
-
-  const fullness = observationPoolFullness(observationTokens, budgetTokens);
-  if (fullness < skipFullness) return 0;
-
-  const cappedFullness = Math.min(DROP_MAX_FULLNESS, Math.max(skipFullness, fullness));
-  const dropRatio =
-    DROP_MIN_RATIO +
-    ((cappedFullness - skipFullness) / (DROP_MAX_FULLNESS - skipFullness)) *
-      (DROP_MAX_RATIO - DROP_MIN_RATIO);
-  return Math.max(1, Math.floor(droppableCount * dropRatio));
 }
 
 function relevanceCounts(
@@ -169,48 +156,6 @@ export function normalizeDropObservationIds(
   return result.length > 0 ? result : undefined;
 }
 
-function timestampRank(timestamp: string): number {
-  const parsed = Date.parse(timestamp);
-  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
-}
-
-export function selectDropCandidates(
-  ids: readonly string[],
-  observations: readonly Observation[],
-  maxDrops: number,
-  reflections: readonly Reflection[] = [],
-): string[] {
-  if (maxDrops <= 0 || ids.length === 0) return [];
-
-  const byId = new Map(observations.map((observation) => [observation.id, observation]));
-  const coverageById = reflectionCoverageMap(observations, reflections);
-  const firstProposalIndex = new Map<string, number>();
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    if (!firstProposalIndex.has(id)) firstProposalIndex.set(id, i);
-  }
-
-  return Array.from(firstProposalIndex.entries())
-    .map(([id, index]) => ({ id, index, observation: byId.get(id) }))
-    .filter(
-      (candidate): candidate is { id: string; index: number; observation: Observation } =>
-        candidate.observation !== undefined,
-    )
-    .sort((a, b) => {
-      const coverageDelta =
-        REFLECTION_COVERAGE_DROP_RANK[coverageTierForObservation(a.observation, coverageById)] -
-        REFLECTION_COVERAGE_DROP_RANK[coverageTierForObservation(b.observation, coverageById)];
-      const relevanceDelta =
-        RELEVANCE_DROP_RANK[a.observation.relevance] - RELEVANCE_DROP_RANK[b.observation.relevance];
-      const aAge = timestampRank(a.observation.timestamp);
-      const bAge = timestampRank(b.observation.timestamp);
-      const ageDelta = aAge === bAge ? 0 : aAge - bAge;
-      return coverageDelta || relevanceDelta || ageDelta || a.index - b.index;
-    })
-    .slice(0, maxDrops)
-    .map((candidate) => candidate.id);
-}
-
 export async function runDropper(args: RunDropperArgs): Promise<string[] | undefined> {
   const {
     model,
@@ -229,19 +174,17 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   // set the caller chose to evaluate — the post-last-drop delta for cadence
   // runs, the whole live pool (`livePoolObservations`) for pressure runs. So
   // this measures that candidate set; widening the scope here would change
-  // which observations the dropper is allowed to drop.
-  const observationTokens = observations.reduce(
-    (sum, observation) => sum + observation.tokenCount,
-    0,
-  );
+  // which observations the dropper is allowed to drop. A batch-mode pressure
+  // override replaces the numbers (but never the candidate set) so every
+  // batch quotes the pool-wide pressure the whole-pool run would show.
+  const observationTokens =
+    args.pressure?.tokens ??
+    observations.reduce((sum, observation) => sum + observation.tokenCount, 0);
   const fullness = observationPoolFullness(observationTokens, budgetTokens);
   const urgency = dropUrgencyForFullness(fullness);
-  const maxDropsAllowed = maxDropCountForPool(
-    observations,
-    observationTokens,
-    budgetTokens,
-    skipFullness,
-  );
+  const maxDropsAllowed =
+    args.pressure?.maxDrops ??
+    maxDropCountForPool(observations, observationTokens, budgetTokens, skipFullness);
   const coverageById = reflectionCoverageMap(observations, reflections);
   const coverageSummaryByRelevance = summarizeCoverageByRelevance(observations, coverageById);
   debugLog("dropper.agent_start", {
@@ -255,7 +198,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     relevanceCounts: relevanceCounts(observations),
     coverageSummaryByRelevance,
   });
-  if (maxDropsAllowed <= 0) {
+  if (maxDropsAllowed <= 0 && !args.rawProposals) {
     debugLog("dropper.result", {
       reason: "not_over_target",
       toolCallCount: 0,
@@ -355,7 +298,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     ? `EXISTING ACTIVE OBSERVATIONS (for context only — these are NOT candidates for dropping):\n${args.existingObservationsSummary}\n\n`
     : "";
 
-  const userText = `CURRENT REFLECTIONS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\n${existingObservationsContext}NEW OBSERVATIONS TO EVALUATE FOR DROPPING:\n${joinOrEmpty(observations.map((observation) => observationToDropperLine(observation, coverageTierForObservation(observation, coverageById))))}\n\nObservation pool pressure: ~${observationTokens.toLocaleString()} tokens; target budget: ~${budgetTokens.toLocaleString()} tokens; fullness: ~${fullnessPercent.toLocaleString()}%.\nDrop urgency: ${urgency}.\nMaximum drops allowed this run: ${maxDropsAllowed.toLocaleString()} observation${maxDropsAllowed === 1 ? "" : "s"}.\nThis maximum is a hard upper bound, not a target. Drop fewer or none if fewer observations are clearly safe.`;
+  const userText = `CURRENT REFLECTIONS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\n${existingObservationsContext}NEW OBSERVATIONS TO EVALUATE FOR DROPPING:\n${joinOrEmpty(observations.map((observation) => observationToDropperLine(observation, coverageTierForObservation(observation, coverageById))))}\n\nObservation pool pressure: ~${observationTokens.toLocaleString()} tokens; target budget: ~${budgetTokens.toLocaleString()} tokens; fullness: ~${fullnessPercent.toLocaleString()}%.\nDrop urgency: ${urgency}.\nPool-wide maximum drops: ${maxDropsAllowed.toLocaleString()} observation${maxDropsAllowed === 1 ? "" : "s"} (advisory for this batch — the run may evaluate the pool in several batches and re-applies the cap globally over the merged proposals).\nThis maximum is a hard upper bound, not a target. Drop fewer or none if fewer observations are clearly safe.`;
   const prompts: Message[] = [
     {
       role: "user",
@@ -371,6 +314,18 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   // "the cap cut the model off".
   const turnCap = effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : undefined;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
+  // The stage wires this from the effective window, but the option is only
+  // nullish-guarded by default: 0, NaN, and negatives would reach the
+  // provider verbatim (`maxTokens: 0` reads as empty success with coverage
+  // advanced on some providers). Validate at the boundary instead.
+  const maxOutputTokens =
+    typeof args.maxOutputTokens === "number" &&
+    Number.isFinite(args.maxOutputTokens) &&
+    args.maxOutputTokens > 0
+      ? // Floor first, clamp after: Math.floor(0.5) is 0, the very empty-cap
+        // case this guard prevents.
+        Math.max(1, Math.floor(args.maxOutputTokens))
+      : boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS);
   const config: AgentLoopConfig & ProviderFetchOption & LegacyTurnCapOption = {
     model,
     apiKey,
@@ -379,7 +334,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
-    maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
+    maxTokens: maxOutputTokens,
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
@@ -391,9 +346,14 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   const loop = args.agentLoop ?? agentLoop;
   // ── Bridge stream function ──
   const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
-  const streamFn = args.streamFn ?? bridgeStreamFn;
+  // Never throws: pi's loop is fire-and-forget, so a sync throw or rejection
+  // here would become an unhandled rejection plus a run that hangs on an open
+  // event stream. Failures arrive as an error stream the completion check
+  // classifies like any provider error.
+  const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
+  let failureKind: string | undefined;
   try {
     for await (const event of stream) {
       // Tool execution collects candidate ids.
@@ -402,10 +362,13 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
           stopReason?: string;
           errorMessage?: string;
         }>;
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg?.stopReason === "error") {
-          agentError = lastMsg.errorMessage ?? "Unknown API error";
-        }
+        // `length`/`aborted`/terminal `toolUse` are not completions either: the
+        // stage writes an OM_OBSERVATIONS_DROPPED marker over the whole window,
+        // so a cut-off evaluation reported as success would never revisit the
+        // observations past the cut. `drop_observations` carries no complete
+        // flag, so only a turn-cap end on a tool-work turn is exempt.
+        agentError = agentCompletionError(msgs, signal, turnCap?.exhausted);
+        failureKind = agentFailureStopReason(msgs);
       }
     }
     await stream.result();
@@ -415,28 +378,72 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     throw withDiscardedCount(error, proposedDropIds.length);
   }
 
+  // The cap ended the run mid-evaluation for the same reason. The message names
+  // no status code: this is a config limit rather than a provider failure, so it
+  // must not cool a session model as deterministic. This check runs BEFORE the
+  // completion check below: a length cut can land on the same turn the cap
+  // fires (turn-cap.ts only exempts error/aborted turns), and the stage's
+  // session-model break-glass keys on turnCapExhausted. A provider `error` is
+  // carved out: it keeps its own classification, and error turns never spend
+  // budget, so the cap did not cause it. A cap firing before any
+  // candidate was proposed is still an empty success (returns undefined). A
+  // concurrent abort keeps the completion check's `aborted` classification,
+  // and a `length` terminal carrying a deterministic (4xx) message keeps its
+  // provider-error classification — the cap did not cause it.
+  if (
+    turnCap?.exhausted &&
+    proposedDropIds.length > 0 &&
+    !signal?.aborted &&
+    failureKind !== "error" &&
+    !(failureKind === "length" && agentError != null && isDeterministicError(agentError))
+  ) {
+    throw new WorkerStreamError(
+      `Dropper turn cap exhausted: ${proposedDropIds.length} drop candidate${proposedDropIds.length === 1 ? "" : "s"} recorded before the run ended`,
+      proposedDropIds.length,
+      true,
+    );
+  }
+
   // `drop_observations` carries no complete flag, so no batch can prove the
   // evaluation finished. The stage writes an OM_OBSERVATIONS_DROPPED marker over
   // the whole observation window and a cadence run never revisits what it
   // covers, so a failure discards the prefix rather than publishing it as a
   // finished evaluation.
   if (agentError) {
+    // A `length` terminal marks the run output-capped (input-size-dependent,
+    // not a broken model) so the stage can break the session retry loop
+    // instead of burning every attempt on an identical outcome.
     throw new WorkerStreamError(
       workerStreamErrorMessage("Dropper", agentError),
       proposedDropIds.length,
+      false,
+      failureKind === "length",
     );
   }
 
-  // The cap ended the run mid-evaluation for the same reason. The message names
-  // no status code: this is a config limit rather than a provider failure, so it
-  // must not cool a session model as deterministic. A cap firing before any
-  // candidate was proposed is still an empty success (returns undefined).
-  if (turnCap?.exhausted && proposedDropIds.length > 0) {
-    throw new WorkerStreamError(
-      `Dropper turn cap exhausted: ${proposedDropIds.length} drop candidate${proposedDropIds.length === 1 ? "" : "s"} recorded before the run ended`,
-      proposedDropIds.length,
-      true,
-    );
+  // Batch mode: hand the raw proposals to the caller, which merges across
+  // batches and applies the ranker + global cap once. Record the per-batch
+  // result first so multi-batch runs keep their audit trail.
+  if (args.rawProposals) {
+    debugLog("dropper.result", {
+      reason: "raw_batch_proposals",
+      toolCallCount,
+      rawRequestedIdsCount,
+      missingIdsCount,
+      criticalCandidateIdsCount,
+      duplicateInRequestCount,
+      duplicateInRunCount,
+      acceptedCandidateCount: proposedDropIds.length,
+      selectedDropsCount: 0,
+      selectedDropTokens: 0,
+      selectedCoverageSummaryByRelevance: summarizeCoverageByRelevanceForIds(
+        [],
+        observations,
+        coverageById,
+      ),
+      maxDropsAllowed,
+    });
+    return proposedDropIds;
   }
 
   const droppedIds = selectDropCandidates(

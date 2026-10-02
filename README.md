@@ -168,7 +168,7 @@ Defaults target ~128k context models and work out of the box — no tuning requi
 }
 ```
 
-Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the workers **do not** fall back to your session model — this avoids surprise cost and cache busting. Enable it with `sessionFallback: true` (default) or set `model` as a shared fallback. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
+Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the session model **is** the last-resort fallback (`sessionFallback: true`), so workers keep running even with no worker models configured. If you don't want worker runs to touch your session model (extra cost and prompt-cache busting), configure cheap worker models (above) and set `sessionFallback: false` — or set `model` as a shared fallback so the session model is never reached. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
 
 Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
 
@@ -190,7 +190,7 @@ https://github.com/user-attachments/assets/a7dd804d-6aca-4bdb-8b6e-0dd779363a43
 
 Three background workers (separate LLM calls) run automatically during the session when `memory: true` (the default):
 
-- **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` newest-first to prevent context blowup on long sessions. Runs most frequently.
+- **Observer** — reads conversation since the last observation marker and extracts timestamped facts: events, decisions, preferences. Input is capped to `observerChunkMaxTokens` as an oldest-first prefix (overflow drains in bounded follow-up batches) to prevent context blowup on long sessions — the coverage cursor never advances past entries the model was not shown. Runs most frequently.
 - **Reflector** — distills new observations into durable reflections: stable facts, patterns, and constraints that survive future compactions. Runs less often.
 - **Dropper** — prunes low-value observations from active memory when the pool exceeds `observationsPoolMaxTokens`, while keeping reflections and other long-term elements safely in the session ledger.
 

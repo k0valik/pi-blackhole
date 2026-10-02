@@ -11,23 +11,25 @@
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { agentCompletionError, agentFailureStopReason } from "../completion.js";
 import { buildAgentContext } from "../agent-context.js";
 import { createTurnCap, type LegacyTurnCapOption } from "../turn-cap.js";
 import {
   createBridgeStreamFn,
   createProviderFetch,
+  neverThrow,
   type ProviderFetchOption,
 } from "../../provider-stream.js";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { Type } from "typebox";
-import type { Static } from "typebox";
 import { hashId } from "../../ids.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { OBSERVER_SYSTEM } from "./prompts.js";
+import { RecordObservationsSchema, type RecordObservationsArgs } from "./tool-schema.js";
 import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
 import { estimateStringTokens } from "../../tokens.js";
 import {
+  isDeterministicError,
   withDiscardedCount,
   WorkerStreamError,
   workerStreamErrorMessage,
@@ -52,6 +54,13 @@ interface RunObserverArgs {
    *  from jiti-loaded consolidation agents. */
   streamFn?: (model: any, context: any, options: any) => any;
   maxTurns?: number;
+  /**
+   * Generation cap wired by the consolidation stage from the effective window
+   * (`workerOutputAllowance`): the dispatched `maxTokens` must equal the output
+   * allowance the preflight reserved, or a fitting prompt still overflows at
+   * generation time. Absent, the legacy unclamped bound applies.
+   */
+  maxOutputTokens?: number;
   thinkingLevel?: ModelThinkingLevel;
   providerIdleTimeoutMs?: number;
   /** Model registry for streamSimple resolution (custom providers, OAuth). */
@@ -72,53 +81,7 @@ interface RunObserverArgs {
   cacheRetention?: CacheRetention;
 }
 
-const RelevanceSchema = Type.Union([
-  Type.Literal("low"),
-  Type.Literal("medium"),
-  Type.Literal("high"),
-  Type.Literal("critical"),
-]);
-
-export const OBSERVATION_TIMESTAMP_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$";
-
-const RecordObservationsSchema = Type.Object({
-  observations: Type.Array(
-    Type.Object({
-      content: Type.String({
-        minLength: 1,
-        description: "Single-line plain prose. No markdown, no tags, no embedded timestamp.",
-      }),
-      relevance: RelevanceSchema,
-      sourceEntryIds: Type.Array(Type.String({ minLength: 1 }), {
-        minItems: 1,
-        description:
-          "Exact source entry ids from the chunk that directly support this observation. " +
-          "Use only ids shown in '[Source entry id: ...]' labels; never invent ids.",
-      }),
-    }),
-    {
-      // The empty batch is the only sanctioned way to close a chunk that yielded
-      // nothing, so it is paired with the flag. The previous wording also offered
-      // "if the tool is not called at all", which is both self-contradictory (an
-      // uncalled tool has no array) and points at the plain-text path the observer
-      // stage reports as a tool_not_called warning.
-      description:
-        "Batch of new observations. May be empty only alongside complete=true, " +
-        "which closes a run that found nothing new.",
-    },
-  ),
-  // Optional on purpose: a model that omits the flag must lose only the
-  // early-stop hint, never the batch itself (a required field would fail
-  // host-side validation and drop every observation in the call).
-  complete: Type.Optional(
-    Type.Boolean({
-      description:
-        "Whether this batch completes chunk coverage. Set false when more observations or corrections remain.",
-    }),
-  ),
-});
-
-type RecordObservationsArgs = Static<typeof RecordObservationsSchema>;
+export { OBSERVATION_TIMESTAMP_PATTERN } from "./tool-schema.js";
 
 /**
  * Derive an observation timestamp from its supporting source entries instead of
@@ -340,6 +303,18 @@ ${conversation}`;
   // "the cap cut the model off".
   const turnCap = effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : undefined;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
+  // The stage wires this from the effective window, but the option is only
+  // nullish-guarded by default: 0, NaN, and negatives would reach the
+  // provider verbatim (`maxTokens: 0` reads as empty success with coverage
+  // advanced on some providers). Validate at the boundary instead.
+  const maxOutputTokens =
+    typeof args.maxOutputTokens === "number" &&
+    Number.isFinite(args.maxOutputTokens) &&
+    args.maxOutputTokens > 0
+      ? // Floor first, clamp after: Math.floor(0.5) is 0, the very empty-cap
+        // case this guard prevents.
+        Math.max(1, Math.floor(args.maxOutputTokens))
+      : boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS);
   const config: AgentLoopConfig & ProviderFetchOption & LegacyTurnCapOption = {
     model,
     apiKey,
@@ -348,7 +323,7 @@ ${conversation}`;
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
-    maxTokens: boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
+    maxTokens: maxOutputTokens,
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
@@ -364,9 +339,14 @@ ${conversation}`;
   // other extensions (e.g., claude-bridge). The bridge looks up streamSimple functions
   // via modelRegistry (host-composed facade → registered provider config → global map).
   const bridgeStreamFn = createBridgeStreamFn(streamSimple, args.modelRegistry);
-  const streamFn = args.streamFn ?? bridgeStreamFn;
+  // Never throws: pi's loop is fire-and-forget, so a sync throw or rejection
+  // here would become an unhandled rejection plus a run that hangs on an open
+  // event stream. Failures arrive as an error stream the completion check
+  // classifies like any provider error.
+  const streamFn = neverThrow(args.streamFn ?? bridgeStreamFn);
   const stream = loop(prompts, context, config, signal, streamFn);
   let agentError: string | undefined;
+  let failureKind: string | undefined;
   try {
     for await (const event of stream) {
       // Drain events; the tool's execute already collects records.
@@ -375,10 +355,16 @@ ${conversation}`;
           stopReason?: string;
           errorMessage?: string;
         }>;
-        const lastMsg = msgs[msgs.length - 1];
-        if (lastMsg?.stopReason === "error") {
-          agentError = lastMsg.errorMessage ?? "Unknown API error";
-        }
+        // `length`/`aborted`/terminal `toolUse` are not completions either: a
+        // partial review reported as success would advance coversUpToId over
+        // observations the model never finished. The complete=true close and a
+        // turn-cap end on a tool-work turn are the two sanctioned endings.
+        agentError = agentCompletionError(
+          msgs,
+          signal,
+          closedByCompleteBatch || turnCap?.exhausted,
+        );
+        failureKind = agentFailureStopReason(msgs);
       }
     }
     await stream.result();
@@ -386,6 +372,41 @@ ${conversation}`;
     // A stream that breaks outright never emits agent_end, so the guard below
     // never sees it — yet the run still holds everything recorded so far.
     throw withDiscardedCount(error, accumulated.size);
+  }
+
+  // The turn cap ended the run before the model ever closed the chunk: the
+  // partial batch is not completed coverage, so returning it as success would
+  // advance coversUpToId and silently drop the tail of the chunk. Throwing
+  // keeps the cursor where it is and lets the stage's fallback chain retry.
+  // This check runs BEFORE the completion check below: a length cut can land
+  // on the same turn the cap fires (turn-cap.ts only exempts error/aborted
+  // turns), and the stage's session-model break-glass keys on
+  // turnCapExhausted — letting the completion check claim it first would
+  // misreport a config limit as a retryable provider failure. A provider
+  // `error` is carved out: it keeps its own classification (deterministic
+  // cooldown depends on its message), and error turns never spend budget, so
+  // the cap did not cause it. A valid close
+  // that recorded something already settled the chunk, so a cap
+  // firing after it changes nothing; a cap firing before anything was recorded
+  // is still an empty success (the stage advances the cursor as "empty"). The
+  // message names no status code: this is a config limit,
+  // not a provider failure, so it must not cool a session model as deterministic.
+  // Two carve-outs: a concurrent abort keeps the completion check's `aborted`
+  // classification, and a `length` terminal carrying a deterministic (4xx)
+  // message keeps its provider-error classification — the cap did not cause it.
+  if (
+    turnCap?.exhausted &&
+    accumulated.size > 0 &&
+    !closedByCompleteBatch &&
+    !signal?.aborted &&
+    failureKind !== "error" &&
+    !(failureKind === "length" && agentError != null && isDeterministicError(agentError))
+  ) {
+    throw new WorkerStreamError(
+      `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
+      accumulated.size,
+      true,
+    );
   }
 
   // A run that already closed the chunk with a valid complete=true batch that
@@ -399,23 +420,14 @@ ${conversation}`;
   if (agentError && !(closedByCompleteBatch && accumulated.size > 0)) {
     // The message stays byte-identical: isDeterministicError scans it for bare
     // 4xx codes, so an interpolated observation count could misclassify it.
-    throw new WorkerStreamError(workerStreamErrorMessage("Observer", agentError), accumulated.size);
-  }
-
-  // The turn cap ended the run before the model ever closed the chunk: the
-  // partial batch is not completed coverage, so returning it as success would
-  // advance coversUpToId and silently drop the tail of the chunk. Throwing
-  // keeps the cursor where it is and lets the stage's fallback chain retry.
-  // A valid close that recorded something already settled the chunk, so a cap
-  // firing after it changes nothing; a cap firing before anything was recorded
-  // is still an empty success (the stage advances the cursor as "empty"). The
-  // message names no status code: this is a config limit,
-  // not a provider failure, so it must not cool a session model as deterministic.
-  if (turnCap?.exhausted && accumulated.size > 0 && !closedByCompleteBatch) {
+    // A `length` terminal marks the run output-capped (input-size-dependent,
+    // not a broken model) so the stage can break the session retry loop
+    // instead of burning every attempt on an identical outcome.
     throw new WorkerStreamError(
-      `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
+      workerStreamErrorMessage("Observer", agentError),
       accumulated.size,
-      true,
+      false,
+      failureKind === "length",
     );
   }
 

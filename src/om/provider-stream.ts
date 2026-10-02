@@ -6,6 +6,9 @@
  * bridge logic so all OM agents (observer, reflector, dropper) use the same
  * custom-provider resolution instead of each duplicating the 15-line function.
  */
+import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
+import { debugLog } from "./debug-log.js";
+
 interface RegisteredProviderConfig {
   api?: string;
   streamSimple?: Function;
@@ -204,39 +207,49 @@ function getGlobalDispatcher(): Dispatcher {
  *
  * Semantics:
  * - `timeoutMs === undefined` → returns undefined (inherit pi's global default).
- * - `timeoutMs === 0`        → returns undefined (explicitly disabled).
- * - `timeoutMs > 0`          → returns a fetch wrapper that applies `bodyTimeout`.
+ * - `timeoutMs === 0`         → returns undefined (explicitly disabled).
+ * - `timeoutMs <= 0`/NaN      → returns undefined (nonsense input degrades to disabled).
+ * - `timeoutMs > 0`           → returns a fetch wrapper that applies `bodyTimeout`.
  *
  * If the caller already supplied an `init.dispatcher`, we chain through it
  * rather than silently overwriting it.
  */
 export function createProviderFetch(timeoutMs?: number): typeof fetch | undefined {
-  // Unset or explicitly disabled → let pi's global default / caller setup apply.
-  if (timeoutMs === undefined || timeoutMs === 0) return undefined;
+  // Unset, explicitly disabled, or non-positive → let pi's global default /
+  // caller setup apply.
+  if (timeoutMs === undefined || !(timeoutMs > 0)) return undefined;
 
-  const dispatcher: Dispatcher = {
-    dispatch(options, handler) {
-      return getGlobalDispatcher().dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
-    },
-  };
+  try {
+    const global: Dispatcher = getGlobalDispatcher();
+    const dispatcher: Dispatcher = {
+      dispatch(options, handler) {
+        return global.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
+      },
+    };
 
-  return (input, init) => {
-    const callerDispatcher = (init as any)?.dispatcher;
-    if (typeof callerDispatcher?.dispatch === "function") {
-      // Respect caller-provided dispatcher by chaining our timeout through it.
-      const chained: Dispatcher = {
-        dispatch(options, handler) {
-          return callerDispatcher.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
-        },
-      };
-      return fetch(input, { ...init, dispatcher: chained } as RequestInit & {
+    return (input, init) => {
+      const callerDispatcher = (init as any)?.dispatcher;
+      if (typeof callerDispatcher?.dispatch === "function") {
+        // Respect caller-provided dispatcher by chaining our timeout through it.
+        const chained: Dispatcher = {
+          dispatch(options, handler) {
+            return callerDispatcher.dispatch({ ...options, bodyTimeout: timeoutMs }, handler);
+          },
+        };
+        return fetch(input, { ...init, dispatcher: chained } as RequestInit & {
+          dispatcher: Dispatcher;
+        });
+      }
+      return fetch(input, { ...init, dispatcher } as RequestInit & {
         dispatcher: Dispatcher;
       });
-    }
-    return fetch(input, { ...init, dispatcher } as RequestInit & {
-      dispatcher: Dispatcher;
-    });
-  };
+    };
+  } catch (error) {
+    // No Undici globals (mocked-fetch harnesses): degrade to plain fetch with
+    // the timeout ignored rather than failing every request in the run.
+    debugLog("provider.idle_timeout_unavailable", { message: String(error) });
+    return undefined;
+  }
 }
 
 export function createBridgeStreamFn(
@@ -260,22 +273,37 @@ export function createBridgeStreamFn(
       typeof (modelRegistry as any).getRegisteredProviderIds === "function" &&
       typeof (modelRegistry as any).getRegisteredProviderConfig === "function"
     ) {
+      // Collect the match inside the guard: only registry enumeration may
+      // fall through (incomplete host/test doubles). Calling the matched
+      // handler stays outside, so a synchronously throwing provider surfaces
+      // instead of being retried on the wrong transport.
+      let exact: { config: RegisteredProviderConfig; handler: Function } | undefined;
+      let apiMatch: { config: RegisteredProviderConfig; handler: Function } | undefined;
+      let apiAmbiguous = false;
       try {
-        let apiMatch: { config: RegisteredProviderConfig; handler: Function } | undefined;
         for (const providerId of (modelRegistry as any).getRegisteredProviderIds()) {
           const config = (modelRegistry as any).getRegisteredProviderConfig(providerId);
           if (!config || typeof config.streamSimple !== "function") continue;
           if (providerId === model.provider && config.api === model.api) {
-            return config.streamSimple(model, ctx, o);
+            exact = { config, handler: config.streamSimple };
+            break;
           }
-          if (config.api === model.api && apiMatch === undefined) {
-            apiMatch = { config, handler: config.streamSimple };
+          if (config.api === model.api) {
+            if (apiMatch === undefined) {
+              apiMatch = { config, handler: config.streamSimple };
+            } else {
+              apiAmbiguous = true;
+            }
           }
         }
-        if (apiMatch) return apiMatch.handler.call(apiMatch.config, model, ctx, o);
       } catch {
         // Incomplete host/test doubles — fall through to global map
       }
+      if (exact) return exact.handler.call(exact.config, model, ctx, o);
+      // Api-only fallback only when unambiguous: two registrants on one api
+      // means the provider id is aliased or unregistered, and guessing the
+      // first would send the wrong URL/auth silently. Fall through to compat.
+      if (apiMatch && !apiAmbiguous) return apiMatch.handler.call(apiMatch.config, model, ctx, o);
     }
 
     // 3. Fall back to global Symbol.for map (existing captureRegisteredProviderStreams)
@@ -318,5 +346,90 @@ export function createBridgeStreamFn(
       headers,
       transformHeaders: createAttributionTransform(model, sessionId, incomingTransform),
     });
+  };
+}
+
+// ── Never-throw stream guard ──────────────────────────────────────────────────
+//
+// pi's agentLoop is fired as `void runAgentLoop(...).then(...)` with no
+// `.catch` (agent-loop.js:13) and reads the provider response with
+// `const response = await streamFunction(...)` (agent-loop.js:271). A stream
+// function that throws — synchronously, or as a rejected promise — therefore
+// rejects that promise into the void (an unhandled rejection the host never
+// sees) AND leaves the loop's event stream open, so the worker's `for await`
+// and `stream.result()` never settle: the run hangs instead of failing. The
+// design constraint is that nothing may ever throw out of `streamFn`; failures
+// arrive as pi's own terminal error stream instead, and the run's completion
+// check (`agentCompletionError`) turns that into the WorkerStreamError the
+// stage already classifies and falls back from.
+
+/** pi-ai's zeroed usage block for a refusal that never reached a provider. */
+const REFUSAL_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
+
+/**
+ * Terminal `stopReason: "error"` stream shaped exactly like a provider failure
+ * pi-ai would produce (`{type:"error"}` ends the loop's switch and
+ * `result()` resolves through the pushed error event; `end(message)` keeps the
+ * result promise settled even on hosts that only read it after iteration).
+ */
+function refusalStream(model: any, errorMessage: string) {
+  const message: AssistantMessage = {
+    role: "assistant",
+    content: [],
+    api: model?.api ?? "openai-completions",
+    provider: model?.provider ?? "unknown",
+    model: model?.id ?? "unknown",
+    usage: { ...REFUSAL_USAGE, cost: { ...REFUSAL_USAGE.cost } },
+    stopReason: "error",
+    errorMessage,
+    timestamp: Date.now(),
+  };
+  const stream = createAssistantMessageEventStream();
+  stream.push({ type: "error", reason: "error", error: message });
+  stream.end(message);
+  return stream;
+}
+
+function refusalMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Wrap a stream function so it can never throw or reject: a synchronous throw
+ * becomes a refusal stream immediately, a rejected promise becomes one when it
+ * settles, and a healthy response (stream or promise-of-stream) passes through
+ * as the very same object.
+ */
+export function neverThrow(streamFn: Function): (...args: any[]) => any {
+  return (...args: any[]) => {
+    let response: any;
+    try {
+      response = streamFn(...args);
+    } catch (error) {
+      return refusalStream(args[0], refusalMessage(error));
+    }
+    // An async streamFn rejects instead of throwing, and the host's
+    // `await streamFunction(...)` turns that into the same open-stream hang.
+    // Guarded against thenable-shaped healthy values: pi-ai event streams are
+    // async-iterables, so anything carrying Symbol.asyncIterator is returned
+    // as-is and never unwrapped.
+    if (
+      response &&
+      typeof response.then === "function" &&
+      typeof response[Symbol.asyncIterator] !== "function"
+    ) {
+      return response.then(
+        (value: any) => value,
+        (error: unknown) => refusalStream(args[0], refusalMessage(error)),
+      );
+    }
+    return response;
   };
 }

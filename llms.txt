@@ -152,7 +152,7 @@ If user picks Off, ask separately whether they also want to disable memory (`mem
 **Agent context:** Three workers, each with a different job and varying capability needs. The key insight is that workers don't need the session model's capability — they're doing structured extraction, synthesis, and pruning, not creative coding. Cheap/free models work great.
 
 Worker characteristics:
-- **Observer** — most frequent runner (every `observeAfterTokens` tokens). Reads conversation chunk (newest-first up to `observerChunkMaxTokens`) and extracts timestamped observations via an agent loop. Needs speed and structured extraction. A model with `thinking: "low"` helps it produce better structured output. Does NOT need deep reasoning.
+- **Observer** — most frequent runner (every `observeAfterTokens` tokens). Reads conversation chunk (oldest-first prefix up to `observerChunkMaxTokens`) and extracts timestamped observations via an agent loop. Needs speed and structured extraction. A model with `thinking: "low"` helps it produce better structured output. Does NOT need deep reasoning.
 - **Reflector** — runs less often. Takes new observations and existing reflection summaries (compacted to ~15% of `reflectorInputMaxTokens`) and synthesizes durable reflections. Benefits from stronger reasoning (`thinking: "low"` or `"medium"`).
 - **Dropper** — runs when the observation pool exceeds `observationsPoolMaxTokens` or at `dropperPressureThreshold` pressure. Prunes low-value observations while keeping reflections. Needs judgment — similar capability to reflector, but can use `thinking: "off"` since it's mainly prioritization.
 
