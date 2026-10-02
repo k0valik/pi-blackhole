@@ -633,7 +633,7 @@ Show the footer status bar: three token gauges — O (transcript since last obse
 
 ### `showWorkerNotifications`
 
-Routine memory-job progress toasts — e.g. `blackhole: reading recent conversation for notes`, `blackhole: saved N notes`, `blackhole: building insights`, `blackhole: pruning low-value notes`, and the info-level `blackhole: no new notes` notice. Set to `false` for quiet sessions.
+Routine memory-job progress toasts — e.g. `blackhole: reading recent conversation for notes`, `blackhole: saved N notes`, `blackhole: building insights`, `blackhole: pruning low-value notes`, and the info-level `blackhole: no new notes` notice. The shrink-to-fit pass adds its own lines to the same channel — `blackhole: shrinking the note-taking chunk to fit …` when the reading batch is capped for the window, and `blackhole: deferring N observations from insight-building` / `… candidates from pruning` when the per-run batch cap defers a stage. Set to `false` for quiet sessions.
 
 Warnings and errors are unaffected: model fallback/unavailability, context-window skips, no-output warnings, worker failures, compaction notifications, and explicit `/blackhole*` command output all stay visible.
 

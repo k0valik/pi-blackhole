@@ -78,7 +78,7 @@ Identifies the *safest* active observations to remove from compacted memory; the
 
 **Tool**: `drop_observations` — `{ ids: string[] (minItems 1), reason?: string }`.
 
-**Deterministic budget gate (before the LLM runs)**: the agent computes pool fullness (`observationPoolFullness` = active tokens / budget), urgency (`dropUrgencyForFullness`: `<0.30` low, `<0.60` medium, else high), and `maxDropCountForPool`. If fullness `< 0.10` (`DROP_SKIP_FULLNESS`), `maxDropsAllowed` is 0 and the LLM is **not called at all**. Otherwise the allowed drop ratio interpolates from `0.10` (`DROP_MIN_RATIO`) at fullness 0.10 up to `0.50` (`DROP_MAX_RATIO`) at fullness 1.0, applied to the non-critical observation count (critical observations are excluded from the ratio base).
+**Deterministic budget gate (before the LLM runs)**: the agent computes pool fullness (`observationPoolFullness` = active tokens / budget), urgency (`dropUrgencyForFullness`: `<0.30` low, `<0.60` medium, else high), and `maxDropCountForPool`. If fullness is below the `skipFullness` bar — the single `dropperPressureThreshold` (default `0.70`) that the stage passes in, falling back to `DROP_SKIP_FULLNESS` (0.1) only when a caller omits it — `maxDropsAllowed` is 0 and the LLM is **not called at all**. Otherwise the allowed drop ratio interpolates from `0.10` (`DROP_MIN_RATIO`) at the bar up to `0.50` (`DROP_MAX_RATIO`) at fullness 1.0, applied to the non-critical observation count (critical observations are excluded from the ratio base).
 
 **Deterministic final selection (after the LLM proposes)**: `selectDropCandidates` re-ranks the proposed ids by `(coverage drop rank, relevance drop rank, timestamp age, proposal order)` and slices to `maxDropsAllowed`. So the LLM proposes candidates, but the deterministic ranker enforces ordering and the hard cap — the LLM cannot exceed the budget or reorder past the safety ranking.
 
@@ -226,9 +226,11 @@ A model that cannot hold the input is skipped for the rest of the run. A too-sma
 
 When no candidate fits anything, the stage shrinks to the largest resolved window instead of aborting — but only on a pure size-mismatch record; any runtime failure keeps error semantics and aborts exactly as before:
 
-- **Observer** — caps the chunk to the window budget and drains the remainder in bounded follow-up batches within the same run.
+- **Observer** — caps the chunk to the window budget and drains the remainder in bounded follow-up batches within the same run (`OBSERVER_DRAIN_MAX_BATCHES`, 3 drain batches after the initial one).
 - **Reflector** — partitions new items into fitting batches, validated upfront (a single oversized item aborts before any model call). All batches complete before the single cursor advance; any batch failure voids the run with the cursor unmoved. New reflections travel whole in every batch.
 - **Dropper** — evaluates batches under the same pool-wide pressure numbers, merges the raw proposals, and applies the deterministic ranker + global cap once before the single advance.
+
+A batch the input budget certified can still overflow the output allowance, so turn-cap and length cuts bisect that batch and process both halves rather than voiding the run. Everything is bounded: the observer drains at most 3 times, every stage executes at most `WORKER_SHRINK_MAX_BATCHES` (8) shrink batches — a larger plan defers the whole stage with the cursor unmoved, deferral is announced in the notice — and a size-skip chain gets its own `MAX_SIZE_SKIP_CONTINUATIONS` (10) budget so many too-small candidates cannot starve the shrink pass.
 
 ## Model resolution
 

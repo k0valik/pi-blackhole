@@ -300,7 +300,7 @@ Based on interview answers, build the config object. Write it to:
   // ── OM worker thresholds (fixed defaults — independent of the auto-compaction curve) ──
   "observeAfterTokens": 15000,         // observer cadence (default)
   "reflectAfterTokens": 25000,         // reflector + dropper cadence (default)
-  "observerChunkMaxTokens": 40000,     // max conversation chunk sent to observer per run
+  "observerChunkMaxTokens": 40000,     // max conversation chunk sent to the observer per batch (oldest-first prefix; overflow drains)
   "observationsPoolMaxTokens": 20000,  // memory maintenance trigger + rendered note-line cap
   "reflectionsPoolMaxTokens": 8000,   // max rendered insight tokens in compaction output, newest first (0 = uncapped)
   "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
