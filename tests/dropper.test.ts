@@ -213,7 +213,7 @@ describe("V3 dropper agent", () => {
     // pi-blackhole display format: "fullness: ~X%" (no "against target")
     expect(userText).toContain("[coverage: partial]");
     expect(userText).toContain("[coverage: none]");
-    expect(userText).toContain("Maximum drops allowed this run:");
+    expect(userText).toContain("Pool-wide maximum drops:");
     expect(userText).toContain("hard upper bound, not a target");
     expect(userText).toContain("Drop fewer or none");
     // pi-blackhole still uses DropUrgency

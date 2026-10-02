@@ -17,7 +17,8 @@
  * estimateStringTokens at every fit-check — never a flat chars/4, which
  * under-prices CJK ~3x relative to the measured side. (The measured schema
  * stringifies without typebox's symbol-keyed markers, so it prices slightly
- * below what the provider receives — the safe direction.)
+ * below what the provider receives — the unsafe direction for a preflight
+ * guard, but the delta is ~zero and the 1024-token safety margin absorbs it.)
  */
 import type { Model } from "@earendil-works/pi-ai";
 import { DROPPER_SYSTEM } from "./agents/dropper/prompts.js";
@@ -35,7 +36,9 @@ export type WorkerPromptStage = "observer" | "reflector" | "dropper";
  * Fixed user-text framing around the variable content: section headers plus
  * the instruction paragraph each agent builds inline (~100-150 tokens;
  * rounded up). Also absorbs the tool name/description lines (~50 tokens),
- * whose wording lives with the agent's tool definition.
+ * whose wording lives with the agent's tool definition. Re-measure if that
+ * wording changes: this constant silently absorbs the difference today, with
+ * roughly half its headroom still spare.
  */
 export const WORKER_FRAMING_TOKENS = 256;
 

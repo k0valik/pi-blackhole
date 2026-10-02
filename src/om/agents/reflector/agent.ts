@@ -37,6 +37,7 @@ import {
 } from "../../ledger/index.js";
 import type { ReflectionCoverageTier } from "../dropper/coverage.js";
 import {
+  isDeterministicError,
   withDiscardedCount,
   WorkerStreamError,
   workerStreamErrorMessage,
@@ -336,12 +337,17 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
   // keys on turnCapExhausted. A provider `error` is carved out: it keeps its
   // own classification, and error turns never spend budget, so the cap did
   // not cause it. A cap firing before anything was recorded is still
-  // an empty success (the stage advances the cursor as "empty").
+  // an empty success (the stage advances the cursor as "empty"). A concurrent
+  // abort keeps the completion check's `aborted` classification, and a
+  // `length` terminal carrying a deterministic (4xx) message keeps its
+  // provider-error classification — the cap did not cause it.
   if (
     turnCap?.exhausted &&
     accumulated.size > 0 &&
     !closedByCompleteBatch &&
-    failureKind !== "error"
+    !signal?.aborted &&
+    failureKind !== "error" &&
+    !(failureKind === "length" && agentError != null && isDeterministicError(agentError))
   ) {
     throw new WorkerStreamError(
       `Reflector turn cap exhausted: ${accumulated.size} reflection${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,

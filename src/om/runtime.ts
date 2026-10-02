@@ -417,6 +417,7 @@ export class Runtime {
 
     // Try configured candidates
     for (const candidate of candidates) {
+      signal?.throwIfAborted();
       const key = modelKey(candidate);
 
       // In-memory skip: model failed earlier in this stage with cooldownHours 0

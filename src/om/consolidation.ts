@@ -511,7 +511,14 @@ export function makeModelResolver(
     }
     debugLog(`${stage}.model_unavailable`, { reason: resolved.reason });
     if (!runtime.resolveFailureNotified && ctx.hasUI && ctx.ui) {
-      if (runtime.failedInCycle.size > 0 && resolved.reason.includes("all candidates exhausted")) {
+      // Cooldown toast only: a size-skipped session reason also contains
+      // "all candidates exhausted" ("too small for this input") but names no
+      // cooldown, so gating on the reason keeps the toast from misattributing it.
+      if (
+        runtime.failedInCycle.size > 0 &&
+        resolved.reason.includes("all candidates exhausted") &&
+        !resolved.reason.includes("too small")
+      ) {
         const fallbackMsg =
           stageFallbacks.length === 0 ? "no fallbacks configured" : "no available fallbacks";
         runtime.tryEmitInfo(
@@ -931,7 +938,10 @@ export async function runObserverStage(
   // going until coverage reaches it. Entries arriving after the snapshot belong
   // to the next cycle; a trailing entry the serializer cannot render keeps the
   // cursor before it (the recursion below serializes it empty and returns
-  // before resolving a model), so this condition alone terminates.
+  // before resolving a model), so this condition alone terminates. Stalling
+  // before a permanently unrenderable entry costs one re-serialize per cycle —
+  // accepted deliberately: advancing past proven-empty would claim coverage
+  // over entries never sent.
   const lastSourceEntryId = entries.filter(isSourceEntry).at(-1)?.id;
   const continueSources = (): StageOutcome | Promise<StageOutcome> => {
     if (drainRemaining <= 0) return "continue";
@@ -1723,6 +1733,10 @@ export async function runReflectorStage(
       if (oversized) return { outcome: "abort", sameRunReflections: [] };
     }
     const planned = batches.length > 0 ? batches : [[] as Observation[]];
+    // The [[]] fallback only fires on empty input (planBatches returns [] for
+    // zero observations); the empty batch is skipped below, matching the
+    // single-run path semantics. Kept rather than early-returning so the cap
+    // check and commit logic stay single-pathed.
     // Bounded by design (see WORKER_SHRINK_MAX_BATCHES): past the cap the
     // pass aborts upfront with the cursor unmoved instead of burning a worker
     // call per batch and still advancing nothing.
@@ -2023,10 +2037,8 @@ export async function runReflectorStage(
       // input-size-dependent rather than a broken model, so smaller batches
       // may still fit the turn budget or the output allowance and the pass
       // stays open for them.
-      sawAttemptError = !(
-        error instanceof WorkerStreamError &&
-        (error.turnCapExhausted || error.lengthCut)
-      );
+      if (!(error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
+        sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "reflector");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
@@ -2382,6 +2394,9 @@ export async function runDropperStage(
       if (oversized) return "abort";
     }
     const planned = batches.length > 0 ? batches : [[] as typeof input.newObservations];
+    // The [[]] fallback only fires on an empty pool; the empty batch is
+    // skipped below, matching the single-run path. Kept rather than
+    // early-returning so the cap check and commit logic stay single-pathed.
     // Bounded by design (see WORKER_SHRINK_MAX_BATCHES): past the cap the
     // pass aborts upfront with the cursor unmoved instead of burning a worker
     // call per batch and still advancing nothing.
@@ -2681,10 +2696,8 @@ export async function runDropperStage(
       // input-size-dependent rather than a broken model, so smaller batches
       // may still fit the turn budget or the output allowance and the pass
       // stays open for them.
-      sawAttemptError = !(
-        error instanceof WorkerStreamError &&
-        (error.turnCapExhausted || error.lengthCut)
-      );
+      if (!(error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
+        sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "dropper");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "dropper");

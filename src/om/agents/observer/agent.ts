@@ -29,6 +29,7 @@ import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
 import { estimateStringTokens } from "../../tokens.js";
 import {
+  isDeterministicError,
   withDiscardedCount,
   WorkerStreamError,
   workerStreamErrorMessage,
@@ -388,11 +389,16 @@ ${conversation}`;
   // is still an empty success (the stage advances the cursor as "empty"). The
   // message names no status code: this is a config limit,
   // not a provider failure, so it must not cool a session model as deterministic.
+  // Two carve-outs: a concurrent abort keeps the completion check's `aborted`
+  // classification, and a `length` terminal carrying a deterministic (4xx)
+  // message keeps its provider-error classification — the cap did not cause it.
   if (
     turnCap?.exhausted &&
     accumulated.size > 0 &&
     !closedByCompleteBatch &&
-    failureKind !== "error"
+    !signal?.aborted &&
+    failureKind !== "error" &&
+    !(failureKind === "length" && agentError != null && isDeterministicError(agentError))
   ) {
     throw new WorkerStreamError(
       `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,

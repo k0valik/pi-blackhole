@@ -24,6 +24,7 @@ import {
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { debugLog } from "../../debug-log.js";
 import {
+  isDeterministicError,
   withDiscardedCount,
   WorkerStreamError,
   workerStreamErrorMessage,
@@ -297,7 +298,7 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
     ? `EXISTING ACTIVE OBSERVATIONS (for context only — these are NOT candidates for dropping):\n${args.existingObservationsSummary}\n\n`
     : "";
 
-  const userText = `CURRENT REFLECTIONS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\n${existingObservationsContext}NEW OBSERVATIONS TO EVALUATE FOR DROPPING:\n${joinOrEmpty(observations.map((observation) => observationToDropperLine(observation, coverageTierForObservation(observation, coverageById))))}\n\nObservation pool pressure: ~${observationTokens.toLocaleString()} tokens; target budget: ~${budgetTokens.toLocaleString()} tokens; fullness: ~${fullnessPercent.toLocaleString()}%.\nDrop urgency: ${urgency}.\nMaximum drops allowed this run: ${maxDropsAllowed.toLocaleString()} observation${maxDropsAllowed === 1 ? "" : "s"}.\nThis maximum is a hard upper bound, not a target. Drop fewer or none if fewer observations are clearly safe.`;
+  const userText = `CURRENT REFLECTIONS:\n${joinOrEmpty(reflections.map(reflectionToSummaryLine))}\n\n${existingObservationsContext}NEW OBSERVATIONS TO EVALUATE FOR DROPPING:\n${joinOrEmpty(observations.map((observation) => observationToDropperLine(observation, coverageTierForObservation(observation, coverageById))))}\n\nObservation pool pressure: ~${observationTokens.toLocaleString()} tokens; target budget: ~${budgetTokens.toLocaleString()} tokens; fullness: ~${fullnessPercent.toLocaleString()}%.\nDrop urgency: ${urgency}.\nPool-wide maximum drops: ${maxDropsAllowed.toLocaleString()} observation${maxDropsAllowed === 1 ? "" : "s"} (advisory for this batch — the run may evaluate the pool in several batches and re-applies the cap globally over the merged proposals).\nThis maximum is a hard upper bound, not a target. Drop fewer or none if fewer observations are clearly safe.`;
   const prompts: Message[] = [
     {
       role: "user",
@@ -383,8 +384,17 @@ export async function runDropper(args: RunDropperArgs): Promise<string[] | undef
   // session-model break-glass keys on turnCapExhausted. A provider `error` is
   // carved out: it keeps its own classification, and error turns never spend
   // budget, so the cap did not cause it. A cap firing before any
-  // candidate was proposed is still an empty success (returns undefined).
-  if (turnCap?.exhausted && proposedDropIds.length > 0 && failureKind !== "error") {
+  // candidate was proposed is still an empty success (returns undefined). A
+  // concurrent abort keeps the completion check's `aborted` classification,
+  // and a `length` terminal carrying a deterministic (4xx) message keeps its
+  // provider-error classification — the cap did not cause it.
+  if (
+    turnCap?.exhausted &&
+    proposedDropIds.length > 0 &&
+    !signal?.aborted &&
+    failureKind !== "error" &&
+    !(failureKind === "length" && agentError != null && isDeterministicError(agentError))
+  ) {
     throw new WorkerStreamError(
       `Dropper turn cap exhausted: ${proposedDropIds.length} drop candidate${proposedDropIds.length === 1 ? "" : "s"} recorded before the run ended`,
       proposedDropIds.length,
