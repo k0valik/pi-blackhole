@@ -13,7 +13,10 @@ import { describe, expect, test } from "vitest";
 import { AGENT_LOOP_MAX_TOKENS } from "../src/om/model-budget.js";
 import { workerInputBudget } from "../src/om/prompt-budget.js";
 import { WORKER_SAFETY_MARGIN_TOKENS } from "../src/om/prompt-budget.js";
-import { workerOutputAllowance } from "../src/om/prompt-budget.js";
+import {
+  MIN_WORKER_OUTPUT_ALLOWANCE_TOKENS,
+  workerOutputAllowance,
+} from "../src/om/prompt-budget.js";
 
 const modelWith = (maxTokens?: number) => (maxTokens !== undefined ? { maxTokens } : {});
 
@@ -72,5 +75,25 @@ describe("workerOutputAllowance", () => {
           WORKER_SAFETY_MARGIN_TOKENS,
       ).toBe(window);
     }
+  });
+
+  test("floors degenerate windows at a usable minimum instead of zero", () => {
+    // A window in [1,3] yields a zero quarter-clamp, which `??` would
+    // dispatch verbatim as `maxTokens: 0` (empty completion). The floor keeps
+    // generation valid; the fit check still admits nothing there.
+    expect(workerOutputAllowance(2, modelWith(32_000) as any)).toBe(
+      MIN_WORKER_OUTPUT_ALLOWANCE_TOKENS,
+    );
+    expect(MIN_WORKER_OUTPUT_ALLOWANCE_TOKENS).toBeGreaterThan(0);
+  });
+
+  test("never inflates past the model reserve itself", () => {
+    // A model capped at 200 output tokens keeps 200: the floor is a sanity
+    // bound on the clamp, not extra budget.
+    expect(workerOutputAllowance(50_000, modelWith(200) as any)).toBe(200);
+  });
+
+  test("falls back to the reserve on a non-finite window", () => {
+    expect(workerOutputAllowance(NaN, modelWith(2000) as any)).toBe(2000);
   });
 });

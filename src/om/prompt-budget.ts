@@ -80,17 +80,34 @@ export function workerOutputReserveTokens(model: Model<any> | undefined): number
 }
 
 /**
+ * Floor for the dispatched generation cap. The quarter-window clamp below has
+ * no natural lower bound, and a zero/NaN cap dispatched verbatim yields an
+ * empty completion (silent empty success with coverage advanced on some
+ * providers) or a malformed request. The floor never inflates past the model
+ * reserve itself, and the fit-check still admits nothing unhostable — it only
+ * keeps generation valid where the clamp would collapse.
+ */
+export const MIN_WORKER_OUTPUT_ALLOWANCE_TOKENS = 1024;
+
+/**
  * Output allowance sharing the context window with the prompt. The agent loop
  * caps generation at this value, so the fit-check reserve and the dispatched
  * cap must be the same number — otherwise a prompt that "fits" still 400s on
- * generation overflow. Capped at a quarter of the window (floored at zero by
- * the caller): registries reporting maxTokens near the window — and small
- * windows that can never host the full allowance — would otherwise either
- * disable the stages or dispatch an unhonorable cap. An unknown model assumes
- * the maximum allowance (safe direction for a pre-flight guard).
+ * generation overflow. Capped at a quarter of the window (registries
+ * reporting maxTokens near the window — and small windows that can never
+ * host the full allowance — would otherwise either disable the stages or
+ * dispatch an unhonorable cap), floored at the minimum usable generation cap
+ * above. An unknown model assumes the maximum allowance (safe direction for
+ * a pre-flight guard). A non-finite window falls back to the reserve: there
+ * is no window to clamp against.
  */
 export function workerOutputAllowance(window: number, model: Model<any> | undefined): number {
-  return Math.min(workerOutputReserveTokens(model), Math.floor(window * 0.25));
+  const reserve = workerOutputReserveTokens(model);
+  if (!Number.isFinite(window) || window <= 0) return reserve;
+  return Math.max(
+    Math.min(MIN_WORKER_OUTPUT_ALLOWANCE_TOKENS, reserve),
+    Math.min(reserve, Math.floor(window * 0.25)),
+  );
 }
 
 /**

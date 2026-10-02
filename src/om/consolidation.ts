@@ -28,6 +28,11 @@ import {
 import { effectiveContextWindow } from "./model-budget.js";
 import { maxDropCountForPool, selectDropCandidates } from "./agents/dropper/selection.js";
 import {
+  coverageTierForObservation,
+  observationToDropperLine,
+  reflectionCoverageMap,
+} from "./agents/dropper/coverage.js";
+import {
   WORKER_TURN_HEADROOM_TOKENS,
   workerInputBudget,
   workerOutputAllowance,
@@ -82,6 +87,22 @@ import {
 
 export type ResolvedModel = Extract<ResolveResult, { ok: true }>;
 
+/**
+ * Identity a size-skip records (and the shrink pass re-offers): a
+ * candidate's skip keys its config, which a registry may normalize on
+ * resolve — keying the resolved model instead would miss on unskip and waste
+ * the shrink. A session model keys its resolved identity.
+ */
+function oversizedIdentityForSkip(
+  resolved: ResolvedModel,
+): { provider: string; id: string } | undefined {
+  if (resolved.source === "candidate") return resolved.candidateConfig;
+  const model = resolved.model as { provider?: unknown; id?: unknown };
+  return typeof model.provider === "string" && typeof model.id === "string"
+    ? { provider: model.provider, id: model.id }
+    : undefined;
+}
+
 export type ConsolidationCtx = {
   cwd: string;
   hasUI: boolean;
@@ -113,6 +134,26 @@ const MAX_STAGE_ATTEMPTS = 10;
  * work_docs/plan-observer-coverage-completion.md).
  */
 export const OBSERVER_DRAIN_MAX_BATCHES = 3;
+
+/**
+ * How many fit-to-window batches one reflector/dropper shrink pass may run
+ * per stage invocation. The commit is all-or-nothing with the cursor unmoved
+ * on any batch failure, so an unbounded fan-out burns a full worker call per
+ * batch and still advances nothing when one batch flakes. Past this bound the
+ * pass aborts upfront — no model call goes out, the backlog waits for the
+ * next cycle with the cursor unmoved (a delay, never a loss) — and names the
+ * remedy (a larger model, or a smaller input cap) in the log.
+ */
+export const WORKER_SHRINK_MAX_BATCHES = 8;
+
+/**
+ * Extra loop iterations one stage run may spend on size-skips above
+ * MAX_STAGE_ATTEMPTS. A skip is cheap (no model call, just resolution), while
+ * an attempt runs a model; conflating the two lets a long fallback chain of
+ * too-small models starve the shrink-to-fit pass that exists for exactly that
+ * record. Runs stay bounded by MAX_STAGE_ATTEMPTS either way.
+ */
+const MAX_SIZE_SKIP_CONTINUATIONS = 10;
 
 function sourceEntriesAfter(entries: Entry[], index: number): Entry[] {
   return entries.slice(index + 1).filter(isSourceEntry);
@@ -969,14 +1010,122 @@ export async function runObserverStage(
   // failure still aborts — see sawAttemptError — so this can never smuggle a
   // broken model back in).
   let bestFit: { resolved: ResolvedModel; ctx: number } | undefined;
-  // Any attempt that ran a model and failed (provider error, timeout, turn
-  // cap, ...). The shrink pass only triggers on a pure size-mismatch record:
-  // once a fitting model has failed at runtime, error semantics own the
-  // outcome and the stage aborts exactly as before.
+  // Any attempt that ran a model and failed on a provider error or timeout.
+  // The shrink pass only triggers on a size-mismatch (or turn-cap/output-cut)
+  // record: once a fitting model has failed at runtime, error semantics own
+  // the outcome and the stage aborts exactly as before. A turn-cap or output
+  // cut is input-size-dependent rather than a broken model — a smaller chunk
+  // may still fit the turn budget or the output allowance — so those leave
+  // the pass open.
   let sawAttemptError = false;
   let didShrink = false;
+  // Set when a candidate run is cut generating (output allowance): the next
+  // shrink halves the entries that ran instead of budget-capping (a no-op —
+  // the chunk already fit), so output shrinks with input. Consumed by the
+  // shrink; the drain then covers the remainder in-run.
+  let needsOutputShrink = false;
 
-  for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
+  // A drain batch re-evaluates size-skips against its smaller remainder: the
+  // parent priced a bigger chunk, so a model skipped there may fit here. The
+  // parent finished its attempt loop before recursing, so clearing is safe.
+  if (drain) runtime.sizeSkippedInCycle.clear();
+
+  // Shrink-to-fit fallback, shared by the total-exhaustion path (!resolved)
+  // and the size-skip backstop below. Sizes the full post-cursor chunk to the
+  // largest resolved window and re-offers it — or, after an output cut,
+  // halves the entries that ran so output shrinks with input; the drain
+  // covers the remainder in-run either way. Returns "shrunk" when the loop
+  // should re-resolve, otherwise the stage outcome to return ("abort", or
+  // "continue" when the shrunk coverage point is already pending in manual
+  // mode).
+  const tryShrinkToFit = (): "shrunk" | StageOutcome => {
+    if (!bestFit) return "abort";
+    const bestModel = bestFit.resolved.model as any;
+    const shrinkBudget =
+      workerInputBudget(bestFit.ctx, bestModel) -
+      observerStaticTokens -
+      preambleTokens -
+      WORKER_TURN_HEADROOM_TOKENS;
+    if (shrinkBudget <= 0) return "abort";
+    // Output-driven halve: the chunk fit the input budget but a run was cut
+    // generating it, so budget-capping is a no-op — halve the entries that
+    // ran instead, so output shrinks with input (the drain covers the
+    // remainder in-run). A single entry that still cuts cannot shrink
+    // further: abort cleanly with the cursor unmoved.
+    let baseEntries = allChunkEntries;
+    if (needsOutputShrink) {
+      needsOutputShrink = false;
+      if (chunkEntries.length <= 1) {
+        debugLog("observer.shrink_single_output_cut", {
+          shrinkBudget,
+          chunkTokens,
+          coversUpToId,
+          model: `${bestModel.provider}/${bestModel.id}`,
+        });
+        return "abort";
+      }
+      baseEntries = chunkEntries.slice(0, Math.max(1, Math.floor(chunkEntries.length / 2)));
+    }
+    const shrunkEntries = trimSerializedPrefix(
+      capSourceEntriesToTokens(baseEntries, shrinkBudget),
+      shrinkBudget,
+    );
+    const shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
+    if (shrunkEntries.length === 1 && estimateStringTokens(shrunk.text) > shrinkBudget) {
+      // A single entry the largest window cannot hold: the re-offered fit
+      // check skips it and the stage aborts with the cursor unmoved every
+      // cycle. No coverage is claimed — just a diagnostic, since nothing
+      // downstream can distinguish this wedge from an ordinary abort.
+      debugLog("observer.shrink_single_oversized", {
+        shrinkBudget,
+        chunkTokens: estimateStringTokens(shrunk.text),
+        coversUpToId: shrunk.sourceEntryIds.at(-1),
+        model: `${bestModel.provider}/${bestModel.id}`,
+      });
+    }
+    const shrunkCover = shrunk.sourceEntryIds.at(-1);
+    if (!shrunkCover || !shrunk.text.trim()) return "abort";
+    chunkEntries = shrunkEntries;
+    chunk = shrunk.text;
+    sourceEntryIds = shrunk.sourceEntryIds;
+    sourceEntryTimestamps = shrunk.sourceEntryTimestamps;
+    coversUpToId = shrunkCover;
+    chunkTokens = estimateStringTokens(chunk);
+    capTokens = chunkEntries.reduce((s: number, e) => s + estimateEntryTokens(e), 0);
+    didShrink = true;
+    // The shrunk chunk has a new coverage point: re-check the manual-mode
+    // pending gate before spending a model call on it. Without this, a
+    // shrink could re-process an already-pending prefix (flush dedupes by
+    // content-hash ids, so this is duplication rather than loss, but the
+    // model call is still wasted).
+    if (isManualMode(runtime.config) && isObservationChunkPending(sessionId, coversUpToId)) {
+      debugLog("observer.pending_skip", { coversUpToId, sessionId });
+      return "continue";
+    }
+    // Unskip the identity the skip recorded (see oversizedIdentityForSkip):
+    // a candidate's skip keys its config, which a registry may normalize on
+    // resolve — unskipping the resolved model would miss and waste the shrink.
+    runtime.unskipOversizedForCycle(oversizedIdentityForSkip(bestFit.resolved));
+    runtime.tryEmitWorkerInfo(
+      ctx.hasUI,
+      ctx.ui,
+      `Observational memory: observer shrinking chunk to fit ${bestModel.provider}/${bestModel.id} (~${shrinkBudget.toLocaleString()}-token budget)`,
+    );
+    debugLog("observer.shrink_to_fit", {
+      shrinkBudget,
+      chunkTokens,
+      coversUpToId,
+      model: `${bestModel.provider}/${bestModel.id}`,
+    });
+    return "shrunk";
+  };
+
+  // Runs (model calls) are bounded by MAX_STAGE_ATTEMPTS; size-skips are
+  // cheap resolution-only iterations with their own continuation budget, so
+  // a long chain of too-small models cannot starve the shrink pass.
+  let attempt = 0;
+  let sizeSkips = 0;
+  while (attempt < MAX_STAGE_ATTEMPTS) {
     const resolved = await resolveModel("observer");
     if (!runtime.isGenerationActive(generation)) return "abort";
     if (!resolved) {
@@ -986,63 +1135,10 @@ export async function runObserverStage(
       // remainder in-run, so this degrades gracefully instead of wedging.
       // Afterwards the loop re-resolves: the shrunk input fits the best
       // model, which is re-offered below.
-      if (!didShrink && bestFit && !sawAttemptError) {
-        const bestModel = bestFit.resolved.model as any;
-        const shrinkBudget =
-          workerInputBudget(bestFit.ctx, bestModel) -
-          observerStaticTokens -
-          preambleTokens -
-          WORKER_TURN_HEADROOM_TOKENS;
-        if (shrinkBudget <= 0) return "abort";
-        let shrunkEntries = trimSerializedPrefix(
-          capSourceEntriesToTokens(allChunkEntries, shrinkBudget),
-          shrinkBudget,
-        );
-        let shrunk = serializeSourceAddressedBranchEntries(shrunkEntries);
-        if (shrunkEntries.length === 1 && estimateStringTokens(shrunk.text) > shrinkBudget) {
-          // A single entry the largest window cannot hold: the re-offered fit
-          // check skips it and the stage aborts with the cursor unmoved every
-          // cycle. No coverage is claimed — just a diagnostic, since nothing
-          // downstream can distinguish this wedge from an ordinary abort.
-          debugLog("observer.shrink_single_oversized", {
-            shrinkBudget,
-            chunkTokens: estimateStringTokens(shrunk.text),
-            coversUpToId: shrunk.sourceEntryIds.at(-1),
-            model: `${bestModel.provider}/${bestModel.id}`,
-          });
-        }
-        const shrunkCover = shrunk.sourceEntryIds.at(-1);
-        if (!shrunkCover || !shrunk.text.trim()) return "abort";
-        chunkEntries = shrunkEntries;
-        chunk = shrunk.text;
-        sourceEntryIds = shrunk.sourceEntryIds;
-        sourceEntryTimestamps = shrunk.sourceEntryTimestamps;
-        coversUpToId = shrunkCover;
-        chunkTokens = estimateStringTokens(chunk);
-        capTokens = chunkEntries.reduce((s: number, e) => s + estimateEntryTokens(e), 0);
-        didShrink = true;
-        // The shrunk chunk has a new coverage point: re-check the manual-mode
-        // pending gate before spending a model call on it. Without this, a
-        // shrink could re-process an already-pending prefix (flush dedupes by
-        // content-hash ids, so this is duplication rather than loss, but the
-        // model call is still wasted).
-        if (isManualMode(runtime.config) && isObservationChunkPending(sessionId, coversUpToId)) {
-          debugLog("observer.pending_skip", { coversUpToId, sessionId });
-          return "continue";
-        }
-        runtime.unskipOversizedForCycle(bestModel);
-        runtime.tryEmitWorkerInfo(
-          ctx.hasUI,
-          ctx.ui,
-          `Observational memory: observer shrinking chunk to fit ${bestModel.provider}/${bestModel.id} (~${shrinkBudget.toLocaleString()}-token budget)`,
-        );
-        debugLog("observer.shrink_to_fit", {
-          shrinkBudget,
-          chunkTokens,
-          coversUpToId,
-          model: `${bestModel.provider}/${bestModel.id}`,
-        });
-        continue;
+      if ((!didShrink || needsOutputShrink) && bestFit && !sawAttemptError) {
+        const shrunk = tryShrinkToFit();
+        if (shrunk === "shrunk") continue;
+        return shrunk;
       }
       return "abort";
     }
@@ -1104,22 +1200,29 @@ export async function runObserverStage(
       // Size-skip only: a too-small window is not a broken model, so this
       // never writes a persisted cooldown (which would wedge later cycles
       // too). The in-cycle skip advances the fallback chain within this run.
-      const resolvedIdentity = resolved.model as { provider?: unknown; id?: unknown };
-      runtime.skipOversizedForCycle(
-        stageModelForThinking ??
-          (typeof resolvedIdentity.provider === "string" && typeof resolvedIdentity.id === "string"
-            ? { provider: resolvedIdentity.provider, id: resolvedIdentity.id }
-            : undefined),
-      );
+      runtime.skipOversizedForCycle(oversizedIdentityForSkip(resolved));
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
         `Observational memory: observer skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveObsCtx.toLocaleString()} too small for ~${observerEstimatedInput.toLocaleString()}-token input)`,
       );
+      sizeSkips += 1;
+      if (sizeSkips > MAX_SIZE_SKIP_CONTINUATIONS) {
+        // Skip budget spent: every candidate refused the full chunk. Settle
+        // exactly like total exhaustion above — the shrunk input may still
+        // fit the best window.
+        if ((!didShrink || needsOutputShrink) && bestFit && !sawAttemptError) {
+          const shrunk = tryShrinkToFit();
+          if (shrunk === "shrunk") continue;
+          return shrunk;
+        }
+        return "abort";
+      }
       continue;
     }
 
     try {
+      attempt += 1;
       const { runObserver } = await import("./agents/observer/agent.js");
       const result = await runWorkerAttempt(
         "observer",
@@ -1244,14 +1347,44 @@ export async function runObserverStage(
         debugLog("observer.stale_ctx", { error: String(error) });
         return "abort";
       }
+      // Output-length cut on an input the preflight accepted: the output
+      // allowance — not the model — is at fault, so this is a size miss, not
+      // a model defect. Size-skip without any persisted cooldown (the next
+      // cycle clears it) and keep shrink-to-fit open: a smaller chunk needs
+      // less output too. A session model has no fallback to advance to, so it
+      // falls through to the break-glass below instead.
+      if (error instanceof WorkerStreamError && error.lengthCut && !error.turnCapExhausted) {
+        const candidateConfig = stageModelForThinking;
+        if (candidateConfig) {
+          const outputAllowance = workerOutputAllowance(effectiveObsCtx, resolved.model as any);
+          debugLog("observer.output_allowance_exceeded", {
+            outputAllowance,
+            model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`,
+            discardedCount: getDiscardedCount(error),
+          });
+          runtime.skipOversizedForCycle(candidateConfig);
+          runtime.tryEmitInfo(
+            ctx.hasUI,
+            ctx.ui,
+            `Observational memory: observer skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (output allowance ~${outputAllowance.toLocaleString()} tokens too small for this input)`,
+          );
+          needsOutputShrink = true;
+          continue;
+        }
+      }
       // Always try next fallback — don't abort pipeline for a single model failure.
       // Record cooldown so resolveModel skips this model in the next iteration.
       // Deterministic 4xx (e.g. MissingSessionID) additionally cools the
       // resolved model itself: the session model has no candidate config, so
       // without this it would retry identically on every cycle.
-      // Any error reaching this point ran a model that fit: error semantics
-      // own the outcome from here, so the shrink-to-fit pass stays out.
-      sawAttemptError = true;
+      // Any error reaching this point ran a model that fit. Provider errors
+      // and timeouts keep error semantics owning the outcome, so the
+      // shrink-to-fit pass stays out — but a turn-cap or output cut is
+      // input-size-dependent rather than a broken model, so a smaller chunk
+      // may still fit the turn budget or the output allowance and the pass
+      // stays open for it.
+      if (!(error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
+        sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "observer");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "observer");
@@ -1266,14 +1399,16 @@ export async function runObserverStage(
       // A timed-out session model has no candidate config to cool down, so
       // the loop would re-resolve the same stalled model and burn the full
       // deadline on every remaining attempt. Treat the stage as exhausted.
-      // A session model cut off by the agent turn cap fails the same way for
-      // the same reason: `agentMaxTurns` is global config, so a retry spends
-      // another whole budget on an identical outcome. Candidates differ — they
-      // cool down and the fallback chain takes over.
+      // A session model cut off by the agent turn cap — or by an output-length
+      // cut on an input the preflight accepted — fails the same way for the
+      // same reason: the turn budget and the output cap derive from the same
+      // window, so a retry spends another whole budget on an identical
+      // outcome. Candidates differ — they cool down and the fallback chain
+      // takes over.
       if (
         !candidateConfig &&
         (error instanceof WorkerAttemptTimeoutError ||
-          (error instanceof WorkerStreamError && error.turnCapExhausted))
+          (error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
       )
         break;
       // Continue loop — resolveModel will skip the cooled-down model
@@ -1295,8 +1430,10 @@ export async function runObserverStage(
  * each fit `budget`. The first item always starts the first batch even when
  * oversized on its own (prefix-guard semantics, mirroring
  * capSourceEntriesToTokens) — the caller treats an over-budget first batch
- * as unplannable and aborts. Order is preserved; per-item wrapper overhead
- * (summary-line headers etc.) rides in the caller's fixed overhead.
+ * as unplannable and aborts. Order is preserved. `tokenOf` must price the
+ * dispatched rendering (summary/dropper line), not bare content: the planner
+ * certifies fit, so unpriced wrappers send over-window batches that fail at
+ * runtime and void the whole run into an identical retry every cycle.
  */
 function planPrefixBatches<T>(
   items: readonly T[],
@@ -1339,8 +1476,17 @@ function computeReflectorInput(
     : observationsCreatedAfterIndex(entries, lastReflectionIdx);
   const newReflections = pending ? [] : reflectionsCreatedAfterIndex(entries, lastReflectionIdx);
   const newItemsTokens =
-    newObservations.reduce((s: number, o: any) => s + estimateStringTokens(o.content), 0) +
-    newReflections.reduce((s: number, r: any) => s + estimateStringTokens(r.content), 0);
+    // Rendered lines, not bare content: the agent sends
+    // observationToSummaryLine / reflectionToSummaryLine per item, and the
+    // fit-check must price what is dispatched (see planPrefixBatches).
+    newObservations.reduce(
+      (s: number, o: any) => s + estimateStringTokens(observationToSummaryLine(o)),
+      0,
+    ) +
+    newReflections.reduce(
+      (s: number, r: any) => s + estimateStringTokens(reflectionToSummaryLine(r)),
+      0,
+    );
   const summaryBudget = Math.floor(runtime.config.reflectorInputMaxTokens * 0.15) * 2;
   const reflectorInputTokens = Math.min(
     newItemsTokens + summaryBudget,
@@ -1528,11 +1674,13 @@ export async function runReflectorStage(
 
   // Shrink-to-fit batching: partition the new observations into contiguous
   // batches that each fit the largest resolved window, run them all with that
-  // model, merge, and commit once. Any batch failure voids the whole run with
-  // the cursor unmoved (a partial commit would advance coverage over
-  // unreviewed observations). New reflections travel whole in every batch:
-  // they are prior-cycle outputs, bounded in practice, and splitting them
-  // would change review semantics.
+  // model, merge, and commit once. A batch the input budget certified can
+  // still overflow the output allowance; those batches bisect output-
+  // adaptively (both halves are processed). Any other batch failure voids the
+  // whole run with the cursor unmoved (a partial commit would advance coverage
+  // over unreviewed observations). New reflections travel whole in every
+  // batch: they are prior-cycle outputs, bounded in practice, and splitting
+  // them would change review semantics.
   const runShrunkBatches = async (best: {
     resolved: ResolvedModel;
     ctx: number;
@@ -1544,7 +1692,7 @@ export async function runReflectorStage(
     // per-batch overhead alongside the summaries (mirroring the normal-path
     // fit-check, which prices them inside newItemsTokens).
     const newReflectionsTokens = input.newReflections.reduce(
-      (s: number, r: any) => s + estimateStringTokens(r.content),
+      (s: number, r: any) => s + estimateStringTokens(reflectionToSummaryLine(r)),
       0,
     );
     const batchFixedOverhead =
@@ -1557,7 +1705,7 @@ export async function runReflectorStage(
     if (itemBudget <= 0) return { outcome: "abort", sameRunReflections: [] };
     const batches = planPrefixBatches(
       input.newObservations,
-      (o) => estimateStringTokens(o.content),
+      (o) => estimateStringTokens(observationToSummaryLine(o)),
       itemBudget,
     );
     if (input.newObservations.length > 0) {
@@ -1568,14 +1716,34 @@ export async function runReflectorStage(
       // retry every cycle. Abort upfront when any batch overflows.
       const oversized = batches.find(
         (batch) =>
-          batch.reduce((s, o) => s + estimateStringTokens(o.content), 0) + batchFixedOverhead >
+          batch.reduce((s, o) => s + estimateStringTokens(observationToSummaryLine(o)), 0) +
+            batchFixedOverhead >
           batchBudget,
       );
       if (oversized) return { outcome: "abort", sameRunReflections: [] };
     }
     const planned = batches.length > 0 ? batches : [[] as Observation[]];
-    // Unbounded by design (the backlog clears on commit), so log the plan
-    // shape upfront: batch count × sizes is the cost multiplier for this run.
+    // Bounded by design (see WORKER_SHRINK_MAX_BATCHES): past the cap the
+    // pass aborts upfront with the cursor unmoved instead of burning a worker
+    // call per batch and still advancing nothing.
+    if (planned.length > WORKER_SHRINK_MAX_BATCHES) {
+      debugLog("reflector.batch_cap", {
+        batchCount: planned.length,
+        maxBatches: WORKER_SHRINK_MAX_BATCHES,
+        newObsCount: input.newObservations.length,
+        model: `${bestModel.provider}/${bestModel.id}`,
+      });
+      runtime.tryEmitWorkerInfo(
+        ctx.hasUI,
+        ctx.ui,
+        `Observational memory: reflector deferring ${input.newObservations.length} observations ` +
+          `(${planned.length} fit-to-window batches exceeds the per-run limit of ${WORKER_SHRINK_MAX_BATCHES}; ` +
+          `a larger reflector model would clear the backlog)`,
+      );
+      return { outcome: "abort", sameRunReflections: [] };
+    }
+    // Log the plan shape upfront: batch count × sizes is the cost
+    // multiplier for this run (bounded by the cap above).
     debugLog("reflector.batch_plan", {
       batchCount: planned.length,
       batchSizes: planned.map((b) => b.length),
@@ -1589,15 +1757,49 @@ export async function runReflectorStage(
     );
     let merged: Reflection[] = [];
     let firstError: string | undefined;
-    for (let batchIndex = 0; batchIndex < planned.length; batchIndex++) {
-      const batch = planned[batchIndex];
-      if (!runtime.isGenerationActive(generation))
-        return { outcome: "abort", sameRunReflections: [] };
+    // Output-adaptive queue: a batch the input budget certified can still
+    // overflow the output allowance. Bisect it and process both halves (the
+    // commit still covers the whole pool at most once — never a prefix).
+    // Total executed batches stay bounded by WORKER_SHRINK_MAX_BATCHES.
+    const queue: Observation[][] = [...planned];
+    const isSessionBest = best.resolved.source !== "candidate";
+    let batchRuns = 0;
+    // Shared void tail for failures splitting cannot save: committing a
+    // prefix would advance coverage over unreviewed observations, so the run
+    // is abandoned with the cursor unmoved.
+    const voidBatchedRun = (error: unknown): ReflectorStageResult => {
+      const candidateConfig = stageModelForBatch;
+      runtime.recordRetryableError(candidateConfig, error, "reflector");
+      if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+      debugLog("reflector.error", {
+        error: String(error),
+        retryable: isRetryableError(error),
+        deterministic: isDeterministicError(error),
+        cooldownWorthy: isCooldownWorthyError(error),
+        discardedCount: getDiscardedCount(error),
+      });
+      runtime.recordConsolidationStageError(ctx, "reflector", error);
+      return { outcome: "abort", sameRunReflections: [] };
+    };
+    while (queue.length > 0) {
+      const batch = queue.shift();
       // Empty batches are no-ops (runReflector returns early on empty
       // observations); skip the trivial call and commit empty below.
-      if (batch.length === 0) continue;
+      if (!batch || batch.length === 0) continue;
+      if (!runtime.isGenerationActive(generation))
+        return { outcome: "abort", sameRunReflections: [] };
+      batchRuns += 1;
+      if (batchRuns > WORKER_SHRINK_MAX_BATCHES) {
+        debugLog("reflector.batch_cap", {
+          batchRuns,
+          maxBatches: WORKER_SHRINK_MAX_BATCHES,
+          newObsCount: input.newObservations.length,
+          model: `${bestModel.provider}/${bestModel.id}`,
+        });
+        return { outcome: "abort", sameRunReflections: [] };
+      }
       debugLog("reflector.batch_start", {
-        batchIndex,
+        batchIndex: batchRuns,
         batchCount: planned.length,
         batchObsCount: batch.length,
         model: `${bestModel.provider}/${bestModel.id}`,
@@ -1641,21 +1843,27 @@ export async function runReflectorStage(
           debugLog("reflector.stale_ctx", { error: String(error) });
           return { outcome: "abort", sameRunReflections: [] };
         }
-        // Batch failure voids the run with the cursor unmoved; the next cycle
-        // retries the whole input. Classified like a normal attempt failure so
-        // cooldowns and the retry gate behave identically.
-        const candidateConfig = stageModelForBatch;
-        runtime.recordRetryableError(candidateConfig, error, "reflector");
-        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
-        debugLog("reflector.error", {
-          error: String(error),
-          retryable: isRetryableError(error),
-          deterministic: isDeterministicError(error),
-          cooldownWorthy: isCooldownWorthyError(error),
-          discardedCount: getDiscardedCount(error),
-        });
-        runtime.recordConsolidationStageError(ctx, "reflector", error);
-        return { outcome: "abort", sameRunReflections: [] };
+        // A turn/output-budget cut is input-size-dependent: bisect the batch
+        // and queue both halves (coverage still commits once, over the whole
+        // pool). Provider errors, a single item even the smallest batch
+        // cannot emit, and a session model that must not spin all void the
+        // run with the cursor unmoved — classified like a normal attempt
+        // failure so cooldowns and the retry gate behave identically.
+        if (
+          !isSessionBest &&
+          error instanceof WorkerStreamError &&
+          (error.lengthCut || error.turnCapExhausted) &&
+          batch.length > 1
+        ) {
+          const mid = Math.max(1, Math.floor(batch.length / 2));
+          queue.unshift(batch.slice(0, mid), batch.slice(mid));
+          debugLog("reflector.batch_split", {
+            batchObsCount: batch.length,
+            model: `${bestModel.provider}/${bestModel.id}`,
+          });
+          continue;
+        }
+        return voidBatchedRun(error);
       }
     }
     return commitReflectorResult(merged.length > 0 ? merged : undefined, firstError, best.resolved);
@@ -1667,13 +1875,19 @@ export async function runReflectorStage(
   let bestFit: { resolved: ResolvedModel; ctx: number } | undefined;
   let sawAttemptError = false;
 
-  for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
+  // Runs (model calls) are bounded by MAX_STAGE_ATTEMPTS; size-skips are
+  // cheap resolution-only iterations with their own continuation budget, so
+  // a long chain of too-small models cannot starve the shrink pass.
+  let attempt = 0;
+  let sizeSkips = 0;
+  while (attempt < MAX_STAGE_ATTEMPTS) {
     const resolved = await resolveModel("reflector");
     if (!runtime.isGenerationActive(generation))
       return { outcome: "abort", sameRunReflections: [] };
     if (!resolved) {
-      // Total exhaustion on a pure size-mismatch record: batch the input to
-      // the largest resolved window and commit once, instead of aborting.
+      // Total exhaustion on a size-mismatch, turn-cap-only, or output-cut
+      // record: batch the input to the largest resolved window and commit
+      // once, instead of aborting.
       if (bestFit && !sawAttemptError) return runShrunkBatches(bestFit);
       return { outcome: "abort", sameRunReflections: [] };
     }
@@ -1720,22 +1934,25 @@ export async function runReflectorStage(
       // Size-skip only: a too-small window is not a broken model, so this
       // never writes a persisted cooldown. The in-cycle skip advances the
       // fallback chain within this run.
-      const resolvedIdentity = resolved.model as { provider?: unknown; id?: unknown };
-      runtime.skipOversizedForCycle(
-        stageModelForThinking ??
-          (typeof resolvedIdentity.provider === "string" && typeof resolvedIdentity.id === "string"
-            ? { provider: resolvedIdentity.provider, id: resolvedIdentity.id }
-            : undefined),
-      );
+      runtime.skipOversizedForCycle(oversizedIdentityForSkip(resolved));
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
         `Observational memory: reflector skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveRefCtx.toLocaleString()} too small for ~${reflectorEstimatedInput.toLocaleString()}-token input)`,
       );
+      sizeSkips += 1;
+      if (sizeSkips > MAX_SIZE_SKIP_CONTINUATIONS) {
+        // Skip budget spent: every candidate refused the full input. Settle
+        // exactly like total exhaustion above — batching to the best window
+        // may still fit.
+        if (bestFit && !sawAttemptError) return runShrunkBatches(bestFit);
+        return { outcome: "abort", sameRunReflections: [] };
+      }
       continue;
     }
 
     try {
+      attempt += 1;
       const { runReflector } = await import("./agents/reflector/agent.js");
       const result = await runWorkerAttempt(
         "reflector",
@@ -1776,9 +1993,40 @@ export async function runReflectorStage(
         debugLog("reflector.stale_ctx", { error: String(error) });
         return { outcome: "abort", sameRunReflections: [] };
       }
-      // Any error reaching this point ran a model that fit: error semantics
-      // own the outcome from here, so the shrink-to-fit pass stays out.
-      sawAttemptError = true;
+      // Output-length cut on an input the preflight accepted: the output
+      // allowance — not the model — is at fault, so this is a size miss, not
+      // a model defect. Size-skip without any persisted cooldown (the next
+      // cycle clears it) and keep shrink-to-fit open: smaller batches need
+      // less output too. A session model has no fallback to advance to, so it
+      // falls through to the break-glass below instead.
+      if (error instanceof WorkerStreamError && error.lengthCut && !error.turnCapExhausted) {
+        const candidateConfig = stageModelForThinking;
+        if (candidateConfig) {
+          const outputAllowance = workerOutputAllowance(effectiveRefCtx, resolved.model as any);
+          debugLog("reflector.output_allowance_exceeded", {
+            outputAllowance,
+            model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`,
+            discardedCount: getDiscardedCount(error),
+          });
+          runtime.skipOversizedForCycle(candidateConfig);
+          runtime.tryEmitInfo(
+            ctx.hasUI,
+            ctx.ui,
+            `Observational memory: reflector skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (output allowance ~${outputAllowance.toLocaleString()} tokens too small for this input)`,
+          );
+          continue;
+        }
+      }
+      // Any error reaching this point ran a model that fit. Provider errors
+      // and timeouts keep error semantics owning the outcome, so the
+      // shrink-to-fit pass stays out — but a turn-cap or output cut is
+      // input-size-dependent rather than a broken model, so smaller batches
+      // may still fit the turn budget or the output allowance and the pass
+      // stays open for them.
+      sawAttemptError = !(
+        error instanceof WorkerStreamError &&
+        (error.turnCapExhausted || error.lengthCut)
+      );
       const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "reflector");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
@@ -1792,14 +2040,15 @@ export async function runReflectorStage(
       });
       // A timed-out session model has no candidate config to cool down, so
       // retrying would stall on the same model for the full deadline again. A
-      // session model cut off by the agent turn cap fails the same way for the
-      // same reason: `agentMaxTurns` is global config, so a retry spends another
-      // whole budget on an identical outcome. Candidates differ — they cool down
-      // and the fallback chain takes over.
+      // session model cut off by the agent turn cap — or by an output-length
+      // cut on an input the preflight accepted — fails the same way: the turn
+      // budget and the output cap derive from the same window, so a retry
+      // spends another whole budget on an identical outcome. Candidates
+      // differ — they cool down and the fallback chain takes over.
       if (
         !candidateConfig &&
         (error instanceof WorkerAttemptTimeoutError ||
-          (error instanceof WorkerStreamError && error.turnCapExhausted))
+          (error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
       )
         break;
       continue;
@@ -1843,8 +2092,30 @@ function computeDropperInput(
     : pending
       ? pendingObservationsCreatedAfter(pending, entries, pending.dropped?.coversUpToId)
       : observationsCreatedAfterIndex(entries, lastDropIdx);
+  // In manual mode, merge accumulated reflection batches with
+  // branch data (preserving pre-switch markers), matching the
+  // dropper's full autoCompact context. Computed before the token pricing
+  // below: the per-item cost is the dispatched dropper line, whose coverage
+  // tier comes from this same reflection set.
+  const pendingReflections = pending
+    ? [
+        ...folded.reflections,
+        ...(pending.reflectionBatches ?? []).flatMap(
+          (b: any) => (b.data as any)?.reflections ?? [],
+        ),
+      ]
+    : folded.reflections;
+  const reflectionsForDropper = mergeReflections(pendingReflections, sameRunReflections);
+  const coverageById = reflectionCoverageMap(newObservations, reflectionsForDropper);
   const dropperNewObsTokens = newObservations.reduce(
-    (s: number, o: any) => s + estimateStringTokens(o.content),
+    // Rendered dropper lines, not bare content: the agent sends
+    // observationToDropperLine per candidate, and the fit-check must price
+    // what is dispatched (see planPrefixBatches).
+    (s: number, o: any) =>
+      s +
+      estimateStringTokens(
+        observationToDropperLine(o, coverageTierForObservation(o, coverageById)),
+      ),
     0,
   );
   const dropperSummaryBudget = Math.floor(runtime.config.dropperInputMaxTokens * 0.2);
@@ -1876,18 +2147,6 @@ function computeDropperInput(
     sourceObsForDropper.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),
     Math.floor(runtime.config.dropperInputMaxTokens * 0.2),
   );
-  // In manual mode, merge accumulated reflection batches with
-  // branch data (preserving pre-switch markers), matching the
-  // dropper's full autoCompact context.
-  const pendingReflections = pending
-    ? [
-        ...folded.reflections,
-        ...(pending.reflectionBatches ?? []).flatMap(
-          (b: any) => (b.data as any)?.reflections ?? [],
-        ),
-      ]
-    : folded.reflections;
-  const reflectionsForDropper = mergeReflections(pendingReflections, sameRunReflections);
   const summaryTokens = estimateStringTokens(existingObservationsSummary);
   return {
     folded,
@@ -2009,11 +2268,10 @@ export async function runDropperStage(
   const dropperStaticTokens = workerStaticPromptTokens("dropper");
   // Reflections travel whole in every prompt (normal and batched), so they
   // ride in the estimated input alongside the candidates — mirroring the
-  // reflector's newItemsTokens, which prices both. All content terms use the
-  // same CJK-aware estimator as the static side (line wrappers ride in the
-  // margin).
+  // reflector's newItemsTokens, which prices both. All terms price the
+  // dispatched rendering with the same CJK-aware estimator as the static side.
   const dropperReflectionsTokens = input.reflectionsForDropper.reduce(
-    (s: number, r: any) => s + estimateStringTokens(r.content),
+    (s: number, r: any) => s + estimateStringTokens(reflectionToSummaryLine(r)),
     0,
   );
 
@@ -2062,8 +2320,10 @@ export async function runDropperStage(
   // batches that each fit the largest resolved window, evaluate every batch
   // with the same pool-wide pressure numbers, merge the raw proposals, and
   // apply the deterministic ranker + global cap once before the single
-  // advance. A partial evaluation is never published: any batch failure
-  // voids the run with the cursor unmoved.
+  // advance. A batch the input budget certified can still overflow the output
+  // allowance; those batches bisect output-adaptively (both halves are
+  // processed). Any other batch failure voids the run: a partial evaluation
+  // is never published, so the cursor stays unmoved.
   const runShrunkBatches = async (best: {
     resolved: ResolvedModel;
     ctx: number;
@@ -2099,25 +2359,50 @@ export async function runDropperStage(
     const batchBudget = workerInputBudget(best.ctx, bestModel);
     const itemBudget = batchBudget - batchFixedOverhead;
     if (itemBudget <= 0) return "abort";
-    const batches = planPrefixBatches(
+    // Priced as dispatched dropper lines against the pool-wide coverage map
+    // (the per-batch agent map agrees per id: tiers derive from reflections
+    // alone), so a certified batch cannot overflow at runtime.
+    const batchCoverageById = reflectionCoverageMap(
       input.newObservations,
-      (o) => estimateStringTokens(o.content),
-      itemBudget,
+      input.reflectionsForDropper,
     );
+    const batchItemTokens = (o: any) =>
+      estimateStringTokens(
+        observationToDropperLine(o, coverageTierForObservation(o, batchCoverageById)),
+      );
+    const batches = planPrefixBatches(input.newObservations, batchItemTokens, itemBudget);
     if (input.newObservations.length > 0) {
       // Every batch must fit: a single huge candidate anywhere in the pool
       // would otherwise send an over-window batch, fail at runtime, and void
       // the whole run into an identical retry every cycle. Abort upfront.
       const oversized = batches.find(
         (batch) =>
-          batch.reduce((s, o) => s + estimateStringTokens(o.content), 0) + batchFixedOverhead >
-          batchBudget,
+          batch.reduce((s, o) => s + batchItemTokens(o), 0) + batchFixedOverhead > batchBudget,
       );
       if (oversized) return "abort";
     }
     const planned = batches.length > 0 ? batches : [[] as typeof input.newObservations];
-    // Unbounded by design (the pool clears on commit), so log the plan shape
-    // upfront: batch count × sizes is the cost multiplier for this run.
+    // Bounded by design (see WORKER_SHRINK_MAX_BATCHES): past the cap the
+    // pass aborts upfront with the cursor unmoved instead of burning a worker
+    // call per batch and still advancing nothing.
+    if (planned.length > WORKER_SHRINK_MAX_BATCHES) {
+      debugLog("dropper.batch_cap", {
+        batchCount: planned.length,
+        maxBatches: WORKER_SHRINK_MAX_BATCHES,
+        candidateCount: input.newObservations.length,
+        model: `${bestModel.provider}/${bestModel.id}`,
+      });
+      runtime.tryEmitWorkerInfo(
+        ctx.hasUI,
+        ctx.ui,
+        `Observational memory: dropper deferring ${input.newObservations.length} candidates ` +
+          `(${planned.length} fit-to-window batches exceeds the per-run limit of ${WORKER_SHRINK_MAX_BATCHES}; ` +
+          `a larger dropper model would clear the pool)`,
+      );
+      return "abort";
+    }
+    // Log the plan shape upfront: batch count × sizes is the cost
+    // multiplier for this run (bounded by the cap above).
     debugLog("dropper.batch_plan", {
       batchCount: planned.length,
       batchSizes: planned.map((b) => b.length),
@@ -2131,12 +2416,46 @@ export async function runDropperStage(
     );
     const seen = new Set<string>();
     const mergedProposals: string[] = [];
-    for (let batchIndex = 0; batchIndex < planned.length; batchIndex++) {
-      const batch = planned[batchIndex];
+    // Output-adaptive queue (see the reflector pass): bisect turn/output-cut
+    // batches and process both halves; the deterministic ranker + global cap
+    // still apply once over the merged union. Total executed batches stay
+    // bounded by WORKER_SHRINK_MAX_BATCHES.
+    const queue = [...planned];
+    const isSessionBest = best.resolved.source !== "candidate";
+    let batchRuns = 0;
+    // Shared void tail for failures splitting cannot save: a partial
+    // evaluation is never published, so the run is abandoned with the cursor
+    // unmoved.
+    const voidBatchedRun = (error: unknown): StageOutcome => {
+      const candidateConfig = stageModelForBatch;
+      runtime.recordRetryableError(candidateConfig, error, "dropper");
+      if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
+      debugLog("dropper.error", {
+        error: String(error),
+        retryable: isRetryableError(error),
+        deterministic: isDeterministicError(error),
+        cooldownWorthy: isCooldownWorthyError(error),
+        discardedCount: getDiscardedCount(error),
+      });
+      runtime.recordConsolidationStageError(ctx, "dropper", error);
+      return "abort";
+    };
+    while (queue.length > 0) {
+      const batch = queue.shift();
+      if (!batch || batch.length === 0) continue;
       if (!runtime.isGenerationActive(generation)) return "abort";
-      if (batch.length === 0) continue;
+      batchRuns += 1;
+      if (batchRuns > WORKER_SHRINK_MAX_BATCHES) {
+        debugLog("dropper.batch_cap", {
+          batchRuns,
+          maxBatches: WORKER_SHRINK_MAX_BATCHES,
+          candidateCount: input.newObservations.length,
+          model: `${bestModel.provider}/${bestModel.id}`,
+        });
+        return "abort";
+      }
       debugLog("dropper.batch_start", {
-        batchIndex,
+        batchIndex: batchRuns,
         batchCount: planned.length,
         batchCandidateCount: batch.length,
         model: `${bestModel.provider}/${bestModel.id}`,
@@ -2183,20 +2502,26 @@ export async function runDropperStage(
           debugLog("dropper.stale_ctx", { error: String(error) });
           return "abort";
         }
-        // Batch failure voids the run with the cursor unmoved; the next cycle
-        // retries the whole input. Classified like a normal attempt failure.
-        const candidateConfig = stageModelForBatch;
-        runtime.recordRetryableError(candidateConfig, error, "dropper");
-        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
-        debugLog("dropper.error", {
-          error: String(error),
-          retryable: isRetryableError(error),
-          deterministic: isDeterministicError(error),
-          cooldownWorthy: isCooldownWorthyError(error),
-          discardedCount: getDiscardedCount(error),
-        });
-        runtime.recordConsolidationStageError(ctx, "dropper", error);
-        return "abort";
+        // A turn/output-budget cut is input-size-dependent: bisect the batch
+        // and queue both halves (the union still merges everything before
+        // the single global selection). Provider errors, a single candidate
+        // even the smallest batch cannot emit, and a session model that must
+        // not spin all void the run with the cursor unmoved.
+        if (
+          !isSessionBest &&
+          error instanceof WorkerStreamError &&
+          (error.lengthCut || error.turnCapExhausted) &&
+          batch.length > 1
+        ) {
+          const mid = Math.max(1, Math.floor(batch.length / 2));
+          queue.unshift(batch.slice(0, mid), batch.slice(mid));
+          debugLog("dropper.batch_split", {
+            batchCandidateCount: batch.length,
+            model: `${bestModel.provider}/${bestModel.id}`,
+          });
+          continue;
+        }
+        return voidBatchedRun(error);
       }
     }
     const selected = selectDropCandidates(
@@ -2214,12 +2539,18 @@ export async function runDropperStage(
   let bestFit: { resolved: ResolvedModel; ctx: number } | undefined;
   let sawAttemptError = false;
 
-  for (let attempt = 0; attempt < MAX_STAGE_ATTEMPTS; attempt++) {
+  // Runs (model calls) are bounded by MAX_STAGE_ATTEMPTS; size-skips are
+  // cheap resolution-only iterations with their own continuation budget, so
+  // a long chain of too-small models cannot starve the shrink pass.
+  let attempt = 0;
+  let sizeSkips = 0;
+  while (attempt < MAX_STAGE_ATTEMPTS) {
     const resolved = await resolveModel("dropper");
     if (!runtime.isGenerationActive(generation)) return "abort";
     if (!resolved) {
-      // Total exhaustion on a pure size-mismatch record: batch the pool to
-      // the largest resolved window and commit once, instead of aborting.
+      // Total exhaustion on a size-mismatch, turn-cap-only, or output-cut
+      // record: batch the pool to the largest resolved window and commit
+      // once, instead of aborting.
       if (bestFit && !sawAttemptError) return runShrunkBatches(bestFit);
       return "abort";
     }
@@ -2263,22 +2594,25 @@ export async function runDropperStage(
       // Size-skip only: a too-small window is not a broken model, so this
       // never writes a persisted cooldown. The in-cycle skip advances the
       // fallback chain within this run.
-      const resolvedIdentity = resolved.model as { provider?: unknown; id?: unknown };
-      runtime.skipOversizedForCycle(
-        stageModelForThinking ??
-          (typeof resolvedIdentity.provider === "string" && typeof resolvedIdentity.id === "string"
-            ? { provider: resolvedIdentity.provider, id: resolvedIdentity.id }
-            : undefined),
-      );
+      runtime.skipOversizedForCycle(oversizedIdentityForSkip(resolved));
       runtime.tryEmitInfo(
         ctx.hasUI,
         ctx.ui,
         `Observational memory: dropper skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (context window ${effectiveDropCtx.toLocaleString()} too small for ~${dropperEstimatedInput.toLocaleString()}-token input)`,
       );
+      sizeSkips += 1;
+      if (sizeSkips > MAX_SIZE_SKIP_CONTINUATIONS) {
+        // Skip budget spent: every candidate refused the full pool. Settle
+        // exactly like total exhaustion above — batching to the best window
+        // may still fit.
+        if (bestFit && !sawAttemptError) return runShrunkBatches(bestFit);
+        return "abort";
+      }
       continue;
     }
 
     try {
+      attempt += 1;
       const { runDropper } = await import("./agents/dropper/agent.js");
       const droppedIds = await runWorkerAttempt(
         "dropper",
@@ -2317,9 +2651,40 @@ export async function runDropperStage(
         debugLog("dropper.stale_ctx", { error: String(error) });
         return "abort";
       }
-      // Any error reaching this point ran a model that fit: error semantics
-      // own the outcome from here, so the shrink-to-fit pass stays out.
-      sawAttemptError = true;
+      // Output-length cut on an input the preflight accepted: the output
+      // allowance — not the model — is at fault, so this is a size miss, not
+      // a model defect. Size-skip without any persisted cooldown (the next
+      // cycle clears it) and keep shrink-to-fit open: smaller batches need
+      // less output too. A session model has no fallback to advance to, so it
+      // falls through to the break-glass below instead.
+      if (error instanceof WorkerStreamError && error.lengthCut && !error.turnCapExhausted) {
+        const candidateConfig = stageModelForThinking;
+        if (candidateConfig) {
+          const outputAllowance = workerOutputAllowance(effectiveDropCtx, resolved.model as any);
+          debugLog("dropper.output_allowance_exceeded", {
+            outputAllowance,
+            model: `${(resolved.model as any).provider}/${(resolved.model as any).id}`,
+            discardedCount: getDiscardedCount(error),
+          });
+          runtime.skipOversizedForCycle(candidateConfig);
+          runtime.tryEmitInfo(
+            ctx.hasUI,
+            ctx.ui,
+            `Observational memory: dropper skipping ${(resolved.model as any).provider}/${(resolved.model as any).id} (output allowance ~${outputAllowance.toLocaleString()} tokens too small for this input)`,
+          );
+          continue;
+        }
+      }
+      // Any error reaching this point ran a model that fit. Provider errors
+      // and timeouts keep error semantics owning the outcome, so the
+      // shrink-to-fit pass stays out — but a turn-cap or output cut is
+      // input-size-dependent rather than a broken model, so smaller batches
+      // may still fit the turn budget or the output allowance and the pass
+      // stays open for them.
+      sawAttemptError = !(
+        error instanceof WorkerStreamError &&
+        (error.turnCapExhausted || error.lengthCut)
+      );
       const candidateConfig = stageModelForThinking;
       runtime.recordRetryableError(candidateConfig, error, "dropper");
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "dropper");
@@ -2333,14 +2698,15 @@ export async function runDropperStage(
       });
       // A timed-out session model has no candidate config to cool down, so
       // retrying would stall on the same model for the full deadline again. A
-      // session model cut off by the agent turn cap fails the same way for the
-      // same reason: `agentMaxTurns` is global config, so a retry spends another
-      // whole budget on an identical outcome. Candidates differ — they cool down
-      // and the fallback chain takes over.
+      // session model cut off by the agent turn cap — or by an output-length
+      // cut on an input the preflight accepted — fails the same way: the turn
+      // budget and the output cap derive from the same window, so a retry
+      // spends another whole budget on an identical outcome. Candidates
+      // differ — they cool down and the fallback chain takes over.
       if (
         !candidateConfig &&
         (error instanceof WorkerAttemptTimeoutError ||
-          (error instanceof WorkerStreamError && error.turnCapExhausted))
+          (error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
       )
         break;
       continue;

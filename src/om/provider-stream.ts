@@ -262,22 +262,29 @@ export function createBridgeStreamFn(
       typeof (modelRegistry as any).getRegisteredProviderIds === "function" &&
       typeof (modelRegistry as any).getRegisteredProviderConfig === "function"
     ) {
+      // Collect the match inside the guard: only registry enumeration may
+      // fall through (incomplete host/test doubles). Calling the matched
+      // handler stays outside, so a synchronously throwing provider surfaces
+      // instead of being retried on the wrong transport.
+      let exact: { config: RegisteredProviderConfig; handler: Function } | undefined;
+      let apiMatch: { config: RegisteredProviderConfig; handler: Function } | undefined;
       try {
-        let apiMatch: { config: RegisteredProviderConfig; handler: Function } | undefined;
         for (const providerId of (modelRegistry as any).getRegisteredProviderIds()) {
           const config = (modelRegistry as any).getRegisteredProviderConfig(providerId);
           if (!config || typeof config.streamSimple !== "function") continue;
           if (providerId === model.provider && config.api === model.api) {
-            return config.streamSimple(model, ctx, o);
+            exact = { config, handler: config.streamSimple };
+            break;
           }
           if (config.api === model.api && apiMatch === undefined) {
             apiMatch = { config, handler: config.streamSimple };
           }
         }
-        if (apiMatch) return apiMatch.handler.call(apiMatch.config, model, ctx, o);
       } catch {
         // Incomplete host/test doubles — fall through to global map
       }
+      if (exact) return exact.handler.call(exact.config, model, ctx, o);
+      if (apiMatch) return apiMatch.handler.call(apiMatch.config, model, ctx, o);
     }
 
     // 3. Fall back to global Symbol.for map (existing captureRegisteredProviderStreams)

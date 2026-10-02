@@ -261,6 +261,16 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
   // "the cap cut the model off".
   const turnCap = effectiveMaxTurns !== undefined ? createTurnCap(effectiveMaxTurns) : undefined;
   const providerFetch = createProviderFetch(args.providerIdleTimeoutMs);
+  // The stage wires this from the effective window, but the option is only
+  // nullish-guarded by default: 0, NaN, and negatives would reach the
+  // provider verbatim (`maxTokens: 0` reads as empty success with coverage
+  // advanced on some providers). Validate at the boundary instead.
+  const maxOutputTokens =
+    typeof args.maxOutputTokens === "number" &&
+    Number.isFinite(args.maxOutputTokens) &&
+    args.maxOutputTokens > 0
+      ? Math.floor(args.maxOutputTokens)
+      : boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS);
   const config: AgentLoopConfig & ProviderFetchOption & LegacyTurnCapOption = {
     model,
     apiKey,
@@ -269,7 +279,7 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
     ...(args.sessionId ? { sessionId: args.sessionId } : {}),
     ...(args.cacheRetention ? { cacheRetention: args.cacheRetention } : {}),
     ...(providerFetch ? { fetch: providerFetch } : {}),
-    maxTokens: args.maxOutputTokens ?? boundedMaxTokens(model, AGENT_LOOP_MAX_TOKENS),
+    maxTokens: maxOutputTokens,
     convertToLlm: (msgs) => msgs as Message[],
     toolExecution: "sequential",
     ...(reasoning && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
@@ -348,9 +358,14 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
   if (agentError && !(closedByCompleteBatch && accumulated.size > 0)) {
     // Byte-identical to the pre-existing message: isDeterministicError scans it
     // for bare 4xx codes, so an interpolated count could misclassify it.
+    // A `length` terminal marks the run output-capped (input-size-dependent,
+    // not a broken model) so the stage can break the session retry loop
+    // instead of burning every attempt on an identical outcome.
     throw new WorkerStreamError(
       workerStreamErrorMessage("Reflector", agentError),
       accumulated.size,
+      false,
+      failureKind === "length",
     );
   }
 

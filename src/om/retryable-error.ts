@@ -78,6 +78,14 @@ export class WorkerStreamError extends Error {
     readonly discardedCount: number,
     /** True when the agent turn cap cut the run off instead of a stream failure. */
     readonly turnCapExhausted = false,
+    /**
+     * True when the run ended on an output-length cut (`length`) rather than a
+     * provider failure. Like the turn cap this is input-size-dependent, not a
+     * broken model: retrying the identical input burns every attempt, so the
+     * stage's session-model break-glass treats it the same way. Set by the
+     * agents from the terminal stopReason; never inferred from message text.
+     */
+    readonly lengthCut = false,
   ) {
     super(message);
     this.name = "WorkerStreamError";
