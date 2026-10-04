@@ -34,10 +34,12 @@ const KNOWN_FORMATS: ReadonlyArray<readonly [kind: string, pattern: RegExp]> = [
 ];
 
 // scheme://user:password@host — keep everything except the password.
-// The password may contain `/`; a numeric port followed by a path, query or
-// fragment (`host:8080/a@b`, `host:8080?email=a@b`) is not userinfo.
-const URL_PASSWORD = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/?#]+:)([^\s@]+)@/gi;
-const PORT_THEN_PATH = /^\d+[/?#]/;
+// The password may contain `/`, and `@` when another `@` follows before the
+// authority ends (`pa@ss@db`). A port of up to 5 digits followed by a path, query
+// or fragment (`host:8080/a@b`, `host:8080?email=a@b`) is not userinfo. Heuristic:
+// `svc:2024/key@host` and `pa@ss/word@host` stay ambiguous and are not fully masked.
+const URL_PASSWORD = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/?#]+:)((?:[^\s@]|@(?=[^\s/?#@]*@))+)@/gi;
+const PORT_THEN_PATH = /^\d{1,5}[/?#]/;
 
 const KEYWORD =
   /api[_\s-]?key|apikey|access[_\s-]?key|secret|token(?!s|iz)|passw(?:or)?d|\bpwd\b|credential|\bauth(?:orization|_?token)?\b|bearer|\bapi\b/i;

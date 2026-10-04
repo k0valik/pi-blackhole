@@ -2,7 +2,7 @@
 
 ### Added
 
-- **API keys pasted into chat no longer end up in summaries or memory.** A key a user pasted into a conversation was copied verbatim into the compaction summary, carried forward through every later compaction, and sent to the observer model, which could record it as an observation. Compaction summaries, append-mode segments, the rendered memory block, the observer's input, and the memory lines sent to the observer, reflector and dropper now replace credentials with `[REDACTED <kind>]`; keys already stored in older summaries, segments, or memories are masked the next time they are rendered. Session files and `recall` are unchanged.
+- **API keys pasted into chat are masked before they reach summaries and memory.** A key a user pasted into a conversation was copied verbatim into the compaction summary, carried forward through every later compaction, and sent to the observer model, which could record it as an observation. Compaction summaries, append-mode segments, the rendered memory block, the observer's input, and the memory lines sent to the observer, reflector and dropper now replace credentials with `[REDACTED <kind>]`; keys already stored in older summaries, segments, or memories are masked the next time they are rendered. `/blackhole-memory view` and `full` show and copy the masked text too. Detection is heuristic (best effort, not a guarantee); session files, the memory ledger and `recall` keep the original text.
 
 ### Fixed
 
