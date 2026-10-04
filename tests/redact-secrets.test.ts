@@ -5,6 +5,15 @@ import { registerBeforeCompactHook } from "../src/hooks/before-compact.js";
 import { serializeSourceAddressedBranchEntries } from "../src/om/serialize.js";
 import { projectAppendOnlyContext } from "../src/core/compaction-chain.js";
 import { isPiVccCompactionDetailsV2 } from "../src/details.js";
+import {
+  observationToSummaryLine,
+  reflectionToSummaryLine,
+} from "../src/om/ledger/render-summary.js";
+import {
+  buildExistingObservationsSummary,
+  buildExistingReflectionsSummary,
+} from "../src/om/ledger/progress.js";
+import { observationToDropperLine } from "../src/om/agents/dropper/coverage.js";
 
 // Synthetic values shaped like keys users paste into chat; none are real credentials.
 // Prefixes are concatenated so secret scanners do not flag this file.
@@ -33,10 +42,24 @@ describe("redactSecrets", () => {
     // Vendor formats whose random body happens to contain no digits.
     "AKIA" + "QWERTYUIOPASDFGH is the access key",
     "hf" + "_AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh",
+    // `/` inside a URL password or a base64 value.
+    "postgres://admin:Xk8sT2pQ/we4rZ@db.local:5432/app",
+    "api_key: AbCdEf12/ghIjKl45MnOp67QrSt89",
+    "token=Zm9vYmFyL3F1eC9iYXo1MjM0NTY3",
+    "postgres://admin:123456789012@db.local/app",
+    "api_key: AbCdEf12GhIjKl45MnOp67QrSt8/",
+    "api_key: Xk82mQp4/abcd/Lz9RtV3nWc7YbN4p",
+    // Label and value on separate lines (pretty-printed JSON, YAML, .env dumps).
+    '{\n  "apiKey":\n    "3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e"\n}',
+    "password:\n  Xk82mQp4Lz9RtV3nWc7YbN4pR6tW1y",
   ])("masks %s", (text) => {
     const out = redactSecrets(text);
     expect(out).toMatch(/\[REDACTED [a-z-]+\]/);
-    expect(out).not.toMatch(/[0-9a-f]{32}|a8F3kL9q|Xk82mQp4|hunter2pass|QWERTYUIOP|AbCdEfGhIj/);
+    expect(out).not.toMatch(
+      /[0-9a-f]{32}|a8F3kL9q|Xk82mQp4|hunter2pass|QWERTYUIOP|AbCdEfGhIj|Xk8sT2pQ|AbCdEf12|Zm9vYmFy|123456789012/,
+    );
+    // Summaries are redacted more than once (segment, compile, projection on read).
+    expect(redactSecrets(out)).toBe(out);
   });
 
   it.each([
@@ -49,6 +72,15 @@ describe("redactSecrets", () => {
     "read /home/u/.pi/agent/sessions/2026-09-28T20-13-43-175Z_01a0e9a6-e186.jsonl for auth",
     "api: normalizeSourceAddressedBranchEntries2 handles token windows",
     "use sk-learn-compatible-estimators for the token classifier",
+    // A port followed by a query, fragment or path is not a URL password.
+    "https://host:8080?email=a@b.com",
+    "https://host:8080#x@y",
+    "https://host:8080/users/a@b.com",
+    "https://example.com/a/b@c",
+    // Paths next to a credential keyword stay intact now that `/` is a candidate character.
+    "token cache at cache/models/Llama3Instruct8BQuantized/weights",
+    "the api lives in src/services/ApiClient2024/handlers",
+    "token:\n  /var/lib/app/AbCdEf12GhIjKl34MnOp56",
   ])("keeps %s", (text) => {
     expect(redactSecrets(text)).toBe(text);
   });
@@ -81,6 +113,8 @@ describe("credential redaction at derived-context boundaries", () => {
       previousSummary: `[Session Goal]\n- ${OPENROUTER} use this apikey for the eval`,
     });
     expect(summary).not.toContain(HEX64);
+    expect(summary).toContain("[REDACTED api-key]");
+    expect(summary).toContain("use this apikey for the eval");
   });
 
   it("the observer chunk never carries the key", () => {
@@ -166,11 +200,42 @@ describe("credential redaction at derived-context boundaries", () => {
     expect(summary).not.toContain(HEX64);
   });
 
-  it("append mode masks a key frozen in a segment written before redaction", () => {
+  it("memory lines sent to the observer, reflector and dropper mask stored keys", () => {
+    // Memories recorded before redaction existed still hold the raw key.
+    const observation = {
+      id: "3f9c2a1b8d4e",
+      timestamp: "2026-10-04T00:00:00.000Z",
+      relevance: "high",
+      content: `User provided OpenRouter key ${OPENROUTER} for the eval`,
+      sourceEntryIds: ["m1"],
+      tokenCount: 30,
+    } as any;
+    const reflection = {
+      id: "7a1b2c3d4e5f",
+      content: `Eval runs use key ${OPENROUTER}`,
+      supportingObservationIds: ["3f9c2a1b8d4e"],
+    } as any;
+    const lines = [
+      observationToSummaryLine(observation),
+      reflectionToSummaryLine(reflection),
+      buildExistingObservationsSummary([observation], 1000),
+      buildExistingReflectionsSummary([reflection], 1000),
+      observationToDropperLine(observation, "none"),
+    ];
+    for (const line of lines) {
+      expect(line).not.toContain(HEX64);
+      expect(line).toContain("[REDACTED api-key]");
+    }
+    expect(lines[0]).toContain("User provided OpenRouter key");
+    expect(lines[1]).toContain("Eval runs use key");
+  });
+
+  it("append mode masks keys frozen in a segment and tail written before redaction", () => {
     const compaction = compact({ compactionSummaryMode: "append" }, conversation);
     expect(isPiVccCompactionDetailsV2(compaction.details)).toBe(true);
-    // Simulate a segment frozen by an earlier version that did not redact.
+    // Simulate a segment and tail frozen by an earlier version that did not redact.
     compaction.details.segment.summary += `\n- ${OPENROUTER} use this apikey`;
+    compaction.details.trailingSummary += `\n- tail note ${OPENROUTER} apikey`;
     const projected = projectAppendOnlyContext(
       [
         {
@@ -182,7 +247,9 @@ describe("credential redaction at derived-context boundaries", () => {
       ],
       [{ id: "c1", type: "compaction", timestamp: 1, ...compaction }],
     );
-    expect(projected.some((m: any) => m.role === "compactionSummary")).toBe(true);
-    expect(JSON.stringify(projected)).not.toContain(HEX64);
+    const text = JSON.stringify(projected);
+    expect(text).not.toContain(HEX64);
+    expect(text).toContain("use this apikey");
+    expect(text).toContain("tail note");
   });
 });

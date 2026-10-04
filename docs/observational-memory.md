@@ -52,7 +52,7 @@ Compresses a chunk of recent conversation into timestamped, rated observations. 
 
 **Injected inputs** (assembled into the user message): current reflections, current observations formatted `[id] date [relevance] content`, the new conversation chunk with `[Source entry id: <id>]` labels and inline message timestamps, and a current local-time fallback.
 
-**Credentials**: the conversation chunk is redacted by `serializeBranchEntries` before it reaches the observer, so API keys pasted into chat are not sent to the observer model or recorded. The prompt also tells the observer to record that a credential exists and where it is configured, never its value.
+**Credentials**: the conversation chunk is redacted by `serializeBranchEntries` before it reaches the observer, so API keys pasted into chat are not sent to the observer model or recorded. Stored observations and reflections are masked when they are formatted as memory lines, so memories recorded before redaction existed are not sent to the observer, reflector or dropper either. The prompt also tells the observer to record that a credential exists and where it is configured, never its value.
 
 **Validation**: `normalizeSourceEntryIds` *filters* unknown ids rather than rejecting the whole batch (one hallucinated id must not discard valid observations — the same pattern as the dropper). Content is truncated by `truncateRecordContent`. Each observation with no surviving valid `sourceEntryIds` is rejected individually. Duplicates are skipped by content hash.
 

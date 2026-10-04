@@ -57,7 +57,7 @@ src/
     search-entries.ts         # BM25 + regex search
     render-entries.ts         # Message → RenderedEntry
     sanitize.ts               # ANSI/control char stripping
-    redact-secrets.ts         # Credential masking for summaries and observer input
+    redact-secrets.ts         # Credential masking for summaries and worker input
     lineage.ts                # Active lineage entry ID extraction
     recall-scope.ts           # scope:lineage|all, mode:hybrid|file|touched parsing
     skill-collapse.ts         # <skill> tag → [skill: X]

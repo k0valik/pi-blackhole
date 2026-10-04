@@ -1,3 +1,4 @@
+import { redactSecrets } from "../../../core/redact-secrets.js";
 import type { Observation, Reflection } from "../../ledger/index.js";
 
 export const REFLECTION_COVERAGE_TIERS = ["none", "partial", "strong"] as const;
@@ -125,7 +126,7 @@ export function observationToDropperLine(
   observation: Observation,
   coverage: ReflectionCoverageTier,
 ): string {
-  return `[${observation.id}] ${observation.timestamp} [${observation.relevance}] [coverage: ${coverage}] ${observation.content}`;
+  return `[${observation.id}] ${observation.timestamp} [${observation.relevance}] [coverage: ${coverage}] ${redactSecrets(observation.content)}`;
 }
 
 export function coverageTierForObservation(

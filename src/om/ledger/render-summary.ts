@@ -6,6 +6,7 @@
  */
 import type { Observation, Reflection } from "./types.js";
 import { estimateStringTokens } from "../tokens.js";
+import { redactSecrets } from "../../core/redact-secrets.js";
 
 const OM_INSTRUCTIONS_FULL = `Bracketed ids in reflections and observations connect to their source session entries. These are condensed memories from earlier in this session.
 When entries conflict, the most recent observation reflects the latest known state.
@@ -19,7 +20,7 @@ export const OM_FOOTER_FULL = `----\n${OM_INSTRUCTIONS_FULL}\n----`;
 export const OM_FOOTER_BASIC = `----\n${OM_INSTRUCTIONS_BASIC}\n----`;
 
 export function observationToSummaryLine(observation: Observation): string {
-  return `[${observation.id}] ${observation.timestamp} [${observation.relevance}] ${observation.content}`;
+  return `[${observation.id}] ${observation.timestamp} [${observation.relevance}] ${redactSecrets(observation.content)}`;
 }
 
 /** Score an observation for cap/trim selection.
@@ -70,7 +71,7 @@ export function selectPriorObservations(
 }
 
 export function reflectionToSummaryLine(reflection: Reflection): string {
-  return `[${reflection.id}] ${reflection.content}`;
+  return `[${reflection.id}] ${redactSecrets(reflection.content)}`;
 }
 
 /** Bound compaction output only; worker reflection prompts stay unchanged. */

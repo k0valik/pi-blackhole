@@ -1,6 +1,7 @@
 import { estimateEntryTokens, getUsageTokens } from "../tokens.js";
 import type { PendingOMState } from "../pending.js";
 import { foldLedger } from "./fold.js";
+import { redactSecrets } from "../../core/redact-secrets.js";
 import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
@@ -346,7 +347,7 @@ export function buildExistingObservationsSummary(
   const lines: string[] = [];
   let tokens = 0;
   for (const obs of observations) {
-    const line = `[${obs.id}] ${obs.timestamp} [${obs.relevance}] ${obs.content}`;
+    const line = `[${obs.id}] ${obs.timestamp} [${obs.relevance}] ${redactSecrets(obs.content)}`;
     const lineTokens = Math.ceil(line.length / 4);
     if (tokens + lineTokens > maxTokens && lines.length > 0) break;
     lines.push(line);
@@ -366,7 +367,7 @@ export function buildExistingReflectionsSummary(
   const lines: string[] = [];
   let tokens = 0;
   for (const ref of reflections) {
-    const line = `[${ref.id}] ${ref.content}`;
+    const line = `[${ref.id}] ${redactSecrets(ref.content)}`;
     const lineTokens = Math.ceil(line.length / 4);
     if (tokens + lineTokens > maxTokens && lines.length > 0) break;
     lines.push(line);

@@ -42,7 +42,7 @@ Converts raw Pi `Message[]` into `NormalizedBlock[]`. Defined in [[src/core/norm
 
 Uses [[src/core/sanitize.ts]] to strip ANSI codes and control characters before normalization.
 
-The compiled summary (including any summary inherited from an earlier compaction), the rendered observational-memory block, and append-mode segments as they are projected into context pass through [[src/core/redact-secrets.ts]], which replaces credentials with `[REDACTED <kind>]`: known vendor key formats, URL passwords, and long random tokens next to a credential keyword (e.g. `api key`, `token`, `password`). Session files and `recall` keep the original text.
+The compiled summary (including any summary inherited from an earlier compaction), the rendered observational-memory block, and append-mode segments and tails as they are projected into context pass through [[src/core/redact-secrets.ts]], which replaces credentials with `[REDACTED <kind>]`: known vendor key formats, URL passwords, and long random tokens next to a credential keyword (e.g. `api key`, `token`, `password`) or alone on the line below a `label:`. Session files and `recall` keep the original text.
 
 ### filterNoise
 

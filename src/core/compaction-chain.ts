@@ -585,7 +585,8 @@ export function projectAppendOnlyContext(
     timestamp: timestampOf(item.entry, index),
   }));
 
-  const trailing = latest.details.trailingSummary.trim();
+  // Same for the tail: entries written before redaction existed are masked on read.
+  const trailing = redactSecrets(latest.details.trailingSummary).trim();
   const tailMessages = trailing
     ? [
         {

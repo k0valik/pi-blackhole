@@ -18,7 +18,6 @@ import {
   stripRecallNotes,
 } from "../core/summarize";
 import { buildAppendOnlyDetails, coverageForMessages } from "../core/compaction-chain.js";
-import { redactSecrets } from "../core/redact-secrets.js";
 import { getModelProvider, matchesSkippedProvider } from "../core/provider-skip.js";
 import type { PiVccCompactionDetails } from "../details";
 import { buildCompactionProjection, renderSummary } from "../om/ledger/index.js";
@@ -718,8 +717,8 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
           omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
         fullFoldAlways: omRuntime.config.fullFoldAlways,
       });
-      // Masks secrets in memories recorded before redaction existed.
-      omContent = redactSecrets(renderSummary(projection.reflections, projection.observations));
+      // renderSummary masks secrets per memory line (covers memories recorded before redaction existed).
+      omContent = renderSummary(projection.reflections, projection.observations);
       omDetails = projection.details;
       omHasContent = projection.reflections.length > 0 || projection.observations.length > 0;
     } else {
