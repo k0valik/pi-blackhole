@@ -12,6 +12,7 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { getUsageTokens } from "../om/tokens.js";
+import { redactSecrets } from "./redact-secrets.js";
 
 export interface SessionEntryLike {
   id?: string;
@@ -578,7 +579,8 @@ export function projectAppendOnlyContext(
 
   const segmentMessages = chain.segments.map((item, index) => ({
     role: "compactionSummary",
-    summary: item.segment.summary,
+    // Segments are frozen; masking on read also covers ones written before redaction existed.
+    summary: redactSecrets(item.segment.summary),
     tokensBefore: item.segment.tokensBefore,
     timestamp: timestampOf(item.entry, index),
   }));

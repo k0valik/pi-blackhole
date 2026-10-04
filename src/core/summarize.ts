@@ -13,6 +13,7 @@ import { filterNoise } from "./filter-noise";
 import { buildSections } from "./build-sections";
 import { formatFileList } from "../extract/files";
 import { formatSummary, capBrief, RECALL_NOTE, wrapLongLines } from "./format";
+import { redactSecrets } from "./redact-secrets";
 
 export interface CompileInput {
   messages: Message[];
@@ -394,7 +395,7 @@ export const compileSegment = (
   >,
 ): string => {
   const fresh = compileFresh(input);
-  return fresh ? wrapLongLines(fresh) : "";
+  return fresh ? wrapLongLines(redactSecrets(fresh)) : "";
 };
 
 export const compile = (input: CompileInput): string => {
@@ -412,7 +413,8 @@ export const compile = (input: CompileInput): string => {
   // Defensive: remove any recall notes that survived the above (e.g. nested
   // inside the brief transcript after a prior merge).
   const cleaned = stripRecallNotes(merged);
-  return wrapLongLines(cleaned + SEPARATOR + RECALL_NOTE);
+  // Redact after the merge so secrets inherited from older summaries are masked too.
+  return wrapLongLines(redactSecrets(cleaned) + SEPARATOR + RECALL_NOTE);
 };
 
 /**

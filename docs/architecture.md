@@ -57,6 +57,7 @@ src/
     search-entries.ts         # BM25 + regex search
     render-entries.ts         # Message → RenderedEntry
     sanitize.ts               # ANSI/control char stripping
+    redact-secrets.ts         # Credential masking for summaries and observer input
     lineage.ts                # Active lineage entry ID extraction
     recall-scope.ts           # scope:lineage|all, mode:hybrid|file|touched parsing
     skill-collapse.ts         # <skill> tag → [skill: X]
@@ -81,7 +82,7 @@ src/
     provider-stream.ts        # Provider stream bridge for jiti agents
     retryable-error.ts        # Retryable error detection
     reverse-recall.ts         # OM id → session entry reverse lookup
-    serialize.ts              # Branch entry serialization
+    serialize.ts              # Branch entry serialization (credentials redacted)
     tokens.ts                 # Token counting
     ids.ts                    # ID generation
     clipboard.ts              # Clipboard helpers

@@ -2,9 +2,10 @@
  * Serialize branch entries and render source-addressed chunks.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/serialize.ts)
- * Unmodified.
+ * Changes: `serializeBranchEntries` redacts credentials (see core/redact-secrets.ts).
  */
 import type { Message, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
+import { redactSecrets } from "../core/redact-secrets.js";
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
@@ -162,7 +163,8 @@ export function serializeBranchEntries(entries: RenderableEntry[]): string {
       blocks.push(`[Branch summary @ ${time}]: ${entry.summary}`);
     }
   }
-  return blocks.join("\n\n");
+  // This text is sent to the observer model; never forward credentials.
+  return redactSecrets(blocks.join("\n\n"));
 }
 
 export type SourceAddressedSerialization = {

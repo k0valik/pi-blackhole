@@ -111,6 +111,7 @@ Detail preservation. When an observation references specific things, preserve th
 
 - File/location: full path + line number when relevant (src/auth.ts:45, not "the auth file").
 - Identifiers and names: package names, function names, variable names, handles, ticket ids, commit SHAs, error codes. Keep them verbatim.
+- Credentials: never copy secret values (API keys, tokens, passwords); record only that one exists and where it is configured.
 - Error messages: quote verbatim.
     BAD:  Build failed with a type error.
     GOOD: Build failed: TS2322: Type 'string | undefined' is not assignable to type 'string' at src/auth.ts:47.
