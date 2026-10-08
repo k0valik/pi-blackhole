@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+---
+
+## [0.5.12] - 2026-10-08
+
 ### Changed
 
 - **Pi 1.x is supported.** The declared peer range for all four `@earendil-works/pi-*` packages widens from `>=0.85.1 <1.0.0` to `>=0.85.1 <2.0.0`, and the dev toolchain moves to `1.1.0`, so Pi 1.0/1.1 installs no longer report an out-of-range peer ([#151](https://github.com/k0valik/pi-blackhole/issues/151)). The extension-API test double picks up the required members Pi 1.1 added (`registerToolRenderer`, `getSettings`, the MCP registrations, and the virtual-model registrations).
