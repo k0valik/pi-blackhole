@@ -52,10 +52,10 @@
     "verify": "pnpm check && pnpm test"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.99.2",
-    "@earendil-works/pi-ai": "0.99.2",
-    "@earendil-works/pi-coding-agent": "0.99.2",
-    "@earendil-works/pi-tui": "0.99.2",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0",
     "lint-staged": "17.6.0",
     "oxfmt": "^0.71.0",
     "oxlint": "1.86.0",
@@ -66,10 +66,10 @@
     "vitest": "5.0.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": ">=0.85.1 <1.0.0",
-    "@earendil-works/pi-ai": ">=0.85.1 <1.0.0",
-    "@earendil-works/pi-coding-agent": ">=0.85.1 <1.0.0",
-    "@earendil-works/pi-tui": ">=0.85.1 <1.0.0"
+    "@earendil-works/pi-agent-core": ">=0.85.1 <2.0.0",
+    "@earendil-works/pi-ai": ">=0.85.1 <2.0.0",
+    "@earendil-works/pi-coding-agent": ">=0.85.1 <2.0.0",
+    "@earendil-works/pi-tui": ">=0.85.1 <2.0.0"
   },
   "lint-staged": {
     "*.{ts,js,mjs,cjs}": [
@@ -79,7 +79,7 @@
       "oxfmt --no-error-on-unmatched-pattern"
     ]
   },
-  "packageManager": "pnpm@11.27.1",
+  "packageManager": "pnpm@12.10.0",
   "pi": {
     "extensions": [
       "./dist/index.js"
