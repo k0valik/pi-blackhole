@@ -66,6 +66,7 @@ interface PatchableSession {
   abort(): Promise<void>;
   compact(customInstructions?: string): Promise<CompactionResult>;
   _bindExtensionCore(runner: unknown): unknown;
+  _emit?(event: unknown): void;
   _disconnectFromAgent?(): void;
   _reconnectToAgent?(): void;
   _compactionAbortController?: AbortController;
@@ -851,6 +852,41 @@ function hasTrailingUnpairedToolCall(messages: unknown[]): boolean {
 }
 
 /**
+ * Events `AgentSession.compact()` labels "manual" that actually describe the
+ * automatic, in-run compaction Blackhole performs at an awaited turn boundary.
+ *
+ * Pi's public event stream (relayed verbatim by RPC/SDK clients) uses `reason`
+ * to tell a user-initiated `/compact` between runs apart from an automatic
+ * in-run compaction: a "manual" start opens a new turn and a "manual" end
+ * closes processing. An inline attempt runs while the agent loop is still
+ * open, so advertising itself as manual makes a frontend end the turn
+ * mid-run. Pi's `compact()` hardcodes "manual" with no way to override it, so
+ * the adapter rewrites the label for the duration of the attempt. Blackhole's
+ * mid-run path is always the token-threshold trigger (Pi's own overflow path
+ * enters through `_runAutoCompaction`, never this call).
+ */
+const INLINE_COMPACTION_REASON = "threshold" as const;
+
+/**
+ * Return `event` with its `reason` corrected for an inline compaction, or the
+ * same reference when it is not a compaction-lifecycle event. Only "manual"
+ * is rewritten, so a genuine overflow/threshold label is never clobbered.
+ */
+function relabelInlineCompactionReason(event: unknown): unknown {
+  if (!event || typeof event !== "object") return event;
+  const value = event as { type?: unknown; reason?: unknown; source?: unknown };
+  if (value.reason !== "manual") return event;
+  if (
+    value.type === "compaction_start" ||
+    value.type === "compaction_end" ||
+    (value.type === "summarization_retry_attempt_start" && value.source === "compaction")
+  ) {
+    return { ...value, reason: INLINE_COMPACTION_REASON };
+  }
+  return event;
+}
+
+/**
  * Run Pi's native compaction pipeline at an awaited turn_end boundary without
  * aborting the active agent run. This is intentionally private to Blackhole:
  * callers must ensure all tools for the turn have completed.
@@ -932,6 +968,19 @@ export async function compactInlineAtTurnBoundary(
           },
         ),
       );
+
+      const realEmit = session._emit;
+      if (typeof realEmit === "function") {
+        restores.push(
+          shadowProperty(
+            session,
+            "_emit",
+            function inlineEmit(this: PatchableSession, event: unknown): void {
+              realEmit.call(this, relabelInlineCompactionReason(event));
+            },
+          ),
+        );
+      }
 
       result = await originalCompact.call(session, customInstructions);
       // Mark the refresh before validating the quiesce invariant. If a future Pi

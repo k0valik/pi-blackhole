@@ -171,6 +171,85 @@ function createSessionClass(options: {
   };
 }
 
+interface RecordedInlineEvent {
+  type: string;
+  reason?: string;
+  source?: string;
+  seq?: string;
+  message?: unknown;
+}
+
+/**
+ * Session whose `compact()` emits the public event sequence Pi produces for a
+ * manual compaction, so tests can observe what the adapter relabels while it
+ * shadows `_emit`. Each event carries a `seq` sentinel to locate it after the
+ * list has been rewritten.
+ */
+function createEmittingSessionClass() {
+  class EmittingSession {
+    compactCalls = 0;
+    events: RecordedInlineEvent[] = [];
+    _compactionAbortController: AbortController | undefined;
+
+    sessionManager = {
+      buildSessionContext: vi.fn(() => ({ messages: [] as unknown[] })),
+      appendCompaction: vi.fn(),
+    };
+
+    agent = {
+      state: { messages: [] as unknown[] },
+      prepareNextTurnWithContext: vi.fn(),
+    };
+
+    async abort(): Promise<void> {
+      this._compactionAbortController?.abort();
+    }
+
+    _bindExtensionCore(runner: unknown): void {
+      void runner;
+    }
+
+    _emit(event: unknown): void {
+      this.events.push(event as RecordedInlineEvent);
+    }
+
+    async compact(): Promise<CompactionResult> {
+      await this.abort();
+      this._compactionAbortController = new AbortController();
+      this._emit({ type: "compaction_start", reason: "manual", seq: "manual-start" });
+      this._emit({ type: "compaction_start", reason: "overflow", seq: "overflow-start" });
+      this._emit({
+        type: "compaction_end",
+        reason: "manual",
+        seq: "manual-end",
+      });
+      this._emit({
+        type: "summarization_retry_attempt_start",
+        source: "compaction",
+        reason: "manual",
+        seq: "compaction-retry",
+      });
+      this._emit({
+        type: "summarization_retry_attempt_start",
+        source: "branchSummary",
+        reason: "manual",
+        seq: "branch-retry",
+      });
+      this._emit({
+        type: "message_start",
+        message: { role: "user", content: "passthrough" },
+        seq: "passthrough",
+      });
+      this.compactCalls += 1;
+      this.sessionManager.appendCompaction();
+      this.agent.state.messages = [{ role: "assistant", content: "kept" }];
+      this._compactionAbortController = undefined;
+      return { summary: "summary", firstKeptEntryId: "kept", tokensBefore: 1 };
+    }
+  }
+  return EmittingSession;
+}
+
 async function refreshNextTurn(session: InstanceType<ReturnType<typeof createSessionClass>>) {
   return await session.agent.prepareNextTurnWithContext(
     {
@@ -1923,8 +2002,13 @@ describe("Blackhole inline compaction adapter", () => {
       ]);
 
       const savedCompactions: CompactionResult[] = [];
+      const compactionReasons: { start: string[]; end: string[] } = { start: [], end: [] };
       harness.session.subscribe((event) => {
-        if (event.type === "compaction_end" && event.result) savedCompactions.push(event.result);
+        if (event.type === "compaction_start") compactionReasons.start.push(event.reason);
+        if (event.type === "compaction_end") {
+          compactionReasons.end.push(event.reason);
+          if (event.result) savedCompactions.push(event.result);
+        }
       });
 
       let activeRunSignal: AbortSignal | undefined;
@@ -1978,6 +2062,11 @@ describe("Blackhole inline compaction adapter", () => {
       expect(activeRunSignal?.aborted).toBe(false);
       expect(runtime.compactInFlight).toBe(false);
       expect(savedCompactions).toHaveLength(1);
+      // RPC/SDK clients distinguish a user-initiated manual compaction from an
+      // automatic in-run one by this reason; an inline attempt must not end the
+      // still-open turn ([#150](https://github.com/k0valik/pi-blackhole/issues/150)).
+      expect(compactionReasons.start).toEqual(["threshold"]);
+      expect(compactionReasons.end).toEqual(["threshold"]);
 
       // Persisted identity: one compaction entry exists in the branch, and the
       // context Pi keeps after it starts at the entry it retained.
@@ -2013,6 +2102,62 @@ describe("Blackhole inline compaction adapter", () => {
       harness.cleanup();
     }
   }
+
+  describe("inline event reason relabeling", () => {
+    async function compactEmitting(SessionClass: ReturnType<typeof createEmittingSessionClass>) {
+      installInlineCompactionAdapter({ sessionClass: SessionClass as never });
+      const session = new SessionClass();
+      session._bindExtensionCore({});
+      await compactInlineAtTurnBoundary(session.sessionManager);
+      return session;
+    }
+
+    it("reports an inline compaction_start as threshold, not manual", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      expect(session.events.find((event) => event.seq === "manual-start")?.reason).toBe(
+        "threshold",
+      );
+    });
+
+    it("leaves a non-manual compaction_start reason untouched", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      expect(session.events.find((event) => event.seq === "overflow-start")?.reason).toBe(
+        "overflow",
+      );
+    });
+
+    it("reports an inline compaction_end as threshold, not manual", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      expect(session.events.find((event) => event.seq === "manual-end")?.reason).toBe("threshold");
+    });
+
+    it("relabels compaction-source summarization retries", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      expect(session.events.find((event) => event.seq === "compaction-retry")?.reason).toBe(
+        "threshold",
+      );
+    });
+
+    it("leaves branch-summary retries untouched", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      expect(session.events.find((event) => event.seq === "branch-retry")?.reason).toBe("manual");
+    });
+
+    it("passes unrelated events through unchanged", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      const event = session.events.find((entry) => entry.seq === "passthrough");
+      expect(event?.type).toBe("message_start");
+      expect(event?.reason).toBeUndefined();
+      expect(event?.message).toEqual({ role: "user", content: "passthrough" });
+    });
+
+    it("restores _emit after the inline attempt", async () => {
+      const session = await compactEmitting(createEmittingSessionClass());
+      expect(Object.prototype.hasOwnProperty.call(session, "_emit")).toBe(false);
+      session._emit({ type: "compaction_start", reason: "manual", seq: "after" });
+      expect(session.events.find((event) => event.seq === "after")?.reason).toBe("manual");
+    });
+  });
 
   describe("turn_end compaction through a live agent run", () => {
     it("compacts with an injected host helper before the next provider request", async () => {

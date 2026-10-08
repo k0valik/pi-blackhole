@@ -6,6 +6,10 @@
 - **Toolchain: pnpm 12.10.0.** `packageManager` moves from 11.27.1 to 12.10.0; the lockfile now records pnpm's self-managed package-manager dependencies.
 - **Dev-dependency refresh.** The dev-dependencies group is bumped (lint-staged `17.6.0`, oxfmt `0.71.0`, oxlint `1.86.0`, vitest `5.0.3`) ([#145](https://github.com/k0valik/pi-blackhole/pull/145)).
 
+### Fixed
+
+- **Mid-run inline compaction no longer looks like a manual `/compact` to RPC/SDK clients.** Pi's `AgentSession.compact()` hardcodes `reason: "manual"` on `compaction_start`/`compaction_end` (and on compaction-source summarization retries), which RPC frontends read as "the user compacted between runs" — so during an inline compaction they closed the still-open turn and dropped every later event of the run. The adapter now rewrites the label to `"threshold"` for the duration of the inline attempt (a run is always open at an awaited `turn_end`), while a genuine `/compact`/`/blackhole` between runs stays `"manual"` ([#150](https://github.com/k0valik/pi-blackhole/issues/150)).
+
 ---
 
 ## [0.5.11] - 2026-10-05
