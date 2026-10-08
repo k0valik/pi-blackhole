@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- **CI installs accept the freshly published Pi 1.1.0 set.** The `@earendil-works/pi-*` bump to `1.1.0` crossed pnpm's minimum-release-age gate, so `pnpm install --frozen-lockfile` failed in CI and the publish job; the 1.1.0 packages are now listed in `minimumReleaseAgeExclude`, matching the earlier `0.87.0` exemption ([#151](https://github.com/k0valik/pi-blackhole/issues/151)).
 - **Mid-run inline compaction no longer looks like a manual `/compact` to RPC/SDK clients.** Pi's `AgentSession.compact()` hardcodes `reason: "manual"` on `compaction_start`/`compaction_end` (and on compaction-source summarization retries), which RPC frontends read as "the user compacted between runs" — so during an inline compaction they closed the still-open turn and dropped every later event of the run. The adapter now rewrites the label to `"threshold"` for the duration of the inline attempt (a run is always open at an awaited `turn_end`), while a genuine `/compact`/`/blackhole` between runs stays `"manual"` ([#150](https://github.com/k0valik/pi-blackhole/issues/150)).
 
 ---
