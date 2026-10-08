@@ -46,13 +46,11 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.11](CHANGELOG.md)**
+> **Latest release: [0.5.12](CHANGELOG.md)**
 >
-> - **Oversized memory work shrinks to fit instead of stalling** — when no configured model holds the sized input, the stages re-plan against the largest window and run, so small-context models work instead of silently never running.
-> - **The observer can no longer skip entries it never saw** — the chunk cap keeps the oldest prefix and drains the backlog in-run, so coverage never advances past content the model wasn't shown.
-> - **Cut-off worker runs fail into fallback instead of counting as finished** — `length`/`aborted`/stray tool-use endings no longer mark uncovered work done.
-> - **Compaction no longer freezes on long encoded tool output** — bounded path scanning keeps multi-megabyte tool results cheap.
-> - **A warning when `observeAfterTokens` exceeds `observerChunkMaxTokens`** — the loader warns (never clamps) that every pass will run as multiple batches.
+> - **Pi 1.x is supported** — the declared peer range widens to `<2.0.0`, so Pi 1.0/1.1 installs no longer report an out-of-range peer.
+> - **Mid-run inline compaction keeps the turn open for RPC/SDK clients** — the compaction event no longer advertises itself as a user-initiated `/compact`, so `pi --mode rpc` frontends stop ending the run mid-turn ([#150](https://github.com/k0valik/pi-blackhole/issues/150)).
+> - **Toolchain refresh** — pnpm 12.10.0 and the dev-dependency group are current; runtime behavior is unchanged.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for the full history.
 

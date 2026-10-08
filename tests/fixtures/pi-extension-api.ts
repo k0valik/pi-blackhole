@@ -42,6 +42,7 @@ export function createExtensionApiDouble(options: ExtensionApiDoubleOptions = {}
     registerMessageRenderer: notImplemented("registerMessageRenderer"),
     registerMarkdownTransformer: notImplemented("registerMarkdownTransformer"),
     registerEntryRenderer: notImplemented("registerEntryRenderer"),
+    registerToolRenderer: notImplemented("registerToolRenderer"),
     sendMessage: notImplemented("sendMessage"),
     sendUserMessage: notImplemented("sendUserMessage"),
     setSessionName: notImplemented("setSessionName"),
@@ -50,6 +51,7 @@ export function createExtensionApiDouble(options: ExtensionApiDoubleOptions = {}
     exec: notImplemented("exec"),
     getActiveTools: notImplemented("getActiveTools"),
     getAllTools: notImplemented("getAllTools"),
+    getSettings: notImplemented("getSettings"),
     setActiveTools: notImplemented("setActiveTools"),
     getCommands: notImplemented("getCommands"),
     setModel: notImplemented("setModel"),
@@ -57,6 +59,11 @@ export function createExtensionApiDouble(options: ExtensionApiDoubleOptions = {}
     setThinkingLevel: notImplemented("setThinkingLevel"),
     registerProvider: notImplemented("registerProvider"),
     unregisterProvider: notImplemented("unregisterProvider"),
+    registerMcpServer: notImplemented("registerMcpServer"),
+    unregisterMcpServer: notImplemented("unregisterMcpServer"),
+    getMcpServers: notImplemented("getMcpServers"),
+    registerVirtualModel: notImplemented("registerVirtualModel"),
+    unregisterVirtualModel: notImplemented("unregisterVirtualModel"),
     events: createEventBus(),
   };
 }
