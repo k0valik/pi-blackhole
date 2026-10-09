@@ -506,6 +506,7 @@ describe("compact-failed × pending auto-compaction", () => {
       lastCompactCancelled: false,
       midRunCompactionRetry: { failures: 0, retryAfter: 0 },
       resetInfoGate: vi.fn(),
+      flushNoticeSummary: vi.fn(),
       tryEmitInfo: vi.fn(() => true),
     };
     registerCompactionTrigger(pi as any, runtime as any);

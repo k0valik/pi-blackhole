@@ -387,6 +387,10 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
   runtime.ensureConfig(ctx.cwd, (msg) => ctx.ui?.notify?.(msg, "warning"));
   // Reset the info gate — allow one notification during agent_end.
   runtime.resetInfoGate();
+  // Re-surface this run's repeated resolve-time notices once, deduped. The
+  // first hit already scrolled away mid-run; the summary restores it at the
+  // boundary where the user is looking. No-op without a UI (RPC mode).
+  runtime.flushNoticeSummary(ctx?.hasUI ?? false, ctx?.ui);
 
   // Pass the config flag explicitly — this handler runs outside ALS context
   // (agent_end events don't flow through consolidation's withDebugLogContext),

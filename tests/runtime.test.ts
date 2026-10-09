@@ -607,6 +607,7 @@ describe("Consolidation trigger — guards with new config keys", () => {
       startSession: vi.fn((identity: string | undefined) => {
         mockSessionIdentity = identity;
       }),
+      resetNoticeGate: vi.fn(),
       dispose: vi.fn(() => {
         mockGeneration += 1;
         mockController.abort();
@@ -1432,4 +1433,107 @@ it("handles missing pending file gracefully", async () => {
   const runtime = new Runtime();
   expect(() => runtime.loadCursorsFromPending("nonexistent-session")).not.toThrow();
   expect(runtime.getCursor("observer")).toBeUndefined();
+});
+
+describe("Runtime — per-run notice collection (warning spam gate)", () => {
+  it("emits the first occurrence immediately, suppresses repeats, and summarizes at flush", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+    const message = "Observational memory: observer model openrouter/missing not found";
+
+    expect(
+      runtime.emitNotice(true, { notify }, "notfound:openrouter/missing", message, "warning"),
+    ).toBe(true);
+    expect(
+      runtime.emitNotice(true, { notify }, "notfound:openrouter/missing", message, "warning"),
+    ).toBe(false);
+    runtime.emitNotice(
+      true,
+      { notify },
+      "cooldown:observer:stepfun/s",
+      "Observational memory: observer skipping stepfun/s (cooldown — details in cooldown log)",
+      "info",
+    );
+
+    // Two immediate emissions: the first occurrence of each distinct key.
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify.mock.calls[0]).toEqual([message, "warning"]);
+
+    runtime.flushNoticeSummary(true, { notify });
+
+    // One summary emission, deduped to one line per distinct key.
+    expect(notify).toHaveBeenCalledTimes(3);
+    const [summary, level] = notify.mock.calls[2];
+    expect(level).toBe("warning");
+    expect(summary).toContain("model openrouter/missing not found");
+    expect(summary).toContain("(×2)");
+    expect(summary).toContain("cooldown — details in cooldown log");
+    expect(summary.split(";")).toHaveLength(2);
+  });
+
+  it("caps the number of distinct entries in the end-of-run summary", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+    for (let i = 0; i < 8; i += 1) {
+      runtime.emitNotice(true, { notify }, `k${i}`, `Observational memory: issue ${i}`, "warning");
+    }
+
+    runtime.flushNoticeSummary(true, { notify });
+
+    const [summary] = notify.mock.calls.at(-1)!;
+    expect(summary).toContain("more");
+    // 5 named entries plus the "+N more" tail — never one line per occurrence.
+    expect(summary.split(";").length).toBeLessThanOrEqual(6);
+  });
+
+  it("never notifies in headless (RPC) mode and clears without emitting", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+
+    expect(runtime.emitNotice(false, { notify }, "k", "m", "warning")).toBe(false);
+    runtime.flushNoticeSummary(false, { notify });
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("resets the collection so the next run announces again", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+
+    runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "warning");
+    runtime.resetNoticeGate();
+
+    expect(runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "warning")).toBe(
+      true,
+    );
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes a not-found warning across resolve attempts in one run", async () => {
+    writeConfig({
+      observerModel: { provider: "openrouter", id: "nonexistent:free" },
+      sessionFallback: false,
+    });
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+    const notify = vi.fn();
+    const ctx = {
+      model: undefined,
+      modelRegistry: makeRegistry([]),
+      hasUI: true,
+      ui: { notify },
+      stageModel: { provider: "openrouter", id: "nonexistent:free" },
+    };
+
+    await runtime.resolveModel(ctx as any);
+    await runtime.resolveModel(ctx as any);
+
+    const notFound = notify.mock.calls.filter((call) => String(call[0]).includes("not found"));
+    expect(notFound).toHaveLength(1);
+  });
 });

@@ -1602,7 +1602,7 @@ describe("observer turn-cap exhaustion", () => {
     expect(agents.runObserver).toHaveBeenCalledTimes(1);
   });
 
-  test("a candidate that exhausts the cap cools down and the fallback is tried", async () => {
+  test("a candidate that exhausts the cap is skipped in-cycle without a persisted cooldown", async () => {
     const fixture = makePipelineFixture({
       observeAfterTokens: 100,
       entries: [rawMessage("big-1", "x".repeat(40_000))],
@@ -1610,11 +1610,15 @@ describe("observer turn-cap exhaustion", () => {
     const retryable = vi
       .spyOn(fixture.runtime, "recordRetryableError")
       .mockImplementation(() => {});
+    const skip = vi.spyOn(fixture.runtime, "skipFailedForCycle").mockImplementation(() => {});
     agents.runObserver.mockRejectedValue(turnCapError());
 
     await fixture.run();
 
-    expect(retryable).toHaveBeenCalled();
+    // The turn cap is a config/input-size limit: the fallback chain is tried
+    // in-cycle, but the model is never benched via a persisted cooldown.
+    expect(retryable).not.toHaveBeenCalled();
+    expect(skip).toHaveBeenCalled();
     expect(agents.runObserver.mock.calls.length).toBeGreaterThan(1);
   });
 });

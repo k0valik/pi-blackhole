@@ -110,6 +110,28 @@ function joinOrEmpty(items: string[]): string {
   return items.length ? items.join("\n") : "(none yet)";
 }
 
+/**
+ * Highest source entry id (in delivery order) cited by any recorded
+ * observation. This is the honest partial-coverage point when a run ends
+ * before its complete=true close: every entry at or before it was delivered
+ * and cited, so a caller may commit that prefix and re-offer the rest. The
+ * chunk is presented oldest-first, and `allowedSourceEntryIds` is that order.
+ */
+function highestCitedSourceEntryId(
+  allowedSourceEntryIds: readonly string[],
+  observations: Iterable<Observation>,
+): string | undefined {
+  const cited = new Set<string>();
+  for (const observation of observations) {
+    for (const id of observation.sourceEntryIds) cited.add(id);
+  }
+  let highest: string | undefined;
+  for (const id of allowedSourceEntryIds) {
+    if (cited.has(id)) highest = id;
+  }
+  return highest;
+}
+
 export function normalizeSourceEntryIds(
   sourceEntryIds: readonly string[] | undefined,
   allowedSourceEntryIds: readonly string[],
@@ -150,6 +172,14 @@ export interface ObserverResult {
    * its result (the chunk was declared covered); the caller should log this.
    */
   errorAfterClose?: string;
+  /**
+   * Set when the run was cut off by the turn cap after recording observations
+   * without a complete=true close. The highest source entry id any recorded
+   * observation cited is the honest partial-coverage point: everything at or
+   * before it was actually observed, so the stage may commit that prefix and
+   * resume the remainder. Absent on a normal completed or empty run.
+   */
+  partialCoverageId?: string;
 }
 
 export async function runObserver(args: RunObserverArgs): Promise<ObserverResult> {
@@ -402,6 +432,25 @@ ${conversation}`;
     failureKind !== "error" &&
     !(failureKind === "length" && agentError != null && isDeterministicError(agentError))
   ) {
+    // A turn cap is a config/input-size limit, not a model defect. The model
+    // already recorded observations; discarding them (and cooling the model
+    // down) wedges the observer on the same chunk forever. Return them with a
+    // partial coverage point instead: the highest cited source entry. The
+    // stage commits that prefix and drains the remainder in-run — coverage
+    // never claims past a citation, and the unobserved tail stays pending.
+    const partialCoverageId = highestCitedSourceEntryId(
+      allowedSourceEntryIds,
+      accumulated.values(),
+    );
+    if (partialCoverageId) {
+      return {
+        observations: Array.from(accumulated.values()),
+        partialCoverageId,
+      };
+    }
+    // No valid citation (unreachable while accumulated.size > 0, since every
+    // recorded observation carries validated ids): fail closed rather than
+    // advance over work whose coverage cannot be proven.
     throw new WorkerStreamError(
       `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
       accumulated.size,

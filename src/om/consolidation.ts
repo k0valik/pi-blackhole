@@ -551,7 +551,14 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime)
   const launch = (_event: unknown, ctx: ConsolidationCtx) => {
     maybeLaunchConsolidation(pi, runtime, ctx);
   };
-  pi.on("agent_start", launch);
+  // Reset the per-run notice collection here — before the first consolidation
+  // launch of the run — because this trigger registers ahead of the compaction
+  // trigger and its agent_start handler, so a reset placed there would clear
+  // notices this launch just emitted.
+  pi.on("agent_start", (event, ctx) => {
+    runtime.resetNoticeGate();
+    launch(event, ctx);
+  });
   pi.on("turn_end", launch);
 }
 
@@ -1283,36 +1290,48 @@ export async function runObserverStage(
       }
 
       if (result.observations && result.observations.length > 0) {
-        const data = buildObservationsRecordedData(result.observations, coversUpToId);
+        // A turn-cap partial advances coverage only to the highest source
+        // entry the model actually cited, never to the delivered chunk end.
+        // Committing that prefix keeps the batch (instead of discarding it
+        // and re-offering the same chunk forever); the drain below then
+        // resumes from an honestly-observed point.
+        const coverageId: string = result.partialCoverageId ?? coversUpToId;
+        const data = buildObservationsRecordedData(result.observations, coverageId);
         if (!data) {
-          runtime.advanceCursor("observer", coversUpToId, "empty");
+          runtime.advanceCursor("observer", coverageId, "empty");
           return "continue";
         }
         debugLog("observer.records", {
           count: result.observations.length,
           observationTokens: result.observations.reduce((s: number, o: any) => s + o.tokenCount, 0),
-          coversUpToId,
+          coversUpToId: coverageId,
+          ...(result.partialCoverageId ? { partial: true, chunkCoversUpToId: coversUpToId } : {}),
         });
         if (isManualMode(runtime.config)) {
-          savePendingObservation(sessionId, { coversUpToId, data });
+          savePendingObservation(sessionId, { coversUpToId: coverageId, data });
           debugLog("observer.pending", {
             count: result.observations.length,
-            coversUpToId,
+            coversUpToId: coverageId,
             sessionId,
           });
         } else {
           if (!appendEntry(pi, runtime, generation, OM_OBSERVATIONS_RECORDED, data)) return "abort";
           debugLog("observer.appended", {
             count: result.observations.length,
-            coversUpToId,
+            coversUpToId: coverageId,
           });
         }
-        runtime.advanceCursor("observer", coversUpToId, "recorded");
+        runtime.advanceCursor("observer", coverageId, "recorded");
         runtime.tryEmitWorkerInfo(
           ctx.hasUI,
           ctx.ui,
-          `Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`,
+          result.partialCoverageId
+            ? `Observational memory: observer turn cap — checkpointed ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} and continuing`
+            : `Observational memory: ${result.observations.length} observation${result.observations.length === 1 ? "" : "s"} recorded`,
         );
+        // The partial point is now the drain's starting line: without this the
+        // recursion below would re-offer the already-covered prefix.
+        if (result.partialCoverageId) coversUpToId = coverageId;
         // Recorded and covered up to the delivered point — drain the rest of
         // the backlog now instead of waiting for the next turn_end.
         return continueSources();
@@ -1396,7 +1415,16 @@ export async function runObserverStage(
       if (!(error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
         sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
-      runtime.recordRetryableError(candidateConfig, error, "observer");
+      if (error instanceof WorkerStreamError && error.turnCapExhausted) {
+        // Input-size limit, not a broken model: skip in-cycle so the fallback
+        // chain is tried now, but never persist a cooldown — a healthy model
+        // benched for `cooldownHours` after merely hitting `agentMaxTurns` is
+        // what wedged the observer. (The agent now returns a partial
+        // checkpoint instead of throwing this; the guard is defense-in-depth.)
+        runtime.skipFailedForCycle(candidateConfig);
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "observer");
+      }
       if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "observer");
       debugLog("observer.error", {
         error: String(error),

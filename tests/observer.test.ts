@@ -13,12 +13,7 @@ import {
   OBSERVATION_TIMESTAMP_PATTERN,
   runObserver,
 } from "../src/om/agents/observer/agent.js";
-import {
-  getDiscardedCount,
-  isDeterministicError,
-  isRetryableError,
-  WorkerStreamError,
-} from "../src/om/retryable-error.js";
+import { getDiscardedCount, WorkerStreamError } from "../src/om/retryable-error.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { leadingSystemPrompt } from "./fixtures/agent-context.js";
 
@@ -975,22 +970,47 @@ describe("runObserver", () => {
     })) as any;
   }
 
-  it("throws when the turn cap ends a run that never closed", async () => {
-    const error = await runObserver({
+  // A turn cap is a config/input-size limit, not a model defect. Rather than
+  // discarding the observations the model already recorded (and cooling the
+  // model down for hours), the run returns them with the highest cited source
+  // entry as a partial coverage point so the stage can commit that prefix and
+  // resume the remainder.
+  it("returns the recorded batch and its partial coverage id when the turn cap ends a run that never closed", async () => {
+    const result = await runObserver({
       ...baseArgs,
       agentLoop: turnCapLoop([{ observations: [terseObservation], complete: false }]),
       maxTurns: 1,
-    }).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect(error).toMatchObject({
-      message: expect.stringContaining("turn cap"),
-      discardedCount: 1,
     });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.partialCoverageId).toBe("entry-a");
+    expect(result.errorAfterClose).toBeUndefined();
   });
 
-  it("throws when the legacy turn-cap hook ends a run that never closed", async () => {
-    const error = await runObserver({
+  it("uses the highest cited source entry as the partial coverage id", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      allowedSourceEntryIds: ["entry-a", "entry-b", "entry-c"],
+      agentLoop: turnCapLoop(
+        [
+          {
+            observations: [
+              { content: "first", relevance: "low", sourceEntryIds: ["entry-a", "entry-c"] },
+            ],
+            complete: false,
+          },
+        ],
+        true,
+      ),
+      maxTurns: 1,
+    });
+
+    expect(result.observations).toHaveLength(1);
+    expect(result.partialCoverageId).toBe("entry-c");
+  });
+
+  it("returns the partial batch when the legacy turn-cap hook ends a run that never closed", async () => {
+    const result = await runObserver({
       ...baseArgs,
       agentLoop: turnCapLoop(
         [{ observations: [terseObservation], complete: false }],
@@ -1000,30 +1020,25 @@ describe("runObserver", () => {
         true,
       ),
       maxTurns: 1,
-    }).catch((caught: unknown) => caught);
+    });
 
     // Drives shouldStopAfterTurn instead of finishTurn: fails if runObserver
     // stops spreading the Pi 0.86 hook into its agent-loop config.
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect(error).toMatchObject({
-      message: expect.stringContaining("turn cap"),
-      discardedCount: 1,
-    });
+    expect(result.observations).toHaveLength(1);
+    expect(result.partialCoverageId).toBe("entry-a");
   });
 
-  it("does not classify turn-cap exhaustion as a provider error", async () => {
-    const error = await runObserver({
+  it("does not treat the turn-cap partial as a completed close", async () => {
+    const result = await runObserver({
       ...baseArgs,
       agentLoop: turnCapLoop([{ observations: [terseObservation], complete: false }]),
       maxTurns: 1,
-    }).catch((caught: unknown) => caught);
+    });
 
-    // `agentMaxTurns` is a config limit, not a credential or payload failure:
-    // classifying it deterministic would cool the session model for an hour
-    // instead of letting the stage report the exhausted budget.
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect(isDeterministicError(error)).toBe(false);
-    expect(isRetryableError(error)).toBe(false);
+    // `agentMaxTurns` is a config limit, not a provider failure: the partial
+    // result carries a coverage point but no error-after-close.
+    expect(result.partialCoverageId).toBe("entry-a");
+    expect(result.errorAfterClose).toBeUndefined();
   });
 
   it("keeps a completed close when the turn cap ends the run", async () => {
