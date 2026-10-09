@@ -987,7 +987,7 @@ describe("runObserver", () => {
     expect(result.errorAfterClose).toBeUndefined();
   });
 
-  it("uses the highest cited source entry as the partial coverage id", async () => {
+  it("uses the contiguous cited prefix as the partial coverage id, not the max cited", async () => {
     const result = await runObserver({
       ...baseArgs,
       allowedSourceEntryIds: ["entry-a", "entry-b", "entry-c"],
@@ -1005,8 +1005,11 @@ describe("runObserver", () => {
       maxTurns: 1,
     });
 
+    // entry-a and entry-c are cited but entry-b is not. The checkpoint must
+    // stop at the first gap (entry-a) so entry-b is re-offered next batch
+    // instead of being silently claimed as covered (the max-cited bug).
     expect(result.observations).toHaveLength(1);
-    expect(result.partialCoverageId).toBe("entry-c");
+    expect(result.partialCoverageId).toBe("entry-a");
   });
 
   it("returns the partial batch when the legacy turn-cap hook ends a run that never closed", async () => {

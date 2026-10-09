@@ -386,10 +386,11 @@ export class Runtime {
     });
     if (this.noticesThisRun.has(key)) return false;
     this.noticesThisRun.add(key);
-    // A notice consumes the per-phase info gate like tryEmitInfo did: a
-    // resolve-time problem already told the user, so a following routine info
-    // does not need to repeat the turn's one allowed info toast.
-    this.hasEmittedInfoThisTurn = true;
+    // Only routine info notices spend the per-phase info gate; a higher-severity
+    // warning must stay visible without silencing the progress toast that
+    // follows (e.g. the observer turn-cap checkpoint). Repeats return above and
+    // never spend it either.
+    if (level === "info") this.hasEmittedInfoThisTurn = true;
     try {
       ui.notify(message, level);
     } catch {
@@ -412,12 +413,16 @@ export class Runtime {
 
   /**
    * Emit one deduped summary of everything `emitNotice` collected this run,
-   * then clear the collection. No-op when nothing was collected or when there
-   * is no UI (headless/RPC must never emit).
+   * then clear the summary. The per-run dedupe set is deliberately kept: a
+   * consolidation pipeline can straddle `agent_end` (it is launched
+   * fire-and-forget), and clearing the set here would re-announce keys already
+   * reported. `agent_start`'s `resetNoticeGate` re-opens both.
+   * No-op when nothing was collected or when there is no UI (headless/RPC must
+   * never emit).
    */
   flushNoticeSummary(hasUI: boolean, ui: { notify: Notify } | undefined): void {
     const collected = [...this.noticeSummary.values()];
-    this.resetNoticeGate();
+    this.noticeSummary.clear();
     if (collected.length === 0) return;
     if (!hasUI || !ui || typeof ui.notify !== "function") return;
 

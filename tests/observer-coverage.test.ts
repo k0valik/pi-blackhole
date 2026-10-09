@@ -153,7 +153,7 @@ describe("observer never covers source entries it was never shown", () => {
     expect(runtime.getCursor("observer")?.entryId).toBe("s2");
   });
 
-  test("a turn-cap checkpoint commits only the last cited entry and drains the rest", async () => {
+  test("a turn-cap checkpoint commits only the cited prefix and drains the rest", async () => {
     const entries = [
       rawMessage("s0", text("OLD-A")),
       rawMessage("s1", text("OLD-B")),
@@ -174,8 +174,9 @@ describe("observer never covers source entries it was never shown", () => {
     await runStage(runtime, entries);
 
     // The first batch delivered [s0, s1, s2] but only s0 was cited, so
-    // coverage advances to s0 — never to the delivered chunk end. The drain
-    // then resumes from s1 with the remainder.
+    // coverage advances to the end of the cited prefix (s0) — never to the
+    // delivered chunk end, and never past an uncited entry. The drain then
+    // resumes from s1 with the remainder.
     expect(observedInput(0).allowedSourceEntryIds).toEqual(["s0", "s1", "s2"]);
     expect(observedInput(1).allowedSourceEntryIds).toEqual(["s1", "s2"]);
     expect(advance.mock.calls).toEqual([

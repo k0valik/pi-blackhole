@@ -127,7 +127,8 @@ function highestCitedSourceEntryId(
   }
   let highest: string | undefined;
   for (const id of allowedSourceEntryIds) {
-    if (cited.has(id)) highest = id;
+    if (!cited.has(id)) break;
+    highest = id;
   }
   return highest;
 }

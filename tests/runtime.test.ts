@@ -1513,6 +1513,75 @@ describe("Runtime — per-run notice collection (warning spam gate)", () => {
     expect(notify).toHaveBeenCalledTimes(2);
   });
 
+  it("lets an info-level notice spend the info-toast gate", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+
+    runtime.emitNotice(
+      true,
+      { notify },
+      "cooldown:observer:stepfun/s",
+      "Observational memory: observer skipping stepfun/s (cooldown)",
+      "info",
+    );
+
+    expect(runtime.tryEmitInfo(true, { notify }, "Observational memory: progress")).toBe(false);
+  });
+
+  it("does not let a warning-level notice spend the info-toast gate", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+
+    runtime.emitNotice(
+      true,
+      { notify },
+      "notfound:openrouter/missing",
+      "Observational memory: observer model openrouter/missing not found",
+      "warning",
+    );
+
+    // The warning stays visible, but the routine progress toast (e.g. the
+    // observer turn-cap checkpoint) must still be allowed through.
+    expect(runtime.tryEmitInfo(true, { notify }, "Observational memory: progress")).toBe(true);
+  });
+
+  it("does not spend the info-toast gate on a suppressed repeat", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+
+    runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "info");
+    runtime.resetInfoGate();
+    expect(runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "info")).toBe(
+      false,
+    );
+
+    expect(runtime.tryEmitInfo(true, { notify }, "Observational memory: progress")).toBe(true);
+  });
+
+  it("flush drains only the summary and keeps per-run dedupe until reset", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    const notify = vi.fn();
+
+    runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "info");
+    runtime.flushNoticeSummary(true, { notify });
+    expect(notify).toHaveBeenCalledTimes(2);
+
+    // A pipeline straddling agent_end must not re-announce the same key.
+    expect(runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "info")).toBe(
+      false,
+    );
+    expect(notify).toHaveBeenCalledTimes(2);
+
+    // agent_start re-opens the window for the next run.
+    runtime.resetNoticeGate();
+    expect(runtime.emitNotice(true, { notify }, "k", "Observational memory: x", "info")).toBe(true);
+    expect(notify).toHaveBeenCalledTimes(3);
+  });
+
   it("dedupes a not-found warning across resolve attempts in one run", async () => {
     writeConfig({
       observerModel: { provider: "openrouter", id: "nonexistent:free" },
