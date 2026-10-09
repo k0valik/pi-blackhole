@@ -272,22 +272,21 @@ describe("observer completion strictness", () => {
     });
   });
 
-  it("routes an output-length cut on a capped run to the turn-cap guard", async () => {
-    const error = await runObserver({
+  it("keeps the partial checkpoint when an output-length cut lands on a capped run", async () => {
+    const result = await runObserver({
       ...observerArgs,
       agentLoop: scriptedLoop([partialObserverBatch], {
         capEndsRun: true,
         agentEnd: endMessages(assistantStop("length")),
       }),
       maxTurns: 1,
-    }).catch((caught: unknown) => caught);
+    });
 
-    // The cap cut off pending tool work on the same turn the provider hit its
-    // output limit: a config limit (no retry, session-model break-glass), not
-    // a provider failure. The completion check must not claim it first.
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect(error?.message).toContain("turn cap");
-    expect(error).toMatchObject({ turnCapExhausted: true, discardedCount: 1 });
+    // The cap and a non-deterministic length cut are both input-size limits,
+    // not provider failures: the recorded batch is kept as a partial checkpoint
+    // at its highest cited source entry instead of being discarded.
+    expect(result.observations).toHaveLength(1);
+    expect(result.partialCoverageId).toBe("entry-a");
   });
 
   it("still throws the length failure when a capped run recorded nothing", async () => {

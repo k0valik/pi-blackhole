@@ -153,6 +153,40 @@ describe("observer never covers source entries it was never shown", () => {
     expect(runtime.getCursor("observer")?.entryId).toBe("s2");
   });
 
+  test("a turn-cap checkpoint commits only the cited prefix and drains the rest", async () => {
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+    ];
+    // 3 × ~302 = ~906 tokens fits one 1000-token chunk, so the first batch is
+    // [s0, s1, s2] and its delivered chunk end (s2) is NOT the partial point.
+    const runtime = makeRuntime(700, 1000);
+    const advance = vi.spyOn(runtime, "advanceCursor");
+    const recordRetryable = vi.spyOn(runtime, "recordRetryableError");
+    runObserverSpy
+      .mockResolvedValueOnce({
+        observations: [observation("o1", { sourceEntryIds: ["s0"] })],
+        partialCoverageId: "s0",
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries);
+
+    // The first batch delivered [s0, s1, s2] but only s0 was cited, so
+    // coverage advances to the end of the cited prefix (s0) — never to the
+    // delivered chunk end, and never past an uncited entry. The drain then
+    // resumes from s1 with the remainder.
+    expect(observedInput(0).allowedSourceEntryIds).toEqual(["s0", "s1", "s2"]);
+    expect(observedInput(1).allowedSourceEntryIds).toEqual(["s1", "s2"]);
+    expect(advance.mock.calls).toEqual([
+      ["observer", "s0", "recorded"],
+      ["observer", "s2", "empty"],
+    ]);
+    // A turn cap is a config limit, not a model defect: no cooldown is written.
+    expect(recordRetryable).not.toHaveBeenCalled();
+  });
+
   test("the drain is bounded so an oversized backlog waits for the next cycle", async () => {
     const entries: TestEntry[] = [];
     for (let i = 0; i < 8; i += 1) {

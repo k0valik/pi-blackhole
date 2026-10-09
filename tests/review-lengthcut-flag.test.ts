@@ -132,8 +132,8 @@ describe("length-cut flag on cut-off failures", () => {
     expect((error as WorkerStreamError).turnCapExhausted).toBe(false);
   });
 
-  it("observer turn-cap throw keeps the length-cut flag falsy", async () => {
-    const error = await runObserver({
+  it("observer turn-cap returns a partial checkpoint rather than throwing", async () => {
+    const result = await runObserver({
       ...observerArgs,
       maxTurns: 1,
       agentLoop: scriptedLoop(
@@ -151,11 +151,13 @@ describe("length-cut flag on cut-off failures", () => {
         ],
         { capEndsRun: true, agentEnd: [assistantStop("toolUse")] },
       ),
-    }).catch((caught: unknown) => caught);
+    });
 
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect((error as WorkerStreamError).turnCapExhausted).toBe(true);
-    expect((error as WorkerStreamError).lengthCut).toBe(false);
+    // A turn cap is a config limit, not a provider failure: the recorded batch
+    // is kept as a partial checkpoint at the highest cited source entry.
+    expect(result.observations).toHaveLength(1);
+    expect(result.partialCoverageId).toBe("entry-a");
+    expect(result.errorAfterClose).toBeUndefined();
   });
 });
 

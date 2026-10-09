@@ -82,6 +82,7 @@ function captureHandler(
   const runtime = {
     ensureConfig: vi.fn(),
     resetInfoGate: vi.fn(),
+    flushNoticeSummary: vi.fn(),
     // Passthrough: call ui.notify so tests can observe notification content
     tryEmitInfo: vi.fn((hasUI: boolean, ui: any, msg: string) => {
       if (!hasUI || !ui) return;
@@ -216,6 +217,23 @@ describe("V3 compaction trigger (blackhole)", () => {
     );
   });
 
+  it("forwards the UI context to flushNoticeSummary on agent_end", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+    const ctx = fakeCtx([belowBranch]);
+
+    handler(agentEnd(), ctx);
+
+    expect(runtime.flushNoticeSummary).toHaveBeenCalledWith(true, ctx.ui);
+  });
+
+  it("forwards hasUI:false to flushNoticeSummary for a headless ctx", async () => {
+    const { handler, runtime } = captureHandler({ compactAfterTokens: 3 });
+    const ctx = fakeCtx([belowBranch], { hasUI: false, ui: { notify: vi.fn() } });
+
+    handler(agentEnd(), ctx);
+
+    expect(runtime.flushNoticeSummary).toHaveBeenCalledWith(false, ctx.ui);
+  });
   it("compaction:auto + compactionEngine:pi-default skips trigger (pi-default means Pi handles timing too)", async () => {
     const { handler, runtime } = captureHandler({
       compaction: "auto",

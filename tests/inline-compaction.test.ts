@@ -1923,6 +1923,7 @@ describe("Blackhole inline compaction adapter", () => {
     };
     runtime.ensureConfig = vi.fn();
     runtime.resetInfoGate = vi.fn();
+    runtime.flushNoticeSummary = vi.fn();
     runtime.tryEmitInfo = vi.fn();
     runtime.compactInFlight = false;
     runtime.autoCompactionController = null;
