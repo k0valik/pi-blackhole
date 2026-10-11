@@ -1,193 +1,167 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
   MIGRATION_NOTICE_VERSION,
-  isThresholdMigrationCandidate,
-  maybeNotifyThresholdMigration,
+  maybeNotifyConfigMigration,
   resetMigrationNoticeForTests,
 } from "../src/changelog/migration-notice.js";
 import { getPackageVersion } from "../src/changelog/changelog.js";
-import { __setTestConfigDir, loadUnifiedConfig } from "../src/core/unified-config.js";
 
-import type { MigrationNoticeConfig } from "../src/changelog/migration-notice.js";
-
-function pinnedConfig(): MigrationNoticeConfig {
-  return {
-    compaction: "auto",
-    compactionEngine: "blackhole",
-    compactAfterTokens: 120_000,
-  };
-}
-
-describe("isThresholdMigrationCandidate", () => {
-  test("true for an auto/blackhole config with a flat compactAfterTokens pin", () => {
-    expect(isThresholdMigrationCandidate(pinnedConfig())).toBe(true);
-  });
-
-  test("false when no compactAfterTokens is set on auto (already on the curve)", () => {
-    expect(
-      isThresholdMigrationCandidate({ compaction: "auto", compactionEngine: "blackhole" }),
-    ).toBe(false);
-  });
-
-  test("true on manual mode even without a pin — opted out, nudge to reconsider", () => {
-    expect(
-      isThresholdMigrationCandidate({ compaction: "manual", compactionEngine: "blackhole" }),
-    ).toBe(true);
-    expect(
-      isThresholdMigrationCandidate({
-        compaction: "manual",
-        compactionEngine: "blackhole",
-        compactAfterTokens: 120_000,
-      }),
-    ).toBe(true);
-  });
-
-  test("true on off mode even without a pin — opted out, nudge to reconsider", () => {
-    expect(
-      isThresholdMigrationCandidate({ compaction: "off", compactionEngine: "blackhole" }),
-    ).toBe(true);
-  });
-
-  test.each([
-    ["compactAfterRatio", { compactAfterRatio: 0.65 }],
-    ["compactReserveTokens", { compactReserveTokens: 20_000 }],
-    ["compactAfterPreset (non-default)", { compactAfterPreset: "aggressive" }],
-  ])("false when a derived knob is engaged: %s", (_name, knob) => {
-    expect(isThresholdMigrationCandidate({ ...pinnedConfig(), ...knob })).toBe(false);
-  });
-
-  test("false when custom preset definitions are configured", () => {
-    expect(
-      isThresholdMigrationCandidate({
-        ...pinnedConfig(),
-        compactAfterPresets: { tiny: [{ window: 32_768, ratio: 0.9 }] },
-      }),
-    ).toBe(false);
-  });
-
-  test("false for the default preset name (no engagement implied)", () => {
-    expect(
-      isThresholdMigrationCandidate({ ...pinnedConfig(), compactAfterPreset: "default" }),
-    ).toBe(true);
-  });
-
-  test.each(["auto", "manual", "off"] as const)(
-    "false when non-derived knob engaged on mode %s (already adopted)",
-    (mode) => {
-      expect(
-        isThresholdMigrationCandidate({
-          ...pinnedConfig(),
-          compaction: mode,
-          compactAfterRatio: 0.65,
-        }),
-      ).toBe(false);
-    },
-  );
-
-  test("false when compactionEngine is pi-default", () => {
-    expect(
-      isThresholdMigrationCandidate({ ...pinnedConfig(), compactionEngine: "pi-default" }),
-    ).toBe(false);
-  });
-});
-
-describe("maybeNotifyThresholdMigration", () => {
-  let testDir: string;
+describe("maybeNotifyConfigMigration", () => {
+  let stampDir: string;
+  let stampPath: string;
 
   beforeEach(() => {
     resetMigrationNoticeForTests();
-    testDir = mkdtempSync(join(tmpdir(), "pi-blackhole-migration-notice-"));
-    __setTestConfigDir(testDir);
+    // Isolated stamp: never touch the real ~/.pi/agent/pi-blackhole one.
+    stampDir = mkdtempSync(join(tmpdir(), "pi-blackhole-notice-"));
+    stampPath = join(stampDir, "stamp.json");
   });
 
   afterEach(() => {
-    __setTestConfigDir(undefined);
-    rmSync(testDir, { recursive: true, force: true });
-    delete process.env.PI_BLACKHOLE_PASSIVE;
+    resetMigrationNoticeForTests();
+    rmSync(stampDir, { recursive: true, force: true });
   });
 
-  const deps = { version: MIGRATION_NOTICE_VERSION };
   const uiCtx = { hasUI: true, ui: { notify: (_m: string, _l?: string) => {} } };
+  type Call = { message: string; level: string };
 
-  test("notifies once with the migration copy for a pinned config (red-first wiring check)", () => {
-    const calls: Array<{ message: string; level: string }> = [];
-    const notified = maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), {
-      ...deps,
-      notify: (message, level) => calls.push({ message, level }),
-    });
+  function baseDeps() {
+    return { version: MIGRATION_NOTICE_VERSION, stampPath };
+  }
+
+  function recorder(calls: Call[]) {
+    return {
+      ...baseDeps(),
+      notify: (message: string, level: string) => calls.push({ message, level }),
+    };
+  }
+
+  test("emits the upgrade notice + a separate migrated outcome after a migration", () => {
+    const calls: Call[] = [];
+    const notified = maybeNotifyConfigMigration(uiCtx, "migrated", recorder(calls));
 
     expect(notified).toBe(true);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.level).toBe("info");
+    expect(calls).toHaveLength(2);
     // T4: assert the unique actionable tokens, not a generic substring.
+    expect(calls[0]!.level).toBe("info");
     expect(calls[0]!.message).toContain("/blackhole settings");
     expect(calls[0]!.message).toContain("/blackhole changelog");
+    expect(calls[0]!.message).toContain("MIGRATION-GUIDE.md");
+    expect(calls[1]!.level).toBe("info");
+    expect(calls[1]!.message).toContain("migrated");
+  });
+
+  test("fires even when no migration ran, with a 'no migration' outcome", () => {
+    const calls: Call[] = [];
+    expect(maybeNotifyConfigMigration(uiCtx, "none", recorder(calls))).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.message).toContain("needed no migration");
+  });
+
+  test("reports a blocked (read-only) migration as its own outcome", () => {
+    const calls: Call[] = [];
+    expect(maybeNotifyConfigMigration(uiCtx, "blocked", recorder(calls))).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.message).toContain("could not be written");
   });
 
   test("second call in the same process is silent (once-per-process guard)", () => {
-    const calls: Array<{ message: string; level: string }> = [];
-    const depsWithRecorder = {
-      ...deps,
-      notify: (message: string, level: "info") => calls.push({ message, level }),
-    };
-    expect(maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), depsWithRecorder)).toBe(true);
-    expect(maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), depsWithRecorder)).toBe(false);
-    expect(calls).toHaveLength(1);
+    const calls: Call[] = [];
+    const rec = recorder(calls);
+    expect(maybeNotifyConfigMigration(uiCtx, "migrated", rec)).toBe(true);
+    expect(maybeNotifyConfigMigration(uiCtx, "migrated", rec)).toBe(false);
+    expect(calls).toHaveLength(2);
   });
 
-  test("silent when running version differs from the notice version", () => {
-    const calls: Array<{ message: string; level: string }> = [];
+  test("records the stamp file so the next process stays silent", () => {
+    const calls: Call[] = [];
+    expect(maybeNotifyConfigMigration(uiCtx, "migrated", recorder(calls))).toBe(true);
+    expect(maybeNotifyConfigMigration(uiCtx, "migrated", recorder(calls))).toBe(false);
+    expect(calls).toHaveLength(2);
+    // T3: the stamp is written on show, so a fresh process has a real record.
+    expect(existsSync(stampPath)).toBe(true);
+    expect(JSON.parse(readFileSync(stampPath, "utf-8")).shownAt).toMatch(/^\d{4}-/);
+  });
+
+  test("silent when the stamp is already present (once per install)", () => {
+    writeFileSync(stampPath, JSON.stringify({ shownAt: "2026-01-01T00:00:00.000Z" }));
+    const calls: Call[] = [];
+    expect(maybeNotifyConfigMigration(uiCtx, "migrated", recorder(calls))).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("silent when the running version differs from the notice version", () => {
+    const calls: Call[] = [];
     expect(
-      maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), {
-        version: "0.5.3",
+      maybeNotifyConfigMigration(uiCtx, "migrated", {
+        ...baseDeps(),
+        version: "0.0.1",
         notify: (message, level) => calls.push({ message, level }),
       }),
     ).toBe(false);
     expect(calls).toHaveLength(0);
   });
 
-  test("falls back to the running package version when no override is given", () => {
-    // Version-independent: the expectation is derived from the ambient
-    // package version instead of assuming it differs (it equals the notice
-    // version exactly once the 0.5.2 release is bumped).
-    const running = getPackageVersion();
-    const shouldNotify = running === MIGRATION_NOTICE_VERSION;
-    const calls: Array<{ message: string; level: string }> = [];
+  test("fires when the running version is past the notice version", () => {
+    const calls: Call[] = [];
     expect(
-      maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), {
-        version: undefined,
+      maybeNotifyConfigMigration(uiCtx, "migrated", {
+        ...baseDeps(),
+        version: "0.6.1",
         notify: (message, level) => calls.push({ message, level }),
       }),
-    ).toBe(shouldNotify);
-    expect(calls).toHaveLength(shouldNotify ? 1 : 0);
+    ).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  test("ignores a prerelease suffix when comparing versions", () => {
+    const calls: Call[] = [];
+    expect(
+      maybeNotifyConfigMigration(uiCtx, "migrated", {
+        ...baseDeps(),
+        version: "0.7.0-rc.1",
+        notify: (message, level) => calls.push({ message, level }),
+      }),
+    ).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  test("falls back to the running package version when no override is given", () => {
+    // Delegation check: implicit and explicit versions must take the same gate.
+    const running = getPackageVersion();
+    const explicitCalls: Call[] = [];
+    const explicit = maybeNotifyConfigMigration(uiCtx, "none", {
+      version: running,
+      stampPath,
+      notify: (message, level) => explicitCalls.push({ message, level }),
+    });
+
+    resetMigrationNoticeForTests();
+    const fallbackCalls: Call[] = [];
+    const fallback = maybeNotifyConfigMigration(uiCtx, "none", {
+      version: undefined,
+      stampPath: join(stampDir, "stamp2.json"),
+      notify: (message, level) => fallbackCalls.push({ message, level }),
+    });
+
+    expect(fallback).toBe(explicit);
+    expect(fallbackCalls).toHaveLength(explicitCalls.length);
   });
 
   test("silent without UI", () => {
-    const calls: Array<{ message: string; level: string }> = [];
+    const calls: Call[] = [];
     expect(
-      maybeNotifyThresholdMigration(
+      maybeNotifyConfigMigration(
         {
           hasUI: false,
           ui: { notify: (m: string, l?: string) => calls.push({ message: m, level: l ?? "" }) },
         },
-        pinnedConfig(),
-        { ...deps, notify: (message, level) => calls.push({ message, level }) },
-      ),
-    ).toBe(false);
-    expect(calls).toHaveLength(0);
-  });
-
-  test("silent when the config is not a migration candidate", () => {
-    const calls: Array<{ message: string; level: string }> = [];
-    expect(
-      maybeNotifyThresholdMigration(
-        uiCtx,
-        { compaction: "auto", compactionEngine: "blackhole" },
-        { ...deps, notify: (message, level) => calls.push({ message, level }) },
+        "migrated",
+        recorder(calls),
       ),
     ).toBe(false);
     expect(calls).toHaveLength(0);
@@ -195,8 +169,8 @@ describe("maybeNotifyThresholdMigration", () => {
 
   test("a throwing ui.notify is swallowed and the guard is still set", () => {
     expect(() =>
-      maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), {
-        ...deps,
+      maybeNotifyConfigMigration(uiCtx, "migrated", {
+        ...baseDeps(),
         notify: () => {
           throw new Error("stale extension context");
         },
@@ -204,73 +178,12 @@ describe("maybeNotifyThresholdMigration", () => {
     ).not.toThrow();
     // Guard set despite the throw — no retry nag in the same process.
     expect(
-      maybeNotifyThresholdMigration(uiCtx, pinnedConfig(), {
-        ...deps,
+      maybeNotifyConfigMigration(uiCtx, "migrated", {
+        ...baseDeps(),
         notify: () => {
           throw new Error("should not be reached");
         },
       }),
     ).toBe(false);
-  });
-
-  test("scaffolded legacy 81000 never notifies — the loader strips it as residue", () => {
-    mkdirSync(join(testDir, "pi-blackhole"), { recursive: true });
-    writeFileSync(
-      join(testDir, "pi-blackhole", "pi-blackhole-config.json"),
-      JSON.stringify({ compaction: "auto", compactAfterTokens: 81000 }, null, 2),
-    );
-    const loaded = loadUnifiedConfig(testDir);
-    const calls: Array<{ message: string; level: string }> = [];
-    expect(
-      maybeNotifyThresholdMigration(uiCtx, loaded, {
-        ...deps,
-        notify: (message, level) => calls.push({ message, level }),
-      }),
-    ).toBe(false);
-    expect(calls).toHaveLength(0);
-  });
-
-  test("an env-pinned compactAfterTokens does notify — env values are never residue", () => {
-    mkdirSync(join(testDir, "pi-blackhole"), { recursive: true });
-    writeFileSync(
-      join(testDir, "pi-blackhole", "pi-blackhole-config.json"),
-      JSON.stringify({ compaction: "auto", compactAfterTokens: 81000 }, null, 2),
-    );
-    process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS = "81000";
-    try {
-      const loaded = loadUnifiedConfig(testDir);
-      const calls: Array<{ message: string; level: string }> = [];
-      expect(
-        maybeNotifyThresholdMigration(uiCtx, loaded, {
-          ...deps,
-          notify: (message, level) => calls.push({ message, level }),
-        }),
-      ).toBe(true);
-      expect(calls).toHaveLength(1);
-    } finally {
-      delete process.env.PI_BLACKHOLE_COMPACT_AFTER_TOKENS;
-    }
-  });
-
-  test("PI_BLACKHOLE_PASSIVE=true disables compaction via the loader → silent", () => {
-    mkdirSync(join(testDir, "pi-blackhole"), { recursive: true });
-    writeFileSync(
-      join(testDir, "pi-blackhole", "pi-blackhole-config.json"),
-      JSON.stringify({ compaction: "auto", compactAfterTokens: 120_000 }, null, 2),
-    );
-    process.env.PI_BLACKHOLE_PASSIVE = "true";
-    try {
-      const loaded = loadUnifiedConfig(testDir);
-      const calls: Array<{ message: string; level: string }> = [];
-      expect(
-        maybeNotifyThresholdMigration(uiCtx, loaded, {
-          ...deps,
-          notify: (message, level) => calls.push({ message, level }),
-        }),
-      ).toBe(false);
-      expect(calls).toHaveLength(0);
-    } finally {
-      delete process.env.PI_BLACKHOLE_PASSIVE;
-    }
   });
 });

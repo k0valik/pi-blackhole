@@ -46,7 +46,20 @@ const ZERO_MEANS_UNSET: ReadonlySet<string> = new Set([
   "compactAfterTokens",
   "compactAfterRatio",
   "compactReserveTokens",
+  "compactAfterMinTokens",
+  "compactAfterMaxTokens",
 ]);
+
+/**
+ * Keys the example states explicitly while DEFAULTS deliberately leaves them
+ * `undefined`. `compactAfterBy` is the out-of-box selector: DEFAULTS keeps it
+ * unset so a file written before the selector existed still gets the legacy
+ * precedence, while the scaffold (and this example) states the effective shape
+ * so a fresh install is self-describing — see `SCAFFOLD_DEFAULTS`.
+ */
+const FILE_STATES_EXPLICITLY: Readonly<Record<string, unknown>> = {
+  compactAfterBy: "preset",
+};
 
 describe("example-config.json completeness", () => {
   it("lists every DEFAULTS key except the deliberately-unset ones", () => {
@@ -61,7 +74,11 @@ describe("example-config.json completeness", () => {
     for (const [key, value] of Object.entries(DEFAULTS)) {
       const inFile = example[key];
       if (inFile === undefined) continue;
-      const expected = ZERO_MEANS_UNSET.has(key) ? 0 : value;
+      const expected = ZERO_MEANS_UNSET.has(key)
+        ? 0
+        : key in FILE_STATES_EXPLICITLY
+          ? FILE_STATES_EXPLICITLY[key]
+          : value;
       if (!isDeepStrictEqual(inFile, expected)) {
         drift.push(
           `${key}: file has ${JSON.stringify(inFile)}, DEFAULTS has ${JSON.stringify(expected)}`,

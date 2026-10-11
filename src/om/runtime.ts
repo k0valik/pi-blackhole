@@ -61,6 +61,17 @@ type NotifyLevel = "warning" | "info" | "error";
 type Notify = (message: string, type?: NotifyLevel) => void;
 export type ConsolidationPhase = "observer" | "reflector" | "dropper";
 
+/**
+ * User-facing name for a memory pipeline stage, so notifications state the
+ * user outcome rather than the internal worker name (plan-09 §4.7).
+ */
+export function stageOutcome(stage: ConsolidationPhase | "unknown"): string {
+  if (stage === "observer") return "note-taking";
+  if (stage === "reflector") return "insight-building";
+  if (stage === "dropper") return "pruning";
+  return "memory update";
+}
+
 /** Captures the extension/session generation that owns a unit of deferred work. */
 export interface RuntimeGeneration {
   readonly generation: number;
@@ -814,7 +825,7 @@ export class Runtime {
     this.tryEmitInfo(
       ctx.hasUI,
       ctx.ui,
-      `Observational memory: ${stageName} skipped — all candidates failed (sessionFallback disabled, won't use main model)`,
+      `blackhole: skipping ${stageOutcome(stageName)} — every configured model failed and session fallback is off`,
     );
     this.resolveFailureNotified = true;
 
@@ -1072,7 +1083,7 @@ export class Runtime {
   launchConsolidationTask(ctx: LaunchCtx, work: () => Promise<void>): Promise<void> {
     this.consolidationInFlight = true;
     this.consolidationPhase = undefined;
-    const promise = this.launchTrackedTask(ctx, "consolidation", work, () => {
+    const promise = this.launchTrackedTask(ctx, work, () => {
       this.consolidationInFlight = false;
       this.consolidationPhase = undefined;
       if (this.consolidationPromise === promise) this.consolidationPromise = null;
@@ -1088,7 +1099,7 @@ export class Runtime {
     if (phase === "dropper") this.lastDropperError = message;
     if (ctx.hasUI && ctx.ui) {
       try {
-        ctx.ui.notify(`Observational memory: ${phase} failed: ${message}`, "warning");
+        ctx.ui.notify(`blackhole: ${stageOutcome(phase)} failed — ${message}`, "warning");
       } catch {
         // Stale extension context — harmless.
       }
@@ -1099,7 +1110,6 @@ export class Runtime {
 
   private launchTrackedTask(
     ctx: LaunchCtx,
-    label: string,
     work: () => Promise<void>,
     onFinally: (error: string | undefined) => void,
   ): Promise<void> {
@@ -1113,7 +1123,7 @@ export class Runtime {
         errorMessage = error instanceof Error ? error.message : String(error);
         if (!this.disposed && hasUI && ui) {
           try {
-            ui.notify(`Observational memory: ${label} failed: ${errorMessage}`, "warning");
+            ui.notify(`blackhole: memory update failed — ${errorMessage}`, "warning");
           } catch {
             // Stale extension context — harmless.
           }

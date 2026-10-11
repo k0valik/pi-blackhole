@@ -42,7 +42,7 @@ interface FailedEvent {
 
 function captureHandler(
   args: {
-    compactionEngine?: "blackhole" | "pi-default";
+    compaction?: "automatic" | "manual" | "off";
     compactInFlight?: boolean;
     compactWasPiVcc?: boolean;
     lastCompactCancelled?: boolean;
@@ -58,7 +58,7 @@ function captureHandler(
   const runtime = {
     ensureConfig: vi.fn(),
     config: {
-      compactionEngine: args.compactionEngine ?? "blackhole",
+      compaction: args.compaction ?? "automatic",
       debugLog: false,
     },
     compactInFlight: args.compactInFlight ?? false,
@@ -177,7 +177,7 @@ describe("compact-failed hook", () => {
   });
 
   it("skips detailed handling for pi-default engine failures that are not ours", () => {
-    const { handler } = captureHandler({ compactionEngine: "pi-default" });
+    const { handler } = captureHandler({ compaction: "off" });
     const ctx = fakeCtx();
 
     handler(
@@ -232,7 +232,7 @@ describe("compact-failed hook", () => {
 
   it("attributes the current /blackhole failure and consumes compactWasPiVcc", () => {
     const { handler, runtime } = captureHandler({
-      compactionEngine: "pi-default",
+      compaction: "off",
       compactWasPiVcc: true,
     });
     const ctx = fakeCtx();
@@ -262,7 +262,7 @@ describe("compact-failed hook", () => {
     // Upstream quirk: a { cancel: true } from session_before_compact emits
     // aborted:true with fromExtension:false. Our flag corrects the record.
     const { handler, runtime } = captureHandler({
-      compactionEngine: "pi-default",
+      compaction: "off",
       lastCompactCancelled: true,
     });
     const ctx = fakeCtx();
@@ -315,8 +315,7 @@ describe("compact-failed attribution × before-compact hook", () => {
     const runtime = {
       ensureConfig: vi.fn(),
       config: {
-        compaction: "auto",
-        compactionEngine: "blackhole",
+        compaction: "automatic",
         overrideDefaultCompaction: true,
         noAutoCompact: false,
         memory: true,
@@ -415,7 +414,7 @@ describe("compact-failed attribution × before-compact hook", () => {
     const { handler, failedHandler, runtime } = captureBeforeCompact();
     const ctx = fakeCtx2();
     runtime.compactWasPiVcc = true;
-    runtime.config.compactionEngine = "pi-default";
+    runtime.config.compaction = "off";
     const branch = [
       {
         id: "e1",
@@ -495,8 +494,7 @@ describe("compact-failed × pending auto-compaction", () => {
     const runtime = {
       ensureConfig: vi.fn(),
       config: {
-        compaction: "auto",
-        compactionEngine: "blackhole",
+        compaction: "automatic",
         compactAfterTokens: 3,
         debugLog: false,
       },

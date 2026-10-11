@@ -297,7 +297,7 @@ describe("Auto-compact trigger: guard permutations (3 knobs)", () => {
         expect(system.ctx.compact).toHaveBeenCalledTimes(1);
         expect(system.runtime.compactInFlight).toBe(false); // reset by onComplete
         // Should show threshold notification
-        expect(system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached"))).toBe(
+        expect(system.notifyCalls.some((n) => n.msg.includes("tokens full — compacting"))).toBe(
           true,
         );
         // Should show completion notification
@@ -306,7 +306,7 @@ describe("Auto-compact trigger: guard permutations (3 knobs)", () => {
         expect(system.ctx.compact).not.toHaveBeenCalled();
         expect(system.runtime.compactInFlight).toBe(false);
         // Should NOT show threshold notification
-        expect(system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached"))).toBe(
+        expect(system.notifyCalls.some((n) => n.msg.includes("tokens full — compacting"))).toBe(
           false,
         );
       }
@@ -462,7 +462,7 @@ describe("Auto-compact trigger: deferral and re-check paths", () => {
 
     expect(system.ctx.compact).not.toHaveBeenCalled();
     expect(system.runtime.compactInFlight).toBe(false);
-    expect(system.notifyCalls.some((n) => n.msg.includes("compaction skipped"))).toBe(true);
+    expect(system.notifyCalls.some((n) => n.msg.includes("skipped compaction"))).toBe(true);
   });
 
   it("handles session reload between trigger and microtask", async () => {
@@ -554,7 +554,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
     // compactInFlight should have been reset by catch
     expect(system.runtime.compactInFlight).toBe(false);
     // Error notification should show
-    expect(system.notifyCalls.some((n) => n.msg.includes("compact threw"))).toBe(true);
+    expect(system.notifyCalls.some((n) => n.msg.includes("compaction error"))).toBe(true);
   });
 
   it("allows subsequent agent_end after successful compaction", async () => {
@@ -595,7 +595,7 @@ describe("Auto-compact trigger: compactInFlight latch safety", () => {
     // compactInFlight still true
     expect(system.runtime.compactInFlight).toBe(true);
     // No threshold notification (handler bailed before reaching it)
-    expect(system.notifyCalls.some((n) => n.msg.includes("compaction threshold"))).toBe(false);
+    expect(system.notifyCalls.some((n) => n.msg.includes("tokens full"))).toBe(false);
   });
 });
 
@@ -714,18 +714,18 @@ describe("New config key trigger permutations", () => {
           if (expectFire) {
             expect(system.ctx.compact).toHaveBeenCalledTimes(1);
             expect(system.runtime.compactInFlight).toBe(false);
-            expect(
-              system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached")),
-            ).toBe(true);
+            expect(system.notifyCalls.some((n) => n.msg.includes("tokens full — compacting"))).toBe(
+              true,
+            );
             expect(system.notifyCalls.some((n) => n.msg.includes("compaction complete"))).toBe(
               true,
             );
           } else {
             expect(system.ctx.compact).not.toHaveBeenCalled();
             expect(system.runtime.compactInFlight).toBe(false);
-            expect(
-              system.notifyCalls.some((n) => n.msg.includes("compaction threshold reached")),
-            ).toBe(false);
+            expect(system.notifyCalls.some((n) => n.msg.includes("tokens full — compacting"))).toBe(
+              false,
+            );
           }
         });
       }

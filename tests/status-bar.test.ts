@@ -381,7 +381,7 @@ describe("status bar", () => {
       await vi.advanceTimersByTimeAsync(1_000);
       const s = h.lastStatus();
       expect(s).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
-      expect(s).toContain("accent:[observer]");
+      expect(s).toContain("accent:[notes]");
     });
 
     it("shows a spinner entry while a stage runs", async () => {
@@ -389,7 +389,7 @@ describe("status bar", () => {
       await startWithObserver(h);
       const s = h.lastStatus();
       expect(s).toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
-      expect(s).toContain("accent:[observer]");
+      expect(s).toContain("accent:[notes]");
     });
 
     it("shows ✓ +N when the stage advances after adding observations", async () => {
@@ -401,7 +401,7 @@ describe("status bar", () => {
       await h.fire("agent_end", {}, h.ctx);
       const s = h.lastStatus();
       expect(s).toContain("✓".replace("✓", "success:✓"));
-      expect(s).toContain("muted:[observer]");
+      expect(s).toContain("muted:[notes]");
       expect(s).toContain("success:+1");
     });
 
@@ -413,8 +413,8 @@ describe("status bar", () => {
       await h.fire("agent_end", {}, h.ctx);
       const s = h.lastStatus();
       expect(s).not.toContain("success:✓");
-      expect(s).not.toContain("[observer]");
-      expect(s).toContain("accent:[reflector]");
+      expect(s).not.toContain("[notes]");
+      expect(s).toContain("accent:[insights]");
     });
 
     it("settles the last stage when the pipeline finishes", async () => {
@@ -465,7 +465,7 @@ describe("status bar", () => {
       expect(h.lastStatus()).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
       h.runtime.consolidationPhase = "observer";
       await vi.advanceTimersByTimeAsync(80);
-      expect(h.lastStatus()).toContain("accent:[observer]");
+      expect(h.lastStatus()).toContain("accent:[notes]");
     });
 
     it("catches stage transitions during a turn without waiting for agent_end", async () => {
@@ -479,7 +479,7 @@ describe("status bar", () => {
       h.setEntries(branch);
       h.runtime.consolidationPhase = "reflector";
       await vi.advanceTimersByTimeAsync(80);
-      expect(h.lastStatus()).toContain("muted:[observer]");
+      expect(h.lastStatus()).toContain("muted:[notes]");
       expect(h.lastStatus()).toContain("success:+1");
     });
 
@@ -495,7 +495,7 @@ describe("status bar", () => {
       h.runtime.consolidationPhase = "dropper";
       await h.fire("agent_end", {}, h.ctx);
       const s = h.lastStatus();
-      expect(s).toContain("muted:[reflector]");
+      expect(s).toContain("muted:[insights]");
       expect(s).toContain("success:+1");
     });
 
@@ -512,7 +512,7 @@ describe("status bar", () => {
       h.runtime.consolidationPhase = undefined;
       await h.fire("agent_end", {}, h.ctx);
       const s = h.lastStatus();
-      expect(s).toContain("muted:[dropper]");
+      expect(s).toContain("muted:[pruning]");
       expect(s).toContain("success:+1");
     });
   });
@@ -524,7 +524,7 @@ describe("status bar", () => {
       await h.fire("session_start", {}, h.ctx);
       await h.fire("session_compact", { reason: "threshold" }, h.ctx);
       const s = h.lastStatus();
-      expect(s).toContain("muted:[compact]");
+      expect(s).toContain("muted:[compacting]");
       expect(s).toContain("muted:threshold");
     });
 
@@ -534,7 +534,7 @@ describe("status bar", () => {
       await h.fire("session_start", {}, h.ctx);
       await h.fire("session_compact", { reason: "manual" }, h.ctx);
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(h.lastStatus()).not.toContain("[compact]");
+      expect(h.lastStatus()).not.toContain("[compacting]");
     });
   });
 

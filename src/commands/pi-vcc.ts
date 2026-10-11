@@ -214,7 +214,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
         }
         clearPendingState(sessionId);
-        ctx.ui.notify("Observational memory: pending entries flushed", "info");
+        ctx.ui.notify("blackhole: pending memory flushed", "info");
       }
 
       ctx.compact({
@@ -224,7 +224,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
           if (stats) {
             ctx.ui.notify(formatCompactionStats(stats), "info");
           } else {
-            ctx.ui.notify("Compacted with blackhole", "info");
+            ctx.ui.notify("blackhole: compacted", "info");
           }
           notifyMigrationReminder(sessionId, (msg, level) => ctx.ui.notify(msg, level as any));
 
@@ -249,7 +249,7 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             // returning { cancel: true }, and Pi renders "Compaction cancelled"
             // itself for manual aborts. A second toast adds nothing.
           } else {
-            ctx.ui.notify(`Compaction failed: ${message}`, "error");
+            ctx.ui.notify(`blackhole: compaction failed — ${message}`, "error");
           }
         },
       });

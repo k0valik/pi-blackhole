@@ -93,7 +93,7 @@ describe("Config migration — manual mode parity", () => {
     writeFileSync(configPath, JSON.stringify({ compaction: "auto" }));
 
     const config = loadUnifiedConfig(testDir);
-    expect(config.compaction).toBe("auto");
+    expect(config.compaction).toBe("automatic");
     expect(config.noAutoCompact).toBeUndefined();
     expect(isManualMode(config)).toBe(false);
   });

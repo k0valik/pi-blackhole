@@ -621,10 +621,8 @@ describe("Consolidation trigger — guards with new config keys", () => {
         noAutoCompact: false,
         debugLog: true,
         observerChunkMaxTokens: 10000,
-        observerPreambleMaxTokens: 500,
         observationsPoolMaxTokens: 50000,
         reflectorInputMaxTokens: 10000,
-        dropperInputMaxTokens: 10000,
         agentMaxTurns: 5,
         model: undefined,
         observerModel: undefined,
@@ -1061,11 +1059,11 @@ describe("Runtime — sessionFallback notification", () => {
     expect(result.reason).toContain("sessionFallback disabled");
     // Both fire: the resolve-time skip ("failed this cycle") has its own
     // per-run dedupe and never consumes the progress gate, so the terminal
-    // "sessionFallback disabled" info still goes out via tryEmitInfo.
+    // "session fallback off" info still goes out via tryEmitInfo.
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify.mock.calls[0]).toEqual([expect.stringContaining("failed this cycle"), "info"]);
     expect(notify.mock.calls[1]).toEqual([
-      expect.stringContaining("sessionFallback disabled"),
+      expect.stringContaining("session fallback is off"),
       "info",
     ]);
   });

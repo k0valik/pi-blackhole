@@ -56,11 +56,9 @@ function captureHandler(
     compactInFlight?: boolean;
     noAutoCompact?: boolean;
     memory?: boolean;
-    /** NEW: Unified compaction control */
-    compaction?: "auto" | "manual" | "off";
-    /** NEW: Which engine handles compaction */
-    compactionEngine?: "blackhole" | "pi-default";
-    /** NEW: Mid-run (turn_end) compaction behavior */
+    /** Unified compaction control */
+    compaction?: "automatic" | "auto" | "manual" | "off";
+    /** Mid-run (turn_end) compaction behavior */
     midRunCompaction?: "resume" | "pause" | "off";
     /** NEW: Context-window-derived threshold knobs (issue #60) */
     compactAfterRatio?: number;
@@ -106,11 +104,9 @@ function captureHandler(
       passive: args.passive ?? false,
       noAutoCompact: args.noAutoCompact ?? false,
       memory: args.memory ?? true,
-      /** NEW: Unified compaction control */
+      /** Unified compaction control */
       compaction: args.compaction,
-      /** NEW: Which engine handles compaction */
-      compactionEngine: args.compactionEngine,
-      /** NEW: Mid-run (turn_end) compaction behavior */
+      /** Mid-run (turn_end) compaction behavior */
       midRunCompaction: args.midRunCompaction,
     },
     compactInFlight: args.compactInFlight ?? false,
@@ -212,7 +208,7 @@ describe("V3 compaction trigger (blackhole)", () => {
 
     expect(ctx.compact).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Observational memory: compaction threshold reached (~3 tokens); triggering compaction",
+      "blackhole: context is ~3 tokens full — compacting",
       "info",
     );
   });
@@ -234,10 +230,10 @@ describe("V3 compaction trigger (blackhole)", () => {
 
     expect(runtime.flushNoticeSummary).toHaveBeenCalledWith(false, ctx.ui);
   });
-  it("compaction:auto + compactionEngine:pi-default skips trigger (pi-default means Pi handles timing too)", async () => {
+
+  it("compaction:off skips trigger (Pi handles timing)", async () => {
     const { handler, runtime } = captureHandler({
-      compaction: "auto",
-      compactionEngine: "pi-default",
+      compaction: "off",
       compactAfterTokens: 3,
     });
     const ctx = fakeCtx([dueBranch]);
@@ -253,7 +249,6 @@ describe("V3 compaction trigger (blackhole)", () => {
     const { handler, runtime } = captureHandler({
       overrideDefaultCompaction: false,
       compaction: undefined,
-      compactionEngine: undefined,
     });
     const ctx = fakeCtx([dueBranch]);
 
@@ -269,7 +264,6 @@ describe("V3 compaction trigger (blackhole)", () => {
     const { handler, runtime } = captureHandler({
       passive: true,
       compaction: undefined,
-      compactionEngine: undefined,
     });
     const ctx = fakeCtx([dueBranch]);
 
@@ -339,7 +333,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     // (ui also received the info-level threshold notice; only one warning)
     const warns = ctx.ui.notify.mock.calls.filter((call) => call[1] === "warning");
     expect(warns).toHaveLength(1);
-    expect(warns[0][0]).toContain("auto-compaction skipped");
+    expect(warns[0][0]).toContain("skipped auto-compaction");
   });
 
   describe("stale-ctx skip surfacing (issue #92)", () => {
@@ -422,7 +416,7 @@ describe("V3 compaction trigger (blackhole)", () => {
         expect(runtime.staleCtxSkippedCompactions).toBe(1);
         expect((ctx.ui as any).notify).not.toHaveBeenCalled();
         expect(warnSpy).toHaveBeenCalledTimes(1);
-        expect(warnSpy.mock.calls[0][0]).toContain("auto-compaction skipped");
+        expect(warnSpy.mock.calls[0][0]).toContain("skipped auto-compaction");
       } finally {
         warnSpy.mockRestore();
       }
@@ -469,7 +463,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(runtime.autoCompactionController).toBeNull();
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Observational memory: compaction cancelled — session changed before compaction",
+      "blackhole: compaction cancelled — the session changed",
       "info",
     );
   });
@@ -554,7 +548,7 @@ describe("V3 compaction trigger (blackhole)", () => {
     expect(ctx.compact).not.toHaveBeenCalled();
     expect(runtime.compactInFlight).toBe(false);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Observational memory: compaction skipped — another compaction already ran before deferred compaction",
+      "blackhole: skipped compaction — another compaction already ran",
       "info",
     );
   });
@@ -887,10 +881,10 @@ describe("mid-run compaction trigger (turn_end)", () => {
     expect(ctx.compact).not.toHaveBeenCalled();
   });
 
-  it("M10: respects compactionEngine:pi-default guard", () => {
+  it("M10: mid-run respects compaction:off", () => {
     const { turnHandler, runtime } = captureHandler({
-      compaction: "auto",
-      compactionEngine: "pi-default",
+      compaction: "off",
+      midRunCompaction: "resume",
       compactAfterTokens: 3,
     });
     const ctx = fakeCtx([dueBranch]);
@@ -905,7 +899,6 @@ describe("mid-run compaction trigger (turn_end)", () => {
     const { turnHandler, runtime } = captureHandler({
       overrideDefaultCompaction: false,
       compaction: undefined,
-      compactionEngine: undefined,
       compactAfterTokens: 3,
     });
     const ctx = fakeCtx([dueBranch]);
@@ -920,7 +913,6 @@ describe("mid-run compaction trigger (turn_end)", () => {
     const { turnHandler, runtime } = captureHandler({
       noAutoCompact: true,
       compaction: undefined,
-      compactionEngine: undefined,
       compactAfterTokens: 3,
     });
     const ctx = fakeCtx([dueBranch]);
@@ -1462,7 +1454,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
     fakeCtx([branch], { model: { provider: "test", id: "test", contextWindow: window } });
 
   it("compacts above a window-derived ratio threshold (0.5 × 100 = 50)", async () => {
-    const { handler, runtime } = captureHandler({ compactAfterRatio: 0.5 });
+    const { handler, runtime } = captureHandler({ compactAfterRatio: 50 });
     const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]); // 75 tokens ≥ 50
 
     handler(agentEnd(), ctx);
@@ -1473,7 +1465,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
   });
 
   it("fires exactly at the derived threshold (tokens == threshold)", async () => {
-    const { handler } = captureHandler({ compactAfterRatio: 0.5 });
+    const { handler } = captureHandler({ compactAfterRatio: 50 });
     const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(200))]); // 50 tokens == 50
 
     handler(agentEnd(), ctx);
@@ -1483,7 +1475,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
   });
 
   it("does not compact below the derived threshold", async () => {
-    const { handler, runtime } = captureHandler({ compactAfterRatio: 0.5 });
+    const { handler, runtime } = captureHandler({ compactAfterRatio: 50 });
     const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(196))]); // 49 tokens < 50
 
     handler(agentEnd(), ctx);
@@ -1507,13 +1499,13 @@ describe("Context-window-derived threshold (issue #60)", () => {
     // Same configured ratio, two evaluations with different model windows: a
     // 100-window model compacts at 50; a 1M-window model's derived threshold
     // (500k) is far above the same 75-token branch, so it must NOT compact.
-    const small = captureHandler({ compactAfterRatio: 0.5 });
+    const small = captureHandler({ compactAfterRatio: 50 });
     const smallCtx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]);
     small.handler(agentEnd(), smallCtx);
     await flushAll();
     expect(smallCtx.compact).toHaveBeenCalledTimes(1);
 
-    const big = captureHandler({ compactAfterRatio: 0.5 });
+    const big = captureHandler({ compactAfterRatio: 50 });
     const bigCtx = windowedCtx(1_000_000, [textCustomMessage("raw-1", "a".repeat(300))]);
     big.handler(agentEnd(), bigCtx);
     await flushAll();
@@ -1522,7 +1514,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
   });
 
   it("explicit compactAfterTokens beats a configured ratio", async () => {
-    const { handler } = captureHandler({ compactAfterTokens: 3, compactAfterRatio: 0.5 });
+    const { handler } = captureHandler({ compactAfterTokens: 3, compactAfterRatio: 50 });
     const ctx = windowedCtx(100, dueBranch); // 3 tokens ≥ explicit 3; < ratio 50
 
     handler(agentEnd(), ctx);
@@ -1694,9 +1686,7 @@ describe("Eligibility guard (proactive auto-compaction Nothing to compact / sess
 
     expect(ctx.compact).not.toHaveBeenCalled();
     const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
-    expect(
-      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached")),
-    ).toBe(false);
+    expect(infoNotices.some((call) => String(call[0]).includes("tokens full"))).toBe(false);
   });
 
   it("deferred recheck skips compaction when session becomes ineligible before agent settles", async () => {
@@ -1777,7 +1767,7 @@ describe("Eligibility guard (proactive auto-compaction Nothing to compact / sess
     expect(runtime.midRunCompactionRetry.failures).toBe(0);
     const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
     expect(
-      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached mid-run")),
+      infoNotices.some((call) => String(call[0]).includes("tokens full — compacting mid-run")),
     ).toBe(false);
   });
 
@@ -1794,7 +1784,7 @@ describe("Eligibility guard (proactive auto-compaction Nothing to compact / sess
     expect(runtime.midRunCompactionRetry.failures).toBe(0);
     const infoNotices = ctx.ui.notify.mock.calls.filter((call) => call[1] === "info");
     expect(
-      infoNotices.some((call) => String(call[0]).includes("compaction threshold reached mid-run")),
+      infoNotices.some((call) => String(call[0]).includes("tokens full — compacting mid-run")),
     ).toBe(false);
   });
 

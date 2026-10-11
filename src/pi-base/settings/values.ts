@@ -8,7 +8,7 @@ export interface BuildVisibilityContextReturn extends VisibilityContext {}
 const INITIAL_JSON_CACHE = new WeakMap<object, string>();
 const KEY_TO_ROW_CACHE = new WeakMap<
   BodyState,
-  { rows: InternalRow[]; map: Map<string, InternalRow> }
+  { rows: InternalRow[]; tabId: string | undefined; map: Map<string, InternalRow> }
 >();
 
 export function buildVisibilityContext(
@@ -17,13 +17,26 @@ export function buildVisibilityContext(
   scope: string,
 ): BuildVisibilityContextReturn {
   let cache = KEY_TO_ROW_CACHE.get(_state);
-  if (!cache || cache.rows !== _state.rows || cache.rows.length !== _state.rows.length) {
+  if (
+    !cache ||
+    cache.rows !== _state.rows ||
+    cache.rows.length !== _state.rows.length ||
+    cache.tabId !== _state.activeTabId
+  ) {
     const map = new Map<string, InternalRow>();
+    const fallbackTab = _state.tabs[0]?.id;
     for (let i = 0; i < _state.rows.length; i += 1) {
       const r = _state.rows[i]!;
+      // Resolve cross-field conditions from the ACTIVE tab's rows only: a key
+      // may repeat across tabs (global/project), and a same-key row in another
+      // tab must not leak its value into this tab's `visibleWhen`.
+      if (_state.tabs.length > 0 && _state.activeTabId !== undefined) {
+        const rowTab = r.field.tab ?? fallbackTab;
+        if (rowTab !== _state.activeTabId) continue;
+      }
       map.set(r.field.key, r);
     }
-    cache = { rows: _state.rows, map };
+    cache = { rows: _state.rows, tabId: _state.activeTabId, map };
     KEY_TO_ROW_CACHE.set(_state, cache);
   }
   const rowsMap: Map<string, InternalRow> = cache.map;

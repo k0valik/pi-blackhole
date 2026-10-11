@@ -137,9 +137,9 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
     notifySafely(hasUI, ui, "blackhole: overflow compaction aborted, retrying turn", "info");
   }
 
-  // Noise filter: with compactionEngine "pi-default" the failure belongs to
-  // pi's engine (unless the content or the trigger was ours) — light trace only.
-  if (runtime.config.compactionEngine === "pi-default" && !attributedFromExtension) {
+  // Noise filter: with compaction "off" the failure belongs to pi's engine
+  // (unless the content or the trigger was ours) — light trace only.
+  if (runtime.config.compaction === "off" && !attributedFromExtension) {
     trace("compact_failed.skipped_pi_default", { reason });
     return;
   }

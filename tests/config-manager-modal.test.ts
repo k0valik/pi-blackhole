@@ -117,21 +117,39 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
 
     expect(ratio).toBeDefined();
     expect(reserve).toBeDefined();
-    // Unset values surface as 0 (the modal's "off" convention), not hidden.
+    const selector = unsetFields.find((f: { key: string }) => f.key === "compactAfterBy");
+    const floor = unsetFields.find((f: { key: string }) => f.key === "compactAfterMinTokens");
+    const ceiling = unsetFields.find((f: { key: string }) => f.key === "compactAfterMaxTokens");
+    expect(selector).toBeDefined();
+    expect(floor).toBeDefined();
+    expect(ceiling).toBeDefined();
+    // Unset numeric values surface as 0 (the modal's "off" convention); the
+    // selector defaults to the effective "preset" shape.
+    expect(selector.value).toBe("preset");
     expect(ratio.value).toBe(0);
     expect(ratio.min).toBe(0);
-    expect(ratio.max).toBe(1);
+    expect(ratio.max).toBe(100);
     expect(reserve.value).toBe(0);
     expect(reserve.min).toBe(0);
     expect(reserve.max).toBe(2_000_000);
+    expect(floor.value).toBe(0);
+    expect(ceiling.value).toBe(0);
 
     // Configured values surface verbatim for editing.
-    base.compactAfterRatio = 0.65;
+    base.compactAfterRatio = 65;
     base.compactReserveTokens = 32_768;
+    base.compactAfterMinTokens = 150_000;
+    base.compactAfterMaxTokens = 180_000;
     const setFields = config.opts.fields(base as never);
-    expect(setFields.find((f: { key: string }) => f.key === "compactAfterRatio").value).toBe(0.65);
+    expect(setFields.find((f: { key: string }) => f.key === "compactAfterRatio").value).toBe(65);
     expect(setFields.find((f: { key: string }) => f.key === "compactReserveTokens").value).toBe(
       32_768,
+    );
+    expect(setFields.find((f: { key: string }) => f.key === "compactAfterMinTokens").value).toBe(
+      150_000,
+    );
+    expect(setFields.find((f: { key: string }) => f.key === "compactAfterMaxTokens").value).toBe(
+      180_000,
     );
   });
 
@@ -149,7 +167,7 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
 
     const cfg = {
       ...DEFAULTS,
-      compactAfterRatio: 0.65,
+      compactAfterRatio: 65,
       compactReserveTokens: 32_768,
     } as Record<string, unknown>;
     config.save(cfg as never, "global", undefined, cfgDir);
@@ -157,7 +175,7 @@ describe("window-derived threshold fields in the settings modal (issue #60)", ()
     const written = JSON.parse(
       readFileSync(join(cfgDir, "pi-blackhole-config.json"), "utf8"),
     ) as Record<string, unknown>;
-    expect(written.compactAfterRatio).toBe(0.65);
+    expect(written.compactAfterRatio).toBe(65);
     expect(written.compactReserveTokens).toBe(32_768);
 
     // Untouched knobs are NOT written as 0 — only real edits land in the file.
@@ -301,12 +319,12 @@ describe("preset-curve select + hand-edited preset definitions (window curve)", 
 
     // …and saves an unrelated field (ratio). save() re-reads the file, so the
     // hand edit must survive; the stale v1 snapshot must NOT be written back.
-    const modalCfg = { ...DEFAULTS, compactAfterRatio: 0.5 } as Record<string, unknown>;
+    const modalCfg = { ...DEFAULTS, compactAfterRatio: 50 } as Record<string, unknown>;
     config.save(modalCfg as never, "global", undefined, cfgDir);
 
     const written = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     expect(written.compactAfterPresets).toEqual(v2);
-    expect(written.compactAfterRatio).toBe(0.5);
+    expect(written.compactAfterRatio).toBe(50);
   });
 });
 
@@ -333,9 +351,31 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
   });
 
   it("drops out-of-range ratios", async () => {
-    for (const ratio of [0, -0.5, 2.5, Number.NaN]) {
+    for (const ratio of [0, -0.5, -1, 100.0001, 101, 1e9, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBeUndefined();
     }
+  });
+
+  it("keeps percent values above the fraction range", async () => {
+    for (const ratio of [46, 99.9, 100]) {
+      expect((await validate({ compactAfterRatio: ratio })).compactAfterRatio).toBe(ratio);
+    }
+  });
+
+  it("scales a pre-plan fraction below 1 to a percent (bare 1 stays 1%)", async () => {
+    expect((await validate({ compactAfterRatio: 0.01 })).compactAfterRatio).toBe(1);
+    expect((await validate({ compactAfterRatio: 0.5 })).compactAfterRatio).toBe(50);
+    expect((await validate({ compactAfterRatio: 0.65 })).compactAfterRatio).toBe(65);
+    // The migration turns a bare legacy `1` into 100%; the seatbelt normalizer
+    // leaves `1` as 1% so the transform is idempotent.
+    expect((await validate({ compactAfterRatio: 1 })).compactAfterRatio).toBe(1);
+  });
+
+  it("scales a tiny fraction to a stable 1% (idempotent, never re-scaled)", async () => {
+    const once = await validate({ compactAfterRatio: 0.001 });
+    expect(once.compactAfterRatio).toBe(1);
+    const twice = await validate(once);
+    expect(twice.compactAfterRatio).toBe(1);
   });
 
   it("drops non-integer or negative token knobs", async () => {
@@ -348,11 +388,11 @@ describe("modal validate normalizes threshold knobs like the file loader", () =>
   it("keeps explicitly set valid knobs", async () => {
     const out = await validate({
       compactAfterTokens: 180_000,
-      compactAfterRatio: 0.65,
+      compactAfterRatio: 65,
       compactReserveTokens: 32_768,
     });
     expect(out.compactAfterTokens).toBe(180_000);
-    expect(out.compactAfterRatio).toBe(0.65);
+    expect(out.compactAfterRatio).toBe(65);
     expect(out.compactReserveTokens).toBe(32_768);
   });
 
@@ -567,13 +607,14 @@ it("reflection row is keyboard-editable and readable at narrow/normal/wide width
     tui.terminal.columns = width;
     const lines = body.render(width);
     const text = lines.join("\n");
-    expect(text).toContain("Reflection output max");
+    expect(text).toContain("Insight memory budget");
     expect(text).toContain("8000");
     expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     snapshots.push(`WIDTH ${width}\n${text}`);
   }
-  // Existing search reduces the list so the full wrapped description is readable.
-  for (const char of "Reflection output") body.handleInput?.(char);
+  // Search narrows to the insight budget row (an exact-label query matches
+  // only this field under fuzzy matching), so its wrapped description fits.
+  for (const char of "insight memory budget") body.handleInput?.(char);
   const filtered = body.render(40).join("\n");
   expect(filtered).toContain("recall");
   snapshots.push(`FILTERED WIDTH 40\n${filtered}`);

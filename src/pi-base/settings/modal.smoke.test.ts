@@ -1399,6 +1399,48 @@ describe("generic body APIs", () => {
     expect(body.render(80).join("\n")).toContain("Save");
   });
 
+  it("readOnly keeps the action highlight while scrolling; edit mode clears it", () => {
+    const markTheme = {
+      ...fakeTheme(),
+      bold: (t: string) => t,
+      inverse: (t: string) => `⟦${t}⟧`,
+    } as unknown as Theme;
+    const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];
+    const tabs = [
+      { id: "t1", label: "Tab 1" },
+      { id: "t2", label: "Tab 2" },
+    ];
+    const actions = [
+      { id: "edit", label: "Edit" },
+      { id: "cancel", label: "Cancel" },
+    ];
+
+    const ro = createSettingsModalBody(
+      { fields, tabs, actions, readOnly: true },
+      { tui: fakeTui(), theme: markTheme, ctx: fakeCtx(), close: vi.fn() },
+    );
+    // Pre-focused action on mount.
+    expect(ro.render(100).join("\n")).toContain("⟦ Edit ⟧");
+    // Scrolling the non-interactive field list must not drop the highlight.
+    ro.handleInput?.("\x1b[B");
+    expect(ro.render(100).join("\n")).toContain("⟦ Edit ⟧");
+    // Switching tabs must not drop it either.
+    ro.handleInput?.("\t");
+    expect(ro.render(100).join("\n")).toContain("⟦ Edit ⟧");
+
+    // Edit mode: tab into the action ring, then scrolling returns focus to fields.
+    const ed = createSettingsModalBody(
+      { fields, tabs, actions },
+      { tui: fakeTui(), theme: markTheme, ctx: fakeCtx(), close: vi.fn() },
+    );
+    ed.render(100);
+    ed.handleInput?.("\t"); // switch to tab 2
+    ed.handleInput?.("\t"); // enter action ring at Edit
+    expect(ed.render(100).join("\n")).toContain("⟦ Edit ⟧");
+    ed.handleInput?.("\x1b[B"); // move into the field zone
+    expect(ed.render(100).join("\n")).not.toContain("⟦ Edit ⟧");
+  });
+
   it("left/right in non-readOnly field zone with tabs still delegates to field renderer", () => {
     const onChange = vi.fn();
     const fields: Field[] = [{ key: "x", type: "boolean", label: "X", value: false }];

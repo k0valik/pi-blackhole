@@ -136,7 +136,7 @@ The extension registers five lifecycle hooks via `pi.on()`:
 
 - **`agent_start`** — Triggers [[observational-memory#Consolidation pipeline|consolidation]] check (are any workers due?) and aborts pending auto-compaction from the previous turn.
 - **`turn_end`** — Same consolidation check as `agent_start`.
-- **`agent_end`** — Evaluates [[observational-memory#Compaction trigger|auto-compaction threshold]]. If tokens exceed the effective threshold — `compactAfterTokens`, or a context-window-derived `compactAfterRatio` / `compactReserveTokens` value — schedules `ctx.compact()` after the agent becomes idle.
+- **`agent_end`** — Evaluates [[observational-memory#Compaction trigger|auto-compaction threshold]]. If tokens exceed the effective threshold — the `compactAfterBy` shape clamped to `compactAfterMinTokens` / `compactAfterMaxTokens` — schedules `ctx.compact()` after the agent becomes idle.
 - **`session_before_compact`** — The central hook. Runs VCC `compile()` and appends OM content. See [[vcc-compaction#before-compact hook]].
 - **`session_compact_failed`** — Failure visibility for aborted/failed compactions: structured trace, `compactInFlight` reset, overflow-retry notification, and attribution fix. Available from pi 0.84.3. See [[observational-memory#Compaction trigger#Compact-failure handling]].
 
