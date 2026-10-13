@@ -450,6 +450,93 @@ describe("/blackhole-export", () => {
     expect(markdown).not.toContain("### Low reflections");
   });
 
+  it("includes branch unanchored markers as kept facts", async () => {
+    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+
+    const scope = encodeScopeDir(projectCwd);
+    writeSession(scope, "unanchored.jsonl", [
+      sessionHeader("ses-unanchored"),
+      messageEntry("u1", "user", "tail work"),
+      customEntry(
+        "om.observations.unanchored",
+        {
+          observations: [
+            {
+              id: "eeee00000009",
+              content: "Kept tail fact without coverage claim",
+              relevance: "high",
+              timestamp: daysAgo(1),
+              sourceEntryIds: ["u1"],
+              tokenCount: 9,
+            },
+          ],
+        },
+        daysAgo(1),
+      ),
+    ]);
+
+    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    // Coverage-inert markers are still facts: recall/export must serve them.
+    expect(corpus.observations.map((o) => o.content)).toContain(
+      "Kept tail fact without coverage claim",
+    );
+  });
+
+  it("includes pending unanchored batches, including unanchored-only files", async () => {
+    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+
+    const bhDir = join(agentDir, "pi-blackhole");
+    // Known session: kept facts join its attributed pending memory.
+    writeFileSync(
+      join(bhDir, "ses-2-pending.json"),
+      JSON.stringify({
+        unanchoredBatches: [
+          {
+            data: {
+              observations: [
+                {
+                  id: "eeee00000009",
+                  content: "Pending kept tail fact",
+                  relevance: "medium",
+                  timestamp: daysAgo(1),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    // Unknown session with nothing but unanchored batches: still orphaned
+    // memory, not a skipped file.
+    writeFileSync(
+      join(bhDir, "orphan789-pending.json"),
+      JSON.stringify({
+        unanchoredBatches: [
+          {
+            data: {
+              observations: [
+                {
+                  id: "ffff00000009",
+                  content: "Orphan kept tail fact",
+                  relevance: "medium",
+                  timestamp: daysAgo(2),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    const contents = corpus.observations.map((o) => o.content);
+    expect(contents).toContain("Pending kept tail fact");
+    expect(contents).toContain("Orphan kept tail fact");
+    expect(corpus.orphanedSessions).toBe(3);
+  });
+
   it("relativeTime formats sensibly", () => {
     const now = Date.now();
     expect(relativeTime(new Date(now - 30 * 1000).toISOString(), now)).toBe("just now");

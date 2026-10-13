@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
   OM_OBSERVATIONS_RECORDED,
+  OM_OBSERVATIONS_UNANCHORED,
   OM_REFLECTIONS_RECORDED,
   OM_OBSERVATIONS_DROPPED,
   RELEVANCE_VALUES,
@@ -191,7 +192,11 @@ function extractFromEntries(
     const customType = entry.customType;
     const data = (entry.data ?? {}) as RawMarkerData;
     const entryTs = parseTimestamp(entry.timestamp);
-    if (customType === OM_OBSERVATIONS_RECORDED || customType === LEGACY_OM_OBSERVATION) {
+    if (
+      customType === OM_OBSERVATIONS_RECORDED ||
+      customType === OM_OBSERVATIONS_UNANCHORED ||
+      customType === LEGACY_OM_OBSERVATION
+    ) {
       const list =
         customType === LEGACY_OM_OBSERVATION ? (data.records ?? []) : (data.observations ?? []);
       for (const o of list) {
@@ -242,6 +247,8 @@ interface PendingState {
   observationBatches?: PendingBatch[];
   reflectionBatches?: PendingBatch[];
   droppedBatches?: PendingBatch[];
+  // Coverage-inert kept facts: same observation payload, no coverage point.
+  unanchoredBatches?: PendingBatch[];
 }
 
 function extractFromPendingState(
@@ -256,12 +263,16 @@ function extractFromPendingState(
   // to the newest observation timestamp in the same file so they render
   // with a useful (N ago) suffix in the export.
   // Consider both batched and singular observation forms for timestamp fallback.
-  const allObsBatches: PendingBatch[] =
-    state.observationBatches && state.observationBatches.length > 0
+  const allObsBatches: PendingBatch[] = [
+    ...(state.observationBatches && state.observationBatches.length > 0
       ? state.observationBatches
       : state.observation
         ? [state.observation]
-        : [];
+        : []),
+    // Kept tail facts share the observation payload shape; they carry no
+    // coverage point but are still facts recall must serve.
+    ...(state.unanchoredBatches ?? []),
+  ];
   const allReflBatches: PendingBatch[] =
     state.reflectionBatches && state.reflectionBatches.length > 0
       ? state.reflectionBatches
@@ -504,6 +515,7 @@ export function buildProjectMemoryCorpus(options: BuildCorpusOptions): ProjectCo
 
       const hasBatches =
         (Array.isArray(state.observationBatches) && state.observationBatches.length > 0) ||
+        (Array.isArray(state.unanchoredBatches) && state.unanchoredBatches.length > 0) ||
         (Array.isArray(state.reflectionBatches) && state.reflectionBatches.length > 0) ||
         (Array.isArray(state.droppedBatches) && state.droppedBatches.length > 0) ||
         // Legacy / singular form: older pending files may only have the
@@ -756,6 +768,7 @@ export async function buildProjectMemoryCorpusAsync(
 
       const hasBatches =
         (Array.isArray(state.observationBatches) && state.observationBatches.length > 0) ||
+        (Array.isArray(state.unanchoredBatches) && state.unanchoredBatches.length > 0) ||
         (Array.isArray(state.reflectionBatches) && state.reflectionBatches.length > 0) ||
         (Array.isArray(state.droppedBatches) && state.droppedBatches.length > 0) ||
         (typeof (state as Record<string, unknown>).observation === "object" &&

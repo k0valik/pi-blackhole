@@ -2295,6 +2295,72 @@ describe("dropper pressure valve", () => {
     expectPressureRerunWithChangedPool();
   });
 
+  test("the reflector input includes kept unanchored facts alongside recorded ones", async () => {
+    const fixture = makePipelineFixture({
+      observeAfterTokens: 100_000,
+      entries: [
+        rawMessage("big-1", "x".repeat(40_000)),
+        observationsRecordedEntry("obs-1", {
+          coversUpToId: "big-1",
+          observations: [
+            observation("aaaaaaaaaaaa", { tokenCount: 25, sourceEntryIds: ["big-1"] }),
+          ],
+        }),
+        {
+          type: "custom",
+          id: "obs-u1",
+          customType: "om.observations.unanchored",
+          data: {
+            observations: [
+              observation("bbbbbbbbbbbb", { tokenCount: 25, sourceEntryIds: ["big-1"] }),
+            ],
+          },
+        },
+      ],
+    });
+    fixture.runtime.config.reflectAfterTokens = 100;
+    agents.runReflector.mockResolvedValue({ reflections: [] });
+
+    await fixture.run();
+
+    // Kept tail facts must reach the reflector's review set: the delta input
+    // reads both keys, while the due-check that launched this run only saw
+    // the recorded marker.
+    expect(agents.runObserver).not.toHaveBeenCalled();
+    expect(agents.runReflector).toHaveBeenCalledTimes(1);
+    const input = agents.runReflector.mock.calls[0][0];
+    expect(input.observations.map((o: { id: string }) => o.id).sort()).toEqual([
+      "aaaaaaaaaaaa",
+      "bbbbbbbbbbbb",
+    ]);
+  });
+
+  test("a pressure dropper run pools kept unanchored facts with recorded ones", async () => {
+    const fixture = pressureFixture({
+      observations: [observation("aaaaaaaaaaaa", { tokenCount: 800, sourceEntryIds: ["big-1"] })],
+    });
+    fixture.entries.push({
+      type: "custom",
+      id: "obs-u1",
+      customType: "om.observations.unanchored",
+      data: {
+        observations: [observation("bbbbbbbbbbbb", { tokenCount: 800, sourceEntryIds: ["big-1"] })],
+      },
+    });
+    agents.runDropper.mockResolvedValue([]);
+
+    await fixture.run();
+
+    // Pool 1600/1000 tokens: pressure sees the whole live pool, and the kept
+    // fact is in it — dropping it later is safe (provenance intact).
+    expect(agents.runDropper).toHaveBeenCalledTimes(1);
+    expect(
+      dropperCallArg()
+        .observations.map((o) => o.id)
+        .sort(),
+    ).toEqual(["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+  });
+
   test("manual pressure bypasses covered-data gates and records the drop", async () => {
     clearPendingState("cursor-session");
     const fixture = makePipelineFixture({ observeAfterTokens: 1_000_000 });

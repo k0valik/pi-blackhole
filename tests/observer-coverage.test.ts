@@ -25,7 +25,7 @@ import {
 } from "../src/om/consolidation.js";
 import { Runtime } from "../src/om/runtime.js";
 import { WorkerStreamError } from "../src/om/retryable-error.js";
-import { clearPendingState, readPendingState } from "../src/om/pending.js";
+import { clearPendingState, readPendingState, savePendingUnanchored } from "../src/om/pending.js";
 import { observation, rawMessage, type TestEntry } from "./fixtures/session.js";
 
 /** Pending writes hit real files, so redirect the agent dir (mirrors consolidation.test.ts). */
@@ -38,6 +38,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
 interface ObserverStageInput {
   chunk: string;
   allowedSourceEntryIds: string[];
+  priorObservations: string[];
 }
 
 const runObserverSpy = vi.hoisted(() => vi.fn<(input: ObserverStageInput) => Promise<unknown>>());
@@ -586,5 +587,51 @@ describe("observer never covers source entries it was never shown", () => {
     // cycle until the next recorded batch. Adding the key to the due-check
     // loops flips this test.
     expect(anyStageDue(entries as any, runtime)).toBe(false);
+  });
+
+  test("kept unanchored facts steer the next observer run through its preamble", async () => {
+    const kept = observation("aaaaaaaaaaaa", {
+      content: "kept tail fact",
+      sourceEntryIds: ["s1"],
+    });
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      {
+        type: "custom",
+        id: "om-unanchored-1",
+        customType: "om.observations.unanchored",
+        data: { observations: [kept] },
+      } as unknown as TestEntry,
+    ];
+    const runtime = makeRuntime(100, 10_000);
+    runObserverSpy.mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries);
+
+    // The payoff: retries spend their turns on the uncovered head instead of
+    // redoing tail work, because the kept fact arrives as existing context
+    // (plus the prompts.ts no-re-emit instruction).
+    expect(observedInput(0).priorObservations.join("\n")).toContain("kept tail fact");
+  });
+
+  test("pending unanchored facts steer manual-mode observer runs through the preamble", async () => {
+    const entries = [rawMessage("s0", text("OLD-A")), rawMessage("s1", text("OLD-B"))];
+    const runtime = makeRuntime(100, 10_000);
+    runtime.config.compaction = "manual";
+    savePendingUnanchored("test-session", {
+      data: {
+        observations: [
+          observation("bbbbbbbbbbbb", { content: "manual kept fact", tokenCount: 10 }),
+        ],
+      },
+    });
+    runObserverSpy.mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries);
+
+    // Manual mode has no branch markers: without the pending merge the kept
+    // fact would sit idle until /blackhole flush.
+    expect(observedInput(0).priorObservations.join("\n")).toContain("manual kept fact");
   });
 });

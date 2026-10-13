@@ -397,7 +397,10 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
       }
     }
     // In manual mode, also check pending observation batches that arrived
-    // after the cursor (since branch has no OM markers).
+    // after the cursor (since branch has no OM markers). Unanchored batches
+    // are deliberately not a trigger: they carry no coverage point, so a
+    // review of them alone could not be committed — they ride along on the
+    // next recorded run's input instead (see pendingObservationsCreatedAfter).
     if (pending) {
       const pendingBatches = pending.observationBatches ?? [];
       for (const batch of pendingBatches) {
@@ -440,7 +443,10 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
           const cursor = cursors.dropper;
           if (!cursor) {
             // In manual mode, pending batches are the only source of new‑data
-            // visibility (branch has no OM markers).
+            // visibility (branch has no OM markers). Unanchored-only pending
+            // is deliberately not new data (same no-coverage-point reason as
+            // the reflector gate): kept facts join the next cadence or
+            // pressure run's candidate set instead of launching one alone.
             const hasPendingNewData = pending
               ? (pending.observationBatches?.length ?? 0) > 0 ||
                 (pending.reflectionBatches?.length ?? 0) > 0
@@ -472,7 +478,8 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
               return true;
             }
           }
-          // In manual mode, also check pending batches after the cursor
+          // In manual mode, also check pending batches after the cursor.
+          // Unanchored batches excluded deliberately (see reflector gate).
           if (pending) {
             const pendingObs = pending.observationBatches ?? [];
             const pendingRef = pending.reflectionBatches ?? [];
@@ -1383,18 +1390,28 @@ export async function runObserverStage(
       if (result.unanchoredObservations && result.unanchoredObservations.length > 0) {
         const unanchoredCount = result.unanchoredObservations.length;
         const unanchoredData = buildObservationsUnanchoredData(result.unanchoredObservations);
+        const unanchoredCitedIds = [
+          ...new Set(result.unanchoredObservations.flatMap((o) => o.sourceEntryIds ?? [])),
+        ];
         if (unanchoredData) {
           if (isManualMode(runtime.config)) {
             savePendingUnanchored(sessionId, { data: unanchoredData });
-            debugLog("observer.pending_unanchored", { count: unanchoredCount, sessionId });
+            debugLog("observer.unanchored_kept", {
+              count: unanchoredCount,
+              citedIds: unanchoredCitedIds,
+              sessionId,
+            });
           } else {
             if (!appendEntry(pi, runtime, generation, OM_OBSERVATIONS_UNANCHORED, unanchoredData))
               return "abort";
-            debugLog("observer.unanchored_appended", { count: unanchoredCount });
+            debugLog("observer.unanchored_kept", {
+              count: unanchoredCount,
+              citedIds: unanchoredCitedIds,
+            });
           }
         }
         if (chunkEntries.length > 1) {
-          const halved = halveChunkForTurnCap(undefined);
+          const halved = halveChunkForTurnCap(unanchoredCount);
           if (halved === "pending_skip") return "continue";
           if (halved === "halved") {
             runtime.tryEmitWorkerInfo(
@@ -1787,7 +1804,12 @@ export async function runReflectorStage(
   let observationCoverageId: string | undefined;
   if (isManualMode(runtime.config)) {
     const pending = readPendingState(sessionId);
-    // Check any accumulated batch for unprocessed observations, not just the latest
+    // Check any accumulated batch for unprocessed observations, not just the latest.
+    // Unanchored-only pending does not launch a review: with no
+    // pending.observation coverage point the commit tail below would discard
+    // its reflections, burning a model call for nothing. Kept facts stay
+    // visible (preamble, pool, recall) until the next recorded batch carries
+    // them into a review, or /blackhole flushes them.
     const hasPendingObs = (pending.observationBatches ?? []).some(
       (b: any) => (b.data as any)?.observations?.length,
     );
@@ -2422,7 +2444,10 @@ export async function runDropperStage(
   };
   if (isManualMode(runtime.config)) {
     const pending = pressurePending ?? readPendingState(sessionId);
-    // Check any accumulated batch for unprocessed observations, not just the latest
+    // Check any accumulated batch for unprocessed observations, not just the latest.
+    // Unanchored-only pending does not launch a cadence run (same
+    // no-coverage-point reason as the reflector gate): kept facts join the
+    // next cadence or pressure run's candidate set instead.
     const hasPendingObs = (pending.observationBatches ?? []).some(
       (b: any) => (b.data as any)?.observations?.length,
     );
