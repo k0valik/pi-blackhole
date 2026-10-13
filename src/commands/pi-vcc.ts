@@ -3,7 +3,7 @@
  *
  * Upstream: https://github.com/sting8k/pi-vcc (src/commands/pi-vcc.ts)
  * Modified by pi-vcc-om:
- * - Flushes pending OM state (observations/reflections/dropped) when manual mode is active
+ * - Flushes pending OM state (observations/reflections/dropped/unanchored) when manual mode is active
  *   before triggering compaction, so the compaction summary includes all accumulated memory.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -21,6 +21,7 @@ import {
 import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
+  OM_OBSERVATIONS_UNANCHORED,
   OM_REFLECTIONS_RECORDED,
 } from "../om/ledger/index.js";
 
@@ -212,6 +213,12 @@ export const registerPiVccCommand = (pi: ExtensionAPI, runtime: Runtime) => {
             : [];
         for (const batch of dropBatches) {
           pi.appendEntry(OM_OBSERVATIONS_DROPPED, batch.data);
+        }
+        // Write all accumulated unanchored batches under their own key: kept
+        // tail facts carry no coverage claim, so flushing them as recorded
+        // entries would advance coverage markers over entries never proven.
+        for (const batch of pending.unanchoredBatches ?? []) {
+          pi.appendEntry(OM_OBSERVATIONS_UNANCHORED, batch.data);
         }
         clearPendingState(sessionId);
         ctx.ui.notify("Observational memory: pending entries flushed", "info");

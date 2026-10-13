@@ -8,7 +8,7 @@
  * basis, and they pin the manual-mode pending breakdown shown to users.
  */
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,6 +26,7 @@ import {
   clearPendingState,
   readPendingState,
   savePendingObservation,
+  savePendingUnanchored,
   type PendingOMState,
 } from "../src/om/pending.js";
 import { registerMemoryCommand } from "../src/commands/memory.js";
@@ -197,6 +198,38 @@ describe("observationPoolTokens", () => {
     });
   });
 
+  it("adds pending unanchored batches to the pool", () => {
+    const pending: PendingOMState = {
+      unanchoredBatches: [
+        {
+          data: {
+            observations: [observation("cccccccccccc", { tokenCount: 300 })],
+          },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_700,
+      count: 3,
+    });
+  });
+
+  it("counts a pending unanchored duplicate of a branch observation only once", () => {
+    const pending: PendingOMState = {
+      unanchoredBatches: [
+        {
+          data: {
+            observations: [observation("aaaaaaaaaaaa", { tokenCount: 700 })],
+          },
+        },
+      ],
+    };
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_400,
+      count: 2,
+    });
+  });
+
   it("counts an observation recorded in both the branch and pending only once", () => {
     const pending: PendingOMState = {
       observationBatches: [
@@ -264,6 +297,39 @@ describe("observationPoolTokens", () => {
   it("measures only the branch when pending is omitted", () => {
     const entries = asEntries([textCustomMessage("raw-1", "x".repeat(400))]);
     expect(observationPoolTokens(entries)).toEqual({ tokens: 0, count: 0 });
+  });
+
+  it("round-trips unanchored batches through the pending file", () => {
+    savePendingUnanchored(SESSION, {
+      data: { observations: [observation("cccccccccccc", { tokenCount: 300 })] },
+    });
+
+    const pending = readPendingState(SESSION);
+    expect(pending.unanchoredBatches).toHaveLength(1);
+    expect(pending.unanchoredBatches?.[0].data).toEqual({
+      observations: [observation("cccccccccccc", { tokenCount: 300 })],
+    });
+    // The kept fact joins the pool while the branch stays untouched.
+    expect(observationPoolTokens(asEntries(observationBranch()), pending)).toEqual({
+      tokens: 1_700,
+      count: 3,
+    });
+  });
+
+  it("sanitizes unanchored batches without a payload on read", () => {
+    const dir = join(agentDir, "pi-blackhole");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, `${SESSION}-pending.json`),
+      JSON.stringify({
+        // { data: undefined } serializes to {} and is dropped; a present
+        // payload is kept even when its observation list is empty — the same
+        // payload-presence rule recorded batches use.
+        unanchoredBatches: [{ data: undefined }, { data: { observations: [] } }],
+      }),
+    );
+
+    expect(readPendingState(SESSION).unanchoredBatches).toEqual([{ data: { observations: [] } }]);
   });
 
   it("matches the inline fold sum on a pre-compaction branch (no snapshot)", () => {

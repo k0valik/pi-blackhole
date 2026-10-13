@@ -111,6 +111,62 @@ describe("session-ledger V3 folding", () => {
     expect(folded.reflections).toHaveLength(1);
   });
 
+  it("collects unanchored observations into the pool without a coverage claim", () => {
+    const unanchored = observation("aaaaaaaaaaaa", { sourceEntryIds: ["raw-2"] });
+    const entries = [
+      textCustomMessage("raw-1", "aaaa"),
+      textCustomMessage("raw-2", "bbbb"),
+      {
+        type: "custom",
+        id: "om-unanchored-1",
+        parentId: null,
+        timestamp: "2026-05-02T10:00:00.000Z",
+        customType: "om.observations.unanchored",
+        data: { observations: [unanchored] },
+      },
+    ];
+
+    const folded = foldLedger(entries);
+
+    expect(folded.observations.map((obs) => obs.id)).toEqual(["aaaaaaaaaaaa"]);
+    expect(folded.activeObservations.map((obs) => obs.id)).toEqual(["aaaaaaaaaaaa"]);
+    expect(folded.observationsById.get("aaaaaaaaaaaa")).toEqual(unanchored);
+  });
+
+  it("dedups a fact re-emitted after its unanchored keep, first write winning", () => {
+    const kept = observation("aaaaaaaaaaaa", {
+      content: "first wording",
+      sourceEntryIds: ["raw-2"],
+    });
+    const reEmitted = observation("aaaaaaaaaaaa", {
+      content: "reworded copy",
+      sourceEntryIds: ["raw-2"],
+    });
+    const entries = [
+      textCustomMessage("raw-1", "aaaa"),
+      textCustomMessage("raw-2", "bbbb"),
+      {
+        type: "custom",
+        id: "om-unanchored-1",
+        parentId: null,
+        timestamp: "2026-05-02T10:00:00.000Z",
+        customType: "om.observations.unanchored",
+        data: { observations: [kept] },
+      },
+      observationsRecordedEntry("om-aaaaaaaaaaaa", {
+        observations: [reEmitted],
+        coversUpToId: "raw-2",
+      }),
+    ];
+
+    const folded = foldLedger(entries);
+
+    // Same id in both markers: one copy survives, the first write winning.
+    expect(folded.observations).toHaveLength(1);
+    expect(folded.observationsById.get("aaaaaaaaaaaa")?.content).toBe("first wording");
+    expect(folded.activeObservations).toHaveLength(1);
+  });
+
   it("retains tombstones for unknown drop ids without throwing", () => {
     const entries = [
       textCustomMessage("raw-1", "aaaa"),

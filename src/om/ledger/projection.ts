@@ -10,6 +10,7 @@ import {
   isMemoryDetails,
   isObservationsDroppedEntry,
   isObservationsRecordedEntry,
+  isObservationsUnanchoredEntry,
   isReflectionsRecordedEntry,
   type Entry,
   type MemoryDetails,
@@ -114,6 +115,21 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
         if (observationsById.has(observation.id)) continue;
         observationsById.add(observation.id);
         observations.push(observation);
+      }
+      continue;
+    }
+
+    // Coverage-inert kept facts join the projection by marker position (they
+    // claim no coverage point of their own): a marker at or before the
+    // observations boundary contributes, one past it does not.
+    if (isObservationsUnanchoredEntry(entry)) {
+      const markerIndex = indexes.get(entry.id) ?? -1;
+      if (isAtOrBefore(markerIndex, observationsBoundary)) {
+        for (const observation of entry.data.observations) {
+          if (observationsById.has(observation.id)) continue;
+          observationsById.add(observation.id);
+          observations.push(observation);
+        }
       }
       continue;
     }

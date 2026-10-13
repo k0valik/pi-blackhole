@@ -62,6 +62,13 @@ function reflectEntry(id: string, reflections: Reflection[], coversUpToId: strin
   });
 }
 
+function unanchoredEntry(id: string, observations: Observation[]): Entry {
+  return makeEntry(id, "custom", {
+    customType: "om.observations.unanchored",
+    data: { observations },
+  });
+}
+
 function compactionEntry(id: string, firstKeptEntryId: string, details?: unknown): Entry {
   return makeEntry(id, "compaction", { firstKeptEntryId, details });
 }
@@ -113,6 +120,30 @@ describe("fullProjection", () => {
     const result = fullProjection(entries, "boundary-mid");
     expect(result.observations).toHaveLength(1);
     expect(result.observations[0].id).toBe(obs1.id);
+  });
+
+  it("includes unanchored observations so future runs see kept tail facts", async () => {
+    const { fullProjection } = await import("../src/om/ledger/projection.js");
+    const kept = makeObservation(hexId("kept-tail"), { sourceEntryIds: ["src-tail"] });
+    const entries: Entry[] = [
+      src("src-head"),
+      src("src-tail"),
+      unanchoredEntry("e-unanchored", [kept]),
+    ];
+    const result = fullProjection(entries);
+    expect(result.observations.map((o) => o.id)).toEqual([kept.id]);
+  });
+
+  it("excludes an unanchored marker positioned after the boundary", async () => {
+    const { fullProjection } = await import("../src/om/ledger/projection.js");
+    const kept = makeObservation(hexId("kept-tail"), { sourceEntryIds: ["src-tail"] });
+    const entries: Entry[] = [
+      src("boundary-mid"), // folding stops here
+      src("src-tail"),
+      unanchoredEntry("e-unanchored", [kept]),
+    ];
+    const result = fullProjection(entries, "boundary-mid");
+    expect(result.observations).toEqual([]);
   });
 });
 

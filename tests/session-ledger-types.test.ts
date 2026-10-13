@@ -11,9 +11,11 @@ import {
   OM_FOLDED,
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
+  OM_OBSERVATIONS_UNANCHORED,
   OM_REFLECTIONS_RECORDED,
   buildObservationsDroppedData,
   buildObservationsRecordedData,
+  buildObservationsUnanchoredData,
   buildReflectionsRecordedData,
   isMemoryDetails,
   isObservationsDroppedData,
@@ -21,6 +23,8 @@ import {
   isObservationsRecordedData,
   isObservationsRecordedEntry,
   isObservation,
+  isObservationsUnanchoredData,
+  isObservationsUnanchoredEntry,
   isReflection,
   isReflectionsRecordedData,
   isReflectionsRecordedEntry,
@@ -155,5 +159,42 @@ describe("session-ledger V3 type guards and builders", () => {
   it("ignores old V2 observation entries and old V2 compaction details", () => {
     expect(isObservationsRecordedEntry(oldV2ObservationEntry("v2-entry"))).toBe(false);
     expect(isMemoryDetails(oldV2CompactionDetails())).toBe(false);
+  });
+
+  it("exports the unanchored observations key for coverage-inert facts", () => {
+    expect(OM_OBSERVATIONS_UNANCHORED).toBe("om.observations.unanchored");
+  });
+
+  it("accepts unanchored observation data without a coverage claim", () => {
+    expect(isObservationsUnanchoredData({ observations: [observation("aaaaaaaaaaaa")] })).toBe(
+      true,
+    );
+    expect(isObservationsUnanchoredData({ observations: [] })).toBe(false);
+    expect(
+      isObservationsUnanchoredData({
+        observations: [{ ...observation("bbbbbbbbbbbb"), sourceEntryIds: [] }],
+      }),
+    ).toBe(false);
+    // Separation pin: recorded data without a coverage point is not valid
+    // recorded data — an unanchored batch must never pass as coverage.
+    expect(isObservationsRecordedData({ observations: [observation("aaaaaaaaaaaa")] })).toBe(false);
+  });
+
+  it("builds unanchored data for non-empty arrays only", () => {
+    expect(buildObservationsUnanchoredData([])).toBeUndefined();
+    expect(buildObservationsUnanchoredData([observation("aaaaaaaaaaaa")])).toEqual({
+      observations: [observation("aaaaaaaaaaaa")],
+    });
+  });
+
+  it("recognizes unanchored memory entries and rejects them as recorded entries", () => {
+    const entry = {
+      type: "custom",
+      id: "om-unanchored-1",
+      customType: "om.observations.unanchored",
+      data: { observations: [observation("aaaaaaaaaaaa")] },
+    };
+    expect(isObservationsUnanchoredEntry(entry as any)).toBe(true);
+    expect(isObservationsRecordedEntry(entry as any)).toBe(false);
   });
 });

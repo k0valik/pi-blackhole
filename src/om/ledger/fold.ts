@@ -7,9 +7,11 @@
 import {
   isObservationsDroppedData,
   isObservationsRecordedData,
+  isObservationsUnanchoredData,
   isReflectionsRecordedData,
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
+  OM_OBSERVATIONS_UNANCHORED,
   OM_REFLECTIONS_RECORDED,
   type Entry,
   type Observation,
@@ -66,6 +68,19 @@ export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): F
 
     if (isCustomEntry(entry, OM_OBSERVATIONS_RECORDED)) {
       if (!isObservationsRecordedData(entry.data)) continue;
+      for (const observation of entry.data.observations) {
+        if (!observationsById.has(observation.id)) {
+          observationsById.set(observation.id, observation);
+        }
+      }
+      continue;
+    }
+
+    // Coverage-inert kept facts: they join the pool (and its first-wins
+    // dedup) but carry no coverage claim, so no cursor or marker scan reads
+    // them — only this pool does.
+    if (isCustomEntry(entry, OM_OBSERVATIONS_UNANCHORED)) {
+      if (!isObservationsUnanchoredData(entry.data)) continue;
       for (const observation of entry.data.observations) {
         if (!observationsById.has(observation.id)) {
           observationsById.set(observation.id, observation);

@@ -9,7 +9,10 @@
  * over a half-observed chunk. A run the agent turn cap cuts off mid-chunk
  * after recording observations instead returns them with a partialCoverageId
  * (end of the contiguous cited prefix) so the stage can commit that prefix
- * and resume the remainder — coverage never claims past a citation.
+ * and resume the remainder — coverage never claims past a citation. When the
+ * citations form no head-anchored prefix at all, the run returns the facts
+ * as unanchoredObservations instead: kept as coverage-inert output without
+ * moving the cursor, never discarded.
  */
 import { agentLoop, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { CacheRetention, Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -185,6 +188,14 @@ export interface ObserverResult {
    * empty run.
    */
   partialCoverageId?: string;
+  /**
+   * Set when the run was cut off by the turn cap after recording observations
+   * whose citations form no head-anchored prefix at all. The observations are
+   * kept as coverage-inert facts: the stage stores them without moving the
+   * cursor, then retries on a smaller input. Never set alongside
+   * partialCoverageId or observations.
+   */
+  unanchoredObservations?: Observation[];
 }
 
 export async function runObserver(args: RunObserverArgs): Promise<ObserverResult> {
@@ -456,15 +467,15 @@ ${conversation}`;
     }
     // No head-anchored citation: reachable whenever the model cites only
     // later entries (every recorded observation carries validated ids, but
-    // none cites the chunk head, so the contiguous prefix is empty). Fail
-    // closed rather than advance over work whose coverage cannot be proven —
-    // the stage halves the delivered entries and retries on the smaller
-    // input instead of discarding the run outright.
-    throw new WorkerStreamError(
-      `Observer turn cap exhausted: ${accumulated.size} observation${accumulated.size === 1 ? "" : "s"} recorded with no complete=true close`,
-      accumulated.size,
-      true,
-    );
+    // none cites the chunk head, so the contiguous prefix is empty). There is
+    // no honest coverage point, so the cursor must stay put — but the recorded
+    // facts themselves are kept as coverage-inert unanchored output instead of
+    // discarded: the stage stores them without advancing, then halves the
+    // delivered entries and retries on the smaller input.
+    return {
+      observations: undefined,
+      unanchoredObservations: Array.from(accumulated.values()),
+    };
   }
 
   // A run that already closed the chunk with a valid complete=true batch that

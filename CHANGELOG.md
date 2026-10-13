@@ -3,6 +3,7 @@
 ### Fixed
 
 - **Observer turn-cap keeps partial work instead of cooling the model.** A capped run returns its recorded observations with a cited-prefix checkpoint; the stage commits that prefix, drains the rest in-run, and skips the model in-cycle only. Coverage never advances past a citation. A capped batch with no head-anchored prefix is halved and retried (converging to a single entry) instead of discarded, still with no cooldown.
+- **Observer turn-cap keeps prefix-less facts as unanchored instead of discarding them.** A capped run whose citations form no head-anchored prefix returns the batch as `unanchoredObservations`; the stage stores it under the coverage-inert `om.observations.unanchored` key (pool, preamble, and reflector/dropper inputs read it; no cursor or coverage scan does), then halves and retries as before. Manual mode buffers them in pending `unanchoredBatches`, flushed by `/blackhole` under the same key.
 - **Resolve-time notices emit once per run with an end-of-run summary.** Per-stage dedupe (capped at five entries), headless-safe, and the checkpoint toast is no longer gated away.
 
 ---

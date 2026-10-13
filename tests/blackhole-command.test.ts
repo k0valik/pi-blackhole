@@ -330,6 +330,32 @@ describe("/blackhole command", () => {
     // Should call compact after flush
     expect(ctx.compact).toHaveBeenCalledTimes(1);
   });
+
+  it("flushes pending unanchored batches under their own key, never as recorded", async () => {
+    const { pi, runtime, handlerMap, makeHandlerArgs, notifyCalls, appendEntryCalls } =
+      createMockEnvironment();
+    runtime.config.compaction = "manual";
+    registerPiVccCommand(pi as any, runtime as any);
+
+    const pendingDir = join(testRoot, "agent", "pi-blackhole");
+    const pendingFile = join(pendingDir, "test-session-pending.json");
+    const keptData = {
+      observations: [{ id: "aaaaaaaaaaaa", content: "kept tail fact" }],
+    };
+    writeFileSync(pendingFile, JSON.stringify({ unanchoredBatches: [{ data: keptData }] }));
+
+    const ctx = makeHandlerArgs();
+    await handlerMap.get("blackhole")!("", ctx);
+
+    // Kept facts flush as coverage-inert entries: flushing them as recorded
+    // would advance coverage markers over entries never proven.
+    expect(appendEntryCalls).toEqual([
+      { customType: "om.observations.unanchored", data: keptData },
+    ]);
+    expect(notifyCalls[0].msg).toContain("pending entries flushed");
+    expect(existsSync(pendingFile)).toBe(false); // cleared after flush
+    expect(ctx.compact).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── Manual-compaction eligibility ───────────────────────────────────────────

@@ -13,6 +13,7 @@ import {
   lastValidUsageIndex,
   latestCoverageIndex,
   latestCoverageMarkerId,
+  observationsCreatedAfterIndex,
   rawTokensAfterIndex,
   rawTokensSinceDropCoverage,
   rawTokensSinceLastCompaction,
@@ -135,6 +136,33 @@ describe("session-ledger V3 progress helpers", () => {
     expect(latestCoverageIndex(entries, V3_OBSERVATIONS_RECORDED)).toBe(1);
     expect(latestCoverageMarkerId(entries, V3_OBSERVATIONS_RECORDED)).toBe("raw-2");
     expect(rawTokensSinceObservationCoverage(entries)).toBe(3);
+  });
+
+  it("serves unanchored markers to worker inputs but never to coverage clocks", () => {
+    const unanchoredMarker = {
+      type: "custom",
+      id: "om-unanchored-1",
+      customType: "om.observations.unanchored",
+      data: { observations: [observation("bbbbbbbbbbbb")] },
+    };
+    const entries = [
+      textCustomMessage("raw-1", "aaaa"),
+      observationsRecordedEntry("om-aaaaaaaaaaaa", {
+        observations: [observation("aaaaaaaaaaaa")],
+        coversUpToId: "raw-1",
+      }),
+      textCustomMessage("raw-2", "bbbbbbbb"),
+      unanchoredMarker,
+    ];
+
+    // Input side: kept tail facts reach the reflector/dropper delta inputs.
+    expect(observationsCreatedAfterIndex(entries as any, 1).map((o) => o.id)).toEqual([
+      "bbbbbbbbbbbb",
+    ]);
+    // Coverage side: the unanchored marker moves no clock and claims no point.
+    expect(latestCoverageIndex(entries as any, V3_OBSERVATIONS_RECORDED)).toBe(0);
+    expect(latestCoverageMarkerId(entries as any, V3_OBSERVATIONS_RECORDED)).toBe("raw-1");
+    expect(rawTokensSinceObservationCoverage(entries as any)).toBe(2); // raw-2 only
   });
 
   it("returns latest inner coverage marker and earlier marker by branch index", () => {

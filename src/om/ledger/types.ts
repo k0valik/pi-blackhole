@@ -5,6 +5,7 @@
  * Unmodified.
  */
 export const OM_OBSERVATIONS_RECORDED = "om.observations.recorded";
+export const OM_OBSERVATIONS_UNANCHORED = "om.observations.unanchored";
 export const OM_REFLECTIONS_RECORDED = "om.reflections.recorded";
 export const OM_OBSERVATIONS_DROPPED = "om.observations.dropped";
 export const OM_FOLDED = "om.folded";
@@ -49,6 +50,16 @@ export type ObservationsRecordedEntryData = {
   coversUpToId: string;
 };
 
+/**
+ * Coverage-inert observations: facts a turn-cap cut recorded without any
+ * head-anchored prefix, kept so the work is not lost. Carries no coverage
+ * claim, so no cursor or marker scan may advance on it — it only feeds the
+ * observation pool (fold, preamble, reflector, dropper).
+ */
+export type ObservationsUnanchoredEntryData = {
+  observations: Observation[];
+};
+
 export type ReflectionsRecordedEntryData = {
   reflections: Reflection[];
   coversUpToId: string;
@@ -71,6 +82,9 @@ export type V3MemoryCustomType =
   | typeof OM_OBSERVATIONS_RECORDED
   | typeof OM_REFLECTIONS_RECORDED
   | typeof OM_OBSERVATIONS_DROPPED;
+// Deliberately excludes OM_OBSERVATIONS_UNANCHORED: coverage scans
+// (latestCoverageIndex, rawTokensSinceCoverage) are parameterized by this
+// type, and unanchored facts must never be a coverage basis.
 
 export function isRelevance(value: unknown): value is Relevance {
   return typeof value === "string" && (RELEVANCE_VALUES as readonly string[]).includes(value);
@@ -129,6 +143,17 @@ export function isObservationsRecordedData(value: unknown): value is Observation
   );
 }
 
+export function isObservationsUnanchoredData(
+  value: unknown,
+): value is ObservationsUnanchoredEntryData {
+  if (!isPlainRecord(value)) return false;
+  return (
+    Array.isArray(value.observations) &&
+    value.observations.length > 0 &&
+    value.observations.every(isObservation)
+  );
+}
+
 export function isReflectionsRecordedData(value: unknown): value is ReflectionsRecordedEntryData {
   if (!isPlainRecord(value)) return false;
   return (
@@ -169,6 +194,18 @@ export function isObservationsRecordedEntry(entry: Entry): entry is Entry & {
   );
 }
 
+export function isObservationsUnanchoredEntry(entry: Entry): entry is Entry & {
+  type: "custom";
+  customType: typeof OM_OBSERVATIONS_UNANCHORED;
+  data: ObservationsUnanchoredEntryData;
+} {
+  return (
+    entry.type === "custom" &&
+    entry.customType === OM_OBSERVATIONS_UNANCHORED &&
+    isObservationsUnanchoredData(entry.data)
+  );
+}
+
 export function isReflectionsRecordedEntry(entry: Entry): entry is Entry & {
   type: "custom";
   customType: typeof OM_REFLECTIONS_RECORDED;
@@ -199,6 +236,13 @@ export function buildObservationsRecordedData(
 ): ObservationsRecordedEntryData | undefined {
   if (observations.length === 0 || !isNonEmptyString(coversUpToId)) return undefined;
   return { observations, coversUpToId };
+}
+
+export function buildObservationsUnanchoredData(
+  observations: Observation[],
+): ObservationsUnanchoredEntryData | undefined {
+  if (observations.length === 0) return undefined;
+  return { observations };
 }
 
 export function buildReflectionsRecordedData(

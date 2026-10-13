@@ -47,6 +47,7 @@ import {
   savePendingObservation,
   savePendingReflection,
   savePendingDropped,
+  savePendingUnanchored,
   isObservationChunkPending,
   PendingOMState,
 } from "./pending.js";
@@ -54,11 +55,13 @@ import { isManualMode } from "../core/unified-config.js";
 import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
+  OM_OBSERVATIONS_UNANCHORED,
   OM_REFLECTIONS_RECORDED,
   buildExistingObservationsSummary,
   buildExistingReflectionsSummary,
   buildObservationsDroppedData,
   buildObservationsRecordedData,
+  buildObservationsUnanchoredData,
   buildReflectionsRecordedData,
   earlierCoverageMarkerId,
   entryIndexForId,
@@ -250,6 +253,12 @@ function mergeReflections(existing: Reflection[], additional: Reflection[]): Ref
  * This is needed in manual mode (pending-based) because the reflector/dropper may skip
  * a pipeline cycle, leaving unprocessed batches in observationBatches that
  * should still be served as "new" on subsequent runs.
+ *
+ * Coverage-inert unanchoredBatches are always included: they carry no
+ * coverage point to compare, and keeping them out of worker inputs would
+ * strand kept facts until the next recorded batch. Re-serving them on later
+ * runs is duplication, not loss (fold dedups by content-hash id) — accepted
+ * deliberately, since kept batches are rare and small.
  */
 function pendingObservationsCreatedAfter(
   pending: PendingOMState,
@@ -257,8 +266,11 @@ function pendingObservationsCreatedAfter(
   afterCoversUpToId: string | undefined,
 ): Observation[] {
   const batches = pending.observationBatches ?? [];
+  const unanchored = (pending.unanchoredBatches ?? []).flatMap(
+    (b: any) => (b.data as any)?.observations ?? [],
+  );
   if (!afterCoversUpToId || entryIndexForId(entries, afterCoversUpToId) < 0) {
-    return batches.flatMap((b: any) => (b.data as any)?.observations ?? []);
+    return [...batches.flatMap((b: any) => (b.data as any)?.observations ?? []), ...unanchored];
   }
   const afterIdx = entryIndexForId(entries, afterCoversUpToId);
   const newObs: Observation[] = [];
@@ -268,7 +280,20 @@ function pendingObservationsCreatedAfter(
       newObs.push(...((batch.data as any)?.observations ?? []));
     }
   }
-  return newObs;
+  return [...newObs, ...unanchored];
+}
+
+/**
+ * Every observation buffered in manual-mode pending state: recorded batches
+ * plus coverage-inert unanchored batches. Shared by the observer/reflector/
+ * dropper preamble merges so kept tail facts steer future runs instead of
+ * sitting idle until flush.
+ */
+function pendingBufferedObservations(pending: PendingOMState): Observation[] {
+  return [
+    ...(pending.observationBatches ?? []).flatMap((b: any) => (b.data as any)?.observations ?? []),
+    ...(pending.unanchoredBatches ?? []).flatMap((b: any) => (b.data as any)?.observations ?? []),
+  ];
 }
 
 /**
@@ -999,9 +1024,7 @@ export async function runObserverStage(
     const accumulatedReflections = (pendingCtx.reflectionBatches ?? []).flatMap(
       (b) => (b.data as any).reflections ?? [],
     );
-    const accumulatedObservations = (pendingCtx.observationBatches ?? []).flatMap(
-      (b) => (b.data as any).observations ?? [],
-    );
+    const accumulatedObservations = pendingBufferedObservations(pendingCtx);
 
     const allObservations = [...memory.observations, ...accumulatedObservations];
     priorObservations = selectPriorObservations(allObservations, preambleMaxTokens).map(
@@ -1157,6 +1180,50 @@ export async function runObserverStage(
   // Runs (model calls) are bounded by MAX_STAGE_ATTEMPTS; size-skips are
   // cheap resolution-only iterations with their own continuation budget, so
   // a long chain of too-small models cannot starve the shrink pass.
+  //
+  // Turn-cap halve, shared by the prefix-less result path (the agent kept
+  // facts but proved no head prefix) and the turn-cap throw path (a partial
+  // id outside the delivered chunk): the fault is the input size, not the
+  // model, so halve the delivered entries and re-offer the same model
+  // instead of burning the fallback chain on the identical chunk. Halving
+  // converges: a single entry always yields a prefix (any recorded
+  // observation must cite it) or an empty advance, so the cursor moves within
+  // ⌈log2(n)⌉ retries, bounded further by MAX_STAGE_ATTEMPTS since every
+  // retry is a counted attempt. The model is deliberately NOT skipped
+  // in-cycle: the shrunk input may fit its turn budget, and skipping would
+  // starve single-model setups of the retry (resolution would exhaust and
+  // abort without re-offering it). Emits no toast itself — each call site
+  // owns its message — but always logs the halve for the debug log.
+  const halveChunkForTurnCap = (
+    discardedCount: number | undefined,
+  ): "halved" | "pending_skip" | "failed" => {
+    const halvedEntries = chunkEntries.slice(0, Math.max(1, Math.floor(chunkEntries.length / 2)));
+    const halved = serializeSourceAddressedBranchEntries(halvedEntries);
+    const halvedCover = halved.sourceEntryIds.at(-1);
+    if (!halvedCover || !halved.text.trim()) return "failed";
+    chunkEntries = halvedEntries;
+    chunk = halved.text;
+    sourceEntryIds = halved.sourceEntryIds;
+    sourceEntryTimestamps = halved.sourceEntryTimestamps;
+    coversUpToId = halvedCover;
+    chunkTokens = estimateStringTokens(chunk);
+    capTokens = chunkEntries.reduce((s: number, e) => s + estimateEntryTokens(e), 0);
+    didShrink = true;
+    // The halved chunk has a new coverage point: re-check the manual-mode
+    // pending gate before spending a model call on it (same as tryShrinkToFit
+    // above).
+    if (isManualMode(runtime.config) && isObservationChunkPending(sessionId, coversUpToId)) {
+      debugLog("observer.pending_skip", { coversUpToId, sessionId });
+      return "pending_skip";
+    }
+    debugLog("observer.turncap_halve", {
+      chunkEntries: halvedEntries.length,
+      chunkTokens,
+      coversUpToId,
+      discardedCount,
+    });
+    return "halved";
+  };
   let attempt = 0;
   let sizeSkips = 0;
   while (attempt < MAX_STAGE_ATTEMPTS) {
@@ -1306,15 +1373,56 @@ export async function runObserverStage(
         });
       }
 
+      // Prefix-less turn-cap cut: the run recorded facts but proved no head
+      // prefix, so no cursor advance is honest. Keep the facts as
+      // coverage-inert unanchored output — the pool, preamble, reflector,
+      // and dropper all read them, while no coverage scan does — then
+      // shrink-and-retry exactly like the halve path, or skip-and-break on
+      // a single-entry chunk, which cannot shrink further. Never a
+      // cooldown: a turn cap is an input-size limit, not a model defect.
+      if (result.unanchoredObservations && result.unanchoredObservations.length > 0) {
+        const unanchoredCount = result.unanchoredObservations.length;
+        const unanchoredData = buildObservationsUnanchoredData(result.unanchoredObservations);
+        if (unanchoredData) {
+          if (isManualMode(runtime.config)) {
+            savePendingUnanchored(sessionId, { data: unanchoredData });
+            debugLog("observer.pending_unanchored", { count: unanchoredCount, sessionId });
+          } else {
+            if (!appendEntry(pi, runtime, generation, OM_OBSERVATIONS_UNANCHORED, unanchoredData))
+              return "abort";
+            debugLog("observer.unanchored_appended", { count: unanchoredCount });
+          }
+        }
+        if (chunkEntries.length > 1) {
+          const halved = halveChunkForTurnCap(undefined);
+          if (halved === "pending_skip") return "continue";
+          if (halved === "halved") {
+            runtime.tryEmitWorkerInfo(
+              ctx.hasUI,
+              ctx.ui,
+              `Observational memory: observer turn cap — kept ${unanchoredCount} unanchored observation${unanchoredCount === 1 ? "" : "s"}, halving chunk to ${chunkEntries.length} ${chunkEntries.length === 1 ? "entry" : "entries"} and retrying`,
+            );
+            continue;
+          }
+        }
+        // Single-entry (or unhalvable) chunk: the same break-glass as a
+        // turn-cap error — skip in-cycle so the fallback chain is tried now,
+        // break for a session model whose identical retry would burn another
+        // whole budget on the same outcome.
+        runtime.skipFailedForCycle(stageModelForThinking, "turn_cap");
+        if (!stageModelForThinking) break;
+        continue;
+      }
+
       if (result.observations && result.observations.length > 0) {
         // A turn-cap partial advances coverage only to the end of the
         // contiguous cited prefix, never to the delivered chunk end.
         // Committing that prefix keeps the batch (instead of discarding it
         // and re-offering the same chunk forever); the drain below then
         // resumes from an honestly-observed point. A capped batch with no
-        // head-anchored prefix at all never reaches here — the agent throws,
-        // and the catch halves the delivered entries and retries (converging
-        // to a single entry, which always advances).
+        // head-anchored prefix at all never reaches here — the agent returns
+        // it as unanchored output, and the branch below stores it without
+        // moving the cursor before halving-and-retrying.
         //
         // The partial id is validated against the delivered chunk: trusting a
         // point outside it blind would move the cursor over entries the model
@@ -1455,53 +1563,22 @@ export async function runObserverStage(
           continue;
         }
       }
-      // Turn-cap cut with no committable prefix (the agent throws when the
-      // cited entries do not start at the chunk head): the batch is discarded,
-      // but the fault is the input size, not the model — so halve the
-      // delivered entries and re-offer instead of burning the fallback chain
-      // on the identical chunk. Halving converges: a single entry always
-      // yields a prefix (any recorded observation must cite it) or an empty
-      // advance, so the cursor moves within ⌈log2(n)⌉ retries, bounded further
-      // by MAX_STAGE_ATTEMPTS since every retry is a counted attempt. The
-      // model is deliberately NOT skipped in-cycle: the shrunk input may fit
-      // its turn budget, and skipping would starve single-model setups of the
-      // retry (resolution would exhaust and abort without re-offering it). A
-      // single-entry chunk cannot halve: it falls through to the skip +
-      // break-glass path below exactly as before.
+      // Turn-cap cut with no committable prefix (a partial id outside the
+      // delivered chunk — the agent-level prefix-less path now returns kept
+      // facts instead of throwing): the batch is discarded, but the fault is
+      // the input size, not the model — so halve the delivered entries and
+      // re-offer instead of burning the fallback chain on the identical
+      // chunk. A single-entry chunk cannot halve: it falls through to the
+      // skip + break-glass path below exactly as before.
       if (error instanceof WorkerStreamError && error.turnCapExhausted && chunkEntries.length > 1) {
-        const halvedEntries = chunkEntries.slice(
-          0,
-          Math.max(1, Math.floor(chunkEntries.length / 2)),
-        );
-        const halved = serializeSourceAddressedBranchEntries(halvedEntries);
-        const halvedCover = halved.sourceEntryIds.at(-1);
-        if (halvedCover && halved.text.trim()) {
-          chunkEntries = halvedEntries;
-          chunk = halved.text;
-          sourceEntryIds = halved.sourceEntryIds;
-          sourceEntryTimestamps = halved.sourceEntryTimestamps;
-          coversUpToId = halvedCover;
-          chunkTokens = estimateStringTokens(chunk);
-          capTokens = chunkEntries.reduce((s: number, e) => s + estimateEntryTokens(e), 0);
-          didShrink = true;
-          // The halved chunk has a new coverage point: re-check the
-          // manual-mode pending gate before spending a model call on it (same
-          // as tryShrinkToFit above).
-          if (isManualMode(runtime.config) && isObservationChunkPending(sessionId, coversUpToId)) {
-            debugLog("observer.pending_skip", { coversUpToId, sessionId });
-            return "continue";
-          }
+        const halved = halveChunkForTurnCap(getDiscardedCount(error));
+        if (halved === "pending_skip") return "continue";
+        if (halved === "halved") {
           runtime.tryEmitWorkerInfo(
             ctx.hasUI,
             ctx.ui,
-            `Observational memory: observer turn cap — halving chunk to ${halvedEntries.length} ${halvedEntries.length === 1 ? "entry" : "entries"} and retrying`,
+            `Observational memory: observer turn cap — halving chunk to ${chunkEntries.length} ${chunkEntries.length === 1 ? "entry" : "entries"} and retrying`,
           );
-          debugLog("observer.turncap_halve", {
-            chunkEntries: halvedEntries.length,
-            chunkTokens,
-            coversUpToId,
-            discardedCount: getDiscardedCount(error),
-          });
           continue;
         }
       }
@@ -1657,12 +1734,7 @@ function computeReflectorInput(
       ]
     : folded.reflections;
   const sourceObservations = pending
-    ? [
-        ...folded.activeObservations,
-        ...(pending.observationBatches ?? []).flatMap(
-          (b: any) => (b.data as any)?.observations ?? [],
-        ),
-      ]
+    ? [...folded.activeObservations, ...pendingBufferedObservations(pending)]
     : folded.activeObservations;
   const existingReflectionsSummary = buildExistingReflectionsSummary(
     sourceReflections,
@@ -2283,12 +2355,7 @@ function computeDropperInput(
   // In manual mode, merge accumulated pending batches with
   // branch data (preserving pre-switch markers).
   const sourceObsForDropper = pending
-    ? [
-        ...folded.activeObservations,
-        ...(pending.observationBatches ?? []).flatMap(
-          (b: any) => (b.data as any)?.observations ?? [],
-        ),
-      ]
+    ? [...folded.activeObservations, ...pendingBufferedObservations(pending)]
     : folded.activeObservations;
   const existingObservationsSummary = buildExistingObservationsSummary(
     sourceObsForDropper.filter((o: any) => !newObservations.some((no: any) => no.id === o.id)),

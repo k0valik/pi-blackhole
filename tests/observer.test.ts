@@ -1012,8 +1012,34 @@ describe("runObserver", () => {
     expect(result.partialCoverageId).toBe("entry-a");
   });
 
-  it("throws a turn-cap error when the capped run cited only later entries", async () => {
-    const error = await runObserver({
+  it("keeps only validated citations in the unanchored return when the capped run mixed valid and hallucinated ids", async () => {
+    const result = await runObserver({
+      ...baseArgs,
+      allowedSourceEntryIds: ["entry-a", "entry-b", "entry-c"],
+      agentLoop: turnCapLoop(
+        [
+          {
+            observations: [
+              { content: "late fact", relevance: "low", sourceEntryIds: ["entry-c", "bogus-id"] },
+            ],
+            complete: false,
+          },
+        ],
+        true,
+      ),
+      maxTurns: 1,
+    });
+
+    // entry-a is uncited, so no contiguous prefix exists — and the hallucinated
+    // id is filtered by normalization, never kept: only entry-c is stored.
+    expect(result.unanchoredObservations).toHaveLength(1);
+    expect(result.unanchoredObservations?.[0].sourceEntryIds).toEqual(["entry-c"]);
+    expect(result.observations).toBeUndefined();
+    expect(result.partialCoverageId).toBeUndefined();
+  });
+
+  it("returns late-only cited observations as unanchored instead of throwing when the turn cap ends the run", async () => {
+    const result = await runObserver({
       ...baseArgs,
       allowedSourceEntryIds: ["entry-a", "entry-b", "entry-c"],
       agentLoop: turnCapLoop(
@@ -1026,13 +1052,15 @@ describe("runObserver", () => {
         true,
       ),
       maxTurns: 1,
-    }).catch((caught: unknown) => caught);
+    });
 
     // entry-a is uncited, so no contiguous prefix exists: there is no honest
-    // coverage point, and the run must fail closed with a turn-cap error the
-    // stage halves-and-retries on — never a partial return past the gap.
-    expect(error).toBeInstanceOf(WorkerStreamError);
-    expect(error).toMatchObject({ turnCapExhausted: true, discardedCount: 1 });
+    // coverage point, but the recorded fact is kept as coverage-inert
+    // unanchored output instead of discarded inside a turn-cap throw.
+    expect(result.unanchoredObservations).toHaveLength(1);
+    expect(result.unanchoredObservations?.[0].sourceEntryIds).toEqual(["entry-c"]);
+    expect(result.observations).toBeUndefined();
+    expect(result.partialCoverageId).toBeUndefined();
   });
 
   it("returns the partial batch when the legacy turn-cap hook ends a run that never closed", async () => {

@@ -4,8 +4,10 @@ import { foldLedger } from "./fold.js";
 import {
   OM_OBSERVATIONS_DROPPED,
   OM_OBSERVATIONS_RECORDED,
+  OM_OBSERVATIONS_UNANCHORED,
   OM_REFLECTIONS_RECORDED,
   isObservationsRecordedData,
+  isObservationsUnanchoredData,
   isReflectionsRecordedData,
   type Entry,
   type Observation,
@@ -170,7 +172,12 @@ export function livePoolObservations(entries: Entry[], pending?: PendingOMState)
   const pool = new Map(
     folded.activeObservations.map((observation) => [observation.id, observation]),
   );
-  for (const batch of pending?.observationBatches ?? []) {
+  // Branch unanchored markers arrive folded above; manual-mode kept facts live
+  // in unanchoredBatches (no coverage point, so never in observationBatches).
+  for (const batch of [
+    ...(pending?.observationBatches ?? []),
+    ...(pending?.unanchoredBatches ?? []),
+  ]) {
     const data = batch.data as { observations?: unknown } | undefined;
     if (!Array.isArray(data?.observations)) continue;
     for (const value of data.observations) {
@@ -292,7 +299,10 @@ export function rawTokensSinceLastCompaction(entries: Entry[]): number {
 /**
  * Extract observations created since the given entry index.
  * Walks the branch and collects observations from OM_OBSERVATIONS_RECORDED
- * entries that were appended AFTER the given index.
+ * entries that were appended AFTER the given index. Coverage-inert
+ * OM_OBSERVATIONS_UNANCHORED markers are collected too: kept tail facts must
+ * reach the reflector/dropper inputs, while every coverage scan keeps
+ * ignoring them (they carry no coversUpToId).
  */
 export function observationsCreatedAfterIndex(entries: Entry[], sinceIndex: number): Observation[] {
   const observations: Observation[] = [];
@@ -301,8 +311,13 @@ export function observationsCreatedAfterIndex(entries: Entry[], sinceIndex: numb
   for (let i = sinceIndex + 1; i < entries.length; i++) {
     const entry = entries[i];
     if (entry.type !== "custom") continue;
-    if (entry.customType !== OM_OBSERVATIONS_RECORDED) continue;
-    if (!isObservationsRecordedData(entry.data)) continue;
+    if (
+      entry.customType !== OM_OBSERVATIONS_RECORDED &&
+      entry.customType !== OM_OBSERVATIONS_UNANCHORED
+    )
+      continue;
+    if (!isObservationsRecordedData(entry.data) && !isObservationsUnanchoredData(entry.data))
+      continue;
     for (const obs of entry.data.observations) {
       if (!seen.has(obs.id)) {
         seen.add(obs.id);
