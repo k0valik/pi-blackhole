@@ -372,11 +372,11 @@ describe("observer never covers source entries it was never shown", () => {
     const pi = { appendEntry: vi.fn() };
     const advance = vi.spyOn(runtime, "advanceCursor");
     const recordRetryable = vi.spyOn(runtime, "recordRetryableError");
-    const tailFact = observation("o1", { sourceEntryIds: ["s2", "s3"] });
+    const tailFact = observation("dddddddddddd", { sourceEntryIds: ["s2", "s3"] });
     runObserverSpy
       .mockResolvedValueOnce({ unanchoredObservations: [tailFact] })
       .mockResolvedValueOnce({
-        observations: [observation("o2", { sourceEntryIds: ["s0"] })],
+        observations: [observation("eeeeeeeeeeee", { sourceEntryIds: ["s0"] })],
         partialCoverageId: "s0",
       })
       .mockResolvedValueOnce(emptyResult());
@@ -419,7 +419,7 @@ describe("observer never covers source entries it was never shown", () => {
     const runtime = makeRuntime(100, 10_000);
     const pi = { appendEntry: vi.fn() };
     runObserverSpy.mockResolvedValueOnce({
-      unanchoredObservations: [observation("o1", { sourceEntryIds: ["s0"] })],
+      unanchoredObservations: [observation("dddddddddddd", { sourceEntryIds: ["s0"] })],
     });
 
     const outcome = await runStage(runtime, entries, resolveModelSession(), pi);
@@ -658,10 +658,10 @@ describe("observer never covers source entries it was never shown", () => {
     // the full-chunk attempt already kept.
     runObserverSpy
       .mockResolvedValueOnce({
-        unanchoredObservations: [observation("o1", { sourceEntryIds: ["s2", "s3"] })],
+        unanchoredObservations: [observation("dddddddddddd", { sourceEntryIds: ["s2", "s3"] })],
       })
       .mockResolvedValueOnce({
-        unanchoredObservations: [observation("o1", { sourceEntryIds: ["s1"] })],
+        unanchoredObservations: [observation("dddddddddddd", { sourceEntryIds: ["s1"] })],
       })
       .mockResolvedValueOnce(emptyResult());
 
@@ -774,7 +774,7 @@ describe("observer never covers source entries it was never shown", () => {
       .mockResolvedValueOnce({
         unanchoredObservations: [
           observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] }),
-          observation("o-new", { sourceEntryIds: ["s3"] }),
+          observation("cccccccccccc", { sourceEntryIds: ["s3"] }),
         ],
       })
       .mockResolvedValueOnce(emptyResult());
@@ -786,7 +786,7 @@ describe("observer never covers source entries it was never shown", () => {
     );
     expect(unanchoredWrites).toHaveLength(1);
     expect(unanchoredWrites[0][1]).toEqual({
-      observations: [observation("o-new", { sourceEntryIds: ["s3"] })],
+      observations: [observation("cccccccccccc", { sourceEntryIds: ["s3"] })],
     });
   });
 

@@ -927,10 +927,9 @@ export async function runObserverStage(
     }
     throw error;
   }
-  // Observation ids kept as unanchored output earlier in this invocation.
-  // The branch snapshot above is fixed for the run, so a fold cannot see
-  // wrappers appended mid-run — this set covers them (see the filter below).
-  const writtenUnanchoredObservationIds = new Set<string>();
+  // Seen ids for the unanchored-keep dedup filter below, seeded lazily on the
+  // first keep (see the branch for why one seed per invocation suffices).
+  let unanchoredSeenIds: Set<string> | undefined;
 
   // Determine start index: cursor takes priority. A cursor whose entry left the
   // branch (fork, navigation, compaction during the session) falls back to the
@@ -1205,9 +1204,10 @@ export async function runObserverStage(
   // starve single-model setups of the retry (resolution would exhaust and
   // abort without re-offering it). Emits no toast itself — each call site
   // owns its message — but always logs the halve for the debug log.
-  const halveChunkForTurnCap = (
-    discardedCount: number | undefined,
-  ): "halved" | "pending_skip" | "failed" => {
+  const halveChunkForTurnCap = (counts: {
+    discarded?: number;
+    kept?: number;
+  }): "halved" | "pending_skip" | "failed" => {
     const halvedEntries = chunkEntries.slice(0, Math.max(1, Math.floor(chunkEntries.length / 2)));
     const halved = serializeSourceAddressedBranchEntries(halvedEntries);
     const halvedCover = halved.sourceEntryIds.at(-1);
@@ -1231,7 +1231,7 @@ export async function runObserverStage(
       chunkEntries: halvedEntries.length,
       chunkTokens,
       coversUpToId,
-      discardedCount,
+      ...counts,
     });
     return "halved";
   };
@@ -1400,14 +1400,20 @@ export async function runObserverStage(
         // so the wrappers would be pure branch bloat. The seen set covers the
         // branch fold (first-wins, tombstones included — a re-emit of a
         // dropped fact stays dropped), manual-mode pending, and keeps written
-        // earlier in this same run.
-        const seenObservationIds = new Set(foldLedger(entries).observations.map((o) => o.id));
-        if (isManualMode(runtime.config)) {
-          for (const buffered of pendingBufferedObservations(readPendingState(sessionId))) {
-            if (typeof buffered.id === "string") seenObservationIds.add(buffered.id);
+        // earlier in this same run. Seeded once per invocation: the branch
+        // snapshot is fixed for the run and the pending file only gains this
+        // stage's own saves mid-run (fresh ids join the set below), so
+        // re-seeding per keep would just re-fold the same branch — and
+        // re-emit one fold.unknown_custom_types aggregate line per keep.
+        if (!unanchoredSeenIds) {
+          unanchoredSeenIds = new Set(foldLedger(entries).observations.map((o) => o.id));
+          if (isManualMode(runtime.config)) {
+            for (const buffered of pendingBufferedObservations(readPendingState(sessionId))) {
+              if (typeof buffered.id === "string") unanchoredSeenIds.add(buffered.id);
+            }
           }
         }
-        for (const id of writtenUnanchoredObservationIds) seenObservationIds.add(id);
+        const seenObservationIds = unanchoredSeenIds;
         const freshObservations = result.unanchoredObservations.filter((o) => {
           if (seenObservationIds.has(o.id)) return false;
           seenObservationIds.add(o.id);
@@ -1434,10 +1440,11 @@ export async function runObserverStage(
               citedIds: unanchoredCitedIds,
             });
           }
-          for (const o of freshObservations) writtenUnanchoredObservationIds.add(o.id);
+          // Fresh ids already joined the shared seen set in the filter above,
+          // so later keeps in this run treat them as stored.
         }
         if (chunkEntries.length > 1) {
-          const halved = halveChunkForTurnCap(unanchoredCount);
+          const halved = halveChunkForTurnCap({ kept: unanchoredCount });
           if (halved === "pending_skip") return "continue";
           if (halved === "halved") {
             runtime.tryEmitWorkerInfo(
@@ -1616,7 +1623,7 @@ export async function runObserverStage(
       // chunk. A single-entry chunk cannot halve: it falls through to the
       // skip + break-glass path below exactly as before.
       if (error instanceof WorkerStreamError && error.turnCapExhausted && chunkEntries.length > 1) {
-        const halved = halveChunkForTurnCap(getDiscardedCount(error));
+        const halved = halveChunkForTurnCap({ discarded: getDiscardedCount(error) });
         if (halved === "pending_skip") return "continue";
         if (halved === "halved") {
           runtime.tryEmitWorkerInfo(

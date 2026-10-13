@@ -86,6 +86,13 @@ function dropEntry(
   });
 }
 
+function unanchoredEntry(id: string, observations: Observation[]): Entry {
+  return makeEntry(id, "custom", {
+    customType: "om.observations.unanchored",
+    data: { observations },
+  });
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("recallMemorySources", () => {
@@ -111,6 +118,46 @@ describe("recallMemorySources", () => {
       expect(result.observations[0].status).toBe("active");
       expect(result.sourceEntries).toHaveLength(1);
       expect(result.sourceEntries[0].id).toBe("src0000000001");
+    }
+  });
+
+  it("finds a kept unanchored observation by id", async () => {
+    const { recallMemorySources } = await import("../src/om/ledger/recall.js");
+    const obsId = hexId("kept-tail-obs");
+    const obs = makeObservation(obsId, ["src0000000001"]);
+    const srcEntry = makeEntry("src0000000001", "message", {
+      message: { role: "user", content: "Hello" },
+    });
+    // Coverage-inert markers are still facts: recall-by-id must serve them,
+    // or a fact visible in /blackhole-memory 404s on recall <id>.
+    const entries: Entry[] = [srcEntry, unanchoredEntry("e-u1", [obs])];
+    const result = recallMemorySources(entries, obsId);
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect(result.observations).toHaveLength(1);
+      expect(result.observations[0].observation.id).toBe(obsId);
+      expect(result.observations[0].status).toBe("active");
+      expect(result.observations[0].observationEntryId).toBe("e-u1");
+    }
+  });
+
+  it("marks a kept unanchored observation as dropped when tombstoned", async () => {
+    const { recallMemorySources } = await import("../src/om/ledger/recall.js");
+    const obsId = hexId("kept-then-dropped");
+    const obs = makeObservation(obsId, ["src0000000001"]);
+    const srcEntry = makeEntry("src0000000001", "message", {
+      message: { role: "user", content: "Hello" },
+    });
+    const entries: Entry[] = [
+      srcEntry,
+      unanchoredEntry("e-u1", [obs]),
+      dropEntry("e-drop", [obsId]),
+    ];
+    const result = recallMemorySources(entries, obsId);
+    expect(result.status).toBe("found");
+    if (result.status === "found") {
+      expect(result.observations).toHaveLength(1);
+      expect(result.observations[0].status).toBe("dropped");
     }
   });
 

@@ -93,6 +93,13 @@ function dropEntry(
   });
 }
 
+function unanchoredEntry(id: string, observations: Observation[]): Entry {
+  return makeEntry(id, "custom", {
+    customType: "om.observations.unanchored",
+    data: { observations },
+  });
+}
+
 // ── Reverse recall tests ─────────────────────────────────────────────────
 
 describe("findObservationsForEntryIds", () => {
@@ -170,6 +177,18 @@ describe("findObservationsForEntryIds", () => {
     const result = findObservationsForEntryIds(entries, ["src00000001", "src00000002"]);
     expect(result).toHaveLength(2);
   });
+
+  it("finds kept unanchored observations by source entry id", async () => {
+    const { findObservationsForEntryIds } = await import("../src/om/reverse-recall.js");
+    const obsId = hexId("kept-tail-obs");
+    const obs = makeObservation(obsId, ["src00000001"]);
+    const entries: Entry[] = [makeEntry("src00000001", "message"), unanchoredEntry("e-u1", [obs])];
+    // Expanding a source entry must surface kept tail facts, not just
+    // recorded ones.
+    const result = findObservationsForEntryIds(entries, ["src00000001"]);
+    expect(result).toHaveLength(1);
+    expect(result[0].memoryId).toBe(obsId);
+  });
 });
 
 // ── Reflection reverse lookup tests ──────────────────────────────────────
@@ -187,6 +206,22 @@ describe("findReflectionsForEntryIds", () => {
     const result = findReflectionsForEntryIds(entries, ["src00000001"]);
     expect(result).toHaveLength(1);
     expect(result[0].memoryId).toBe(REF_ID);
+  });
+
+  it("finds reflections supported by kept unanchored observations", async () => {
+    const { findReflectionsForEntryIds } = await import("../src/om/reverse-recall.js");
+    const obsId = hexId("kept-tail-obs");
+    const refId = hexId("ref-on-kept");
+    const obs = makeObservation(obsId, ["src00000001"]);
+    const ref = makeReflection(refId, [obsId]);
+    const entries: Entry[] = [
+      makeEntry("src00000001", "message"),
+      unanchoredEntry("e-u1", [obs]),
+      reflectEntry("e2", [ref]),
+    ];
+    const result = findReflectionsForEntryIds(entries, ["src00000001"]);
+    expect(result).toHaveLength(1);
+    expect(result[0].memoryId).toBe(refId);
   });
 
   it("returns empty when no observations reference the target", async () => {

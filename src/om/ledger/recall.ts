@@ -7,6 +7,7 @@
 import {
   isObservationsDroppedEntry,
   isObservationsRecordedEntry,
+  isObservationsUnanchoredEntry,
   isReflectionsRecordedEntry,
   type Entry,
   type Observation,
@@ -110,6 +111,20 @@ export function indexLedger(entries: Entry[]): {
   for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
     const entry = entries[entryIndex];
     if (isObservationsRecordedEntry(entry)) {
+      entry.data.observations.forEach((observation, recordIndex) => {
+        observations.push({
+          observation,
+          entryId: entry.id,
+          entryIndex,
+          recordIndex,
+        });
+      });
+      continue;
+    }
+    // Coverage-inert kept facts are still facts: recall-by-id and reverse
+    // lookup must serve them. Dropped-status handling below applies
+    // unchanged — tombstones reference ids, not keys.
+    if (isObservationsUnanchoredEntry(entry)) {
       entry.data.observations.forEach((observation, recordIndex) => {
         observations.push({
           observation,
