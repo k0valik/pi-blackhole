@@ -927,6 +927,10 @@ export async function runObserverStage(
     }
     throw error;
   }
+  // Observation ids kept as unanchored output earlier in this invocation.
+  // The branch snapshot above is fixed for the run, so a fold cannot see
+  // wrappers appended mid-run — this set covers them (see the filter below).
+  const writtenUnanchoredObservationIds = new Set<string>();
 
   // Determine start index: cursor takes priority. A cursor whose entry left the
   // branch (fork, navigation, compaction during the session) falls back to the
@@ -1388,10 +1392,31 @@ export async function runObserverStage(
       // a single-entry chunk, which cannot shrink further. Never a
       // cooldown: a turn cap is an input-size limit, not a model defect.
       if (result.unanchoredObservations && result.unanchoredObservations.length > 0) {
-        const unanchoredCount = result.unanchoredObservations.length;
-        const unanchoredData = buildObservationsUnanchoredData(result.unanchoredObservations);
+        // Dedup by observation id against everything already stored: a halve
+        // retry re-offers overlapping entries, and a later cycle re-offers the
+        // identical chunk (the cursor never moves on a keep), so identical
+        // content — which hashes to the same id — would otherwise stack one
+        // redundant wrapper per keep, forever. Downstream readers all dedup,
+        // so the wrappers would be pure branch bloat. The seen set covers the
+        // branch fold (first-wins, tombstones included — a re-emit of a
+        // dropped fact stays dropped), manual-mode pending, and keeps written
+        // earlier in this same run.
+        const seenObservationIds = new Set(foldLedger(entries).observations.map((o) => o.id));
+        if (isManualMode(runtime.config)) {
+          for (const buffered of pendingBufferedObservations(readPendingState(sessionId))) {
+            if (typeof buffered.id === "string") seenObservationIds.add(buffered.id);
+          }
+        }
+        for (const id of writtenUnanchoredObservationIds) seenObservationIds.add(id);
+        const freshObservations = result.unanchoredObservations.filter((o) => {
+          if (seenObservationIds.has(o.id)) return false;
+          seenObservationIds.add(o.id);
+          return true;
+        });
+        const unanchoredCount = freshObservations.length;
+        const unanchoredData = buildObservationsUnanchoredData(freshObservations);
         const unanchoredCitedIds = [
-          ...new Set(result.unanchoredObservations.flatMap((o) => o.sourceEntryIds ?? [])),
+          ...new Set(freshObservations.flatMap((o) => o.sourceEntryIds ?? [])),
         ];
         if (unanchoredData) {
           if (isManualMode(runtime.config)) {
@@ -1409,6 +1434,7 @@ export async function runObserverStage(
               citedIds: unanchoredCitedIds,
             });
           }
+          for (const o of freshObservations) writtenUnanchoredObservationIds.add(o.id);
         }
         if (chunkEntries.length > 1) {
           const halved = halveChunkForTurnCap(unanchoredCount);
@@ -1417,7 +1443,9 @@ export async function runObserverStage(
             runtime.tryEmitWorkerInfo(
               ctx.hasUI,
               ctx.ui,
-              `Observational memory: observer turn cap — kept ${unanchoredCount} unanchored observation${unanchoredCount === 1 ? "" : "s"}, halving chunk to ${chunkEntries.length} ${chunkEntries.length === 1 ? "entry" : "entries"} and retrying`,
+              unanchoredCount > 0
+                ? `Observational memory: observer turn cap — kept ${unanchoredCount} unanchored observation${unanchoredCount === 1 ? "" : "s"}, halving chunk to ${chunkEntries.length} ${chunkEntries.length === 1 ? "entry" : "entries"} and retrying`
+                : `Observational memory: observer turn cap — halving chunk to ${chunkEntries.length} ${chunkEntries.length === 1 ? "entry" : "entries"} and retrying`,
             );
             continue;
           }

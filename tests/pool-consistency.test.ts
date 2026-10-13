@@ -322,14 +322,37 @@ describe("observationPoolTokens", () => {
     writeFileSync(
       join(dir, `${SESSION}-pending.json`),
       JSON.stringify({
-        // { data: undefined } serializes to {} and is dropped; a present
-        // payload is kept even when its observation list is empty — the same
-        // payload-presence rule recorded batches use.
+        // { data: undefined } serializes to {} and is dropped. Unlike recorded
+        // batches (payload-presence rule), unanchored batches must carry a
+        // valid observation payload: the preamble/reflector/dropper consumers
+        // flatMap observations without per-item checks, so shape validation
+        // happens here, once, at the read gate.
         unanchoredBatches: [{ data: undefined }, { data: { observations: [] } }],
       }),
     );
 
-    expect(readPendingState(SESSION).unanchoredBatches).toEqual([{ data: { observations: [] } }]);
+    expect(readPendingState(SESSION).unanchoredBatches).toEqual([]);
+  });
+
+  it("drops malformed unanchored batches but keeps valid ones on read", () => {
+    const dir = join(agentDir, "pi-blackhole");
+    mkdirSync(dir, { recursive: true });
+    const valid = { observations: [observation("cccccccccccc", { tokenCount: 300 })] };
+    writeFileSync(
+      join(dir, `${SESSION}-pending.json`),
+      JSON.stringify({
+        unanchoredBatches: [
+          // Non-array observations would flow into flatMap consumers as an
+          // element instead of defaulting to [].
+          { data: { observations: "not-an-array" } },
+          // Missing id/relevance/tokenCount would poison token budgets.
+          { data: { observations: [{ content: "no identity" }] } },
+          { data: valid },
+        ],
+      }),
+    );
+
+    expect(readPendingState(SESSION).unanchoredBatches).toEqual([{ data: valid }]);
   });
 
   it("matches the inline fold sum on a pre-compaction branch (no snapshot)", () => {

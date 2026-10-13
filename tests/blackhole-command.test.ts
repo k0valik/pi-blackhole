@@ -340,7 +340,16 @@ describe("/blackhole command", () => {
     const pendingDir = join(testRoot, "agent", "pi-blackhole");
     const pendingFile = join(pendingDir, "test-session-pending.json");
     const keptData = {
-      observations: [{ id: "aaaaaaaaaaaa", content: "kept tail fact" }],
+      observations: [
+        {
+          id: "aaaaaaaaaaaa",
+          content: "kept tail fact",
+          timestamp: "2026-05-02 10:00",
+          relevance: "medium",
+          sourceEntryIds: ["s2"],
+          tokenCount: 4,
+        },
+      ],
     };
     writeFileSync(pendingFile, JSON.stringify({ unanchoredBatches: [{ data: keptData }] }));
 

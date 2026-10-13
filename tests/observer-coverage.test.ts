@@ -13,7 +13,8 @@
  * Harness mirrors tests/observer-anchor.test.ts: real Runtime, real stage,
  * module-mocked worker.
  */
-import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, afterEach, afterAll, describe, expect, test, vi } from "vitest";
+import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,7 +27,12 @@ import {
 import { Runtime } from "../src/om/runtime.js";
 import { WorkerStreamError } from "../src/om/retryable-error.js";
 import { clearPendingState, readPendingState, savePendingUnanchored } from "../src/om/pending.js";
-import { observation, rawMessage, type TestEntry } from "./fixtures/session.js";
+import {
+  observation,
+  observationsRecordedEntry,
+  rawMessage,
+  type TestEntry,
+} from "./fixtures/session.js";
 
 /** Pending writes hit real files, so redirect the agent dir (mirrors consolidation.test.ts). */
 const coverageTestDir = join(tmpdir(), `pi-blackhole-observer-coverage-${Date.now()}`);
@@ -125,6 +131,10 @@ beforeEach(() => {
 
 afterEach(() => {
   clearPendingState("test-session");
+});
+
+afterAll(() => {
+  rmSync(coverageTestDir, { recursive: true, force: true });
 });
 
 describe("observer never covers source entries it was never shown", () => {
@@ -435,11 +445,11 @@ describe("observer never covers source entries it was never shown", () => {
     const runtime = makeRuntime(700, 2000);
     runtime.config.compaction = "manual";
     const pi = { appendEntry: vi.fn() };
-    const tailFact = observation("o1", { sourceEntryIds: ["s2", "s3"] });
+    const tailFact = observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] });
     runObserverSpy
       .mockResolvedValueOnce({ unanchoredObservations: [tailFact] })
       .mockResolvedValueOnce({
-        observations: [observation("o2", { sourceEntryIds: ["s0"] })],
+        observations: [observation("bbbbbbbbbbbb", { sourceEntryIds: ["s0"] })],
         partialCoverageId: "s0",
       })
       .mockResolvedValueOnce(emptyResult());
@@ -633,5 +643,214 @@ describe("observer never covers source entries it was never shown", () => {
     // Manual mode has no branch markers: without the pending merge the kept
     // fact would sit idle until /blackhole flush.
     expect(observedInput(0).priorObservations.join("\n")).toContain("manual kept fact");
+  });
+
+  test("a halve retry re-emitting the kept fact stores no second wrapper", async () => {
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+      rawMessage("s3", text("OLD-D")),
+    ];
+    const runtime = makeRuntime(700, 2000);
+    const pi = { appendEntry: vi.fn() };
+    // Same content hashes to the same id: the [s0,s1] retry re-emits the fact
+    // the full-chunk attempt already kept.
+    runObserverSpy
+      .mockResolvedValueOnce({
+        unanchoredObservations: [observation("o1", { sourceEntryIds: ["s2", "s3"] })],
+      })
+      .mockResolvedValueOnce({
+        unanchoredObservations: [observation("o1", { sourceEntryIds: ["s1"] })],
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries, resolveModelSession(), pi);
+
+    // One wrapper, not two — but the halve-and-retry still runs to cover the head.
+    const unanchoredWrites = pi.appendEntry.mock.calls.filter(
+      ([customType]) => customType === "om.observations.unanchored",
+    );
+    expect(unanchoredWrites).toHaveLength(1);
+    expect(observedInput(1).allowedSourceEntryIds).toEqual(["s0", "s1"]);
+  });
+
+  test("a fact already kept on the branch is not stored again", async () => {
+    const kept = observation("aaaaaaaaaaaa", {
+      content: "kept tail fact",
+      sourceEntryIds: ["s2", "s3"],
+    });
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+      rawMessage("s3", text("OLD-D")),
+      {
+        type: "custom",
+        id: "om-unanchored-1",
+        customType: "om.observations.unanchored",
+        data: { observations: [kept] },
+      } as unknown as TestEntry,
+    ];
+    const runtime = makeRuntime(700, 2000);
+    const pi = { appendEntry: vi.fn() };
+    // A later cycle re-offered the same chunk and the model distilled the
+    // identical fact: same content, same hash id.
+    runObserverSpy
+      .mockResolvedValueOnce({
+        unanchoredObservations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] })],
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries, resolveModelSession(), pi);
+
+    expect(
+      pi.appendEntry.mock.calls.filter(
+        ([customType]) => customType === "om.observations.unanchored",
+      ),
+    ).toHaveLength(0);
+    expect(observedInput(1).allowedSourceEntryIds).toEqual(["s0", "s1"]);
+  });
+
+  test("an all-duplicate keep stores nothing and halves with the plain line", async () => {
+    const kept = observation("aaaaaaaaaaaa", {
+      content: "kept tail fact",
+      sourceEntryIds: ["s2", "s3"],
+    });
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+      rawMessage("s3", text("OLD-D")),
+      {
+        type: "custom",
+        id: "om-unanchored-1",
+        customType: "om.observations.unanchored",
+        data: { observations: [kept] },
+      } as unknown as TestEntry,
+    ];
+    const runtime = makeRuntime(700, 2000);
+    const pi = { appendEntry: vi.fn() };
+    const workerInfo = vi.spyOn(runtime, "tryEmitWorkerInfo");
+    runObserverSpy
+      .mockResolvedValueOnce({
+        unanchoredObservations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] })],
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries, resolveModelSession(), pi);
+
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+    expect(observedInput(1).allowedSourceEntryIds).toEqual(["s0", "s1"]);
+    // Nothing was kept, so the toast must not claim a keep: it falls back to
+    // the same plain halving line the discard path emits.
+    const halveLines = workerInfo.mock.calls
+      .map(([, , message]) => String(message))
+      .filter((message) => message.includes("halving chunk to 2 entries"));
+    expect(halveLines).toHaveLength(1);
+    expect(halveLines[0]).not.toContain("kept");
+  });
+
+  test("a mixed keep stores only the new fact", async () => {
+    const kept = observation("aaaaaaaaaaaa", {
+      content: "kept tail fact",
+      sourceEntryIds: ["s2", "s3"],
+    });
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+      rawMessage("s3", text("OLD-D")),
+      {
+        type: "custom",
+        id: "om-unanchored-1",
+        customType: "om.observations.unanchored",
+        data: { observations: [kept] },
+      } as unknown as TestEntry,
+    ];
+    const runtime = makeRuntime(700, 2000);
+    const pi = { appendEntry: vi.fn() };
+    runObserverSpy
+      .mockResolvedValueOnce({
+        unanchoredObservations: [
+          observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] }),
+          observation("o-new", { sourceEntryIds: ["s3"] }),
+        ],
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries, resolveModelSession(), pi);
+
+    const unanchoredWrites = pi.appendEntry.mock.calls.filter(
+      ([customType]) => customType === "om.observations.unanchored",
+    );
+    expect(unanchoredWrites).toHaveLength(1);
+    expect(unanchoredWrites[0][1]).toEqual({
+      observations: [observation("o-new", { sourceEntryIds: ["s3"] })],
+    });
+  });
+
+  test("manual mode drops a keep already buffered in pending", async () => {
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+      rawMessage("s3", text("OLD-D")),
+    ];
+    const runtime = makeRuntime(700, 2000);
+    runtime.config.compaction = "manual";
+    const pi = { appendEntry: vi.fn() };
+    savePendingUnanchored("test-session", {
+      data: { observations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] })] },
+    });
+    runObserverSpy
+      .mockResolvedValueOnce({
+        unanchoredObservations: [
+          observation("aaaaaaaaaaaa", { sourceEntryIds: ["s2", "s3"] }),
+          observation("bbbbbbbbbbbb", { sourceEntryIds: ["s3"] }),
+        ],
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries, resolveModelSession(), pi);
+
+    // Manual mode never appends; the buffered dup is filtered before the new
+    // batch lands, so the file holds the old batch plus exactly the new fact.
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+    const pending = readPendingState("test-session");
+    expect(pending.unanchoredBatches).toHaveLength(2);
+    const secondBatch = pending.unanchoredBatches?.[1];
+    if (!secondBatch) throw new Error("expected a second unanchored batch");
+    expect((secondBatch.data as any).observations.map((o: any) => o.id)).toEqual(["bbbbbbbbbbbb"]);
+  });
+
+  test("manual mode drops a keep already recorded on the branch", async () => {
+    const entries = [
+      rawMessage("s0", text("OLD-A")),
+      rawMessage("s1", text("OLD-B")),
+      rawMessage("s2", text("OLD-C")),
+      rawMessage("s3", text("OLD-D")),
+      observationsRecordedEntry("om-recorded-1", {
+        observations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["s0"], tokenCount: 10 })],
+        coversUpToId: "s0",
+      }),
+    ];
+    const runtime = makeRuntime(700, 2000);
+    runtime.config.compaction = "manual";
+    const pi = { appendEntry: vi.fn() };
+    // Pre-switch leftover: the fact lives in a branch recorded marker while
+    // pending is empty. A re-emit must not buffer a redundant batch.
+    runObserverSpy
+      .mockResolvedValueOnce({
+        unanchoredObservations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["s1"] })],
+      })
+      .mockResolvedValueOnce(emptyResult());
+
+    await runStage(runtime, entries, resolveModelSession(), pi);
+
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+    expect(readPendingState("test-session").unanchoredBatches ?? []).toEqual([]);
+    // Chunk was [s1, s2, s3]; halving three entries offers the head one.
+    expect(observedInput(1).allowedSourceEntryIds).toEqual(["s1"]);
   });
 });

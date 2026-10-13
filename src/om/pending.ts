@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { isObservationsUnanchoredData } from "./ledger/types.js";
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export interface PendingObservation {
@@ -263,11 +264,19 @@ function sanitizePendingState(raw: PendingOMState): PendingOMState {
         (b as any).data !== undefined,
     );
   }
-  // Unanchored batches carry no coverage point by design: only the payload
-  // shape is validated.
+  // Unanchored batches carry no coverage point by design, but the payload
+  // itself is validated: the preamble/reflector/dropper merges flatMap
+  // observations without per-item checks (unlike the pool, which validates),
+  // so a malformed batch must die here at the read gate, not poison token
+  // budgets downstream. This is stricter than the recorded-batch
+  // payload-presence rule — deliberately, and only for this new key.
   if (Array.isArray(raw.unanchoredBatches)) {
     sanitized.unanchoredBatches = raw.unanchoredBatches.filter(
-      (b): b is PendingUnanchored => !!b && typeof b === "object" && (b as any).data !== undefined,
+      (b): b is PendingUnanchored =>
+        !!b &&
+        typeof b === "object" &&
+        (b as any).data !== undefined &&
+        isObservationsUnanchoredData((b as PendingUnanchored).data),
     );
   }
   return sanitized;
