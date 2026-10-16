@@ -10,6 +10,7 @@
 
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
+- **Compaction memory keeps reflections whose evidence lies before the cut.** A reflection run whose coverage ended after the maintenance boundary (the cut with `fullFoldAlways`, otherwise the last full fold) was left out whole, even when every observation it cites was already summarized away. The projection now keeps the reflections whose supporting observations are all placed at or before the boundary; drops past the boundary are still not applied, because a drop may rest on a reflection that is still left out.
 
 ---
 

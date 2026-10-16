@@ -133,6 +133,7 @@ Projection builds slices of the ledger for different purposes. Defined in [[src/
 
 - Observations boundary: `firstKeptEntryId` (normal fold)
 - Reflections/drops boundary: `latestFullFoldBoundaryId` (maintenance boundary)
+  - A reflection run recorded wholly at or before the boundary is included. A run that straddles it contributes the reflections whose every `supportingObservationIds` entry is an observation placed at or before the boundary (by cited sources, or marker position for unanchored ones); others wait for a later compaction. Drops are not applied past the boundary: a drop can rest on a reflection that is still left out, so dropping early could lose the only copy.
 - **Full fold**: When observation tokens ≥ `observationsPoolMaxTokens`, fold through branch tip
 - **Token cap**: Even if dropper kept some old observations, a safety valve caps to pool budget using `selectPriorObservations()`
 

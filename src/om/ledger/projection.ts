@@ -112,6 +112,7 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
   const observationsById = new Set<string>();
   const reflectionsById = new Set<string>();
   const droppedObservationIds = new Set<string>();
+  let placedObservationIds: Set<string> | undefined;
 
   for (const entry of entries) {
     if (
@@ -141,11 +142,25 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
       continue;
     }
 
-    if (
-      isReflectionsRecordedEntry(entry) &&
-      isCoveredAtOrBefore(entry, indexes, reflectionsBoundary)
-    ) {
+    if (isReflectionsRecordedEntry(entry)) {
+      const covered = isCoveredAtOrBefore(entry, indexes, reflectionsBoundary);
+      const straddles = !covered && coverageIndex(entry, indexes) > reflectionsBoundary;
+      if (!covered && !straddles) continue;
+      // A straddling run keeps only reflections whose every supporting
+      // observation is placed at or before the boundary.
+      if (straddles)
+        placedObservationIds ??= observationIdsWithinBoundary(
+          entries,
+          indexes,
+          reflectionsBoundary,
+        );
       for (const reflection of entry.data.reflections) {
+        if (
+          straddles &&
+          (reflection.supportingObservationIds.length === 0 ||
+            !reflection.supportingObservationIds.every((id) => placedObservationIds?.has(id)))
+        )
+          continue;
         if (reflectionsById.has(reflection.id)) continue;
         reflectionsById.add(reflection.id);
         reflections.push(reflection);
@@ -163,6 +178,36 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
     observations: observations.filter((observation) => !droppedObservationIds.has(observation.id)),
     reflections,
   };
+}
+
+/**
+ * Ids of the observations that are provably placed at or before the boundary,
+ * by their cited sources (recorded batches) or marker position (unanchored).
+ */
+function observationIdsWithinBoundary(
+  entries: Entry[],
+  indexes: Map<string, number>,
+  boundaryIndex: number,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (isObservationsRecordedEntry(entry)) {
+      for (const observation of entry.data.observations) {
+        const sources = observation.sourceEntryIds;
+        if (
+          sources.length > 0 &&
+          sources.every((id) => isAtOrBefore(indexes.get(id) ?? -1, boundaryIndex))
+        )
+          ids.add(observation.id);
+      }
+    } else if (
+      isObservationsUnanchoredEntry(entry) &&
+      isAtOrBefore(indexes.get(entry.id) ?? -1, boundaryIndex)
+    ) {
+      for (const observation of entry.data.observations) ids.add(observation.id);
+    }
+  }
+  return ids;
 }
 
 function projectionFromMemoryDetails(details: MemoryDetails): Projection {
