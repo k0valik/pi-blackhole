@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **An unsplittable output-limited batch no longer cools a healthy model.** Reflector and dropper now treat this as a size skip, matching their normal attempt paths. Incomplete batches leave coverage unchanged and can be tried again with a later request.
+
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 

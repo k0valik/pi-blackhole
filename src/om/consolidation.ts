@@ -2078,8 +2078,14 @@ export async function runReflectorStage(
     // is abandoned with the cursor unmoved.
     const voidBatchedRun = (error: unknown): ReflectorStageResult => {
       const candidateConfig = stageModelForBatch;
-      runtime.recordRetryableError(candidateConfig, error, "reflector");
-      if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+      if (error instanceof WorkerStreamError && error.lengthCut && !error.turnCapExhausted) {
+        // The smallest batch still exceeded the output allowance. Like the
+        // normal catch, this is an input-size skip, not model unavailability.
+        runtime.skipOversizedForCycle(candidateConfig ?? bestModel);
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "reflector");
+        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+      }
       debugLog("reflector.error", {
         error: String(error),
         retryable: isRetryableError(error),
@@ -2745,8 +2751,14 @@ export async function runDropperStage(
     // unmoved.
     const voidBatchedRun = (error: unknown): StageOutcome => {
       const candidateConfig = stageModelForBatch;
-      runtime.recordRetryableError(candidateConfig, error, "dropper");
-      if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
+      if (error instanceof WorkerStreamError && error.lengthCut && !error.turnCapExhausted) {
+        // The smallest batch still exceeded the output allowance. Like the
+        // normal catch, this is an input-size skip, not model unavailability.
+        runtime.skipOversizedForCycle(candidateConfig ?? bestModel);
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "dropper");
+        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
+      }
       debugLog("dropper.error", {
         error: String(error),
         retryable: isRetryableError(error),

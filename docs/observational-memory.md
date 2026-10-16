@@ -222,6 +222,8 @@ Pipeline cursors track progress per stage. Defined in `PipelineCursor` / `Pipeli
 
 Before calling each worker, the pipeline estimates the full first-turn input — variable content (chunk text, observation/reflection contents, actual capped summaries) with the CJK-aware estimator, the rendered preamble, measured static overhead (system prompt + the one tool schema + framing: ~3.8k/2.8k/1.6k tokens for observer/reflector/dropper, computed once at import), plus headroom for later tool turns — and checks it against the model's window minus the output allowance (sharing the same window) minus a safety margin. The output allowance is capped at a quarter of the window (floored at zero), so small-context models stay usable instead of computing a negative budget. The stage passes that same allowance as each worker's `maxTokens`, so a prompt that passes the fit check cannot overflow at generation time.
 
+An output-length cut in a reflector/dropper batch that cannot be split further is also a size skip, not a model cooldown. The incomplete batched run leaves coverage unchanged; a later cycle or smaller request can use the model again.
+
 A model that cannot hold the input is skipped for the rest of the run. A too-small window is not a broken model, so the skip never writes a persisted cooldown — the model stays available for smaller inputs and later cycles.
 
 When no candidate fits anything, the stage shrinks to the largest resolved window instead of aborting — but only on a pure size-mismatch record; any runtime failure keeps error semantics and aborts exactly as before:
