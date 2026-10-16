@@ -102,6 +102,25 @@ function isCoveredAtOrBefore(
   return isAtOrBefore(coverageIndex(entry, indexes), boundaryIndex);
 }
 
+/**
+ * An observation of a batch that straddles the boundary joins the projection
+ * only when every cited source is provably at or before it. A source that is
+ * missing from the branch cannot be placed, so the observation stays out
+ * (the whole-batch rule it replaces) rather than being guessed in. Observations
+ * with a source past the boundary stay in the kept tail and are projected by
+ * the compaction whose boundary reaches them.
+ */
+function isObservationWithinBoundary(
+  observation: Observation,
+  indexes: Map<string, number>,
+  boundaryIndex: number,
+): boolean {
+  return (
+    observation.sourceEntryIds.length > 0 &&
+    observation.sourceEntryIds.every((id) => isAtOrBefore(indexes.get(id) ?? -1, boundaryIndex))
+  );
+}
+
 function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Projection {
   const indexes = entryIndexById(entries);
   const observationsBoundary = boundaryIndex(entries, indexes, options.observationsBoundary);
@@ -114,11 +133,13 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
   const droppedObservationIds = new Set<string>();
 
   for (const entry of entries) {
-    if (
-      isObservationsRecordedEntry(entry) &&
-      isCoveredAtOrBefore(entry, indexes, observationsBoundary)
-    ) {
+    if (isObservationsRecordedEntry(entry)) {
+      const covered = isCoveredAtOrBefore(entry, indexes, observationsBoundary);
+      const straddles = !covered && coverageIndex(entry, indexes) > observationsBoundary;
+      if (!covered && !straddles) continue;
       for (const observation of entry.data.observations) {
+        if (straddles && !isObservationWithinBoundary(observation, indexes, observationsBoundary))
+          continue;
         if (observationsById.has(observation.id)) continue;
         observationsById.add(observation.id);
         observations.push(observation);

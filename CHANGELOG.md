@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- **Compaction memory keeps the pre-cut observations of a batch that straddles the cut.** An observer batch whose coverage ended after the first kept entry was left out of the compacted memory as a whole, so facts already summarized away from the raw transcript had no observation either (37% of 1,979 compactions in a sample, median about 710 observation tokens). The projection now keeps the observations whose cited sources are all at or before the cut and leaves later ones for the compaction that reaches them; observations with unplaceable sources stay out as before.
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 

@@ -132,6 +132,7 @@ Projection builds slices of the ledger for different purposes. Defined in [[src/
 `buildCompactionProjection(entries, firstKeptEntryId, config)` — Builds the memory slice for compaction output. Uses boundary-based folding:
 
 - Observations boundary: `firstKeptEntryId` (normal fold)
+  - A batch recorded wholly at or before the boundary is included. A batch that straddles it (its `coversUpToId` is past the boundary) contributes the observations whose cited `sourceEntryIds` are all at or before the boundary; observations with a later or unplaceable source are left out and are projected by the compaction whose boundary reaches them.
 - Reflections/drops boundary: `latestFullFoldBoundaryId` (maintenance boundary)
 - **Full fold**: When observation tokens ≥ `observationsPoolMaxTokens`, fold through branch tip
 - **Token cap**: Even if dropper kept some old observations, a safety valve caps to pool budget using `selectPriorObservations()`
