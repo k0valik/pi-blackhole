@@ -8,6 +8,8 @@
  * avoiding the need to duplicate 20+ provider-specific overflow patterns.
  */
 
+import { isContextOverflow } from "@earendil-works/pi-ai";
+
 /** Regex matching retryable API error messages. */
 export const RETRYABLE_ERROR_RE =
   /overloaded|provider.?returned.?error|rate.?limit|too many requests|\b429\b|\b500\b|\b502\b|\b503\b|\b504\b|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
@@ -160,7 +162,7 @@ export function isDeterministicError(error: unknown): boolean {
  * additionally cool the resolved session model via `recordDeterministicError`.
  */
 export function isCooldownWorthyError(error: unknown): boolean {
-  return isRetryableError(error) || isDeterministicError(error);
+  return !isRequestLocalError(error) && (isRetryableError(error) || isDeterministicError(error));
 }
 
 /** Detect Pi's "extension ctx is stale" error from session replacement/reload.
@@ -175,4 +177,94 @@ export function isStaleExtensionContextError(error: unknown): boolean {
     message = String(error || "");
   }
   return message.includes("extension ctx is stale") || message.includes("ctx is stale");
+}
+
+/**
+ * Request-size/options rejection does not establish model-wide unavailability.
+ * SDKs expose status + code/param, while workers can flatten provider failures
+ * to text. Text fallbacks require a status framing and a specific rejection,
+ * never merely the word "context" or a blanket exclusion of every 400.
+ */
+export function isRequestLocalError(error: unknown): boolean {
+  const fields = error !== null && typeof error === "object" ? error : undefined;
+  const message = fields && "message" in fields ? String(fields.message) : String(error || "");
+  const text = message.replace(WORKER_FRAMING_RE, "");
+  const rawStatus =
+    fields && "status" in fields
+      ? fields.status
+      : fields && "statusCode" in fields
+        ? fields.statusCode
+        : undefined;
+  // The outer status wins: do not read an upstream 400 inside a 503 body.
+  const statusText = text.match(
+    /^(?:HTTP(?:\/[\d.]+)?\s+|[\w -]+ API error\s*\(|status\s*:?\s*|error\s*[:(]\s*)?([45]\d{2})\b/i,
+  )?.[1];
+  // Gemini/Vertex flatten their ApiError to JSON with no HTTP prefix.
+  // Only accept that leading error envelope, never a quoted code in prose.
+  const jsonStatus = text.match(
+    /^(?:got status: INVALID_ARGUMENT\.\s*)?\{\s*"error"\s*:\s*\{\s*"code"\s*:\s*(4\d{2})\b/i,
+  )?.[1];
+  const status = typeof rawStatus === "number" ? rawStatus : Number(statusText ?? jsonStatus);
+  if (status === 413) return true;
+  if (status !== 400 && status !== 422) return false;
+  // pi-ai 0.85.1 classified any bodyless 400 as context overflow. Keep the
+  // current contract on that supported peer too: no evidence means no exemption.
+  if (/\(no body\)/i.test(text)) return false;
+  // A provider-required session header is configuration-wide, not payload-local.
+  if (/MissingSessionID|missing.?session|invalid.?api.?key|unauthorized/i.test(text)) return false;
+  const detail =
+    fields && "error" in fields && fields.error !== null && typeof fields.error === "object"
+      ? fields.error
+      : fields;
+  const code = detail && "code" in detail ? detail.code : undefined;
+  const param = detail && "param" in detail ? detail.param : undefined;
+  if (code === "context_length_exceeded" || code === "request_too_large") return true;
+  if (
+    (param === "reasoning_effort" ||
+      param === "reasoning.effort" ||
+      param === "thinking_level" ||
+      param === "thinking.level") &&
+    (code === "unsupported_value" || code === "invalid_value")
+  )
+    return true;
+  // Reuse pi-ai's maintained provider overflow patterns without treating a
+  // bare 400 as overflow. Only the error-message arm is used (no usage inference).
+  if (
+    isContextOverflow({
+      role: "assistant",
+      content: [],
+      api: "openai-completions",
+      provider: "unknown",
+      model: "unknown",
+      stopReason: "error",
+      errorMessage: text,
+      timestamp: 0,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    })
+  )
+    return true;
+  // OpenAI provider text: openai/openai-python#2112. Responses uses the
+  // reasoning.effort param spelling (openai/codex#45955). Match the rejected
+  // parameter plus error code, not an arbitrary unsupported-value message.
+  const thinkingParam =
+    /"param"\s*:\s*"(?:reasoning[._]effort|thinking_level|thinking\.level)"/i.test(text);
+  const unsupportedValue = /"code"\s*:\s*"(?:unsupported_value|invalid_value)"/i.test(text);
+  // Literal "invalid thinking level" is a defensive fallback for custom
+  // providers; the parameter-specific patterns above have incident evidence.
+  return (
+    (thinkingParam && unsupportedValue) ||
+    /Unsupported value:\s*['"]reasoning_effort['"] does not support ['"][^'"]+['"] with this model\./i.test(
+      text,
+    ) ||
+    /\b(?:payload|request(?: body)?) (?:is )?too large\b|\b(?:invalid|unsupported) thinking level\b|\bthinking level .{1,40} (?:is )?(?:invalid|not supported)\b/i.test(
+      text,
+    )
+  );
 }

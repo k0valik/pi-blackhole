@@ -19,7 +19,7 @@ import {
   sanitizeCooldownReason,
   getCooldownEntry,
 } from "./cooldown.js";
-import { isDeterministicError } from "./retryable-error.js";
+import { isDeterministicError, isRequestLocalError } from "./retryable-error.js";
 import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -963,7 +963,8 @@ export class Runtime {
    * (not the session model).  If it's the session model we don't cool it down.
    *
    * When cooldownHours is explicitly 0, the model is tracked in-memory for the
-   * current consolidation stage (no disk writes). Otherwise a persisted cooldown
+   * current consolidation stage (no disk writes). Request-local size/option errors
+   * are also in-cycle only. Otherwise a persisted cooldown
    * is recorded.
    */
   recordRetryableError(
@@ -975,7 +976,7 @@ export class Runtime {
     // Thinking-only modifiers carry no identity to cool down; the session
     // model's deterministic errors are handled via recordDeterministicError.
     if (!hasModelIdentity(modelConfig)) return;
-    if (modelConfig.cooldownHours === 0) {
+    if (modelConfig.cooldownHours === 0 || isRequestLocalError(error)) {
       // In-memory only: skip this model for the rest of this stage.
       // No disk writes, no persistent cooldown.
       this.failedInCycle.add(modelKey(modelConfig));
@@ -1006,9 +1007,13 @@ export class Runtime {
     error: unknown,
     stage: ConsolidationPhase,
   ): void {
-    if (!isDeterministicError(error)) return;
     const model = resolvedModel as { provider?: unknown; id?: unknown } | null | undefined;
     if (typeof model?.provider !== "string" || typeof model?.id !== "string") return;
+    if (isRequestLocalError(error)) {
+      this.skipFailedForCycle({ provider: model.provider, id: model.id });
+      return;
+    }
+    if (!isDeterministicError(error)) return;
     const rawReason = error instanceof Error ? error.message : String(error || "unknown error");
     // recordCooldown sanitizes + defaults to a 1h window when cooldownHours is unset.
     recordCooldown(

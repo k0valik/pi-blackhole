@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **Request incompatibility no longer disables a memory model for other inputs.** Recognized payload/context-size and thinking-level rejections now skip only the current stage instead of cooling the provider/model identity across sessions. Authentication, missing-model and transient provider errors retain their existing cooldown policy.
+
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 
