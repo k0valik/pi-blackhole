@@ -382,8 +382,9 @@ falling back to entry time or pending observation time for legacy records.
 `reflectionSupersedes` defaults to `false`. When enabled, the reflector may list ids
 of earlier reflections shown in its input. Unknown, self and same-run ids are ignored.
 The new record alone stores the annotation, displayed as `(supersedes <id>[, <id>])`.
-This is display-only: fold, projections, worker input, dropper coverage, memory views,
-export and recall keep the same reflections. Export and recall omit the suffix.
+The replaced reflection is retired from compaction projections, the observer preamble
+and `/blackhole-memory` views; the ledger, worker input, dropper coverage, export and
+recall keep it. Export and recall omit the suffix.
 Nothing edits an earlier record or append segment. Toggling changes display at the
 next compaction only. Both keys off preserve legacy rendering, prompt and tool schema.
 No additional model calls are introduced. Rendered lines count against existing caps.

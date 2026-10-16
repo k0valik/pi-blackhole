@@ -1056,7 +1056,7 @@ describe("append reflection annotations", () => {
     );
     return { first, second };
   }
-  it("keeps older reflection line byte-identical after supersession", () => {
+  it("retires the superseded reflection line from the new trailing summary", () => {
     const { first, second } = twoCompactions();
     const line = (summary: string) =>
       summary.split("\n").find((text) => text.startsWith("[aaaaaaaaaaaa]"));
@@ -1068,7 +1068,7 @@ describe("append reflection annotations", () => {
         .find((text: string) => text.startsWith("[bbbbbbbbbbbb]")),
     }).toEqual({
       before: "[aaaaaaaaaaaa] 2026-10-03 10:00 tests failing",
-      after: "[aaaaaaaaaaaa] 2026-10-03 10:00 tests failing",
+      after: undefined,
       newer: "[bbbbbbbbbbbb] 2026-10-03 14:20 tests pass (supersedes aaaaaaaaaaaa)",
     });
   });

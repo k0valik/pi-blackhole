@@ -154,7 +154,7 @@ export function renderSummary(
   if (opts.supersedes)
     fullFooter = fullFooter.replace(
       "\n----",
-      "\nSupersedes notes identify earlier reflections replaced by this entry; all reflections remain available.\n----",
+      "\nSupersedes notes identify earlier reflections replaced by this entry; replaced reflections are retired from this summary.\n----",
     );
   const footer = hasContent ? fullFooter : OM_FOOTER_BASIC;
   if (parts.length > 0) {

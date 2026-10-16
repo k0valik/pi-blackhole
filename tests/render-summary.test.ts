@@ -233,7 +233,7 @@ describe("reflection annotations", () => {
         "When entries conflict, the entry with the latest timestamp reflects the latest known state.",
       ),
       supersedes: text.includes(
-        "Supersedes notes identify earlier reflections replaced by this entry; all reflections remain available.",
+        "Supersedes notes identify earlier reflections replaced by this entry; replaced reflections are retired from this summary.",
       ),
       legacy: text.includes(
         "When entries conflict, the most recent observation reflects the latest known state.",

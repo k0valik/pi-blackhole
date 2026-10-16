@@ -2,7 +2,7 @@
  * Observational memory ledger types — validated Entry, Observation, Reflection.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/types.ts)
- * Modified: optional evidence timestamps and display-only supersede annotations.
+ * Modified: optional evidence timestamps and supersede annotations.
  */
 export const OM_OBSERVATIONS_RECORDED = "om.observations.recorded";
 export const OM_OBSERVATIONS_UNANCHORED = "om.observations.unanchored";
@@ -110,6 +110,16 @@ function isTokenCount(value: unknown): value is number {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object";
+}
+
+/**
+ * Valid supersede targets of a record: well-formed ids other than its own.
+ * Persisted annotations are optional, so a malformed value reads as "none"
+ * and never invalidates the record.
+ */
+export function supersededIds(record: { id: string; supersedes?: unknown }): string[] {
+  if (!Array.isArray(record.supersedes)) return [];
+  return record.supersedes.filter((id): id is string => isMemoryId(id) && id !== record.id);
 }
 
 export function isObservation(value: unknown): value is Observation {

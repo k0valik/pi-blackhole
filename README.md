@@ -350,8 +350,9 @@ What blackhole adds and reworks on top:
 
 Reflection lines show their latest supporting observation timestamp by default
 (`reflectionTimestamps: true`). Legacy reflections remain unchanged. Optional
-`reflectionSupersedes: true` adds display-only `(supersedes <id>)` notes on new
-reflections; no earlier reflection is hidden or removed. Both keys add no model calls.
+`reflectionSupersedes: true` adds `(supersedes <id>)` notes on new reflections and
+retires the replaced reflection from compaction output (the ledger keeps it). Both
+keys add no model calls.
 Use `PI_BLACKHOLE_REFLECTION_TIMESTAMPS` and `PI_BLACKHOLE_REFLECTION_SUPERSEDES`
 for environment overrides. Export prefers reflection evidence time but omits notes.
 

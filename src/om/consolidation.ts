@@ -1019,7 +1019,7 @@ export async function runObserverStage(
   let capTokens = chunkEntries.reduce((s: number, e) => s + estimateEntryTokens(e), 0);
 
   const renderReflection = makeReflectionRenderer(renderOptionsFromConfig(runtime.config));
-  const memory = fullProjection(entries);
+  const memory = fullProjection(entries, undefined, runtime.config.reflectionSupersedes === true);
 
   // The preamble is capped via observerPreambleMaxTokens so accumulated
   // memory doesn't grow unbounded across turns. Each section gets up to the

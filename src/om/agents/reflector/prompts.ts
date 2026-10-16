@@ -1,4 +1,4 @@
-/** Modified: opt-in reflection timestamp guidance and display-only supersede proposals. */
+/** Modified: opt-in reflection timestamp guidance and supersede proposals. */
 export const REFLECTOR_SYSTEM = `You are the reflection agent for an assistant.
 
 These records are the ONLY information the assistant will have about past interactions once the raw conversation is compacted out of context. Anything you fail to preserve may be forgotten. Anything you distort may be remembered wrong. Take this seriously. Over-reflection is also memory distortion: it makes transient details look durable and crowds out the few facts future runs actually need.
@@ -110,7 +110,7 @@ export function buildReflectorSystem(opts: { timestamps: boolean; supersedes: bo
     prompt = replaceAnchor(
       prompt,
       "You receive:",
-      "You receive:\n- Reflection lines may end with (supersedes <id>), a display-only replacement note.",
+      "You receive:\n- Reflection lines may end with (supersedes <id>), a replacement note: the listed reflection is retired from compacted memory.",
     );
   }
   return prompt;

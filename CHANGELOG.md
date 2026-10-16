@@ -6,6 +6,10 @@
 - **Display-only supersede notes.** `reflectionSupersedes` (default `false`, env `PI_BLACKHOLE_REFLECTION_SUPERSEDES`) lets new reflections annotate earlier shown ids with `(supersedes <id>)`. No reflection is hidden, removed or rewritten; append segments remain unchanged. Both reflection keys off preserve legacy rendering, reflector prompt and schema. No new model calls.
 - Opt-in `observeOnShutdown` (`PI_BLACKHOLE_OBSERVE_ON_SHUTDOWN`, default `false`): persisted sessions can observe their unprocessed tail before quit, new, resume or fork. One observer request at most, a shared 20-second deadline, and a 200-token minimum. Stale host contexts block pending batches and cursor writes, including in-flight consolidation; errors honor `debugLog`. Reload and non-persisted sessions are skipped; no new reflector or dropper is launched.
 
+### Changed
+
+- **`reflectionSupersedes` now retires the replaced reflection.** Supersede notes were display-only, so a reflection that a newer one replaced stayed in compaction output beside it. With `reflectionSupersedes` on (default `false`, unchanged), the replaced reflection now leaves compaction projections, the observer preamble and `/blackhole-memory` views, while the ledger, worker input, export and recall keep it. The prompt wording, summary footer and setting description follow. No new model calls.
+
 ### Fixed
 
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.

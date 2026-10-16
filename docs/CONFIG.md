@@ -47,7 +47,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "memory": true,                 // Enable OM workers + content injection
   "sessionFallback": true,        // Fall back to session model when OM models fail
   "reflectionTimestamps": true,  // Show reflection evidence time
-  "reflectionSupersedes": false, // Display-only replacement notes
+  "reflectionSupersedes": false, // Replacement notes; replaced reflections leave compaction output
   "observeOnShutdown": false,    // One bounded observer attempt before session exit
   "fullFoldAlways": true,         // Treat first compaction as full-fold boundary
   "statusBar": true,              // Footer token gauges (O/P/X) + worker events
@@ -407,9 +407,9 @@ reflections without timestamps remain unchanged. Export prefers stored evidence 
 ### `reflectionSupersedes`
 
 Boolean, default `false`. Allow the reflector to cite earlier shown reflection ids
-that a new fact replaces. The new line displays `(supersedes <id>)`; this is display-only.
-Earlier reflections stay available in summaries, worker inputs, coverage, export and
-recall. Only the new reflection stores the annotation. Export and recall do not display
+that a new fact replaces. The new line displays `(supersedes <id>)` and the replaced
+reflection is retired from compaction projections and the observer preamble. Retired
+reflections stay in the ledger, worker inputs, coverage, export and recall. Only the new reflection stores the annotation. Export and recall do not display
 the suffix. With both reflection keys off, rendering, reflector prompt and tool schema
 match the legacy output. Toggle changes affect the next compaction, not stored segments.
 
