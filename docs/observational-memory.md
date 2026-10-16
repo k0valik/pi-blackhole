@@ -255,6 +255,8 @@ Models that fail with retryable errors are cooled down and skipped in subsequent
 
 ### Persistence
 
+With `debugLog` enabled, each successful cooldown write emits one `model.cooldown_write` event at the persistence owner. It contains the normalized model identity, stage, cause class (`provider_configuration`, `provider_transient`, or `unknown`) and a short sanitized reason, not an HTML/JSON response body. The class describes the current error classification; it does not change cooldown eligibility or retry policy. Failed writes and in-memory-only skips emit no write event.
+
 Cooldowns persist to `~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` with ISO 8601 timestamps. Each entry records:
 
 - `modelKey` — `provider/id` identifier

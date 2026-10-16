@@ -19,7 +19,7 @@ import {
   sanitizeCooldownReason,
   getCooldownEntry,
 } from "./cooldown.js";
-import { isDeterministicError } from "./retryable-error.js";
+import { isDeterministicError, isRetryableError } from "./retryable-error.js";
 import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -987,7 +987,13 @@ export class Runtime {
     // cooldown log never stores a full page and the skip toast stays short.
     // recordCooldown re-sanitizes as defense-in-depth.
     const brief = sanitizeCooldownReason(rawReason);
-    recordCooldown(modelConfig, brief, stage);
+    const causeClass = isDeterministicError(error)
+      ? "provider_configuration"
+      : isRetryableError(error) ||
+          /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND)\b/.test(rawReason)
+        ? "provider_transient"
+        : "unknown";
+    recordCooldown(modelConfig, brief, stage, causeClass);
   }
 
   /**
@@ -1015,6 +1021,7 @@ export class Runtime {
       { provider: model.provider, id: model.id },
       sanitizeCooldownReason(rawReason),
       stage,
+      "provider_configuration",
     );
   }
 

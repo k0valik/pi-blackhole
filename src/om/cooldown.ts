@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { OmModelConfig } from "../core/unified-config.js";
+import { debugLog } from "./debug-log.js";
 
 // ── Persistence ─────────────────────────────────────────────────────────────
 
@@ -65,17 +66,19 @@ function readCooldownMap(): CooldownMap {
   }
 }
 
-function writeCooldownMap(map: CooldownMap): void {
+function writeCooldownMap(map: CooldownMap): boolean {
   try {
     const path = cooldownPath();
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(path, `${JSON.stringify(map, null, 2)}\n`);
+    return true;
   } catch {
     // Best-effort: cooldowns are advisory. Losing them means a rate-limited
     // model might be retried before its cooldown window expires — slightly
     // more API traffic, no data loss. This also prevents a process crash
     // on read-only filesystems.
+    return false;
   }
 }
 
@@ -187,7 +190,12 @@ function httpStatusFrom(text: string): string | undefined {
  * @param reason  Human-readable error reason (e.g. "429 Too Many Requests").
  * @param stage   Which pipeline stage failed ("observer" | "reflector" | "dropper").
  */
-export function recordCooldown(model: OmModelConfig, reason: string, stage: string): void {
+export function recordCooldown(
+  model: OmModelConfig,
+  reason: string,
+  stage: string,
+  causeClass: "provider_configuration" | "provider_transient" | "unknown" = "unknown",
+): void {
   // cooldownHours === 0 means cooldown disabled
   if (model.cooldownHours === 0) return;
   // Thinking-only modifiers carry no identity: nothing to cool down.
@@ -203,7 +211,14 @@ export function recordCooldown(model: OmModelConfig, reason: string, stage: stri
     reason: sanitizeCooldownReason(reason),
     stage,
   };
-  writeCooldownMap(map);
+  if (writeCooldownMap(map)) {
+    debugLog("model.cooldown_write", {
+      model: modelKey({ provider: model.provider, id: model.id }),
+      stage,
+      causeClass,
+      reason: sanitizeCooldownReason(reason),
+    });
+  }
 }
 
 /**
