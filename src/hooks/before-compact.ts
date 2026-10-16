@@ -8,7 +8,7 @@
  * - This is the single joining point between pi-vcc and OM.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { writeFileSync } from "fs";
 import {
   compile,
@@ -17,7 +17,11 @@ import {
   stripOMContent,
   stripRecallNotes,
 } from "../core/summarize";
-import { buildAppendOnlyDetails, coverageForMessages } from "../core/compaction-chain.js";
+import {
+  buildAppendOnlyDetails,
+  coverageForMessages,
+  projectAppendOnlyContext,
+} from "../core/compaction-chain.js";
 import { getModelProvider, matchesSkippedProvider } from "../core/provider-skip.js";
 import type { PiVccCompactionDetails } from "../details";
 import {
@@ -33,6 +37,16 @@ import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js
 import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
 import { loadGitFileTags } from "../extract/git-status.js";
 import { collectFilesTouched } from "../extract/file-touch.js";
+
+import { selectPressureTail } from "../core/context-pressure.js";
+import { estimateEntryTokens, estimateStringTokens } from "../om/tokens.js";
+
+/** Count the actual host wrapper, not only the summary's text. */
+const summaryContextTokens = (summary: string): number =>
+  convertToLlm([{ role: "compactionSummary", summary, tokensBefore: 0, timestamp: 0 }]).reduce(
+    (sum, message) => sum + estimateTokens(message),
+    0,
+  );
 
 export const PI_VCC_COMPACT_INSTRUCTION = "__pi_vcc__";
 
@@ -398,7 +412,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       piFirstKeptEntryId: preparation.firstKeptEntryId,
     });
 
-    const ownCut = buildOwnCut(
+    let ownCut = buildOwnCut(
       branchEntries as any[],
       preparation.firstKeptEntryId,
       effectiveTailBehavior,
@@ -478,6 +492,90 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       } catch {}
       omRuntime.lastCompactCancelled = true;
       return { cancel: true };
+    }
+
+    const pressureEnabled = omRuntime.config.contextPressureFallback === "vcc";
+    let pressureBridged = false;
+    if (pressureEnabled) {
+      const preferredCut = ownCut;
+      const originalSelected = new Set(preferredCut.selectedIds);
+      const preferredIndex = branchEntries.findIndex(
+        (entry) => entry.id === preferredCut.firstKeptEntryId,
+      );
+      const candidateEntries = (id: string) => {
+        const end =
+          id === "" ? branchEntries.length : branchEntries.findIndex((entry) => entry.id === id);
+        return branchEntries.filter(
+          (entry, index) =>
+            entry.type === "message" &&
+            (originalSelected.has(entry.id) ||
+              (preferredIndex >= 0 && index >= preferredIndex && index < end)),
+        );
+      };
+      const pressure = selectPressureTail({
+        entries: branchEntries,
+        firstKeptEntryId: preferredCut.firstKeptEntryId,
+        contextWindow:
+          ctx.model && Number.isFinite(ctx.model.contextWindow) && ctx.model.contextWindow > 0
+            ? effectiveContextWindow(ctx.model)
+            : undefined,
+        reserveTokens:
+          (preparation.settings?.reserveTokens ?? Number.NaN) +
+          estimateStringTokens(ctx.getSystemPrompt?.() ?? ""),
+        keepRecentTokens: preparation.settings?.keepRecentTokens ?? Number.NaN,
+        summaryTokens: (id) => {
+          const sources = candidateEntries(id);
+          const messages = sources.flatMap((entry) =>
+            entry.type === "message" ? convertToLlm([entry.message]) : [],
+          );
+          const summary = compile({
+            messages,
+            previousSummary: preparation.previousSummary,
+            fileOps: {
+              readFiles: [...preparation.fileOps.read],
+              modifiedFiles: [...preparation.fileOps.written, ...preparation.fileOps.edited],
+            },
+            cwd: ctx.cwd ?? process.cwd(),
+          });
+          const projection = buildCompactionProjection(branchEntries, id, {
+            observationsPoolMaxTokens: omRuntime.config.observationsPoolMaxTokens,
+            reflectionsPoolMaxTokens:
+              omRuntime.config.reflectionsPoolMaxTokens ?? DEFAULTS.reflectionsPoolMaxTokens,
+            fullFoldAlways: omRuntime.config.fullFoldAlways,
+            reflectionTimestamps: omRuntime.config.reflectionTimestamps,
+            reflectionSupersedes: omRuntime.config.reflectionSupersedes,
+          });
+          return summaryContextTokens(
+            summary +
+              "\n\n" +
+              renderSummary(
+                omRuntime.config.memory === false ? [] : projection.reflections,
+                omRuntime.config.memory === false ? [] : projection.observations,
+                renderOptionsFromConfig(omRuntime.config),
+              ),
+          );
+        },
+      });
+      if (!pressure.ok) {
+        trace("before_compact.cancel", { reason: pressure.reason });
+        ctx.ui?.notify?.(
+          "blackhole: context pressure fallback deferred; no safe fitting raw tail or capacity is unknown.",
+          "warning",
+        );
+        omRuntime.lastCompactCancelled = true;
+        return { cancel: true };
+      }
+      pressureBridged = pressure.bridgedIds.length > 0;
+      if (pressureBridged) {
+        const selected = candidateEntries(pressure.firstKeptEntryId);
+        ownCut = {
+          ok: true,
+          messages: selected.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
+          selectedIds: selected.map((entry) => entry.id),
+          firstKeptEntryId: pressure.firstKeptEntryId,
+          compactAll: false,
+        };
+      }
     }
 
     trace("before_compact.proceeding", {
@@ -686,16 +784,18 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     } catch {
       // Omitted outputs remain generically recallable when an index is unproven.
     }
-    const retainedToolOutputProjection = buildRetainedToolOutputProjection(
-      keptEntries,
-      allEntries,
-      omRuntime.config.retainedToolOutputMaxTokens,
-    );
+    const retainedToolOutputProjection = pressureBridged
+      ? undefined
+      : buildRetainedToolOutputProjection(
+          keptEntries,
+          allEntries,
+          omRuntime.config.retainedToolOutputMaxTokens,
+        );
     trace("before_compact.tool_output_budget", {
-      retainedTokens: retainedToolOutputProjection.retainedTokens,
-      omittedTokens: retainedToolOutputProjection.omittedTokens,
-      omittedCount: retainedToolOutputProjection.omissions.length,
-      pendingCount: retainedToolOutputProjection.pendingCount,
+      retainedTokens: retainedToolOutputProjection?.retainedTokens,
+      omittedTokens: retainedToolOutputProjection?.omittedTokens,
+      omittedCount: retainedToolOutputProjection?.omissions.length,
+      pendingCount: retainedToolOutputProjection?.pendingCount,
     });
 
     const legacyDetails: PiVccCompactionDetails = {
@@ -741,6 +841,14 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // (renderSummary([], []) always emits the OM recall footer, so the check
     // must not key off footer-inclusive omContent.)
     const fallbackSummary = summary + "\n\n" + omContent;
+    if (pressureEnabled && summary.trim().length === 0 && !omHasContent) {
+      ctx.ui?.notify?.(
+        "blackhole: context pressure fallback deferred; no useful summary.",
+        "warning",
+      );
+      omRuntime.lastCompactCancelled = true;
+      return { cancel: true };
+    }
     if (summary.trim().length === 0 && !omHasContent) {
       // Returning undefined delegates to Pi's native summarizer:
       // ExtensionHandler permits void, and pi only acts on result?.compaction.
@@ -783,7 +891,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         try {
           const result = buildAppendOnlyDetails({
             branchEntries: branchEntries as any[],
-            manualRebase: isPiVcc,
+            manualRebase: isPiVcc || pressureBridged,
             freshSummary: freshSegmentSummary,
             aggregateSummary,
             trailingSummary,
@@ -828,10 +936,73 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         );
       }
     }
+    if (pressureEnabled) {
+      // Final render is authoritative: refs, OM and append metadata can cost more
+      // than the candidate estimate. Never publish a knowingly oversized cut.
+      const estimated =
+        estimateStringTokens(ctx.getSystemPrompt?.() ?? "") +
+        summaryContextTokens(fallbackSummary) +
+        (keptIdx >= 0 ? branchEntries.slice(keptIdx) : []).reduce(
+          (total, entry) => total + estimateEntryTokens(entry),
+          0,
+        );
+      const capacity =
+        (ctx.model ? effectiveContextWindow(ctx.model) : 0) -
+        (preparation.settings?.reserveTokens ?? 0);
+      if (estimated > capacity) {
+        ctx.ui?.notify?.(
+          "blackhole: context pressure fallback deferred; final summary and raw tail exceed capacity.",
+          "warning",
+        );
+        omRuntime.lastCompactCancelled = true;
+        return { cancel: true };
+      }
+    }
+    if (pressureEnabled && details.version === 2) {
+      let candidateId = "blackhole-pressure-candidate";
+      while (branchEntries.some((entry) => entry.id === candidateId)) candidateId += "-";
+      const candidateMessages = projectAppendOnlyContext(
+        [{ role: "compactionSummary", summary: fallbackSummary, tokensBefore: 0, timestamp: 0 }],
+        [
+          ...branchEntries,
+          {
+            id: candidateId,
+            type: "compaction",
+            summary: fallbackSummary,
+            firstKeptEntryId,
+            details,
+          },
+        ],
+      );
+      const summaryTokens = convertToLlm(candidateMessages).reduce(
+        (total, message) => total + estimateTokens(message),
+        0,
+      );
+      const rawTokens = (keptIdx >= 0 ? branchEntries.slice(keptIdx) : []).reduce(
+        (total, entry) => total + estimateEntryTokens(entry),
+        0,
+      );
+      const capacity =
+        (ctx.model ? effectiveContextWindow(ctx.model) : 0) -
+        (preparation.settings?.reserveTokens ?? 0) -
+        estimateStringTokens(ctx.getSystemPrompt?.() ?? "");
+      if (summaryTokens + rawTokens > capacity) {
+        ctx.ui?.notify?.(
+          "blackhole: compaction deferred; append context and raw tail exceed capacity.",
+          "warning",
+        );
+        omRuntime.lastCompactCancelled = true;
+        return { cancel: true };
+      }
+    }
     return {
       compaction: {
         summary: fallbackSummary,
-        details: { ...details, "om.folded": omDetails },
+        details: {
+          ...details,
+          "om.folded": omDetails,
+          ...(pressureEnabled ? { "om.preserveSourceHistory": true } : {}),
+        },
         tokensBefore: preparation.tokensBefore,
         firstKeptEntryId,
       },

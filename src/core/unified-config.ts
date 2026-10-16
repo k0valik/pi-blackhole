@@ -130,6 +130,9 @@ export interface UnifiedConfig {
    *  ONLY applies when compactionEngine: "blackhole" */
   tailBehavior: "pi-default" | "minimal";
 
+  /** Opt-in policy-independent VCC bridge when the preferred context cannot fit. */
+  contextPressureFallback: "off" | "vcc";
+
   /** Show a display-only copy of the newest assistant output that the
    *  compaction dropped from view (`blackhole-pre-compaction-output` custom
    *  entry). Cosmetic: the copy never enters provider context or Blackhole
@@ -301,6 +304,7 @@ export const DEFAULTS: UnifiedConfig = {
 
   skipForProviders: [],
   tailBehavior: "minimal",
+  contextPressureFallback: "off",
   showPreCompactionMessage: true,
   retainedToolOutputMaxTokens: 20_000,
   recallResponseMaxChars: 48_000,
@@ -583,6 +587,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
   if (isCompactionSummaryMode(raw.compactionSummaryMode))
     c.compactionSummaryMode = raw.compactionSummaryMode;
   if (isTailBehavior(raw.tailBehavior)) c.tailBehavior = raw.tailBehavior;
+  if (raw.contextPressureFallback === "off" || raw.contextPressureFallback === "vcc")
+    c.contextPressureFallback = raw.contextPressureFallback;
   if (isMidRunCompaction(raw.midRunCompaction)) c.midRunCompaction = raw.midRunCompaction;
   // cacheRetention is the one string enum that canonicalizes: the raw value is
   // normalized so a hand-edited "LONG" resolves the same as the env var's.

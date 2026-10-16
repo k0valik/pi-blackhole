@@ -1,3 +1,4 @@
+import { convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 /**
  * Ported from upstream pi-vcc
  * Changes:
@@ -29,7 +30,11 @@ afterAll(() => {
 });
 
 // Minimal ExtensionAPI stub: capture handler + provide ctx with mocked ui.notify
-function createMockPi(initialConfig?: Record<string, unknown>, ctxModel?: unknown) {
+function createMockPi(
+  initialConfig?: Record<string, unknown>,
+  ctxModel?: unknown,
+  systemPrompt = "",
+) {
   let handler: ((event: any, ctx: any) => any) | undefined;
   const notifyCalls: Array<{ msg: string; level: string }> = [];
   const config = {
@@ -44,6 +49,7 @@ function createMockPi(initialConfig?: Record<string, unknown>, ctxModel?: unknow
     cwd: tmpDir,
     hasUI: true,
     model: ctxModel,
+    getSystemPrompt: () => systemPrompt,
     ui: {
       notify: (msg: string, level: string) => {
         notifyCalls.push({ msg, level });
@@ -565,4 +571,169 @@ describe("registerBeforeCompactHook: provider-aware skip", () => {
     );
     expect(result.compaction).toBeDefined();
   });
+});
+
+describe("opt-in shared pressure fallback", () => {
+  const entries = () => [
+    msg("m1", "user", "Initial goal"),
+    msg("m2", "assistant", "Old work"),
+    msg("m3", "user", "Older retained request"),
+    {
+      ...msg("call", "assistant"),
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call1", name: "read", arguments: { path: "file.ts" } }],
+      },
+    },
+    {
+      ...msg("m4", "toolResult"),
+      message: {
+        role: "toolResult",
+        toolCallId: "call1",
+        toolName: "read",
+        content: [{ type: "text", text: "x".repeat(40000) }],
+      },
+    },
+    msg("m5", "user", "Recent request"),
+  ];
+  const model = { provider: "test", id: "test", contextWindow: 4000 };
+  test("pi-default bridges old retained tail under pressure", () => {
+    const { pi, invoke, omRuntime } = createMockPi(
+      { tailBehavior: "pi-default", contextPressureFallback: "vcc" },
+      model,
+    );
+    registerBeforeCompactHook(pi, omRuntime);
+    const event = makeEvent(entries(), PI_VCC_COMPACT_INSTRUCTION);
+    event.preparation.firstKeptEntryId = "m3";
+    event.preparation.settings = { reserveTokens: 500, keepRecentTokens: 500 };
+    const result = invoke(event);
+    expect(result.compaction.firstKeptEntryId).toBe("m5");
+    expect(result.compaction.details["om.preserveSourceHistory"]).toBe(true);
+  });
+  test("default-off keeps existing pi-default cut", () => {
+    const { pi, invoke, omRuntime } = createMockPi({ tailBehavior: "pi-default" }, model);
+    registerBeforeCompactHook(pi, omRuntime);
+    const event = makeEvent(entries(), PI_VCC_COMPACT_INSTRUCTION);
+    event.preparation.firstKeptEntryId = "m3";
+    expect(invoke(event).compaction.firstKeptEntryId).toBe("m3");
+  });
+  test("fitting preferred tail is untouched", () => {
+    const { pi, invoke, omRuntime } = createMockPi(
+      { tailBehavior: "pi-default", contextPressureFallback: "vcc" },
+      { ...model, contextWindow: 100000 },
+    );
+    registerBeforeCompactHook(pi, omRuntime);
+    const event = makeEvent(entries(), PI_VCC_COMPACT_INSTRUCTION);
+    event.preparation.firstKeptEntryId = "m3";
+    event.preparation.settings = { reserveTokens: 500, keepRecentTokens: 500 };
+    expect(invoke(event).compaction.firstKeptEntryId).toBe("m3");
+  });
+  test("oversized unsplittable tail explicitly defers", () => {
+    const { pi, invoke, omRuntime } = createMockPi(
+      { tailBehavior: "pi-default", contextPressureFallback: "vcc" },
+      model,
+    );
+    registerBeforeCompactHook(pi, omRuntime);
+    const event = makeEvent(
+      [
+        msg("m1", "user", "goal"),
+        msg("m2", "assistant", "response"),
+        msg("m3", "user", "x".repeat(40000)),
+      ],
+      PI_VCC_COMPACT_INSTRUCTION,
+    );
+    event.preparation.firstKeptEntryId = "m3";
+    event.preparation.settings = { reserveTokens: 500, keepRecentTokens: 500 };
+    expect(invoke(event)).toEqual({ cancel: true });
+  });
+});
+
+test("pressure opt-in does not delegate an empty summary to native compaction", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { tailBehavior: "minimal", contextPressureFallback: "vcc", memory: false },
+    { provider: "test", id: "test", contextWindow: 10000 },
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const event = makeEvent(
+    [msg("m1", "assistant", ""), msg("m2", "assistant", ""), msg("m3", "assistant", "")],
+    PI_VCC_COMPACT_INSTRUCTION,
+  );
+  event.preparation.settings = { reserveTokens: 100, keepRecentTokens: 100 };
+  expect(invoke(event)).toEqual({ cancel: true });
+});
+
+test("pressure unknown model capacity defers rather than assuming a window", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { contextPressureFallback: "vcc" },
+    { provider: "test", id: "test" },
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const event = makeEvent(
+    [msg("m1", "user", "goal"), msg("m2", "assistant", "response"), msg("m3", "user", "next")],
+    PI_VCC_COMPACT_INSTRUCTION,
+  );
+  event.preparation.settings = { reserveTokens: 100, keepRecentTokens: 100 };
+  expect(invoke(event)).toEqual({ cancel: true });
+});
+
+test("capacity includes the current system prompt", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { contextPressureFallback: "vcc" },
+    { provider: "test", id: "test", contextWindow: 2000 },
+    "system ".repeat(2000),
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const event = makeEvent(
+    [
+      msg("m1", "user", "Build feature"),
+      msg("m2", "assistant", "done"),
+      msg("m3", "user", "next"),
+      {
+        id: "om1",
+        type: "custom",
+        customType: "om.observations.recorded",
+        data: {
+          coversUpToId: "m2",
+          observations: [
+            {
+              id: "aaaaaaaaaaaa",
+              content: "Done",
+              timestamp: "2026-01-01T00:00:00Z",
+              relevance: "high",
+              tokenCount: 5,
+              sourceEntryIds: ["m1", "m2"],
+            },
+          ],
+        },
+      },
+    ],
+    PI_VCC_COMPACT_INSTRUCTION,
+  );
+  event.preparation.settings = { reserveTokens: 100, keepRecentTokens: 100 };
+  expect(invoke(event)).toEqual({ cancel: true });
+});
+
+test("pressure estimates include host compaction-summary wrappers", () => {
+  const entries = [
+    msg("m1", "user", "Build feature"),
+    msg("m2", "assistant", "done"),
+    msg("m3", "user", "next"),
+  ];
+  const run = (window: number) => {
+    const { pi, invoke, omRuntime } = createMockPi(
+      { contextPressureFallback: "vcc", tailBehavior: "minimal" },
+      { provider: "test", id: "test", contextWindow: window },
+    );
+    registerBeforeCompactHook(pi, omRuntime);
+    const event = makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION);
+    event.preparation.settings = { reserveTokens: 100, keepRecentTokens: 100 };
+    return invoke(event);
+  };
+  const summary = run(10000).compaction.summary;
+  const wrapped = convertToLlm([
+    { role: "compactionSummary", summary, tokensBefore: 1000, timestamp: 0 },
+  ]).reduce((total, message) => total + estimateTokens(message), 0);
+  // Capacity is one token below the real host-wrapped summary plus raw tail.
+  const capacity = wrapped + 1 - 1;
+  expect(run(capacity + 100)).toEqual({ cancel: true });
 });

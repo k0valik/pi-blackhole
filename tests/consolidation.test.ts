@@ -2659,3 +2659,143 @@ describe("reflector annotation settings snapshot", () => {
     }).toEqual({ timestamps: false, supersedes: false, line: "[aaaaaaaaaaaa] C" });
   });
 });
+
+describe("pressure original-history continuity", () => {
+  test.each([false, true])(
+    "no coverage replays original backlog across repeated compactions (stale cursor %s)",
+    async (stale) => {
+      const fixture = makePipelineFixture({
+        observeAfterTokens: 1,
+        entries: [
+          smallSource("m1"),
+          compactionEntry("c1", { firstKeptEntryId: "m2" }),
+          smallSource("m2"),
+          compactionEntry("c2", { firstKeptEntryId: "m3" }),
+          smallSource("m3"),
+        ],
+      });
+      fixture.runtime.config.contextPressureFallback = "vcc";
+      if (stale) fixture.runtime.advanceCursor("observer", "missing", "recorded");
+      await fixture.run();
+      expect(observerChunkArg().allowedSourceEntryIds).toEqual(["m1", "m2", "m3"]);
+    },
+  );
+  test("restart preserves backlog before compaction without recording coverage", async () => {
+    const entries = [
+      smallSource("m1"),
+      compactionEntry("c1", { firstKeptEntryId: "m2" }),
+      smallSource("m2"),
+    ];
+    const first = makePipelineFixture({ observeAfterTokens: 5000, entries });
+    first.runtime.config.contextPressureFallback = "vcc";
+    await first.run();
+    first.runtime.saveCursorsToPending("cursor-session");
+    const restored = makePipelineFixture({ observeAfterTokens: 1, entries });
+    restored.runtime.config.contextPressureFallback = "vcc";
+    restored.runtime.loadCursorsFromPending("cursor-session");
+    await restored.run();
+    expect(observerChunkArg().allowedSourceEntryIds).toEqual(["m1", "m2"]);
+  });
+});
+
+test("persisted preservation intent survives mode change and missing cursor", async () => {
+  const fixture = makePipelineFixture({
+    observeAfterTokens: 1,
+    entries: [
+      smallSource("m1"),
+      compactionEntry("c1", {
+        firstKeptEntryId: "m2",
+        details: { "om.preserveSourceHistory": true },
+      }),
+      smallSource("m2"),
+    ],
+  });
+  fixture.runtime.config.tailBehavior = "minimal";
+  await fixture.run();
+  expect(observerChunkArg().allowedSourceEntryIds).toEqual(["m1", "m2"]);
+});
+
+test("in-flight observation completes only its snapshot; compaction cannot skip later originals", async () => {
+  const fixture = makePipelineFixture({ observeAfterTokens: 1, entries: [smallSource("m1")] });
+  fixture.runtime.config.contextPressureFallback = "vcc";
+  let release: ((value: unknown) => void) | undefined;
+  let entered: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  agents.runObserver.mockImplementationOnce(() => {
+    entered?.();
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  });
+  const running = fixture.run();
+  try {
+    await started;
+    fixture.entries.push(
+      smallSource("m2"),
+      compactionEntry("c1", {
+        firstKeptEntryId: "m2",
+        details: { "om.preserveSourceHistory": true },
+      }),
+    );
+  } finally {
+    release?.({ observations: [], emptyReason: { kind: "no_new_content" } });
+    await running;
+  }
+  await fixture.run();
+  expect(agents.runObserver.mock.calls.map(([input]) => input.allowedSourceEntryIds)).toEqual([
+    ["m1"],
+    ["m2"],
+  ]);
+});
+
+test("preserving observer rejects coverage anchored to compaction metadata", async () => {
+  const fixture = makePipelineFixture({
+    observeAfterTokens: 1,
+    entries: [
+      smallSource("m1"),
+      compactionEntry("c1", { firstKeptEntryId: "m2" }),
+      smallSource("m2"),
+      observationsRecordedEntry("om1", {
+        coversUpToId: "c1",
+        observations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["m1"] })],
+      }),
+    ],
+  });
+  fixture.runtime.config.contextPressureFallback = "vcc";
+  await fixture.run();
+  expect(observerChunkArg().allowedSourceEntryIds).toEqual(["m1", "m2"]);
+});
+
+test("preserving observer trigger counts backlog before an inherited compaction cursor", () => {
+  const fixture = makePipelineFixture({
+    observeAfterTokens: 1000,
+    entries: [
+      rawMessage("m1", "x".repeat(10000)),
+      compactionEntry("c1", { firstKeptEntryId: "m2" }),
+      smallSource("m2"),
+    ],
+  });
+  fixture.runtime.config.contextPressureFallback = "vcc";
+  fixture.runtime.advanceCursor("observer", "c1", "not_due");
+  expect(anyStageDue(fixture.entries, fixture.runtime)).toBe(true);
+});
+
+test("preserving observer does not skip an earlier hole before a disconnected batch", async () => {
+  const fixture = makePipelineFixture({
+    observeAfterTokens: 1,
+    entries: [
+      smallSource("m1"),
+      smallSource("m2"),
+      smallSource("m3"),
+      observationsRecordedEntry("om1", {
+        coversUpToId: "m2",
+        observations: [observation("aaaaaaaaaaaa", { sourceEntryIds: ["m2"] })],
+      }),
+    ],
+  });
+  fixture.runtime.config.contextPressureFallback = "vcc";
+  await fixture.run();
+  expect(observerChunkArg().allowedSourceEntryIds).toEqual(["m1", "m2", "m3"]);
+});

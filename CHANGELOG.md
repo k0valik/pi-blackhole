@@ -2,6 +2,10 @@
 
 ### Added
 
+- Opt-in `contextPressureFallback: "vcc"` bridges older retained context under pressure independently of tail policy, with a bounded recent raw suffix and original-history observer continuity. Default is `"off"`.
+
+### Added
+
 - **Reflection timestamps.** New reflections store evidence time from their latest supporting observation. `reflectionTimestamps` (default `true`, env `PI_BLACKHOLE_REFLECTION_TIMESTAMPS`) displays it in compacted memory, worker prompts and `/blackhole-memory`; export prefers that time. Legacy records remain unchanged.
 - **Display-only supersede notes.** `reflectionSupersedes` (default `false`, env `PI_BLACKHOLE_REFLECTION_SUPERSEDES`) lets new reflections annotate earlier shown ids with `(supersedes <id>)`. No reflection is hidden, removed or rewritten; append segments remain unchanged. Both reflection keys off preserve legacy rendering, reflector prompt and schema. No new model calls.
 - Opt-in `observeOnShutdown` (`PI_BLACKHOLE_OBSERVE_ON_SHUTDOWN`, default `false`): persisted sessions can observe their unprocessed tail before quit, new, resume or fork. One observer request at most, a shared 20-second deadline, and a 200-token minimum. Stale host contexts block pending batches and cursor writes, including in-flight consolidation; errors honor `debugLog`. Reload and non-persisted sessions are skipped; no new reflector or dropper is launched.

@@ -116,3 +116,16 @@ describe("reflection output configuration", () => {
     expect(DEFAULTS.compactAfterPreset).toBe("default");
   });
 });
+
+describe("contextPressureFallback opt-in", () => {
+  it.each([undefined, "invalid", "vcc"])("loads %s without changing defaults", async (value) => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const { config } = await import("../src/pi-base/blackhole-settings.js");
+    writeConfig({ contextPressureFallback: value });
+    const expected = value === "vcc" ? "vcc" : "off";
+    expect(loadUnifiedConfig(testDir).contextPressureFallback).toBe(expected);
+    expect(config.load(testDir, join(testDir, "pi-blackhole")).contextPressureFallback).toBe(
+      expected,
+    );
+  });
+});

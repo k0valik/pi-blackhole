@@ -8,6 +8,7 @@
   "compactionEngine": "blackhole",
   "compactionSummaryMode": "default",
   "tailBehavior": "minimal",
+  "contextPressureFallback": "off",
   "showPreCompactionMessage": true,
   "midRunCompaction": "off",
   "compactAfterTokens": 0,

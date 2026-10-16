@@ -99,6 +99,15 @@ export const config = new ConfigManager<UnifiedConfig>({
       },
     },
     {
+      key: "contextPressureFallback",
+      type: "enum",
+      label: "Context pressure fallback",
+      description:
+        "off=unchanged tail policy, vcc=bridge older retained tail only when preferred context cannot fit",
+      value: cfg.contextPressureFallback,
+      options: ["off", "vcc"],
+    },
+    {
       key: "midRunCompaction",
       type: "enum",
       label: "Mid-run compaction",
@@ -453,6 +462,8 @@ export const config = new ConfigManager<UnifiedConfig>({
    */
   validate: (raw) => {
     const parsed = { ...raw } as Partial<UnifiedConfig>;
+    if (parsed.contextPressureFallback !== "off" && parsed.contextPressureFallback !== "vcc")
+      delete parsed.contextPressureFallback;
 
     // ── Migration: legacy keys → new surface ──
     if (parsed.compaction === undefined && parsed.compactionEngine === undefined) {

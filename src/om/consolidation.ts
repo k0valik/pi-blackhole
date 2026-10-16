@@ -7,6 +7,7 @@
  * - All errors record cooldown (so the failed model is skipped next iteration).
  * - 30s retry gate prevents repeated failed runs (isConsolidationRetryGated).
  */
+import { observedPrefixIndex } from "../core/observation-boundary.js";
 import { observeTailOnShutdown } from "./shutdown-observe.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { matchesSkippedProvider } from "../core/provider-skip.js";
@@ -351,6 +352,33 @@ function matchesEmptyPressurePool(runtime: Runtime, poolSignature: string): bool
   return cursor?.state === "empty" && cursor.activePoolSignature === poolSignature;
 }
 
+/** Compaction is not observation progress. Persisted intent survives restart
+ * and disabling the opt-in, without pretending a VCC bridge was observed. */
+function preserveObserverSources(entries: Entry[], runtime: Runtime): boolean {
+  return (
+    runtime.config.contextPressureFallback === "vcc" ||
+    entries.some(
+      (entry) =>
+        entry.type === "compaction" &&
+        entry.details &&
+        typeof entry.details === "object" &&
+        "om.preserveSourceHistory" in entry.details &&
+        entry.details["om.preserveSourceHistory"] === true,
+    )
+  );
+}
+
+function observerStartIndex(entries: Entry[], runtime: Runtime): number {
+  const preserve = preserveObserverSources(entries, runtime);
+  const cursor = runtime.getCursor("observer");
+  const cursorIndex = entryIndexForId(entries, cursor?.entryId);
+  if (cursorIndex >= 0 && (!preserve || isSourceEntry(entries[cursorIndex]))) return cursorIndex;
+  if (preserve) return observedPrefixIndex(entries);
+
+  const coverage = latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED);
+  return coverage >= 0 ? coverage : findLastCompactionIndex(entries);
+}
+
 /** Cursor-aware stage-due check.  Uses cursors when available; falls back to
  *  legacy coverage markers when cursors are absent (cold start, fork recovery).
  *
@@ -363,6 +391,11 @@ export function anyStageDue(entries: Entry[], runtime: Runtime, pending?: Pendin
 
   // ── Observer ──────────────────────────────────────────────────────────
   const observerDue = (() => {
+    if (preserveObserverSources(entries, runtime))
+      return (
+        rawTokensAfterIndex(entries, observerStartIndex(entries, runtime)) >=
+        config.observeAfterTokens
+      );
     const cursor = cursors.observer;
     if (!cursor) {
       return rawTokensSinceObservationCoverage(entries) >= config.observeAfterTokens;
@@ -938,22 +971,8 @@ export async function runObserverStage(
   // first keep (see the branch for why one seed per invocation suffices).
   let unanchoredSeenIds: Set<string> | undefined;
 
-  // Determine start index: cursor takes priority. A cursor whose entry left the
-  // branch (fork, navigation, compaction during the session) falls back to the
-  // same marker/compaction rule as an absent cursor, so a pruned pre-compaction
-  // anchor never forces a full-history re-observation.
-  const observerCursor = runtime.getCursor("observer");
-  const observerFallbackStart = (): number => {
-    const lastCoverageIdx = latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED);
-    return lastCoverageIdx >= 0 ? lastCoverageIdx : findLastCompactionIndex(entries);
-  };
-  let effectiveStart: number;
-  if (observerCursor) {
-    const cursorIdx = entryIndexForId(entries, observerCursor.entryId);
-    effectiveStart = cursorIdx >= 0 ? cursorIdx : observerFallbackStart();
-  } else {
-    effectiveStart = observerFallbackStart();
-  }
+  // The same anchor drives trigger accounting and delivered source selection.
+  const effectiveStart = observerStartIndex(entries, runtime);
 
   // Anchor -1 (no cursor, no marker, no compaction) measures the full history:
   // rawTokensAfterIndex clamps -1 to index 0 (issue #87).
