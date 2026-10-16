@@ -28,6 +28,8 @@ What to emit:
 - Group repeated similar tool calls into a single observation rather than one per call.
 - Skip routine, low-information events. It is fine to emit zero observations if the chunk carries no new information — in that case, close the run with a single record_observations call carrying an empty observations array and complete=true.
 
+ask_user_question results: a "[Tool result for ask_user_question ...]" block holds the user's own answers, so each selected choice is a user decision. Record every selected choice, and the meaning of any "User notes", as its own clean single-fact observation citing that result's source entry id, with relevance at least high. Never record the unselected options.
+
 Survival test. Before recording, ask one question per candidate: with only this line and no transcript, would a future assistant make a better decision, avoid redoing work, or avoid violating a user constraint? If yes, record it. If no, it is noise: label it low, or omit it entirely when it carries no value at all. You are not summarizing the chunk for a reader of the chunk — you are curating what a future session needs.
 
 Grounding rules:
