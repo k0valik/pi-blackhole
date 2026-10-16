@@ -1703,7 +1703,8 @@ export async function runObserverStage(
       // derive from the same window, so a retry spends another whole budget on
       // an identical outcome. (A turn cap on a multi-entry chunk never reaches
       // here: the halve-and-retry above continues on the smaller input.)
-      // Candidates differ — they cool down and the fallback chain takes over.
+      // Candidates differ — turn caps skip in-cycle and provider failures cool
+      // down, then the fallback chain takes over.
       if (
         !candidateConfig &&
         (error instanceof WorkerAttemptTimeoutError ||
@@ -2078,8 +2079,12 @@ export async function runReflectorStage(
     // is abandoned with the cursor unmoved.
     const voidBatchedRun = (error: unknown): ReflectorStageResult => {
       const candidateConfig = stageModelForBatch;
-      runtime.recordRetryableError(candidateConfig, error, "reflector");
-      if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+      if (error instanceof WorkerStreamError && error.turnCapExhausted) {
+        runtime.skipFailedForCycle(candidateConfig ?? bestModel, "turn_cap");
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "reflector");
+        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+      }
       debugLog("reflector.error", {
         error: String(error),
         retryable: isRetryableError(error),
@@ -2343,8 +2348,12 @@ export async function runReflectorStage(
       if (!(error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
         sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
-      runtime.recordRetryableError(candidateConfig, error, "reflector");
-      if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
+      if (error instanceof WorkerStreamError && error.turnCapExhausted) {
+        runtime.skipFailedForCycle(candidateConfig ?? resolved.model, "turn_cap");
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "reflector");
+        if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
+      }
       debugLog("reflector.error", {
         error: String(error),
         retryable: isRetryableError(error),
@@ -2359,7 +2368,8 @@ export async function runReflectorStage(
       // cut on an input the preflight accepted — fails the same way: the turn
       // budget and the output cap derive from the same window, so a retry
       // spends another whole budget on an identical outcome. Candidates
-      // differ — they cool down and the fallback chain takes over.
+      // differ — they are skipped in-cycle for turn caps (cooled for provider
+      // failures), and the fallback chain takes over.
       if (
         !candidateConfig &&
         (error instanceof WorkerAttemptTimeoutError ||
@@ -2745,8 +2755,12 @@ export async function runDropperStage(
     // unmoved.
     const voidBatchedRun = (error: unknown): StageOutcome => {
       const candidateConfig = stageModelForBatch;
-      runtime.recordRetryableError(candidateConfig, error, "dropper");
-      if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
+      if (error instanceof WorkerStreamError && error.turnCapExhausted) {
+        runtime.skipFailedForCycle(candidateConfig ?? bestModel, "turn_cap");
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "dropper");
+        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
+      }
       debugLog("dropper.error", {
         error: String(error),
         retryable: isRetryableError(error),
@@ -3003,8 +3017,12 @@ export async function runDropperStage(
       if (!(error instanceof WorkerStreamError && (error.turnCapExhausted || error.lengthCut)))
         sawAttemptError = true;
       const candidateConfig = stageModelForThinking;
-      runtime.recordRetryableError(candidateConfig, error, "dropper");
-      if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "dropper");
+      if (error instanceof WorkerStreamError && error.turnCapExhausted) {
+        runtime.skipFailedForCycle(candidateConfig ?? resolved.model, "turn_cap");
+      } else {
+        runtime.recordRetryableError(candidateConfig, error, "dropper");
+        if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "dropper");
+      }
       debugLog("dropper.error", {
         error: String(error),
         retryable: isRetryableError(error),
@@ -3019,7 +3037,8 @@ export async function runDropperStage(
       // cut on an input the preflight accepted — fails the same way: the turn
       // budget and the output cap derive from the same window, so a retry
       // spends another whole budget on an identical outcome. Candidates
-      // differ — they cool down and the fallback chain takes over.
+      // differ — they are skipped in-cycle for turn caps (cooled for provider
+      // failures), and the fallback chain takes over.
       if (
         !candidateConfig &&
         (error instanceof WorkerAttemptTimeoutError ||

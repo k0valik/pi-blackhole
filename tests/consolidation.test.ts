@@ -1675,17 +1675,35 @@ describe("reflector turn-cap exhaustion", () => {
     expect(agents.runReflector).toHaveBeenCalledTimes(1);
   });
 
-  test("a candidate that exhausts the cap cools down and the fallback is tried", async () => {
+  test("a candidate that exhausts the cap skips in-cycle and the fallback is tried", async () => {
     const fixture = workerStageFixture("candidate");
     const retryable = vi
       .spyOn(fixture.runtime, "recordRetryableError")
       .mockImplementation(() => {});
-    agents.runReflector.mockRejectedValue(turnCapError());
+    const skip = vi.spyOn(fixture.runtime, "skipFailedForCycle");
+    let attempt = 0;
+    fixture.runtime.resolveModel = async () => {
+      const id = attempt++ === 0 ? "primary" : "fallback";
+      return {
+        ok: true as const,
+        source: "candidate" as const,
+        candidateConfig: { provider: "test", id },
+        model: { provider: "test", id, contextWindow: 1_000_000 },
+        apiKey: "test",
+      };
+    };
+    agents.runReflector
+      .mockRejectedValueOnce(turnCapError())
+      .mockResolvedValue({ reflections: [] });
 
     await fixture.run();
 
-    expect(retryable).toHaveBeenCalled();
-    expect(agents.runReflector.mock.calls.length).toBeGreaterThan(1);
+    expect(retryable).not.toHaveBeenCalled();
+    expect(skip).toHaveBeenCalledWith({ provider: "test", id: "primary" }, "turn_cap");
+    expect(agents.runReflector.mock.calls.map(([input]) => input.model?.id)).toEqual([
+      "primary",
+      "fallback",
+    ]);
   });
 });
 
@@ -1703,18 +1721,33 @@ describe("dropper turn-cap exhaustion", () => {
     expect(agents.runDropper).toHaveBeenCalledTimes(1);
   });
 
-  test("a candidate that exhausts the cap cools down and the fallback is tried", async () => {
+  test("a candidate that exhausts the cap skips in-cycle and the fallback is tried", async () => {
     const fixture = workerStageFixture("candidate");
     agents.runReflector.mockResolvedValue({ reflections: [] });
     const retryable = vi
       .spyOn(fixture.runtime, "recordRetryableError")
       .mockImplementation(() => {});
-    agents.runDropper.mockRejectedValue(turnCapError());
+    const skip = vi.spyOn(fixture.runtime, "skipFailedForCycle");
+    fixture.runtime.resolveModel = async () => {
+      const id = agents.runDropper.mock.calls.length === 0 ? "primary" : "fallback";
+      return {
+        ok: true as const,
+        source: "candidate" as const,
+        candidateConfig: { provider: "test", id },
+        model: { provider: "test", id, contextWindow: 1_000_000 },
+        apiKey: "test",
+      };
+    };
+    agents.runDropper.mockRejectedValueOnce(turnCapError()).mockResolvedValue([]);
 
     await fixture.run();
 
-    expect(retryable).toHaveBeenCalled();
-    expect(agents.runDropper.mock.calls.length).toBeGreaterThan(1);
+    expect(retryable).not.toHaveBeenCalled();
+    expect(skip).toHaveBeenCalledWith({ provider: "test", id: "primary" }, "turn_cap");
+    expect(agents.runDropper.mock.calls.map(([input]) => input.model?.id)).toEqual([
+      "primary",
+      "fallback",
+    ]);
   });
 });
 

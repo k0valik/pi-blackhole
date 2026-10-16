@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **Turn limits no longer bench reflector and dropper models.** Exhausting a worker turn budget now skips that model only for the current stage, including batches that cannot be split further. Incomplete work keeps its coverage unchanged and can retry in a later cycle without waiting for a model cooldown.
+
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 
