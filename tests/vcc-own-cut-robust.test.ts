@@ -404,4 +404,98 @@ describe("buildOwnCut", () => {
       }
     });
   });
+
+  describe("minimal tail with no later user message (single prompt, long run)", () => {
+    const longRun = () => [
+      msg("u", "user"),
+      msg("a0", "assistant"),
+      ...Array.from({ length: 10 }, (_, i) => [
+        msg(`x${i * 2}`, "assistant"),
+        msg(`x${i * 2 + 1}`, "toolResult"),
+      ]).flat(),
+    ];
+
+    it("honors Pi's split-turn cut when the only user message is the first live message", () => {
+      const res = buildOwnCut(longRun(), "x8", "minimal");
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.compactAll).toBe(false);
+        expect(res.firstKeptEntryId).toBe("x8");
+        expect(res.selectedIds).toEqual([
+          "u",
+          "a0",
+          "x0",
+          "x1",
+          "x2",
+          "x3",
+          "x4",
+          "x5",
+          "x6",
+          "x7",
+        ]);
+      }
+    });
+
+    it("honors an early Pi cut in the same window", () => {
+      const res = buildOwnCut(longRun(), "x2", "minimal");
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.compactAll).toBe(false);
+        expect(res.firstKeptEntryId).toBe("x2");
+        expect(res.selectedIds).toEqual(["u", "a0", "x0", "x1"]);
+      }
+    });
+
+    it("honors Pi's cut when the window has no user message (orphan recovery)", () => {
+      const entries = [
+        msg("old", "user"),
+        msg("o1", "assistant"),
+        comp("c", ""),
+        ...longRun().slice(1),
+      ];
+      const res = buildOwnCut(entries, "x4", "minimal");
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.compactAll).toBe(false);
+        expect(res.firstKeptEntryId).toBe("x4");
+        expect(res.selectedIds[0]).toBe("a0");
+      }
+    });
+
+    it("resolves a non-message Pi cut to the next message", () => {
+      const entries = longRun();
+      entries.splice(8, 0, { id: "meta", type: "custom" });
+      const res = buildOwnCut(entries, "meta", "minimal");
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.compactAll).toBe(false);
+        expect(res.firstKeptEntryId).toBe("x6");
+      }
+    });
+
+    it("still compacts all without a usable Pi cut (overflow recovery)", () => {
+      for (const piCut of [undefined, "u", "missing"]) {
+        const res = buildOwnCut(longRun(), piCut, "minimal");
+        expect(res.ok).toBe(true);
+        if (res.ok) {
+          expect(res.compactAll).toBe(true);
+          expect(res.firstKeptEntryId).toBe("");
+          expect(res.messages).toHaveLength(22);
+        }
+      }
+    });
+
+    it("pi-default is unchanged", () => {
+      const res = buildOwnCut(longRun(), "x8", "pi-default");
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.firstKeptEntryId).toBe("x8");
+    });
+
+    it("keeps the last user message when Pi's cut is earlier than it", () => {
+      const entries = [...longRun(), msg("u2", "user"), msg("b", "assistant")];
+      const res = buildOwnCut(entries, "x8", "minimal");
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.firstKeptEntryId).toBe("u2");
+    });
+  });
 });

@@ -183,11 +183,12 @@ export function buildOwnCut(
 
   // Minimal normally cuts at the last user message. If Pi found a later safe
   // split-turn boundary, use it too so one oversized current turn is not kept whole.
+  // With no user message after the first live one, minimal has no cut of its own
+  // (index 0), so any Pi cut past the window start is later and wins.
   let minimalCutIdx = liveMessages.length - 1;
   while (minimalCutIdx > 0 && liveMessages[minimalCutIdx]?.message.role !== "user") {
     minimalCutIdx--;
   }
-  if (minimalCutIdx <= 0) minimalCutIdx = liveMessages.length; // compact-all
 
   // ── Pi's cut path: always use in pi-default; in minimal only when later ──
   if (piFirstKeptEntryId) {
