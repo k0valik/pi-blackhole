@@ -21,7 +21,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   // ── Compaction ──
   "compaction": "auto",           // "auto" | "manual" | "off"
   "compactionEngine": "blackhole", // "blackhole" | "pi-default"
-  "tailBehavior": "minimal",   // "pi-default" | "minimal"
+  "tailBehavior": "minimal",   // "pi-default" | "minimal" | "unobserved"
   "showPreCompactionMessage": true, // Display-only copy of the newest dropped assistant output (max 16 KiB)
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
@@ -868,3 +868,9 @@ Controls how auto-compaction summaries are stored and presented to the model. On
 ```
 
 See [`docs/APPEND_COMPACTION.md`](docs/APPEND_COMPACTION.md) for the fallback, branch, observational-memory, and cache-measurement rules.
+
+### Unobserved raw tail (opt-in)
+
+`tailBehavior: "unobserved"` retains original messages after trustworthy completed OM observation coverage, backing up to a complete user turn to avoid splitting tool interactions. Missing, invalid or disconnected coverage retains extra original history. Compaction and VCC never advance OM coverage. Pending observer input remains the original branch, including across restart and repeated compactions; no blocking observer flush is added.
+
+The default remains `"minimal"`; `"pi-default"` is unchanged. This mode does not truncate retained tool outputs. If the raw tail plus summary cannot fit the model context minus Pi's `reserveTokens`, capacity is unknown, or no useful summary exists, Blackhole explicitly defers compaction rather than dropping the tail or invoking native summarization. Token estimates are not a provider acceptance guarantee.

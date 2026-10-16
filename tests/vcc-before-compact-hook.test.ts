@@ -1,3 +1,4 @@
+import { convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 /**
  * Ported from upstream pi-vcc
  * Changes:
@@ -29,7 +30,11 @@ afterAll(() => {
 });
 
 // Minimal ExtensionAPI stub: capture handler + provide ctx with mocked ui.notify
-function createMockPi(initialConfig?: Record<string, unknown>, ctxModel?: unknown) {
+function createMockPi(
+  initialConfig?: Record<string, unknown>,
+  ctxModel?: unknown,
+  systemPrompt = "",
+) {
   let handler: ((event: any, ctx: any) => any) | undefined;
   const notifyCalls: Array<{ msg: string; level: string }> = [];
   const config = {
@@ -44,6 +49,7 @@ function createMockPi(initialConfig?: Record<string, unknown>, ctxModel?: unknow
     cwd: tmpDir,
     hasUI: true,
     model: ctxModel,
+    getSystemPrompt: () => systemPrompt,
     ui: {
       notify: (msg: string, level: string) => {
         notifyCalls.push({ msg, level });
@@ -565,4 +571,266 @@ describe("registerBeforeCompactHook: provider-aware skip", () => {
     );
     expect(result.compaction).toBeDefined();
   });
+});
+
+describe("unobserved safe deferral", () => {
+  test("oversized original tail cancels instead of delegating or dropping", () => {
+    const { pi, invoke, omRuntime, notifyCalls } = createMockPi(
+      { tailBehavior: "unobserved" },
+      { contextWindow: 100, provider: "test", id: "test" },
+    );
+    registerBeforeCompactHook(pi, omRuntime);
+    expect(
+      invoke(
+        makeEvent(
+          [msg("m1", "user", "x".repeat(10000)), msg("m2", "assistant"), msg("m3", "user")],
+          PI_VCC_COMPACT_INSTRUCTION,
+        ),
+      ),
+    ).toEqual({ cancel: true });
+    expect(notifyCalls.some((call) => call.msg.includes("unobserved"))).toBe(true);
+  });
+  test("no coverage and no summary cancels rather than native fallback", () => {
+    const { pi, invoke, omRuntime } = createMockPi({ tailBehavior: "unobserved" });
+    registerBeforeCompactHook(pi, omRuntime);
+    expect(
+      invoke(
+        makeEvent(
+          [msg("m1", "user"), msg("m2", "assistant"), msg("m3", "user")],
+          PI_VCC_COMPACT_INSTRUCTION,
+        ),
+      ),
+    ).toEqual({ cancel: true });
+  });
+});
+
+test("unobserved successful compaction preserves raw tool output and continuity intent", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { tailBehavior: "unobserved", retainedToolOutputMaxTokens: 1 },
+    { contextWindow: 100000, provider: "test", id: "test" },
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const entries = [
+    msg("m1", "user", "Build a feature"),
+    msg("m2", "assistant", "Old response"),
+    msg("m3", "user", "Pending task"),
+    msg("m4", "toolResult", "raw output"),
+    {
+      id: "om1",
+      type: "custom",
+      customType: "om.observations.recorded",
+      data: {
+        coversUpToId: "m2",
+        observations: [
+          {
+            id: "aaaaaaaaaaaa",
+            content: "Completed old task",
+            timestamp: "2026-01-01T00:00:00Z",
+            relevance: "high",
+            tokenCount: 5,
+            sourceEntryIds: ["m1", "m2"],
+          },
+        ],
+      },
+    },
+  ];
+  const result = invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION));
+  expect(result.compaction.firstKeptEntryId).toBe("m3");
+  expect(result.compaction.details["om.preserveSourceHistory"]).toBe(true);
+  expect(result.compaction.details.retainedToolOutputProjection).toBeUndefined();
+});
+
+test("unobserved budget includes retained custom source entries", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { tailBehavior: "unobserved" },
+    { contextWindow: 2000, provider: "test", id: "test" },
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const entries = [
+    msg("m1", "user", "Build feature"),
+    msg("m2", "assistant", "done"),
+    { id: "pending", type: "custom_message", customType: "test", content: "p".repeat(20000) },
+    msg("m3", "user", "next"),
+    {
+      id: "om1",
+      type: "custom",
+      customType: "om.observations.recorded",
+      data: {
+        coversUpToId: "m2",
+        observations: [
+          {
+            id: "aaaaaaaaaaaa",
+            content: "Done",
+            timestamp: "2026-01-01T00:00:00Z",
+            relevance: "high",
+            tokenCount: 5,
+            sourceEntryIds: ["m1", "m2"],
+          },
+        ],
+      },
+    },
+  ];
+  expect(invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION))).toEqual({ cancel: true });
+});
+
+test("unobserved unknown model capacity defers rather than assuming a window", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { tailBehavior: "unobserved" },
+    { provider: "test", id: "test" },
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const event = makeEvent(
+    [
+      msg("m1", "user", "Build feature"),
+      msg("m2", "assistant", "done"),
+      msg("m3", "user", "next"),
+      {
+        id: "om1",
+        type: "custom",
+        customType: "om.observations.recorded",
+        data: {
+          coversUpToId: "m2",
+          observations: [
+            {
+              id: "aaaaaaaaaaaa",
+              content: "Done",
+              timestamp: "2026-01-01T00:00:00Z",
+              relevance: "high",
+              tokenCount: 5,
+              sourceEntryIds: ["m1", "m2"],
+            },
+          ],
+        },
+      },
+    ],
+    PI_VCC_COMPACT_INSTRUCTION,
+  );
+  expect(invoke(event)).toEqual({ cancel: true });
+});
+test("completed OM batch survives a tool-safe cut inside its coverage", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { tailBehavior: "unobserved" },
+    { provider: "test", id: "test", contextWindow: 10000 },
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const entries = [
+    msg("m1", "user", "old task"),
+    msg("m2", "assistant", "old response"),
+    msg("m3", "user", "new task"),
+    {
+      ...msg("m4", "assistant"),
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t", name: "read", arguments: {} }],
+      },
+    },
+    {
+      ...msg("m5", "toolResult"),
+      message: {
+        role: "toolResult",
+        toolCallId: "t",
+        toolName: "read",
+        content: [{ type: "text", text: "pending" }],
+      },
+    },
+    {
+      id: "om1",
+      type: "custom",
+      customType: "om.observations.recorded",
+      data: {
+        coversUpToId: "m4",
+        observations: [
+          {
+            id: "aaaaaaaaaaaa",
+            content: "UNIQUE-OLDER-COMPLETED-FACT",
+            timestamp: "2026-01-01T00:00:00Z",
+            relevance: "high",
+            tokenCount: 5,
+            sourceEntryIds: ["m1", "m2"],
+          },
+        ],
+      },
+    },
+  ];
+  const result = invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION));
+  expect(result.compaction.firstKeptEntryId).toBe("m3");
+  expect(result.compaction.details["om.folded"].observations.map((item) => item.id)).toEqual([
+    "aaaaaaaaaaaa",
+  ]);
+});
+
+test("capacity includes the current system prompt", () => {
+  const { pi, invoke, omRuntime } = createMockPi(
+    { tailBehavior: "unobserved" },
+    { provider: "test", id: "test", contextWindow: 2000 },
+    "system ".repeat(2000),
+  );
+  registerBeforeCompactHook(pi, omRuntime);
+  const event = makeEvent(
+    [
+      msg("m1", "user", "Build feature"),
+      msg("m2", "assistant", "done"),
+      msg("m3", "user", "next"),
+      {
+        id: "om1",
+        type: "custom",
+        customType: "om.observations.recorded",
+        data: {
+          coversUpToId: "m2",
+          observations: [
+            {
+              id: "aaaaaaaaaaaa",
+              content: "Done",
+              timestamp: "2026-01-01T00:00:00Z",
+              relevance: "high",
+              tokenCount: 5,
+              sourceEntryIds: ["m1", "m2"],
+            },
+          ],
+        },
+      },
+    ],
+    PI_VCC_COMPACT_INSTRUCTION,
+  );
+  event.preparation.settings = { reserveTokens: 100, keepRecentTokens: 100 };
+  expect(invoke(event)).toEqual({ cancel: true });
+});
+
+test("unobserved capacity includes the real host summary wrapper", () => {
+  const entries = [
+    msg("m1", "user", "Build feature"),
+    msg("m2", "assistant", "done"),
+    msg("m3", "user", "next"),
+    {
+      id: "om1",
+      type: "custom",
+      customType: "om.observations.recorded",
+      data: {
+        coversUpToId: "m2",
+        observations: [
+          {
+            id: "aaaaaaaaaaaa",
+            content: "Done",
+            timestamp: "2026-01-01T00:00:00Z",
+            relevance: "high",
+            tokenCount: 5,
+            sourceEntryIds: ["m1", "m2"],
+          },
+        ],
+      },
+    },
+  ];
+  const run = (window: number) => {
+    const { pi, invoke, omRuntime } = createMockPi(
+      { tailBehavior: "unobserved" },
+      { provider: "test", id: "test", contextWindow: window },
+    );
+    registerBeforeCompactHook(pi, omRuntime);
+    return invoke(makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION));
+  };
+  const summary = run(10000).compaction.summary;
+  const wrapped = convertToLlm([
+    { role: "compactionSummary", summary, tokensBefore: 1000, timestamp: 0 },
+  ]).reduce((total, message) => total + estimateTokens(message), 0);
+  expect(run(wrapped)).toEqual({ cancel: true });
 });

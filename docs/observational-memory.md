@@ -399,3 +399,9 @@ shutdown model call and does not make export observe missing raw messages.
 Reload, non-persisted sessions, memory-off, skipped providers, legacy passive mode and retry gates skip this work. Forced termination and SDK hosts calling `AgentSession.dispose()` without emitting shutdown are not covered. Persisted child CLI sessions can incur the same exit delay. A capped chunk or partial checkpoint may leave a remainder. Export/project recall can use recorded tail observations, subject to their viability filters. With the setting off, a below-threshold tail remains raw history: `recall` and resumed observation can still see it, but export and project recall cannot until it is observed.
 
 Host limit: the locally inspected `pi-subagents` SDK host emits child shutdown events but disposes after a 3-second host deadline. Its persisted children therefore have no guarantee of completing this 20-second flush; in-memory children are skipped.
+
+### Unobserved raw tail (opt-in)
+
+`tailBehavior: "unobserved"` retains original messages after trustworthy completed OM observation coverage, backing up to a complete user turn to avoid splitting tool interactions. Missing, invalid or disconnected coverage retains extra original history. Compaction and VCC never advance OM coverage. Pending observer input remains the original branch, including across restart and repeated compactions; no blocking observer flush is added.
+
+The default remains `"minimal"`; `"pi-default"` is unchanged. This mode does not truncate retained tool outputs. If the raw tail plus summary cannot fit the model context minus Pi's `reserveTokens`, capacity is unknown, or no useful summary exists, Blackhole explicitly defers compaction rather than dropping the tail or invoking native summarization. Token estimates are not a provider acceptance guarantee.

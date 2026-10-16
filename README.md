@@ -358,3 +358,9 @@ for environment overrides. Export prefers reflection evidence time but omits not
 ## License
 
 MIT
+
+### Unobserved raw tail (opt-in)
+
+`tailBehavior: "unobserved"` retains original messages after trustworthy completed OM observation coverage, backing up to a complete user turn to avoid splitting tool interactions. Missing, invalid or disconnected coverage retains extra original history. Compaction and VCC never advance OM coverage. Pending observer input remains the original branch, including across restart and repeated compactions; no blocking observer flush is added.
+
+The default remains `"minimal"`; `"pi-default"` is unchanged. This mode does not truncate retained tool outputs. If the raw tail plus summary cannot fit the model context minus Pi's `reserveTokens`, capacity is unknown, or no useful summary exists, Blackhole explicitly defers compaction rather than dropping the tail or invoking native summarization. Token estimates are not a provider acceptance guarantee.
