@@ -160,7 +160,7 @@ export function isDeterministicError(error: unknown): boolean {
  * additionally cool the resolved session model via `recordDeterministicError`.
  */
 export function isCooldownWorthyError(error: unknown): boolean {
-  return isRetryableError(error) || isDeterministicError(error);
+  return !isLocalExecutionError(error) && (isRetryableError(error) || isDeterministicError(error));
 }
 
 /** Detect Pi's "extension ctx is stale" error from session replacement/reload.
@@ -175,4 +175,42 @@ export function isStaleExtensionContextError(error: unknown): boolean {
     message = String(error || "");
   }
   return message.includes("extension ctx is stale") || message.includes("ctx is stale");
+}
+
+/** Local execution failures do not establish provider/model unavailability. */
+export function isLocalExecutionError(error: unknown): boolean {
+  const fields = error !== null && typeof error === "object" ? error : undefined;
+  const name = fields && "name" in fields ? fields.name : undefined;
+  const code = fields && "code" in fields ? fields.code : undefined;
+  const message = fields && "message" in fields ? String(fields.message) : String(error || "");
+  const text = message.replace(WORKER_FRAMING_RE, "");
+  const cause = fields && "cause" in fields ? fields.cause : undefined;
+  const causeCode =
+    cause !== null && typeof cause === "object" && "code" in cause ? cause.code : undefined;
+  // Fetch/undici reject transport and mid-body failures with TypeError too.
+  if (
+    name === "TypeError" &&
+    (/^(?:fetch failed|Failed to fetch|terminated|NetworkError when attempting to fetch resource\.?)$/i.test(
+      text,
+    ) ||
+      (typeof causeCode === "string" && causeCode.startsWith("UND_ERR_")))
+  )
+    return false;
+  return (
+    name === "AbortError" ||
+    name === "TypeError" ||
+    name === "ReferenceError" ||
+    name === "SyntaxError" ||
+    name === "RangeError" ||
+    code === "ERR_MODULE_NOT_FOUND" ||
+    code === "MODULE_NOT_FOUND" ||
+    /^Cannot find (?:module|package) /i.test(text) ||
+    // Framed provider text can describe malformed responses, not local bugs.
+    (!WORKER_FRAMING_RE.test(message) &&
+      /^(?:Cannot read properties of |[\w$]+ is not defined\b|(?:TypeError|ReferenceError|SyntaxError):)/i.test(
+        text,
+      )) ||
+    /^(?:The operation was aborted|request aborted|aborted)$/i.test(text) ||
+    isStaleExtensionContextError(error)
+  );
 }

@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- **Local failures no longer disable healthy memory models.** Import/programming errors and aborted requests now skip the failed model only for the current stage instead of persisting a cooldown across sessions. Provider authentication, model-not-found and transient network failures keep their existing behavior.
+
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 

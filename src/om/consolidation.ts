@@ -866,6 +866,7 @@ function handleWorkerErrorAfterClose(args: {
   const sessionIdentity: { provider?: unknown; id?: unknown } | null | undefined = resolved.model;
   const cooled =
     deterministic &&
+    isCooldownWorthyError(afterClose) &&
     (stageModelForThinking
       ? stageModelForThinking.cooldownHours !== 0
       : typeof sessionIdentity?.provider === "string" && typeof sessionIdentity?.id === "string");

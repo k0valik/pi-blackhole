@@ -253,6 +253,8 @@ Models with active cooldowns are transparently skipped. Up to 10 model resolutio
 
 Models that fail with retryable errors are cooled down and skipped in subsequent attempts. Defined in [[src/om/cooldown.ts]].
 
+Local import/programming errors and aborted requests do not show that a provider is unavailable. They skip the failed identity only for the current stage, even if the runtime generation is still active; the next stage or cycle may use it again. Stale-generation guards still discard late errors before any cooldown decision. Network failures (including fetch transport errors), authentication failures and provider model-not-found errors retain their existing cooldown behavior.
+
 ### Persistence
 
 Cooldowns persist to `~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` with ISO 8601 timestamps. Each entry records:
