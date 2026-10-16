@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- **Observations can retire the stale observations they replace.** Old and new facts both reached compaction, so "unresolved: build fails" could sit beside "resolved: build fails" and mislead the next session. `record_observations` items now accept an optional `supersedes` list of ids from the observer preamble; those observations leave the pool, dropper candidates and the compaction summary without writing a drop marker. Unknown ids are ignored and legacy records load unchanged. No new config key or model call.
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 

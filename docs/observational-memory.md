@@ -367,6 +367,16 @@ If any stage fails (model error, rate limit, timeout), remaining stages are skip
 - **Per-model cooldown**: Failed models are cooled down and skipped in subsequent attempts.
 - **Stale context handling**: `agent_end` handlers catch "extension ctx is stale" errors gracefully.
 
+## Observation supersession
+
+The observer's `record_observations` items accept an optional `supersedes` list of
+observation ids shown in its CURRENT OBSERVATIONS preamble. Unknown, self or malformed
+ids are ignored (debug-logged) without failing the batch. The ids are stored on the new
+observation; fold, projection and the live pool treat them as tombstones, so the
+resolved/replaced observation leaves the pool, the dropper's candidates and the
+compaction summary. No drop marker is written, so dropper cadence is unaffected. Legacy
+records without the field load unchanged. It needs no config key.
+
 ## Reflection timestamps and supersede notes
 
 New reflection records carry optional `timestamp` and `supersedes` fields. Timestamp

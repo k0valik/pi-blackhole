@@ -10,6 +10,7 @@ import {
   isObservationsRecordedData,
   isObservationsUnanchoredData,
   isReflectionsRecordedData,
+  supersededIds,
   type Entry,
   type Observation,
   type Reflection,
@@ -196,6 +197,13 @@ export function livePoolObservations(entries: Entry[], pending?: PendingOMState)
       pool.set(observation.id, observation as Observation);
     }
   }
+  // Supersession from pending observations retires pool members (branch or
+  // pending) the same way a branch record's would.
+  const superseded = new Set<string>();
+  for (const observation of pool.values()) {
+    for (const id of supersededIds(observation)) superseded.add(id);
+  }
+  for (const id of superseded) pool.delete(id);
 
   const dropped = pending?.droppedBatches?.length
     ? pending.droppedBatches

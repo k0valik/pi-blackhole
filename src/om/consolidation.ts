@@ -1036,9 +1036,8 @@ export async function runObserverStage(
     preambleMaxTokens,
     renderReflection,
   ).map(renderReflection);
-  let priorObservations = selectPriorObservations(memory.observations, preambleMaxTokens).map(
-    observationToSummaryLine,
-  );
+  let priorObservationRecords = selectPriorObservations(memory.observations, preambleMaxTokens);
+  let priorObservations = priorObservationRecords.map(observationToSummaryLine);
   if (isManualMode(runtime.config)) {
     const pendingCtx = readPendingState(sessionId);
     const accumulatedReflections = (pendingCtx.reflectionBatches ?? []).flatMap(
@@ -1047,9 +1046,8 @@ export async function runObserverStage(
     const accumulatedObservations = pendingBufferedObservations(pendingCtx);
 
     const allObservations = [...memory.observations, ...accumulatedObservations];
-    priorObservations = selectPriorObservations(allObservations, preambleMaxTokens).map(
-      observationToSummaryLine,
-    );
+    priorObservationRecords = selectPriorObservations(allObservations, preambleMaxTokens);
+    priorObservations = priorObservationRecords.map(observationToSummaryLine);
 
     const allReflections = [...memory.reflections, ...accumulatedReflections];
     priorReflections = selectPriorReflections(
@@ -1366,6 +1364,7 @@ export async function runObserverStage(
             maxOutputTokens: workerOutputAllowance(effectiveObsCtx, resolved.model as any),
             priorReflections,
             priorObservations,
+            priorObservationIds: priorObservationRecords.map((o) => o.id),
             chunk,
             allowedSourceEntryIds: sourceEntryIds,
             sourceEntryTimestamps,

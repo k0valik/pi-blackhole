@@ -17,6 +17,7 @@ import {
   isObservationsRecordedEntry,
   isObservationsUnanchoredEntry,
   isReflectionsRecordedEntry,
+  supersededIds,
   type Entry,
   type MemoryDetails,
   type Observation,
@@ -156,6 +157,14 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
     if (isObservationsDroppedEntry(entry) && isCoveredAtOrBefore(entry, indexes, dropsBoundary)) {
       for (const observationId of entry.data.observationIds)
         droppedObservationIds.add(observationId);
+    }
+  }
+
+  // Supersession is scoped to what the projection holds: a superseder outside
+  // the boundary does not hide anything.
+  for (const observation of observations) {
+    for (const id of supersededIds(observation)) {
+      if (observationsById.has(id)) droppedObservationIds.add(id);
     }
   }
 

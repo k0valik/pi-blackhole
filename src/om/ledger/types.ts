@@ -36,6 +36,8 @@ export type Observation = {
   relevance: Relevance;
   sourceEntryIds: string[];
   tokenCount: number;
+  /** Prior observation ids this one replaces. Optional: legacy records omit it. */
+  supersedes?: string[];
 };
 
 export type Reflection = {
@@ -110,6 +112,16 @@ function isTokenCount(value: unknown): value is number {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object";
+}
+
+/**
+ * Valid supersede targets of a record: well-formed ids other than its own.
+ * Persisted annotations are optional, so a malformed value reads as "none"
+ * and never invalidates the record.
+ */
+export function supersededIds(record: { id: string; supersedes?: unknown }): string[] {
+  if (!Array.isArray(record.supersedes)) return [];
+  return record.supersedes.filter((id): id is string => isMemoryId(id) && id !== record.id);
 }
 
 export function isObservation(value: unknown): value is Observation {

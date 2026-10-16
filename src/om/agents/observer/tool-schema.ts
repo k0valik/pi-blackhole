@@ -30,6 +30,14 @@ export const RecordObservationsSchema = Type.Object({
           "Exact source entry ids from the chunk that directly support this observation. " +
           "Use only ids shown in '[Source entry id: ...]' labels; never invent ids.",
       }),
+      // Optional on purpose, like `complete`: omitting it must never fail a batch.
+      supersedes: Type.Optional(
+        Type.Array(Type.String({ minLength: 1 }), {
+          description:
+            "Ids of CURRENT OBSERVATIONS this observation resolves, replaces or corrects. " +
+            "Listed observations are retired from memory. Use only ids shown in CURRENT OBSERVATIONS; unknown ids are ignored.",
+        }),
+      ),
     }),
     {
       // The empty batch is the only sanctioned way to close a chunk that yielded

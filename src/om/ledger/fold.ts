@@ -2,11 +2,12 @@
  * Ledger folding — deduplicates observations/reflections and applies tombstones.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/fold.ts)
- * Unmodified.
+ * Modified: observation supersedes act as tombstones.
  */
 import {
   isObservationsDroppedData,
   isObservationsRecordedData,
+  supersededIds,
   isObservationsUnanchoredData,
   isReflectionsRecordedData,
   OM_OBSERVATIONS_DROPPED,
@@ -123,6 +124,14 @@ export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): F
     debugLog("fold.unknown_custom_types", {
       counts: Object.fromEntries(unknownCustomTypeCounts),
     });
+  }
+
+  // A newer observation that names an older one retires it, exactly like a
+  // drop tombstone but without touching dropper coverage markers.
+  for (const observation of observationsById.values()) {
+    for (const id of supersededIds(observation)) {
+      if (observationsById.has(id)) droppedObservationIds.add(id);
+    }
   }
 
   const observations = Array.from(observationsById.values());

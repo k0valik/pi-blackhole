@@ -33,6 +33,7 @@ import { RecordObservationsSchema, type RecordObservationsArgs } from "./tool-sc
 import { nowTimestamp, truncateRecordContent } from "../../serialize.js";
 import type { Observation, Relevance } from "../../ledger/index.js";
 import { estimateStringTokens } from "../../tokens.js";
+import { debugLog } from "../../debug-log.js";
 import {
   isDeterministicError,
   withDiscardedCount,
@@ -47,6 +48,8 @@ interface RunObserverArgs {
   env?: Record<string, string>;
   priorReflections: string[];
   priorObservations: string[];
+  /** Ids of the observations rendered in `priorObservations`; the only valid `supersedes` targets. */
+  priorObservationIds?: string[];
   chunk: string;
   allowedSourceEntryIds: string[];
   /** Entry id -> local display timestamp for the chunk's source entries; used to
@@ -231,6 +234,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
   // observations under complete=false mean the model found the chunk not yet
   // covered, and rejections mean the tool just told it corrections remain.
   let closedByCompleteBatch = false;
+  const supersedable = new Set(args.priorObservationIds ?? []);
 
   const recordObservations: AgentTool<typeof RecordObservationsSchema> = {
     name: "record_observations",
@@ -259,6 +263,17 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           duplicates++;
           continue;
         }
+        // Unknown, malformed or self ids are dropped silently (logged), never
+        // failing the batch: one hallucinated id must not discard the facts.
+        const supersedes = [...new Set(obs.supersedes ?? [])].filter(
+          (target) => target !== id && supersedable.has(target),
+        );
+        if ((obs.supersedes?.length ?? 0) > supersedes.length) {
+          debugLog("observer.supersedes_ignored", {
+            proposed: obs.supersedes,
+            kept: supersedes,
+          });
+        }
         accumulated.set(id, {
           id,
           content,
@@ -266,6 +281,7 @@ export async function runObserver(args: RunObserverArgs): Promise<ObserverResult
           relevance: obs.relevance as Relevance,
           sourceEntryIds,
           tokenCount: estimateStringTokens(content),
+          ...(supersedes.length ? { supersedes } : {}),
         });
         added++;
       }
