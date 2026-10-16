@@ -42,6 +42,7 @@ const HEADER_NAMES = [
   "Commits",
   "Outstanding Context",
   "User Preferences",
+  "User Decisions",
 ];
 
 const SEPARATOR = "\n\n---\n\n";

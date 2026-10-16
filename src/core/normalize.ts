@@ -56,6 +56,9 @@ const normalizeOne = (msg: Message, msgIndex: number | undefined): NormalizedBlo
         name: msg.toolName,
         text: sanitize(textOf(msg.content)),
         isError: msg.isError,
+        ...(msg.toolName === "ask_user_question" && (msg as any).details
+          ? { details: (msg as any).details }
+          : {}),
         sourceIndex: msgIndex,
       },
     ];

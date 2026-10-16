@@ -24,6 +24,8 @@ export type NormalizedBlock =
       name: string;
       text: string;
       isError: boolean;
+      /** Structured result details; carried only for ask_user_question. */
+      details?: unknown;
       sourceIndex?: number;
     }
   | {

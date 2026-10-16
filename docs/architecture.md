@@ -169,6 +169,7 @@ interface SectionData {
   filesAndChanges: string[];
   commits: string[];
   userPreferences: string[];
+  userDecisions: string[];
   briefTranscript: string;
 }
 ```

@@ -57,7 +57,7 @@ Orchestrates section extraction from filtered blocks. Defined in [[src/core/buil
 
 ## Section extraction
 
-Four extraction modules produce the structured sections. Each uses deterministic regex-based heuristics — no LLM involved.
+Five extraction modules produce the structured sections. Each uses deterministic regex-based heuristics — no LLM involved.
 
 ### Goals extraction
 
@@ -88,6 +88,15 @@ Extracts user preferences from user message blocks. Defined in [[src/extract/pre
 - **Filters**: Length 5-200 chars, excludes questions (ending `?`), max 1 preference per user block
 - **Dedup**: `dedupPreferencesAgainstGoals()` removes preferences that duplicate goals
 - **Limit**: Max 10 preferences
+
+### User decisions extraction
+
+Keeps the user's answers to `ask_user_question` prompts. Defined in [[src/extract/user-decisions.ts]].
+
+- **Source**: `ask_user_question` tool results. Structured `details` are used first; the tool's text format (`User answers:` …) is the fallback. Cancelled results, errors and validation failures yield nothing.
+- **Line format**: `User decided: <question> → <selected labels or custom answer>`. Notes are appended verbatim, flattened to one line, as `user note:`; a global note becomes `User note (global): …`. Option descriptions and previews are never emitted.
+- **Clips**: question 120 chars, answer 240, note 300.
+- **Limit**: Max 8 lines, newest kept.
 
 ### Commits extraction
 
@@ -133,7 +142,7 @@ Text utilities shared across the pipeline. Defined in [[src/core/content.ts]].
 
 Formats `SectionData` into a human-readable summary with TUI-safe wrapping. Defined in [[src/core/format.ts]].
 
-- **Section headers**: `[Session Goal]`, `[Files And Changes]`, `[Commits]`, `[Outstanding Context]`, `[User Preferences]`
+- **Section headers**: `[Session Goal]`, `[Files And Changes]`, `[Commits]`, `[Outstanding Context]`, `[User Preferences]`, `[User Decisions]`
 - **List format**: `- item` under each header
 - **Brief cap**: Keep last 120 lines, avoid cutting mid-section
 - **Line wrapping**: 120 chars, preserve list-item continuation indent

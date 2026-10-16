@@ -60,6 +60,7 @@ export const formatSummary = (data: SectionData): string => {
     section("Commits", data.commits),
     section("Outstanding Context", data.outstandingContext),
     section("User Preferences", data.userPreferences),
+    section("User Decisions", data.userDecisions),
   ].filter(Boolean);
 
   const parts: string[] = [];

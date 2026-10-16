@@ -15,6 +15,7 @@ import { extractGoals } from "../extract/goals";
 import { extractFiles, formatFileList } from "../extract/files";
 import { collectFilesTouched } from "../extract/file-touch";
 import { extractPreferences, dedupPreferencesAgainstGoals } from "../extract/preferences";
+import { extractUserDecisions } from "../extract/user-decisions";
 import { extractCommits, formatCommits } from "../extract/commits";
 import { buildBriefSections, stringifyBrief } from "./brief";
 
@@ -222,6 +223,7 @@ export const buildSections = (input: BuildSectionsInput): SectionData => {
     filesAndChanges: formatFileActivity(input),
     commits: formatCommits(extractCommits(blocks)),
     userPreferences,
+    userDecisions: extractUserDecisions(blocks),
     briefTranscript: stringifyBrief(briefSections),
   };
 };
