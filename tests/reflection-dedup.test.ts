@@ -50,6 +50,10 @@ function corpus(observations: CorpusObservation[], reflections: CorpusReflection
   return {
     projectRoot: "/tmp/proj",
     sessionsConsidered: 2,
+    sessionsDiscovered: 2,
+    sessionsSkippedByWindow: 0,
+    entriesOutsideWindow: 0,
+    entriesWithoutTimestamp: 0,
     filesWithMarkers: 2,
     observations,
     reflections,

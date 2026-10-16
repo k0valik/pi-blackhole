@@ -51,6 +51,10 @@ beforeEach(() => {
       buildProjectMemoryCorpusAsync: vi.fn(async () => ({
         projectRoot: "/project",
         sessionsConsidered: 0,
+        sessionsDiscovered: 0,
+        sessionsSkippedByWindow: 0,
+        entriesOutsideWindow: 0,
+        entriesWithoutTimestamp: 0,
         observations: [],
         reflections: [],
         droppedIds: new Set(),
@@ -60,6 +64,10 @@ beforeEach(() => {
   vi.doMock("../src/project-recall/format-export.js", () => {
     imports.push("export-formatter");
     return { buildExportMarkdownAsync: vi.fn() };
+  });
+  vi.doMock("../src/project-recall/format-timeline-export.js", () => {
+    imports.push("timeline-formatter");
+    return { buildTimelineExportMarkdownAsync: vi.fn() };
   });
 });
 
@@ -125,6 +133,49 @@ describe("lazy command imports", () => {
     await command.handler("out:invalid.txt", ctx);
     expect(imports).toEqual([]);
     await command.handler("", ctx);
+    expect(imports).toEqual(["session-dir", "corpus"]);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("No observational memory"),
+      "warning",
+    );
+  });
+
+  it.each(["days:0", "days:wat", "mode:foo"])(
+    "loads nothing for parser-invalid args %s",
+    async (args) => {
+      const { registerBlackholeExportCommand } =
+        await import("../src/commands/blackhole-export.js");
+      let command: any;
+      registerBlackholeExportCommand({
+        registerCommand: (_name: string, def: any) => {
+          command = def;
+        },
+      } as any);
+      const ctx = {
+        cwd: "/project",
+        ui: { notify: vi.fn() },
+        sessionManager: { getSessionFile: () => undefined },
+      };
+      await command.handler(args, ctx);
+      expect(imports).toEqual([]);
+      expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Invalid"), "error");
+    },
+  );
+
+  it("keeps both formatters unloaded on the windowed empty path", async () => {
+    const { registerBlackholeExportCommand } = await import("../src/commands/blackhole-export.js");
+    let command: any;
+    registerBlackholeExportCommand({
+      registerCommand: (_name: string, def: any) => {
+        command = def;
+      },
+    } as any);
+    const ctx = {
+      cwd: "/project",
+      ui: { notify: vi.fn() },
+      sessionManager: { getSessionFile: () => undefined },
+    };
+    await command.handler("days:7 mode:timeline", ctx);
     expect(imports).toEqual(["session-dir", "corpus"]);
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("No observational memory"),

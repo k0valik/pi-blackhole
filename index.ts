@@ -15,7 +15,10 @@ import { registerPreCompactionOutput } from "./src/hooks/cosmetic-output.js";
 import { registerPiVccCommand } from "./src/commands/pi-vcc";
 import { registerMemoryCommand } from "./src/commands/memory";
 import { registerVccRecallCommand } from "./src/commands/vcc-recall";
-import { registerBlackholeExportCommand } from "./src/commands/blackhole-export";
+import {
+  registerBlackholeExportCommand,
+  registerBlackholeExportFlag,
+} from "./src/commands/blackhole-export";
 import { registerConsolidationTrigger } from "./src/om/consolidation.js";
 import { registerCompactionTrigger } from "./src/om/compaction-trigger.js";
 import { registerStatusBar } from "./src/om/status-bar.js";
@@ -95,6 +98,7 @@ export default async (pi: ExtensionAPI) => {
   registerMemoryCommand(pi, omRuntime); // /blackhole-memory [status|view|full]
   registerVccRecallCommand(pi); // /blackhole-recall <query>
   registerBlackholeExportCommand(pi); // /blackhole-export [out:<path>]
+  registerBlackholeExportFlag(pi); // --blackhole-export "<args>" headless export for cron/sync jobs
 
   // Tools
   registerRecallTool(pi, omRuntime); // unified recall (#N + [12char]), budget-capped

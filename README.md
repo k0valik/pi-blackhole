@@ -74,21 +74,25 @@ Both halves share a single hook and a single output. Together they keep the agen
 
 ## Commands
 
-| Command                     | Description & Options                                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/blackhole`                | Manual compact — deterministic structural summary                                                                                                       |
-| `/blackhole settings`       | Open the configuration overlay _(Alias: `/blackhole configure`)_                                                                                        |
-| `/blackhole changelog`      | Open the in-app changelog viewer                                                                                                                        |
-| `/blackhole cleanup`        | Remove orphaned pending files                                                                                                                           |
-| `/blackhole om-off`         | Disable observational memory                                                                                                                            |
-| `/blackhole om-on`          | Enable observational memory                                                                                                                             |
-| `/blackhole-memory`         | Memory pipeline status & token counters _(Same as `/blackhole-memory status`)_                                                                          |
-| `/blackhole-memory view`    | Show visible observations and reflections (after compaction trimming), copied to clipboard                                                              |
-| `/blackhole-memory full`    | Show **all** recorded memory (including dropped observations), copied to clipboard                                                                      |
-| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file                                                                                      | touched`, regex *(Also available to agent as `recall` tool)* |
-| `/blackhole-export`         | Export distilled project memory (observations/reflections across past sessions + pending buffers) to import-ready markdown _(Options: `out:<path>.md`)_ |
+| Command                     | Description & Options                                                                                                                                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/blackhole`                | Manual compact — deterministic structural summary                                                                                                                                                                                                               |
+| `/blackhole settings`       | Open the configuration overlay _(Alias: `/blackhole configure`)_                                                                                                                                                                                                |
+| `/blackhole changelog`      | Open the in-app changelog viewer                                                                                                                                                                                                                                |
+| `/blackhole cleanup`        | Remove orphaned pending files                                                                                                                                                                                                                                   |
+| `/blackhole om-off`         | Disable observational memory                                                                                                                                                                                                                                    |
+| `/blackhole om-on`          | Enable observational memory                                                                                                                                                                                                                                     |
+| `/blackhole-memory`         | Memory pipeline status & token counters _(Same as `/blackhole-memory status`)_                                                                                                                                                                                  |
+| `/blackhole-memory view`    | Show visible observations and reflections (after compaction trimming), copied to clipboard                                                                                                                                                                      |
+| `/blackhole-memory full`    | Show **all** recorded memory (including dropped observations), copied to clipboard                                                                                                                                                                              |
+| `/blackhole-recall <query>` | Search session history. Supports `page:N`, `scope:all`, `mode:file                                                                                                                                                                                              | touched`, regex *(Also available to agent as `recall` tool)* |
+| `/blackhole-export`         | Export distilled project memory (observations/reflections across past sessions + pending buffers) to import-ready markdown _(Options: `out:<path>.md` `days:<N>` `mode:distilled\|timeline` — e.g. `days:7 mode:timeline` for the recent chronological stream)_ |
 
 All commands work regardless of `compaction` mode — only _when_ auto-compaction fires changes. See [Compaction modes](#compaction-modes) below.
+
+> `days:N` is a rolling snapshot, not exactly-once replication: the still-active session stays excluded and its memory can age out of the window before it becomes eligible.
+
+Headless runs for cron/systemd timers reuse the same argument grammar: `pi --blackhole-export "days:7 mode:timeline out:memory/weekly.md" -p` (run from the project root). The summary prints to stdout, parse/IO failures exit non-zero, and the snapshot semantics above apply unchanged. Pass `--no-session` to guarantee no session file is created (message-less probe runs persisted none, but session persistence is host behavior).
 
 <details>
 <summary>The `recall` tool (agent-facing)</summary>

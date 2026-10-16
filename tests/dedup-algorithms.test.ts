@@ -135,6 +135,10 @@ describe("dedup algorithms", () => {
       const corpus = {
         projectRoot: "/tmp/project",
         sessionsConsidered: 1,
+        sessionsDiscovered: 1,
+        sessionsSkippedByWindow: 0,
+        entriesOutsideWindow: 0,
+        entriesWithoutTimestamp: 0,
         filesWithMarkers: 1,
         observations: [
           "Register Provider handles HTTP authentication in src/auth-provider.ts",

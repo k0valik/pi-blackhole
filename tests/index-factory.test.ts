@@ -13,6 +13,7 @@ import { createExtensionApiDouble } from "./fixtures/pi-extension-api.js";
 const installMock = vi.fn();
 const registerCompactionTriggerMock = vi.fn();
 const registerPreCompactionOutputMock = vi.fn();
+const registerBlackholeExportFlagMock = vi.fn();
 
 vi.mock("../src/core/settings", () => ({ scaffoldSettings: vi.fn() }));
 vi.mock("../src/hooks/before-compact", () => ({ registerBeforeCompactHook: vi.fn() }));
@@ -24,7 +25,10 @@ vi.mock("../src/hooks/cosmetic-output", () => ({
 vi.mock("../src/commands/pi-vcc", () => ({ registerPiVccCommand: vi.fn() }));
 vi.mock("../src/commands/memory", () => ({ registerMemoryCommand: vi.fn() }));
 vi.mock("../src/commands/vcc-recall", () => ({ registerVccRecallCommand: vi.fn() }));
-vi.mock("../src/commands/blackhole-export", () => ({ registerBlackholeExportCommand: vi.fn() }));
+vi.mock("../src/commands/blackhole-export", () => ({
+  registerBlackholeExportCommand: vi.fn(),
+  registerBlackholeExportFlag: registerBlackholeExportFlagMock,
+}));
 vi.mock("../src/om/consolidation", () => ({ registerConsolidationTrigger: vi.fn() }));
 vi.mock("../src/tools/recall", () => ({ registerRecallTool: vi.fn() }));
 vi.mock("../src/om/provider-stream", () => ({ captureRegisteredProviderStreams: vi.fn() }));
@@ -49,6 +53,7 @@ describe("extension factory wiring", () => {
     installMock.mockReset();
     registerCompactionTriggerMock.mockReset();
     registerPreCompactionOutputMock.mockReset();
+    registerBlackholeExportFlagMock.mockReset();
   });
 
   it("awaits the host adapter probe and stores its status on the trigger runtime", async () => {
@@ -85,5 +90,6 @@ describe("extension factory wiring", () => {
 
     expect(registeredStatus).toEqual(failureStatus);
     expect(registerPreCompactionOutputMock).toHaveBeenCalledOnce();
+    expect(registerBlackholeExportFlagMock).toHaveBeenCalledOnce();
   });
 });

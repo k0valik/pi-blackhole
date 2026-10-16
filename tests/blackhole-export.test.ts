@@ -415,7 +415,7 @@ describe("/blackhole-export", () => {
   });
 
   it("inferReflectionTier falls back to medium when no observation resolves", async () => {
-    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+    const { buildProjectMemoryCorpusAsync } = await import("../src/project-recall/corpus.js");
     const { buildExportMarkdown } = await import("../src/project-recall/format-export.js");
 
     const scope = encodeScopeDir(projectCwd);
@@ -441,7 +441,7 @@ describe("/blackhole-export", () => {
       }),
     ]);
 
-    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    const corpus = await buildProjectMemoryCorpusAsync({ cwd: projectCwd, agentDir });
     const { markdown } = buildExportMarkdown(corpus, {
       now: Date.now(),
       title: "proj",
@@ -451,7 +451,7 @@ describe("/blackhole-export", () => {
   });
 
   it("includes branch unanchored markers as kept facts", async () => {
-    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+    const { buildProjectMemoryCorpusAsync } = await import("../src/project-recall/corpus.js");
 
     const scope = encodeScopeDir(projectCwd);
     writeSession(scope, "unanchored.jsonl", [
@@ -475,7 +475,7 @@ describe("/blackhole-export", () => {
       ),
     ]);
 
-    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    const corpus = await buildProjectMemoryCorpusAsync({ cwd: projectCwd, agentDir });
     // Coverage-inert markers are still facts: recall/export must serve them.
     expect(corpus.observations.map((o) => o.content)).toContain(
       "Kept tail fact without coverage claim",
@@ -483,7 +483,7 @@ describe("/blackhole-export", () => {
   });
 
   it("includes pending unanchored batches, including unanchored-only files", async () => {
-    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+    const { buildProjectMemoryCorpusAsync } = await import("../src/project-recall/corpus.js");
 
     const bhDir = join(agentDir, "pi-blackhole");
     // Known session: kept facts join its attributed pending memory.
@@ -530,7 +530,7 @@ describe("/blackhole-export", () => {
       "utf-8",
     );
 
-    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    const corpus = await buildProjectMemoryCorpusAsync({ cwd: projectCwd, agentDir });
     const contents = corpus.observations.map((o) => o.content);
     expect(contents).toContain("Pending kept tail fact");
     expect(contents).toContain("Orphan kept tail fact");
@@ -548,8 +548,8 @@ describe("/blackhole-export", () => {
   });
 
   it("prefilter keeps marker-less sessions cheap but counted", async () => {
-    const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
-    const corpus = buildProjectMemoryCorpus({ cwd: projectCwd, agentDir });
+    const { buildProjectMemoryCorpusAsync } = await import("../src/project-recall/corpus.js");
+    const corpus = await buildProjectMemoryCorpusAsync({ cwd: projectCwd, agentDir });
     expect(corpus.sessionsConsidered).toBe(3);
     expect(corpus.filesWithMarkers).toBe(2);
     expect(corpus.knownSessionIds.has("ses-1")).toBe(true);
@@ -571,8 +571,7 @@ describe("reflection export timestamps", () => {
     ["2026-10-03 14:05 junk", "2026-10-04T00:00:00.000Z"],
     ["2026-10-03 14:05 +02:00", "2026-10-04T00:00:00.000Z"],
   ])("uses evidence time or entry fallback: %s", async (timestamp, expected) => {
-    const { buildProjectMemoryCorpus, buildProjectMemoryCorpusAsync } =
-      await import("../src/project-recall/corpus.js");
+    const { buildProjectMemoryCorpusAsync } = await import("../src/project-recall/corpus.js");
     writeSession(encodeScopeDir(projectCwd), "reflection-time.jsonl", [
       sessionHeader("reflection-time"),
       customEntry(
@@ -584,12 +583,8 @@ describe("reflection export timestamps", () => {
       ),
     ]);
     const options = { cwd: projectCwd, agentDir };
-    const sync = buildProjectMemoryCorpus(options);
-    const async = await buildProjectMemoryCorpusAsync(options);
-    expect([sync.reflections[0]?.timestamp, async.reflections[0]?.timestamp]).toEqual([
-      expected,
-      expected,
-    ]);
+    const corpus = await buildProjectMemoryCorpusAsync(options);
+    expect(corpus.reflections[0]?.timestamp).toEqual(expected);
   });
 });
 
@@ -598,7 +593,7 @@ describe("pending reflection timestamps", () => {
   it.each(["2026-10-03 14:05", undefined, "invalid", "2026-10-03 14:05 PST"])(
     "prefers own timestamp or legacy fallback %s",
     async (timestamp) => {
-      const { buildProjectMemoryCorpus } = await import("../src/project-recall/corpus.js");
+      const { buildProjectMemoryCorpusAsync } = await import("../src/project-recall/corpus.js");
       writeSession(encodeScopeDir(projectCwd), "pending-time.jsonl", [
         sessionHeader("pending-time"),
       ]);
@@ -626,8 +621,95 @@ describe("pending reflection timestamps", () => {
         }),
       );
       expect(
-        buildProjectMemoryCorpus({ cwd: projectCwd, agentDir }).reflections[0]?.timestamp,
+        (await buildProjectMemoryCorpusAsync({ cwd: projectCwd, agentDir })).reflections[0]
+          ?.timestamp,
       ).toBe(timestamp === "2026-10-03 14:05" ? timestamp : "2026-10-04T00:00:00.000Z");
     },
   );
+});
+
+describe("blackhole-export days/mode wiring (Phase 4)", () => {
+  beforeEach(() => {
+    rmSync(testRoot, { recursive: true, force: true });
+    mkdirSync(testRoot, { recursive: true });
+    createFixtures();
+  });
+
+  afterEach(() => {
+    rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  it.each(["days:0", "days:-5", "days:wat", "mode:foo"])(
+    "rejects invalid args %s without writing",
+    async (args) => {
+      const env = createMockEnv();
+      registerBlackholeExportCommand(env.pi);
+      await env.handlerMap.get("blackhole-export")!(args, env.ctx);
+      expect(env.ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Invalid"), "error");
+      expect(env.sentMessages).toHaveLength(0);
+      expect(readdirSync(projectCwd).filter((f) => f.endsWith(".md"))).toHaveLength(0);
+    },
+  );
+
+  it("days:7 distilled excludes out-of-window orphan memory but keeps recent facts", async () => {
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    await env.handlerMap.get("blackhole-export")!("days:7 out:windowed-distilled.md", env.ctx);
+    const md = readFileSync(join(projectCwd, "windowed-distilled.md"), "utf-8");
+    expect(md).toContain("# Project memory export");
+    expect(md).toContain("Ship releases only on Fridays");
+    expect(md).not.toContain("Orphan memory recovered from lost session");
+  });
+
+  it("mode:timeline writes a chronological timeline file", async () => {
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    await env.handlerMap.get("blackhole-export")!(
+      "days:7 mode:timeline out:timeline-weekly.md",
+      env.ctx,
+    );
+    const md = readFileSync(join(projectCwd, "timeline-weekly.md"), "utf-8");
+    expect(md).toContain("# Project memory timeline");
+    expect(md).toContain("exact duplicates only");
+    expect(md).toContain("Ship releases only on Fridays");
+    expect(md).not.toContain("Orphan memory recovered from lost session");
+  });
+
+  it("mode:timeline summary reports Window without ranking lines", async () => {
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    await env.handlerMap.get("blackhole-export")!(
+      "days:7 mode:timeline out:timeline-summary.md",
+      env.ctx,
+    );
+    expect(env.sentMessages).toHaveLength(1);
+    const content = env.sentMessages[0].content;
+    expect(content).toContain("Window:");
+    expect(content).toContain("Sessions:");
+    expect(content).toContain("Observations:");
+    expect(content).toContain("Reflections:");
+    expect(content).not.toContain("viability gate");
+    expect(content).not.toContain("topic groups");
+  });
+
+  it("days:7 with no memory notifies the windowed empty message and writes nothing", async () => {
+    rmSync(agentDir, { recursive: true, force: true });
+    mkdirSync(agentDir, { recursive: true });
+    const emptyScope = encodeScopeDir(projectCwd);
+    writeSession(emptyScope, "plain.jsonl", [
+      sessionHeader("ses-9"),
+      messageEntry("z1", "user", "nothing"),
+    ]);
+
+    const env = createMockEnv();
+    registerBlackholeExportCommand(env.pi);
+    await env.handlerMap.get("blackhole-export")!("days:7", env.ctx);
+
+    expect(env.sentMessages).toHaveLength(0);
+    expect(env.ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("in the last 7 days"),
+      "warning",
+    );
+    expect(readdirSync(projectCwd).filter((f) => f.endsWith(".md"))).toHaveLength(0);
+  });
 });
