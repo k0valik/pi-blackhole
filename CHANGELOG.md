@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- **Reflector can record corrections of changed facts.** The reflector prompt told the model to emit nothing when a candidate looked like a near-duplicate of an existing reflection, so a fact that had since changed (a blocker resolved, a check now passing) could stay recorded in its stale form. The prompt now allows a correction that states the current fact in full. No schema, config or model-call change.
 - **Reflection metadata validation.** Ignore impossible evidence dates and malformed supersede ids; reflection export falls back to legacy dates without changing observation parsing.
 - **Reflection prompt budget consistency.** Snapshot annotation settings for each reflector stage so settings reloads cannot change its dispatched prompt/schema after budget measurement.
 

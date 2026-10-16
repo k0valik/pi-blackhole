@@ -738,6 +738,14 @@ describe("reflection annotation contract", () => {
     expect(buildReflectorSystem({ timestamps: false, supersedes: false })).toBe(REFLECTOR_SYSTEM);
   });
 
+  it("lets a correction of a changed fact through the near-duplicate rule", async () => {
+    const { buildReflectorSystem } = await import("../src/om/agents/reflector/prompts.js");
+    const prompt = buildReflectorSystem({ timestamps: false, supersedes: false });
+    expect(prompt).toContain("emit nothing");
+    expect(prompt).toContain("unless the candidate corrects a fact that has since changed");
+    expect(prompt).toContain("a failing check now passing");
+  });
+
   it("rejects earlier same-run ids without dropping the new record", async () => {
     const loop = fakeAgentLoop(async (_prompts, context) => {
       await context.tools[0].execute("first", {
