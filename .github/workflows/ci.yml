@@ -22,6 +22,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: node --test tests/check-tarball.test.mjs
+      - run: npm pack --dry-run --json --ignore-scripts | node scripts/check-tarball.mjs
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
