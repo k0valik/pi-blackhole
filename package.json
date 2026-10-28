@@ -25,6 +25,7 @@
   },
   "files": [
     "dist/",
+    "scripts/prepare.mjs",
     "*.ts",
     "src/**/*.ts",
     "!src/**/*.test.ts",
