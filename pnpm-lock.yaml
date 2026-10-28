@@ -184,7 +184,7 @@ snapshots:
 lockfileVersion: '9.0'
 
 settings:
-  autoInstallPeers: true
+  autoInstallPeers: false
   excludeLinksFromLockfile: false
 
 overrides:
@@ -194,6 +194,13 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      tsup:
+        specifier: ^9.0.0
+        version: 9.0.0(jiti@2.7.0)(postcss@8.5.28)(typescript@6.0.3)(yaml@2.9.1)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
     devDependencies:
       '@earendil-works/pi-agent-core':
         specifier: 1.4.0
@@ -219,15 +226,9 @@ importers:
       simple-git-hooks:
         specifier: ^2.14.0
         version: 2.14.0
-      tsup:
-        specifier: ^9.0.0
-        version: 9.0.0(jiti@2.7.0)(postcss@8.5.28)(typescript@6.0.3)(yaml@2.9.1)
       typebox:
         specifier: 1.4.3
         version: 1.4.3
-      typescript:
-        specifier: 6.0.3
-        version: 6.0.3
       vitest:
         specifier: 5.0.5
         version: 5.0.5(@types/node@26.5.1)(vite@8.0.16(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))

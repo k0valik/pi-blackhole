@@ -46,7 +46,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check",
-    "prepare": "node scripts/prepare.mjs",
+    "postinstall": "node scripts/prepare.mjs",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt . --check",
     "verify": "pnpm check && pnpm test"
@@ -60,10 +60,12 @@
     "oxfmt": "^0.74.0",
     "oxlint": "1.89.0",
     "simple-git-hooks": "^2.14.0",
-    "tsup": "^9.0.0",
     "typebox": "1.4.3",
-    "typescript": "6.0.3",
     "vitest": "5.0.5"
+  },
+  "dependencies": {
+    "tsup": "^9.0.0",
+    "typescript": "6.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.85.1 <2.0.0",

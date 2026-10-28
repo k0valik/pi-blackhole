@@ -1,17 +1,5 @@
-// Best-effort build hook. Runs via `prepare` on install (dev clones, git deps)
-// and on pack/publish. Designed to NEVER break a consumer install:
-//
-//   - tsup present  → build dist/ (real build errors still fail loudly —
-//                     that's a dev/CI bug, not a consumer environment issue)
-//   - tsup missing  → skip the build. If dist/ is also missing, warn loudly:
-//                     pi resolves the extension from ./dist/index.js, so a git
-//                     consumer without devDependencies (pi default
-//                     `npm install --omit=dev`) would otherwise get a silent
-//                     no-load. Registry consumers never run this script at all.
-//   - simple-git-hooks present → (re)install git hooks, best-effort (dev checkouts only)
-//   - Also patches pre-push hook to require SKIP_PRE_PUSH_ALLOWED
-//
-// Zero runtime dependencies: plain node, no pnpm/npm/bun requirement.
+// Build the bundled entry on install; git installs include tsup as a dependency.
+// Git hook installation remains best-effort for development checkouts.
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -20,7 +8,7 @@ const root = join(import.meta.dirname, "..");
 const isWindows = process.platform === "win32";
 const bin = (name) => join(root, "node_modules", ".bin", isWindows ? `${name}.cmd` : name);
 
-// 1. Build dist when the toolchain is available.
+// 1. Build dist using the local toolchain.
 // Installer-agnostic: works under pnpm, bun, npm. Pi never calls build after
 // install — only `prepare` does. Windows needs shell:true for .cmd shims.
 const tsup = bin("tsup");
@@ -30,16 +18,9 @@ if (existsSync(tsup)) {
     console.error("[prepare] tsup build failed");
     process.exit(r.status ?? 1);
   }
-} else if (!existsSync(join(root, "dist", "index.js"))) {
-  console.warn(
-    [
-      "[prepare] tsup not found and dist/index.js is missing.",
-      "[prepare] Pi loads this extension from ./dist/index.js, so it will not load.",
-      "[prepare] This happens on git installs that skip devDependencies (pi default `npm install --omit=dev`).",
-      '[prepare] Fix: set npmCommand in ~/.pi/agent/settings.json, e.g. "npmCommand": ["npm"], then reinstall.',
-      "[prepare] Or install from npm: pi install npm:pi-blackhole",
-    ].join("\n"),
-  );
+} else {
+  console.error("[prepare] tsup not found; cannot build dist/index.js");
+  process.exit(1);
 }
 
 // 2. Git hooks, best-effort (only meaningful in a dev checkout).
