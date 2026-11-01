@@ -204,12 +204,17 @@ function sourceEntryTimestamp(entry: RenderableEntry): string {
   return formatTimestamp(entry.timestamp);
 }
 
+/** Rendered observer input for a source entry, or undefined when it is not delivered. */
+function renderDeliveredSourceEntry(entry: RenderableEntry): string | undefined {
+  if (!entry.id || !isSourceRenderableEntry(entry)) return undefined;
+  const rendered = serializeBranchEntries([entry]);
+  return rendered.trim() ? rendered : undefined;
+}
+
 export function isDeliveredSourceEntry(
   entry: RenderableEntry,
 ): entry is RenderableEntry & { id: string } {
-  return (
-    !!entry.id && isSourceRenderableEntry(entry) && serializeBranchEntries([entry]).trim() !== ""
-  );
+  return renderDeliveredSourceEntry(entry) !== undefined;
 }
 
 export function serializeSourceAddressedBranchEntries(
@@ -219,8 +224,8 @@ export function serializeSourceAddressedBranchEntries(
   const sourceEntryIds: string[] = [];
   const sourceEntryTimestamps: Record<string, string> = {};
   for (const entry of entries) {
-    if (!isDeliveredSourceEntry(entry)) continue;
-    const rendered = serializeBranchEntries([entry]);
+    const rendered = renderDeliveredSourceEntry(entry);
+    if (rendered === undefined || !entry.id) continue;
     sourceEntryIds.push(entry.id);
     sourceEntryTimestamps[entry.id] = sourceEntryTimestamp(entry);
     blocks.push(`[Source entry id: ${entry.id}]\n${rendered}`);
