@@ -204,6 +204,14 @@ function sourceEntryTimestamp(entry: RenderableEntry): string {
   return formatTimestamp(entry.timestamp);
 }
 
+export function isDeliveredSourceEntry(
+  entry: RenderableEntry,
+): entry is RenderableEntry & { id: string } {
+  return (
+    !!entry.id && isSourceRenderableEntry(entry) && serializeBranchEntries([entry]).trim() !== ""
+  );
+}
+
 export function serializeSourceAddressedBranchEntries(
   entries: RenderableEntry[],
 ): SourceAddressedSerialization {
@@ -211,9 +219,8 @@ export function serializeSourceAddressedBranchEntries(
   const sourceEntryIds: string[] = [];
   const sourceEntryTimestamps: Record<string, string> = {};
   for (const entry of entries) {
-    if (!entry.id || !isSourceRenderableEntry(entry)) continue;
+    if (!isDeliveredSourceEntry(entry)) continue;
     const rendered = serializeBranchEntries([entry]);
-    if (!rendered.trim()) continue;
     sourceEntryIds.push(entry.id);
     sourceEntryTimestamps[entry.id] = sourceEntryTimestamp(entry);
     blocks.push(`[Source entry id: ${entry.id}]\n${rendered}`);
