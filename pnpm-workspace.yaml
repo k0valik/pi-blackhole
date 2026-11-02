@@ -1,3 +1,6 @@
+# Pi supplies its own peer dependencies; keep local and production installs aligned.
+autoInstallPeers: false
+
 allowBuilds:
   "@google/genai": true
   esbuild: true
