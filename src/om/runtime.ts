@@ -1344,9 +1344,14 @@ export class Runtime {
     if (!this.isGenerationActive(request.generation)) return;
     try {
       request.run();
-    } catch {
-      // The recheck closure reports its own unexpected failures; one must
-      // never reject the finishing pipeline's tracked promise.
+    } catch (error) {
+      // Keep callback failures visible even if a caller does not report them,
+      // without rejecting the finishing pipeline's tracked promise.
+      debugLog(
+        "consolidation.recheck_callback_error",
+        { errorMessage: String(error) },
+        this.config.debugLog === true,
+      );
     }
   }
 

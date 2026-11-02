@@ -321,6 +321,43 @@ afterAll(() => {
   vi.unstubAllEnvs();
 });
 
+describe("runtime recheck callback failures", () => {
+  test.each([true, false])("contains callback errors with debugLog=%s", async (enabled) => {
+    const runtime = new Runtime();
+    runtime.config.debugLog = enabled;
+    runtime.startSession("callback-session");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    heldReleases.push(release);
+    const pipeline = runtime.launchConsolidationTask({ hasUI: false }, async () => gate);
+    outstanding.push(pipeline);
+    const callback = vi.fn(() => {
+      throw new Error("runtime recheck callback failure");
+    });
+    runtime.requestConsolidationRecheck(runtime.captureGeneration("callback-session"), callback);
+    release();
+
+    await expect(pipeline).resolves.toBeUndefined();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(runtime.consolidationInFlight).toBe(false);
+    expect(runtime.consolidationPromise).toBeNull();
+    flushDebugLog();
+    const path = join(scratch.dir, DEBUG_LOG_RELATIVE_PATH);
+    const log = existsSync(path) ? readFileSync(path, "utf-8") : "";
+    const errors = log
+      .split("\n")
+      .filter((line) => line.includes('"event":"consolidation.recheck_callback_error"'));
+    if (enabled) {
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain('"errorMessage":"Error: runtime recheck callback failure"');
+    } else {
+      expect(errors).toHaveLength(0);
+    }
+  });
+});
+
 describe("headless coalesced recheck errors", () => {
   test.each([
     { debugLog: true, stale: false, shouldLog: true },
