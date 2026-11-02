@@ -21,6 +21,19 @@ const history = () => [
 ];
 
 describe("unobserved tail", () => {
+  test("selects covered messages past an undelivered assistant entry", () => {
+    const entries = [
+      rawMessage("aborted", "", { message: { role: "assistant", content: [] } }),
+      ...history(),
+      covered(),
+    ];
+
+    expect(buildOwnCut(entries, "m5", "unobserved")).toMatchObject({
+      ok: true,
+      firstKeptEntryId: "m3",
+      selectedIds: ["aborted", "m1", "m2"],
+    });
+  });
   test("cuts only completed OM coverage, not Pi's later cut", () => {
     expect(buildOwnCut([...history(), covered()], "m5", "unobserved")).toMatchObject({
       ok: true,

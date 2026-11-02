@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Observation progress no longer stalls after an interrupted turn.** An aborted turn leaving an empty assistant message (or a message containing only redacted thinking) could make the observer re-read the same chunk indefinitely; with an unobserved tail, compaction could repeat every turn without shrinking context. Coverage now advances past entries omitted from observer input while still requiring every deliverable entry to be covered ([#190](https://github.com/k0valik/pi-blackhole/issues/190)).
+
 ---
 
 ## [0.5.16] - 2026-10-24
