@@ -64,7 +64,8 @@ export function configPath(): string {
 export interface OmModelConfig {
   /** Provider name. Optional to allow thinking-only modifiers
    *  (`{ thinking: "low" }`) that track the session model via sessionFallback.
-   *  `cooldownHours`/`contextWindow` require provider+id to take effect. */
+   *  `contextWindow` requires provider+id. `cooldownHours` also applies to
+   *  the resolved session-fallback model when set on a stage entry. */
   provider?: string;
   /** Model ID. Optional — see `provider`. */
   id?: string;

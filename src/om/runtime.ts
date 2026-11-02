@@ -885,7 +885,11 @@ export class Runtime {
       if (
         typeof sessionIdentity.provider === "string" &&
         typeof sessionIdentity.id === "string" &&
-        isCooldownActive({ provider: sessionIdentity.provider, id: sessionIdentity.id })
+        isCooldownActive({
+          provider: sessionIdentity.provider,
+          id: sessionIdentity.id,
+          cooldownHours: ctx.stageModel?.cooldownHours,
+        })
       ) {
         return {
           ok: false,
@@ -1127,8 +1131,10 @@ export class Runtime {
    * Record a deterministic client error (4xx-class: missing provider-required
    * headers, bad credentials, unknown model) for the RESOLVED model — including
    * the session model, which has no candidate config and is therefore invisible
-   * to `recordRetryableError`. Without this, a deterministically broken session
-   * model retries identically on every consolidation cycle (up to
+   * to `recordRetryableError`. The owning stage config controls the fallback's
+   * cooldown duration; `cooldownHours: 0` keeps the failure in-cycle only.
+   * Without a configured cooldown, a deterministically broken session model
+   * retries identically on every consolidation cycle (up to
    * MAX_STAGE_ATTEMPTS per stage) instead of cooling down and letting the
    * pipeline settle. Transient errors are excluded: a blip on the user's main
    * model must not disable OM for an hour (the 30s consolidation retry gate
@@ -1138,6 +1144,7 @@ export class Runtime {
     resolvedModel: unknown,
     error: unknown,
     stage: ConsolidationPhase,
+    stageModel?: ConfiguredModel,
   ): void {
     const model = resolvedModel as { provider?: unknown; id?: unknown } | null | undefined;
     if (typeof model?.provider !== "string" || typeof model?.id !== "string") return;
@@ -1146,10 +1153,19 @@ export class Runtime {
       return;
     }
     if (!isDeterministicError(error)) return;
+    if (stageModel?.cooldownHours === 0) {
+      this.skipFailedForCycle({ provider: model.provider, id: model.id });
+      return;
+    }
     const rawReason = error instanceof Error ? error.message : String(error || "unknown error");
-    // recordCooldown sanitizes + defaults to a 1h window when cooldownHours is unset.
+    // The stage's cooldown setting also applies when the resolved model is the
+    // session fallback; omit it only when unset to retain the 1h default.
     recordCooldown(
-      { provider: model.provider, id: model.id },
+      {
+        provider: model.provider,
+        id: model.id,
+        cooldownHours: stageModel?.cooldownHours,
+      },
       sanitizeCooldownReason(rawReason),
       stage,
       "provider_configuration",

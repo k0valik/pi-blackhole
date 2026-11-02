@@ -633,10 +633,10 @@ Each model config supports the following fields:
 | `provider` | string | Provider name (required with `id`; omit both for a thinking-only modifier). |
 | `id` | string | Model ID (required with `provider`; omit both for a thinking-only modifier). |
 | `thinking` | enum | Thinking level: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`. Defaults to `"low"` when unset. May be set alone, without `provider`/`id`, as a pure thinking-level modifier for the session-fallback model. |
-| `cooldownHours` | number | Cooldown duration in hours after a cooldown-worthy error — transient (429/5xx/timeout) or deterministic 4xx (missing provider-required headers, bad credentials, unknown model). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. Requires `provider`+`id`; inert on thinking-only modifiers. |
+| `cooldownHours` | number | Cooldown duration in hours after a cooldown-worthy error — transient (429/5xx/timeout) or deterministic 4xx (missing provider-required headers, bad credentials, unknown model). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries. |
 | `contextWindow` | number | Override for the model's context window. Inherits from Pi's model registry when unset. Requires `provider`+`id`; inert on thinking-only modifiers. |
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it only supplies the stage thinking level while the worker tracks the session model via `sessionFallback` (default `true`). With `sessionFallback: false` the stage is skipped. Thinking-only entries in `*FallbackModels` arrays are likewise skipped as candidates. An entry with exactly one of `provider`/`id` is rejected entirely (so a forgotten `id` cannot silently become a modifier).
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `true`). With `sessionFallback: false` the stage is skipped. Thinking-only entries in `*FallbackModels` arrays are likewise skipped as candidates. An entry with exactly one of `provider`/`id` is rejected entirely (so a forgotten `id` cannot silently become a modifier).
 
 **Example:**
 

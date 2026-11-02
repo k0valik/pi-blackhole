@@ -340,8 +340,8 @@ describe("thinking-only stageThinkingLevel precedence", () => {
   });
 });
 
-describe("thinking-only cooldown inertness", () => {
-  it("partial entries never activate or record cooldowns", async () => {
+describe("cooldown helpers require model identity", () => {
+  it("direct cooldown helpers ignore partial model configs", async () => {
     const { isCooldownActive, recordCooldown, getCooldownEntry } =
       await import("../src/om/cooldown.js");
     const partial = { thinking: "low" } as { provider?: string; id?: string; thinking: "low" };

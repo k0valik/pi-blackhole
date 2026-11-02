@@ -163,7 +163,7 @@ interface OmModelConfig {
   provider?: string;       // required with id — omit both for a thinking-only modifier
   id?: string;             // required with provider — omit both for a thinking-only modifier
   thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  cooldownHours?: number;  // default 1h, 0 = in-memory only (no disk persistence); requires provider+id
+  cooldownHours?: number;  // default 1h, 0 = in-memory only (no disk persistence); stage setting also applies when that stage falls back to the session model
   contextWindow?: number;  // override Pi's registry value; requires provider+id
 }
 ```
@@ -337,7 +337,7 @@ Each model entry supports these fields:
 }
 ```
 
-**`cooldownHours: 0` behavior:** When set to 0, the model is never written to the cooldown file on disk. Instead, failures are tracked in-memory for the current consolidation stage only (`Runtime.failedInCycle` Set in `runtime.ts`). This means:
+**`cooldownHours: 0` behavior:** When set to 0, the model is never written to the cooldown file on disk, including when a stage falls back to the session model (whether its entry is thinking-only or has a model identity). Instead, failures are tracked in-memory for the current consolidation stage only (`Runtime.failedInCycle` Set in `runtime.ts`). This means:
 - The model is skipped for the rest of the current pipeline stage
 - It's available again on the next pipeline run (no persisted cooldown)
 - Useful for testing or when you don't want cooldown state to persist across restarts

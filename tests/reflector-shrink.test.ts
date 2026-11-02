@@ -62,12 +62,16 @@ vi.mock("../src/om/agents/reflector/agent.js", () => ({
   runReflector: runReflectorSpy,
 }));
 
-function ctxWith(entries: TestEntry[], modelRegistry: unknown): ConsolidationCtx {
+function ctxWith(
+  entries: TestEntry[],
+  modelRegistry: unknown,
+  model: unknown = undefined,
+): ConsolidationCtx {
   return {
     cwd: "/tmp",
     hasUI: false,
     ui: undefined,
-    model: undefined,
+    model,
     modelRegistry,
     sessionManager: {
       getBranch: () => entries,
@@ -146,9 +150,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function runStage(runtime: Runtime, entries: TestEntry[], registry: unknown) {
+async function runStage(
+  runtime: Runtime,
+  entries: TestEntry[],
+  registry: unknown,
+  model?: unknown,
+) {
   const { makeModelResolver, runReflectorStage } = await import("../src/om/consolidation.js");
-  const ctx = ctxWith(entries, registry);
+  const ctx = ctxWith(entries, registry, model);
   const generation = runtime.captureGeneration("test-session");
   const appendEntry = vi.fn(() => true);
   const outcome = await runReflectorStage(
@@ -162,6 +171,27 @@ async function runStage(runtime: Runtime, entries: TestEntry[], registry: unknow
 }
 
 describe("reflector shrink-to-fit batching", () => {
+  test("thinking-only cooldownHours: 0 handles a session-model failure in the batch path", async () => {
+    const { entries } = poolBranch(13, 10_000);
+    const runtime = makeRuntime();
+    runtime.config.reflectorModel = { thinking: "low", cooldownHours: 0 };
+    runtime.config.sessionFallback = true;
+    const sessionModel = {
+      provider: "session-provider",
+      id: "session-model",
+      contextWindow: 50_000,
+      maxTokens: 2_000,
+    };
+    runReflectorSpy.mockRejectedValue(new Error("HTTP 401 Unauthorized"));
+
+    const { outcome } = await runStage(runtime, entries, fakeRegistry(50_000, 2_000), sessionModel);
+
+    expect(outcome.outcome).toBe("abort");
+    expect(runReflectorSpy).toHaveBeenCalledOnce();
+    expect(runtime.sizeSkippedInCycle.has("session-provider/session-model")).toBe(true);
+    expect(runtime.failedInCycle.has("session-provider/session-model")).toBe(true);
+    expect(recordCooldownSpy).not.toHaveBeenCalled();
+  });
   test("unsplittable output-length batch skips by size without cooling or advancing", async () => {
     const { entries } = poolBranch(13, 10_000);
     const runtime = makeRuntime();

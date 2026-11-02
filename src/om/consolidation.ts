@@ -928,17 +928,18 @@ function handleWorkerErrorAfterClose(args: {
   } = args;
   const afterClose = new Error(workerStreamErrorMessage(worker, errorText));
   const deterministic = isDeterministicError(afterClose);
-  // The toast must describe what was actually written: a cooldownHours-0
-  // candidate cools in-memory only, and a session model whose resolved model
-  // has no provider/id never reaches the cooldown file at all —
-  // recordDeterministicError keys it on both.
+  // The toast must describe what was actually written: cooldownHours: 0
+  // (including on a thinking-only stage modifier) skips only in-memory, and a
+  // session model without provider/id cannot be written to the cooldown file.
   const sessionIdentity: { provider?: unknown; id?: unknown } | null | undefined = resolved.model;
+  const stageModel = stageModelConfig(runtime, stage);
+  const cooldownConfig = stageModelForThinking ?? stageModel;
   const cooled =
     deterministic &&
     isCooldownWorthyError(afterClose) &&
-    (stageModelForThinking
-      ? stageModelForThinking.cooldownHours !== 0
-      : typeof sessionIdentity?.provider === "string" && typeof sessionIdentity?.id === "string");
+    cooldownConfig?.cooldownHours !== 0 &&
+    typeof sessionIdentity?.provider === "string" &&
+    typeof sessionIdentity?.id === "string";
   if (stage === "observer") {
     debugLog("observer.error_after_close", {
       error: errorText,
@@ -955,7 +956,7 @@ function handleWorkerErrorAfterClose(args: {
   if (deterministic) {
     runtime.recordRetryableError(stageModelForThinking, afterClose, stage);
     if (!stageModelForThinking) {
-      runtime.recordDeterministicError(resolved.model, afterClose, stage);
+      runtime.recordDeterministicError(resolved.model, afterClose, stage, stageModel);
     }
   }
   if (ctx.hasUI) {
@@ -1755,7 +1756,13 @@ export async function runObserverStage(
       } else {
         runtime.recordRetryableError(candidateConfig, error, "observer");
       }
-      if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "observer");
+      if (!candidateConfig)
+        runtime.recordDeterministicError(
+          resolved.model,
+          error,
+          "observer",
+          stageModelConfig(runtime, "observer"),
+        );
       debugLog("observer.error", {
         error: String(error),
         retryable: isRetryableError(error),
@@ -2157,7 +2164,13 @@ export async function runReflectorStage(
         runtime.skipOversizedForCycle(candidateConfig ?? bestModel);
       } else {
         runtime.recordRetryableError(candidateConfig, error, "reflector");
-        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "reflector");
+        if (!candidateConfig)
+          runtime.recordDeterministicError(
+            bestModel,
+            error,
+            "reflector",
+            stageModelConfig(runtime, "reflector"),
+          );
       }
       debugLog("reflector.error", {
         error: String(error),
@@ -2426,7 +2439,13 @@ export async function runReflectorStage(
         runtime.skipFailedForCycle(candidateConfig ?? resolved.model, "turn_cap");
       } else {
         runtime.recordRetryableError(candidateConfig, error, "reflector");
-        if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "reflector");
+        if (!candidateConfig)
+          runtime.recordDeterministicError(
+            resolved.model,
+            error,
+            "reflector",
+            stageModelConfig(runtime, "reflector"),
+          );
       }
       debugLog("reflector.error", {
         error: String(error),
@@ -2837,7 +2856,13 @@ export async function runDropperStage(
         runtime.skipOversizedForCycle(candidateConfig ?? bestModel);
       } else {
         runtime.recordRetryableError(candidateConfig, error, "dropper");
-        if (!candidateConfig) runtime.recordDeterministicError(bestModel, error, "dropper");
+        if (!candidateConfig)
+          runtime.recordDeterministicError(
+            bestModel,
+            error,
+            "dropper",
+            stageModelConfig(runtime, "dropper"),
+          );
       }
       debugLog("dropper.error", {
         error: String(error),
@@ -3099,7 +3124,13 @@ export async function runDropperStage(
         runtime.skipFailedForCycle(candidateConfig ?? resolved.model, "turn_cap");
       } else {
         runtime.recordRetryableError(candidateConfig, error, "dropper");
-        if (!candidateConfig) runtime.recordDeterministicError(resolved.model, error, "dropper");
+        if (!candidateConfig)
+          runtime.recordDeterministicError(
+            resolved.model,
+            error,
+            "dropper",
+            stageModelConfig(runtime, "dropper"),
+          );
       }
       debugLog("dropper.error", {
         error: String(error),

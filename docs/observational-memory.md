@@ -280,7 +280,7 @@ Cooldowns survive Pi restarts. `expireCooldowns()` runs lazily on config load. `
 
 ### Cooldown hours
 
-`cooldownHours` per model config (default: 1 hour). Set `0` to disable cooldown — the model is tracked in-memory for the current stage only (no disk writes), using `failedInCycle` set.
+`cooldownHours` per stage model config (default: 1 hour). Set `0` to disable cooldown — the model is tracked in-memory for the current stage only (no disk writes), using `failedInCycle` set. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries.
 
 ### Retryable error detection
 
