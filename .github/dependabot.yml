@@ -7,6 +7,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       dev-dependencies:
+        dependency-type: "development"
         patterns:
           - "*"
     # TypeScript stays at 6.0.3: @typescript-eslint v8 does not support TS 7+,

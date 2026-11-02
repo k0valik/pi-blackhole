@@ -52,21 +52,21 @@
     "fmt:check": "oxfmt . --check",
     "verify": "pnpm check && pnpm test"
   },
+  "dependencies": {
+    "tsup": "^9.0.0",
+    "typescript": "6.0.3"
+  },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
     "lint-staged": "17.6.0",
-    "oxfmt": "^0.74.0",
-    "oxlint": "1.89.0",
+    "oxfmt": "^0.75.0",
+    "oxlint": "1.90.0",
     "simple-git-hooks": "^2.14.0",
     "typebox": "1.4.3",
     "vitest": "5.0.5"
-  },
-  "dependencies": {
-    "tsup": "^9.0.0",
-    "typescript": "6.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.85.1 <2.0.0",
