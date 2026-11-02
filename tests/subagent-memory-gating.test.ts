@@ -186,6 +186,8 @@ describe("consolidation trigger wiring", () => {
       isConsolidationRetryGated: vi.fn(() => false),
       isMemoryEnabled: vi.fn(() => false),
       noteSubagentMemorySkip: vi.fn(),
+      isConsolidationShutdownSuppressed: vi.fn(() => false),
+      cancelPendingConsolidationRecheck: vi.fn(),
       launchConsolidationTask: vi.fn(),
     } as any;
     const { pi, fire } = makePi();
