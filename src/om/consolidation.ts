@@ -673,7 +673,11 @@ function rememberCoalescedRecheck(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
       // Stale host contexts are the expected end of a superseded session;
       // anything else is reported like any other background failure.
       if (isStaleExtensionContextError(error)) return;
-      debugLog("consolidation.recheck_error", { errorMessage: String(error) });
+      debugLog(
+        "consolidation.recheck_error",
+        { errorMessage: String(error) },
+        runtime.config.debugLog === true,
+      );
       if (detachedCtx.hasUI && detachedCtx.ui) {
         try {
           detachedCtx.ui.notify(`Observational memory: ${String(error)}`, "warning");

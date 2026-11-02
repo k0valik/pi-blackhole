@@ -10,7 +10,7 @@
  * per-test scratch directory.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -25,6 +25,7 @@ import { Runtime } from "../src/om/runtime.js";
 import { registerConsolidationTrigger, type ConsolidationCtx } from "../src/om/consolidation.js";
 import { readPendingState } from "../src/om/pending.js";
 import { recordCooldown } from "../src/om/cooldown.js";
+import { DEBUG_LOG_RELATIVE_PATH, flushDebugLog } from "../src/om/debug-log.js";
 import { ROOT_SESSIONS_ENV } from "../src/core/subagent-detector.js";
 import { rawMessage, type TestEntry } from "./fixtures/session.js";
 import { createExtensionApiDouble } from "./fixtures/pi-extension-api.js";
@@ -312,11 +313,57 @@ afterEach(async () => {
   sessionStartHandlers.length = 0;
   shutdownHandlers.length = 0;
   vi.restoreAllMocks();
+  flushDebugLog();
   rmSync(scratch.dir, { recursive: true, force: true });
 });
 
 afterAll(() => {
   vi.unstubAllEnvs();
+});
+
+describe("headless coalesced recheck errors", () => {
+  test.each([
+    { debugLog: true, stale: false, shouldLog: true },
+    { debugLog: false, stale: false, shouldLog: false },
+    { debugLog: true, stale: true, shouldLog: false },
+  ])(
+    "debugLog=$debugLog stale=$stale records error=$shouldLog",
+    async ({ debugLog, stale, shouldLog }) => {
+      const f = makeSchedulingFixture({ reflectAfterTokens: 1 });
+      f.runtime.config.debugLog = debugLog;
+      f.entries.push(bigSource("big-1"));
+      const releaseDropper = f.holdDropper();
+      f.fireTurnEnd();
+      const pipeline = f.runtime.consolidationPromise;
+      if (!pipeline) throw new Error("Expected an active consolidation pipeline");
+      outstanding.push(pipeline);
+      await vi.waitFor(() => expect(agents.runDropper).toHaveBeenCalledTimes(1));
+
+      f.entries.push(bigSource("final-1"));
+      f.fireTurnEnd();
+      const errorMessage = stale ? "extension ctx is stale" : "headless recheck branch failure";
+      const getBranch = vi.spyOn(f.ctx.sessionManager, "getBranch").mockImplementationOnce(() => {
+        throw new Error(errorMessage);
+      });
+      releaseDropper();
+      await pipeline;
+      expect(getBranch).toHaveBeenCalledTimes(1);
+      expect(f.runtime.consolidationInFlight).toBe(false);
+
+      flushDebugLog();
+      const path = join(scratch.dir, DEBUG_LOG_RELATIVE_PATH);
+      const log = existsSync(path) ? readFileSync(path, "utf-8") : "";
+      const errors = log
+        .split("\n")
+        .filter((line) => line.includes('"event":"consolidation.recheck_error"'));
+      if (shouldLog) {
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toContain('"errorMessage":"Error: headless recheck branch failure"');
+      } else {
+        expect(errors).toHaveLength(0);
+      }
+    },
+  );
 });
 
 describe("coalesced recheck scheduling", () => {
