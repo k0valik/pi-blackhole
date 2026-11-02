@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Coalesced consolidation rechecks — lost wake-ups after a busy pipeline.** A lifecycle trigger (`turn_end`, `agent_start`) arriving while an observer→reflector→dropper pipeline was already running used to be dropped: the pipeline finished, cleared its in-flight flag, and the accumulated backlog sat unobserved until the next user message (observed live as ~37k unobserved tokens against the 15k `observeAfterTokens` threshold). A due trigger that arrives while consolidation is busy is now remembered as a single coalesced recheck scoped to the session generation, and the finishing pipeline re-evaluates the branch exactly once after its cleanup — through the same `anyStageDue`, retry, configuration and generation gates. Busy triggers coalesce into one follow-up; an ineligible context (memory disabled, skipped provider, legacy passive) invalidates a remembered request; content already covered consumes the recheck without another worker; a no-progress follow-up (`tool_not_called`-style empty outcomes) stays stopped until another trigger, so no autonomous retry loop is possible. At session shutdown regular scheduling is suppressed synchronously before the bounded shutdown observation, and the next session start revives it. Workers stay strictly sequential — no new lifecycle launch hook, timer, persisted state or user setting was added.
+
 ---
 
 ## [0.5.17] - 2026-11-03
