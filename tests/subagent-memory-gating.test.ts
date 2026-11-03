@@ -71,7 +71,10 @@ function makePi() {
 }
 
 beforeEach(() => {
-  scratch.dir = mkdtempSync(join(tmpdir(), "pi-blackhole-gating-"));
+  // Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
+  // host and the on-disk config resolve to the same place.
+  scratch.dir =
+    process.env.PI_CODING_AGENT_DIR ?? mkdtempSync(join(tmpdir(), "pi-blackhole-gating-"));
   delete process.env.PI_BLACKHOLE_DEBUG_LOG;
 });
 
