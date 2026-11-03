@@ -10,7 +10,13 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const testDir = join(tmpdir(), `pi-blackhole-cooldown-sanitize-${Date.now()}`);
+// Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
+// host and the on-disk config resolve to the same place. configPath() resolves
+// through PI_CODING_AGENT_DIR rather than the mocked getAgentDir, so a
+// hardcoded tmpdir path would silently make every writeConfig here a no-op
+// (the file lands where nothing reads it and DEFAULTS apply instead).
+const testDir =
+  process.env.PI_CODING_AGENT_DIR ?? join(tmpdir(), `pi-blackhole-cooldown-sanitize-${Date.now()}`);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,
@@ -146,6 +152,7 @@ describe("resolveModel skip toast (issue #80)", () => {
   it("does not dump the cooldown reason body into the toast", async () => {
     writeConfig({
       observerModel: { provider: "openrouter", id: "toast:free", cooldownHours: 1 },
+      sessionFallback: true,
     });
     // Simulate a pre-fix cooldown file holding an unsanitized HTML reason.
     mkdirSync(join(testDir, "pi-blackhole"), { recursive: true });

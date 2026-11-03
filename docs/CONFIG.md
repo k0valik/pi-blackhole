@@ -47,7 +47,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   // ── Observational Memory ──
   "memory": true,                 // Enable OM workers + content injection
   "subagentMemory": "off",        // "off" = no OM in detected subagents, "inherit" = follow memory
-  "sessionFallback": true,        // Fall back to session model when OM models fail
+  "sessionFallback": false,       // Opt in to the session model as last-resort fallback (costs main-model tokens, busts its prompt cache)
   "reflectionTimestamps": true,  // Show reflection evidence time
   "reflectionSupersedes": false, // Replacement notes; replaced reflections leave compaction output
   "observeOnShutdown": false,    // One bounded observer attempt before session exit
@@ -423,11 +423,11 @@ Precedence: `memory: false` still disables OM everywhere. Under `"off"`, a detec
 
 ### `sessionFallback`
 
-Defaults to `true`: when all OM model candidates are exhausted, the stage falls back to the main coding (session) model as a last resort instead of being skipped. Set to `false` to skip the stage entirely instead — recommended once cheap worker models are configured, since worker runs on the session model add cost and bust its prompt cache.
+Defaults to `false`: when all OM model candidates are exhausted, the stage is **skipped** instead of falling back to the main coding (session) model. Set to `true` to opt in to the session model as a last resort — useful when you would rather a worker run on the main model than not run at all, but note that worker runs on the session model add cost and bust its prompt cache.
 
 | Type | Default |
 |------|---------|
-| boolean | `true` |
+| boolean | `false` |
 
 ### `reflectionTimestamps`
 
@@ -636,7 +636,7 @@ Each model config supports the following fields:
 | `cooldownHours` | number | Cooldown duration in hours after a cooldown-worthy error — transient (429/5xx/timeout) or deterministic 4xx (missing provider-required headers, bad credentials, unknown model). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries. |
 | `contextWindow` | number | Override for the model's context window. Inherits from Pi's model registry when unset. Requires `provider`+`id`; inert on thinking-only modifiers. |
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `true`). With `sessionFallback: false` the stage is skipped. Thinking-only entries in `*FallbackModels` arrays are likewise skipped as candidates. An entry with exactly one of `provider`/`id` is rejected entirely (so a forgotten `id` cannot silently become a modifier).
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). With `sessionFallback: true` the session model is the last candidate. Thinking-only entries in `*FallbackModels` arrays are likewise skipped as candidates. An entry with exactly one of `provider`/`id` is rejected entirely (so a forgotten `id` cannot silently become a modifier).
 
 **Example:**
 

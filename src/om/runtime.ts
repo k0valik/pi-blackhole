@@ -969,10 +969,14 @@ export class Runtime {
     }
 
     // All configured candidates exhausted and session fallback disabled —
-    // skip the stage entirely.
-    this.tryEmitInfo(
+    // skip the stage entirely. emitNotice (not tryEmitInfo) because the
+    // progress gate holds a single slot per turn: spending it here would
+    // silence every later stage's skip. Per-stage key so observer, reflector
+    // and dropper each report once, and the run summary re-surfaces them.
+    this.emitNotice(
       ctx.hasUI,
       ctx.ui,
+      `sessionFallback:${stageName}`,
       `Observational memory: ${stageName} skipped — all candidates failed (sessionFallback disabled, won't use main model)`,
     );
     this.resolveFailureNotified = true;

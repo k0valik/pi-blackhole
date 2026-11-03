@@ -284,7 +284,7 @@ Based on interview answers, build the config object. Write it to:
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
   "subagentMemory": "off",        // "off" = no OM in detected subagents; "inherit" = follow memory
-  "sessionFallback": true,        // false = skip worker when all configured models fail, don't use main model
+  "sessionFallback": false,       // true = opt in to the session model as last-resort fallback (costs main-model tokens, busts its prompt cache)
   "reflectionTimestamps": true,  // Show reflection evidence time
   "reflectionSupersedes": false, // Replacement notes; replaced reflections leave compaction output
   "observeOnShutdown": false,    // One bounded observer attempt before session exit
@@ -576,7 +576,7 @@ These are processed in `loadUnifiedConfig()` in `unified-config.ts`. The passive
 
 **Do not hardcode model IDs from your own knowledge without checking.** Pi's model registry is the source of truth for what's available. However, built-in providers (openrouter, cerebras, ollama, etc.) have models that may not be in `models.json` — if the user says "I want to use Qwen via OpenRouter," and OpenRouter is a known provider, construct the model ID and it will work. The model ID format matters (case, separators). When in doubt, ask the user for the exact model ID they use.
 
-**Do not set every worker to the session model.** The whole point of background workers is to use cheap/free models. The session model is expensive and should only be the last-resort fallback. Setting `sessionFallback: true` (default) already ensures the session model is tried last — you don't need to also configure it as a primary or base model.
+**Do not set every worker to the session model.** The whole point of background workers is to use cheap/free models. The session model is expensive, and it is no longer tried unless you opt in with `sessionFallback: true` — so give each stage its own cheap primary plus cross-provider fallbacks rather than leaning on the main model.
 
 **Do not set all fallbacks from the same provider as the primary.** If OpenRouter is rate-limiting, another OpenRouter model is also rate-limited. Pick fallbacks from different providers (cerebras, ollama, zai, opencode). The runtime doesn't check for this — it just tries candidates in order.
 

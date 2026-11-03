@@ -129,7 +129,7 @@
 
   "memory": true,
   "subagentMemory": "off",
-  "sessionFallback": true,
+  "sessionFallback": false,
   "observeOnShutdown": false,
   "fullFoldAlways": true,
   "reflectionTimestamps": true,
@@ -154,7 +154,7 @@
     "  recallResponseMaxChars (default 48000, 0=unbounded) — cap on a single recall tool / /blackhole-recall response; per-entry and per-line shares are derived from it",
     "  observationsPoolMaxTokens / reflectionsPoolMaxTokens — rendered-line caps including IDs and separators; headings/footer extra; source history retained",
     "  append rebase — pressure plus useful saving at existing compactions; cadence unchanged",
-    "  sessionFallback (true|false) — if false, skip session model as last-resort fallback",
+    "  sessionFallback (true|false) — false by default: opt in to the session model as last-resort fallback",
     "  fullFoldAlways (true|false) — treat every compaction as a full-fold boundary so early reflections/drops survive the first compaction",
     "  statusBar (true|false) — footer token gauges (O/P/X) plus worker spinners and completion events",
     "  showWorkerNotifications (true|false) — routine observer/reflector/dropper progress toasts; false leaves warnings, errors and command output visible",

@@ -895,6 +895,10 @@ function makePipelineFixture(options: {
   runtime.config.memory = true;
   runtime.config.observeAfterTokens = options.observeAfterTokens;
   runtime.config.reflectAfterTokens = 1_000_000;
+  // A fixture that supplies a session model is exercising the session-fallback
+  // path, which is opt-in: arm the precondition explicitly instead of relying
+  // on the default.
+  if (options.sessionModel !== undefined) runtime.config.sessionFallback = true;
   if (!options.useRuntimeModelResolver) {
     runtime.resolveModel = async () => ({
       ok: true as const,

@@ -188,7 +188,7 @@ Defaults target ~128k context models and work out of the box — no tuning requi
 }
 ```
 
-Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the session model **is** the last-resort fallback (`sessionFallback: true`), so workers keep running even with no worker models configured. If you don't want worker runs to touch your session model (extra cost and prompt-cache busting), configure cheap worker models (above) and set `sessionFallback: false` — or set `model` as a shared fallback so the session model is never reached. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
+Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model` (skipping cooled-down models), then stops. The session model is **not** used unless you opt in with `sessionFallback: true` — worker runs on the session model add cost and bust its prompt cache, so the safe default is to configure cheap worker models (above) and leave it off. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
 
 Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
 

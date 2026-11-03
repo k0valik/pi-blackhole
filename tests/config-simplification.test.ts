@@ -89,6 +89,24 @@ describe("New config keys — defaults", () => {
     // Old keys are optional and absent from DEFAULTS
     expect(config.overrideDefaultCompaction).toBeUndefined();
   });
+
+  it("T1c: sessionFallback defaults to false so the session model is opt-in", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    // No config file at all: the bare default must not silently spend the
+    // session model's tokens (and prompt cache) on background workers.
+    const config = loadUnifiedConfig(testDir);
+
+    expect(config.sessionFallback).toBe(false);
+  });
+
+  it("T1d: an explicit sessionFallback true still opts in", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ sessionFallback: true });
+
+    const config = loadUnifiedConfig(testDir);
+
+    expect(config.sessionFallback).toBe(true);
+  });
 });
 
 // ── Tests: New key parsing ─────────────────────────────────────────────────
