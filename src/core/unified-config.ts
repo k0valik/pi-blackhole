@@ -64,7 +64,8 @@ export function configPath(): string {
 export interface OmModelConfig {
   /** Provider name. Optional to allow thinking-only modifiers
    *  (`{ thinking: "low" }`) that track the session model via sessionFallback.
-   *  `cooldownHours`/`contextWindow` require provider+id to take effect. */
+   *  `contextWindow` requires provider+id. `cooldownHours` also applies to
+   *  the resolved session-fallback model when set on a stage entry. */
   provider?: string;
   /** Model ID. Optional — see `provider`. */
   id?: string;
@@ -275,7 +276,8 @@ export interface UnifiedConfig {
   dropperFallbackModels?: OmModelConfig[];
 
   /** When false, skip session model fallback when all OM model candidates are exhausted.
-   *  Default true for backward compatibility. */
+   *  Defaults to false: the session model costs main-model tokens and busts its prompt
+   *  cache, so falling back to it is an explicit opt-in. */
   sessionFallback?: boolean;
 
   /** @deprecated Use compaction instead. */
@@ -302,7 +304,11 @@ export interface UnifiedConfig {
 
 export const DEFAULTS: UnifiedConfig = {
   debug: false,
-  sessionFallback: true,
+  // Opt-in, not a default: falling back to the session model spends the user's
+  // main-model tokens on background workers and busts its prompt cache. Workers
+  // must be given their own (cheap) models; set true to restore the old
+  // last-resort behavior.
+  sessionFallback: false,
 
   // New config surface
   compaction: "auto",
@@ -1021,8 +1027,10 @@ export function scaffoldConfig(): void {
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    if (!existsSync(path)) {
-      writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`);
+    try {
+      writeFileSync(path, `${JSON.stringify(DEFAULTS, null, 2)}\n`, { flag: "wx" });
+    } catch (e) {
+      if (typeof e !== "object" || e === null || !("code" in e) || e.code !== "EEXIST") throw e;
     }
   } catch (e) {
     console.error("blackhole: config scaffold failed", e);

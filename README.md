@@ -46,14 +46,14 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.16](CHANGELOG.md#0516---2026-10-24)**
+> **Latest release: [0.5.17](CHANGELOG.md#0517---2026-11-03)**
 >
+> - **The session model is no longer a silent worker fallback** — `sessionFallback` defaults to `false`, so an exhausted worker stage is skipped instead of spending main-model tokens and busting its prompt cache; stage cooldowns now also cover the fallback model. Set `sessionFallback: true` to opt back in.
+> - **Observation progress no longer stalls after an interrupted turn** — an aborted turn leaving an empty or thinking-only assistant message could make the observer re-read the same chunk, so compaction repeated every turn without shrinking context.
+> - **Scaffolding can no longer truncate an existing config** — the config file is created with `O_EXCL`, closing the check-then-write race that replaced it with defaults.
 > - **Observational memory is off in subagent sessions by default** — detected children run no OM workers or OM injection while compaction is untouched. `subagentMemory: "inherit"` opts a child back in; detection is runner-agnostic, with `PI_BLACKHOLE_SUBAGENT_MARKERS` as the escape hatch for unsupported runners.
 > - **Large-session recall no longer holds hundreds of MiB** — sessions above 64 MiB are rescanned instead of cached, and retained source bytes are capped at 128 MiB with oldest-first eviction.
 > - **Extension loads on omp again** — the reflector schemas no longer read `.properties` back from a callable-typebox base at import time, so `omp plugin install` works with `reflectionSupersedes` both on and off.
-> - **Timeline and scheduled memory exports** — `/blackhole-export days:7 mode:timeline` produces a chronological rolling snapshot. Use `pi --no-session --blackhole-export "days:7 mode:timeline out:memory/weekly.md" -p` for scheduled exports; distilled export remains the default.
-> - **Keep unobserved original context** — opt into `tailBehavior: "unobserved"` to retain the raw history the observer has not completed. The default remains `"minimal"`; oversized protected tails defer compaction safely.
-> - **Optional context-pressure fallback** — `contextPressureFallback: "vcc"` can bridge older retained context while keeping a recent raw suffix. It is independent of tail policy and defaults to `"off"`.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for detailed fixes and contribution history.
 
@@ -188,7 +188,7 @@ Defaults target ~128k context models and work out of the box — no tuning requi
 }
 ```
 
-Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model → session model` (skipping cooled-down models). By default the session model **is** the last-resort fallback (`sessionFallback: true`), so workers keep running even with no worker models configured. If you don't want worker runs to touch your session model (extra cost and prompt-cache busting), configure cheap worker models (above) and set `sessionFallback: false` — or set `model` as a shared fallback so the session model is never reached. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
+Fallbacks (optional): each worker tries `stageModel → stageFallbacks → base model` (skipping cooled-down models), then stops. The session model is **not** used unless you opt in with `sessionFallback: true` — worker runs on the session model add cost and bust its prompt cache, so the safe default is to configure cheap worker models (above) and leave it off. See [`docs/CONFIG.md` → Model Configuration](docs/CONFIG.md#model-configuration).
 
 Config file: **`~/.pi/agent/pi-blackhole/pi-blackhole-config.json`**
 

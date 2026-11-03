@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, test, expect, vi } from "vitest";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Runtime } from "../src/om/runtime.js";
@@ -34,6 +34,7 @@ import { WorkerStreamError } from "../src/om/retryable-error.js";
 
 /** Cursor round trips write real pending files, so redirect the agent dir. */
 const cursorTestDir = join(tmpdir(), `pi-blackhole-consolidation-cursors-${Date.now()}`);
+const cooldownFile = join(cursorTestDir, "pi-blackhole", "pi-blackhole-cooldown.json");
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
   return { ...actual, getAgentDir: () => cursorTestDir };
@@ -894,6 +895,10 @@ function makePipelineFixture(options: {
   runtime.config.memory = true;
   runtime.config.observeAfterTokens = options.observeAfterTokens;
   runtime.config.reflectAfterTokens = 1_000_000;
+  // A fixture that supplies a session model is exercising the session-fallback
+  // path, which is opt-in: arm the precondition explicitly instead of relying
+  // on the default.
+  if (options.sessionModel !== undefined) runtime.config.sessionFallback = true;
   if (!options.useRuntimeModelResolver) {
     runtime.resolveModel = async () => ({
       ok: true as const,
@@ -1320,7 +1325,7 @@ describe("observer error after a kept close", () => {
   });
 
   test("a deterministic error on the session model cools that model down", async () => {
-    const { fixture, retryable } = keptCloseFixture("HTTP 401 Unauthorized");
+    const { fixture, notices, retryable } = keptCloseFixture("HTTP 401 Unauthorized");
     const sessionModel = { provider: "test", id: "session", contextWindow: 1_000_000 };
     fixture.runtime.resolveModel = async () => ({
       ok: true as const,
@@ -1340,7 +1345,43 @@ describe("observer error after a kept close", () => {
       sessionModel,
       expect.objectContaining({ message: "Observer API error: HTTP 401 Unauthorized" }),
       "observer",
+      undefined,
     );
+    expect(notices).toContainEqual({
+      message: expect.stringContaining("model cooled down; details in cooldown log"),
+      level: "warning",
+    });
+  });
+
+  test("thinking-only cooldownHours: 0 reports no cooldown for a kept session close", async () => {
+    const { fixture, notices } = keptCloseFixture("HTTP 401 Unauthorized");
+    const sessionModel = { provider: "test", id: "session", contextWindow: 1_000_000 };
+    const stageModel = { thinking: "low" as const, cooldownHours: 0 };
+    fixture.runtime.config.observerModel = stageModel;
+    fixture.runtime.resolveModel = async () => ({
+      ok: true as const,
+      source: "session" as const,
+      model: sessionModel,
+      apiKey: "test",
+    });
+    const deterministic = vi.spyOn(fixture.runtime, "recordDeterministicError");
+
+    await fixture.run();
+
+    expect(deterministic).toHaveBeenCalledWith(
+      sessionModel,
+      expect.objectContaining({ message: "Observer API error: HTTP 401 Unauthorized" }),
+      "observer",
+      stageModel,
+    );
+    expect(notices).toContainEqual({
+      message: expect.stringContaining("deterministic error; no cooldown recorded"),
+      level: "warning",
+    });
+    expect(notices.some((notice) => notice.message.includes("details in cooldown log"))).toBe(
+      false,
+    );
+    expect(existsSync(cooldownFile)).toBe(false);
   });
 
   test("a session model with no coolable identity does not claim a cooldown log entry", async () => {
@@ -1526,7 +1567,40 @@ describe("reflector error after a kept close", () => {
       sessionModel,
       expect.objectContaining({ message: "Reflector API error: HTTP 401 Unauthorized" }),
       "reflector",
+      undefined,
     );
+  });
+
+  test("thinking-only cooldownHours: 0 reports no cooldown for a kept session review", async () => {
+    const { fixture, notices, deterministic } = keptReviewFixture("HTTP 401 Unauthorized");
+    deterministic.mockRestore();
+    const recordDeterministic = vi.spyOn(fixture.runtime, "recordDeterministicError");
+    const sessionModel = { provider: "test", id: "session", contextWindow: 1_000_000 };
+    const stageModel = { thinking: "low" as const, cooldownHours: 0 };
+    fixture.runtime.config.reflectorModel = stageModel;
+    fixture.runtime.resolveModel = async () => ({
+      ok: true as const,
+      source: "session" as const,
+      model: sessionModel,
+      apiKey: "test",
+    });
+
+    await fixture.run();
+
+    expect(recordDeterministic).toHaveBeenCalledWith(
+      sessionModel,
+      expect.objectContaining({ message: "Reflector API error: HTTP 401 Unauthorized" }),
+      "reflector",
+      stageModel,
+    );
+    expect(notices).toContainEqual({
+      message: expect.stringContaining("deterministic error; no cooldown recorded"),
+      level: "warning",
+    });
+    expect(notices.some((notice) => notice.message.includes("details in cooldown log"))).toBe(
+      false,
+    );
+    expect(existsSync(cooldownFile)).toBe(false);
   });
 
   test("a session model with no coolable identity does not claim a cooldown log entry", async () => {

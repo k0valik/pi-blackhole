@@ -15,9 +15,9 @@ pnpm check         # typecheck + lint
 
 - CI order: `build` → `typecheck` → `lint` → `test` → `format:check` (.github/workflows/ci.yml).
 - pre-commit: lint-staged (now in `package.json:lint-staged`) + typecheck. pre-push: typecheck + test.
-- pnpm only (`packageManager: pnpm@11.2.2`). TypeScript pinned to 6.0.3 for @typescript-eslint v8 compat — never bump TS alone.
+- pnpm only (`packageManager: pnpm@12.10.0`). TypeScript pinned to 6.0.3 for @typescript-eslint v8 compat — never bump TS alone.
 - `oxfmt` config and `lint-staged` live in `package.json`; `.oxfmtignore` stays at root.
-- Prepare script (`scripts/prepare.mjs`) builds dist via tsup on install; must never break consumer installs. It warns (never fails) when tsup is absent and `dist/index.js` is missing, which is the git install without `npmCommand` case.
+- `postinstall` (`scripts/prepare.mjs`) builds `dist/` via tsup for git installs; `tsup` is in production dependencies so installs that omit devDependencies can still build. Published tarballs already contain `dist/index.js`, so the hook skips rebuilding. Build failures fail installation; git-hook setup remains best-effort.
 
 ## Testing quirks
 
@@ -28,7 +28,7 @@ pnpm check         # typecheck + lint
 
 ## Architecture
 
-- `index.ts` is the real factory; `pi.extensions` points at the built `dist/index.js` (gitignored). Git installs that skip devDependencies (`npm install --omit=dev` with no `npmCommand` set) cannot build dist, so `scripts/prepare.mjs` warns and the extension will not load until `npmCommand` is set. The factory installs the host inline-compaction adapter, captures provider streams, registers consolidation + compaction triggers, `session_before_compact` + `session_compact_failed` + `context` hooks, commands, and the unified `recall` tool.
+- `index.ts` is the real factory; `pi.extensions` points at the built `dist/index.js` (gitignored). Git installs build the bundle during `postinstall` because `tsup` is a production dependency; published tarballs already contain the bundle and skip rebuilding. The factory installs the host inline-compaction adapter, captures provider streams, registers consolidation + compaction triggers, `session_before_compact` + `session_compact_failed` + `context` hooks, commands, and the unified `recall` tool.
 - `src/core/` — unified config (`unified-config.ts` = defaults + resolution; env overrides declared in `config-env.ts` as `PI_BLACKHOLE_*`). configManager is the true source and entry point - users edit in UI.
 - `src/extract/` — vcc compaction section extraction (goals, files, commits, preferences, brief).
 - `src/om/` — observational memory: `agents/` (observer → reflector → dropper agent loops), `ledger/`, `runtime.ts`, `consolidation.ts`, `compaction-trigger.ts`, `cooldown.ts` (persisted fallback cooldowns), `pending.ts` (manual-mode disk buffers), `inline-compaction.ts`.
@@ -54,7 +54,7 @@ pnpm check         # typecheck + lint
 
 ## Testing
 
-- **T1. Prove a new test can fail — while writing it, never after.** The red run comes from writing the test first against untouched code: test → red → implement → green, in that order. This applies to fixes you author in this session too (including review follow-ups): land the test before the fix, not the other way round. Never reconstruct a "pre-fix" state to demonstrate redness — no reverting, stashing, `git checkout`, or patching out changes, especially not your own uncommitted work; that destroys the change to re-verify it. For a change whose red run you didn't witness (pre-existing fix, someone else's work), run the test green and confirm its assertions target the changed path instead. If a test can't fail, it isn't testing anything.
+- **T1. Red, green, refactor.** Write the failing test first, watch it fail, then write the code that fixes it. Never revert, stash, `git checkout` or patch out a change that was already written just to make a test fail again — the red run comes from code that has not been touched yet, and destroying a change to re-verify it is never worth it. If you did not witness the red run (a pre-existing fix, someone else's work), run it green and confirm the assertions actually target the changed path. A test that cannot fail is not testing anything.
 - **T2. Arm every precondition the branch needs.** If the code path depends on prior state (a flag, a prior call, session data), set that state explicitly in the test. Don't assume execution reaches the new guard by default, check what runs before it.
 - **T3. Cover every branch, not just the happy path.** Each conditional (if/else, fallback, empty vs populated input) needs its own test case. A theme-present case and a theme-absent case are two tests, not one.
 - **T4. Assert the specific thing that would break, not a generic proxy.** A broad negative check, like asserting a substring is absent from the whole output, passes even when an unrelated change happens to introduce that same substring elsewhere. Assert against a stable, unique token or the actual structure.

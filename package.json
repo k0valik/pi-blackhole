@@ -1,6 +1,6 @@
 {
   "name": "pi-blackhole",
-  "version": "0.5.16",
+  "version": "0.5.17",
   "description": "Unified compaction + observational memory extension for Pi — compresses conversation context while preserving durable observations and reflections",
   "keywords": [
     "agents",
@@ -25,6 +25,7 @@
   },
   "files": [
     "dist/",
+    "scripts/prepare.mjs",
     "*.ts",
     "src/**/*.ts",
     "!src/**/*.test.ts",
@@ -46,23 +47,25 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm lint && pnpm fmt:check",
-    "prepare": "node scripts/prepare.mjs",
+    "postinstall": "node scripts/prepare.mjs",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt . --check",
     "verify": "pnpm check && pnpm test"
   },
+  "dependencies": {
+    "tsup": "^9.0.0",
+    "typescript": "6.0.3"
+  },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.3.0",
-    "@earendil-works/pi-ai": "1.3.0",
-    "@earendil-works/pi-coding-agent": "1.3.0",
-    "@earendil-works/pi-tui": "1.3.0",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-tui": "1.4.0",
     "lint-staged": "17.6.0",
-    "oxfmt": "^0.73.0",
-    "oxlint": "1.88.0",
+    "oxfmt": "^0.75.0",
+    "oxlint": "1.90.0",
     "simple-git-hooks": "^2.14.0",
-    "tsup": "^8.5.1",
-    "typebox": "1.3.37",
-    "typescript": "6.0.3",
+    "typebox": "1.4.3",
     "vitest": "5.0.5"
   },
   "peerDependencies": {

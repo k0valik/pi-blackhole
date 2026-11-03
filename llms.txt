@@ -163,12 +163,12 @@ interface OmModelConfig {
   provider?: string;       // required with id — omit both for a thinking-only modifier
   id?: string;             // required with provider — omit both for a thinking-only modifier
   thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  cooldownHours?: number;  // default 1h, 0 = in-memory only (no disk persistence); requires provider+id
+  cooldownHours?: number;  // default 1h, 0 = in-memory only (no disk persistence); stage setting also applies when that stage falls back to the session model
   contextWindow?: number;  // override Pi's registry value; requires provider+id
 }
 ```
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it only supplies the stage thinking level while the worker tracks the session model via `sessionFallback`. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). With `sessionFallback: true` the session model is the last candidate. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
 
 **Model ID resolution:** `modelRegistry.find(provider, id)` is used to resolve models. This means:
 - Models explicitly in `models.json` work (they're registered)
@@ -284,7 +284,7 @@ Based on interview answers, build the config object. Write it to:
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
   "subagentMemory": "off",        // "off" = no OM in detected subagents; "inherit" = follow memory
-  "sessionFallback": true,        // false = skip worker when all configured models fail, don't use main model
+  "sessionFallback": false,       // true = opt in to the session model as last-resort fallback (costs main-model tokens, busts its prompt cache)
   "reflectionTimestamps": true,  // Show reflection evidence time
   "reflectionSupersedes": false, // Replacement notes; replaced reflections leave compaction output
   "observeOnShutdown": false,    // One bounded observer attempt before session exit
@@ -337,7 +337,7 @@ Each model entry supports these fields:
 }
 ```
 
-**`cooldownHours: 0` behavior:** When set to 0, the model is never written to the cooldown file on disk. Instead, failures are tracked in-memory for the current consolidation stage only (`Runtime.failedInCycle` Set in `runtime.ts`). This means:
+**`cooldownHours: 0` behavior:** When set to 0, the model is never written to the cooldown file on disk, including when a stage falls back to the session model (whether its entry is thinking-only or has a model identity). Instead, failures are tracked in-memory for the current consolidation stage only (`Runtime.failedInCycle` Set in `runtime.ts`). This means:
 - The model is skipped for the rest of the current pipeline stage
 - It's available again on the next pipeline run (no persisted cooldown)
 - Useful for testing or when you don't want cooldown state to persist across restarts
@@ -576,7 +576,7 @@ These are processed in `loadUnifiedConfig()` in `unified-config.ts`. The passive
 
 **Do not hardcode model IDs from your own knowledge without checking.** Pi's model registry is the source of truth for what's available. However, built-in providers (openrouter, cerebras, ollama, etc.) have models that may not be in `models.json` — if the user says "I want to use Qwen via OpenRouter," and OpenRouter is a known provider, construct the model ID and it will work. The model ID format matters (case, separators). When in doubt, ask the user for the exact model ID they use.
 
-**Do not set every worker to the session model.** The whole point of background workers is to use cheap/free models. The session model is expensive and should only be the last-resort fallback. Setting `sessionFallback: true` (default) already ensures the session model is tried last — you don't need to also configure it as a primary or base model.
+**Do not set every worker to the session model.** The whole point of background workers is to use cheap/free models. The session model is expensive, and it is no longer tried unless you opt in with `sessionFallback: true` — so give each stage its own cheap primary plus cross-provider fallbacks rather than leaning on the main model.
 
 **Do not set all fallbacks from the same provider as the primary.** If OpenRouter is rate-limiting, another OpenRouter model is also rate-limited. Pick fallbacks from different providers (cerebras, ollama, zai, opencode). The runtime doesn't check for this — it just tries candidates in order.
 

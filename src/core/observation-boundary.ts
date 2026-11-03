@@ -4,6 +4,7 @@ import {
   type Entry,
 } from "../om/ledger/types.js";
 import { isSourceEntry } from "../om/ledger/progress.js";
+import { isDeliveredSourceEntry } from "../om/serialize.js";
 
 /** Completed ledger batches only. Never infer observation progress from a cut.
  * A batch must connect to the known prefix through its source anchors. Legacy
@@ -21,7 +22,9 @@ export function observedPrefixIndex(entries: Entry[]): number {
     const end = indexes.get(data.coversUpToId);
     if (end === undefined || end <= boundary || end >= markerIndex || !isSourceEntry(entries[end]))
       continue;
-    const next = sources.find((index) => index > boundary);
+    const next = sources.find(
+      (index) => index > boundary && isDeliveredSourceEntry(entries[index]),
+    );
     if (next === undefined) continue;
     if (data.coversFromId !== undefined) {
       const start = indexes.get(data.coversFromId);

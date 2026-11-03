@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Runtime } from "../src/om/runtime.js";
+import { recordCooldown } from "../src/om/cooldown.js";
 import { makeModelResolver, runConsolidationPipeline } from "../src/om/consolidation.js";
 import { createExtensionApiDouble } from "./fixtures/pi-extension-api.js";
 import { observation, observationsRecordedEntry, rawMessage } from "./fixtures/session.js";
@@ -158,6 +159,78 @@ describe("request-local cooldown isolation", () => {
     f.runtime.recordDeterministicError(identity, error, "observer");
     expect(cooldowns()).toEqual({});
     expect(f.runtime.failedInCycle.has(key)).toBe(true);
+  });
+  test("thinking-only stage cooldownHours: 0 ignores an existing session-model cooldown", async () => {
+    const f = fixture();
+    const sessionModel = { ...identity, contextWindow: 1_000_000, maxTokens: 16_384 };
+    Object.assign(f.runtime.config, {
+      observerModel: { thinking: "low", cooldownHours: 0 },
+      observerFallbackModels: [],
+      sessionFallback: true,
+    });
+    Object.assign(f.ctx, { model: sessionModel });
+    recordCooldown(identity, "HTTP 401 Unauthorized", "observer", "provider_configuration");
+
+    expect(await makeModelResolver(f.runtime, f.ctx, f.generation)("observer")).toMatchObject({
+      source: "session",
+    });
+  });
+  test("an identity-bearing stage entry still controls session-fallback cooldowns", async () => {
+    const f = fixture();
+    const sessionModel = { ...identity, contextWindow: 1_000_000, maxTokens: 16_384 };
+    Object.assign(f.runtime.config, {
+      model: undefined,
+      observerModel: { provider: "missing", id: "unavailable", cooldownHours: 0 },
+      observerFallbackModels: [],
+      sessionFallback: true,
+    });
+    Object.assign(f.ctx, { model: sessionModel });
+    Object.assign(f.ctx.modelRegistry, { find: () => undefined });
+    workers.observer.mockRejectedValue(new Error("HTTP 401 Unauthorized"));
+
+    await f.run();
+
+    expect(workers.observer).toHaveBeenCalledOnce();
+    expect(cooldowns()).toEqual({});
+    expect(f.runtime.failedInCycle.has(key)).toBe(true);
+  });
+  test.each(["observer", "reflector", "dropper"] as const)(
+    "thinking-only stage cooldownHours: 0 disables %s session-model cooldowns",
+    async (stage) => {
+      const f = fixture(stage);
+      const sessionModel = { ...identity, contextWindow: 1_000_000, maxTokens: 16_384 };
+      Object.assign(f.runtime.config, {
+        model: undefined,
+        [`${stage}Model`]: { thinking: "low", cooldownHours: 0 },
+        [`${stage}FallbackModels`]: [],
+        sessionFallback: true,
+      });
+      Object.assign(f.ctx, { model: sessionModel });
+      workers[stage].mockRejectedValue(new Error("HTTP 401 Unauthorized"));
+
+      await f.run();
+
+      expect(workers[stage]).toHaveBeenCalled();
+      expect(cooldowns()).toEqual({});
+      expect(f.runtime.failedInCycle.has(key)).toBe(true);
+    },
+  );
+  test("a nonzero thinking-only cooldown controls session-model duration", async () => {
+    const f = fixture();
+    const sessionModel = { ...identity, contextWindow: 1_000_000, maxTokens: 16_384 };
+    Object.assign(f.runtime.config, {
+      model: undefined,
+      observerModel: { thinking: "low", cooldownHours: 4 },
+      observerFallbackModels: [],
+      sessionFallback: true,
+    });
+    Object.assign(f.ctx, { model: sessionModel });
+    workers.observer.mockRejectedValue(new Error("HTTP 401 Unauthorized"));
+
+    await f.run();
+
+    expect(cooldowns()[key]?.until).toBe("2026-10-16T04:00:00.000Z");
+    expect(f.runtime.failedInCycle.has(key)).toBe(false);
   });
   test.each([
     "HTTP 401 Unauthorized",

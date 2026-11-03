@@ -255,7 +255,7 @@ Models with active cooldowns are transparently skipped. Up to 10 model resolutio
 
 ### Session fallback
 
-`sessionFallback: true` (default) falls back to the session model when all OM candidates are exhausted. Set `false` to skip the stage entirely instead. This is useful when you don't want OM workers consuming your main model's rate limits.
+`sessionFallback: false` (default) skips the stage when all OM candidates are exhausted, so background workers never spend the session model's tokens or bust its prompt cache. Set `true` to opt back in to the session model as a last resort — useful when you would rather a worker run on the main model than not run at all.
 
 ## Cooldown system
 
@@ -280,7 +280,7 @@ Cooldowns survive Pi restarts. `expireCooldowns()` runs lazily on config load. `
 
 ### Cooldown hours
 
-`cooldownHours` per model config (default: 1 hour). Set `0` to disable cooldown — the model is tracked in-memory for the current stage only (no disk writes), using `failedInCycle` set.
+`cooldownHours` per stage model config (default: 1 hour). Set `0` to disable cooldown — the model is tracked in-memory for the current stage only (no disk writes), using `failedInCycle` set. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries.
 
 ### Retryable error detection
 

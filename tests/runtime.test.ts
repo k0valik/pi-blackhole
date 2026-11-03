@@ -7,7 +7,10 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
-const testDir = join(tmpdir(), `pi-blackhole-runtime-test-${Date.now()}`);
+// Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
+// host and the on-disk config resolve to the same place.
+const testDir =
+  process.env.PI_CODING_AGENT_DIR ?? join(tmpdir(), `pi-blackhole-runtime-test-${Date.now()}`);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,
@@ -212,6 +215,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
         id: "cooled-model",
         cooldownHours: 24,
       },
+      sessionFallback: true,
     });
     const { recordCooldown } = await import("../src/om/cooldown.js");
     recordCooldown(
@@ -437,6 +441,7 @@ describe("Runtime.resolveModel — fallback chain", () => {
   it("falls through to session model when all candidates exhausted", async () => {
     writeConfig({
       observerModel: { provider: "openrouter", id: "primary:free" },
+      sessionFallback: true,
     });
 
     const { recordCooldown } = await import("../src/om/cooldown.js");
@@ -874,6 +879,7 @@ describe("Runtime.resolveModel — resolution provenance", () => {
   });
 
   it("marks the session fallback without a candidate config", async () => {
+    writeConfig({ sessionFallback: true });
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
     runtime.ensureConfig(testDir);
@@ -968,7 +974,7 @@ describe("Runtime — session-model deterministic cooldown", () => {
   }
 
   it("cools the session model on deterministic errors so resolveModel skips it", async () => {
-    writeConfig({});
+    writeConfig({ sessionFallback: true });
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
     runtime.ensureConfig(testDir);
@@ -991,7 +997,7 @@ describe("Runtime — session-model deterministic cooldown", () => {
   });
 
   it("leaves the session model usable after transient errors", async () => {
-    writeConfig({});
+    writeConfig({ sessionFallback: true });
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
     runtime.ensureConfig(testDir);
@@ -1461,8 +1467,12 @@ describe("Runtime — per-run notice collection (warning spam gate)", () => {
   });
 
   it("announces a turn-cap skip distinctly from a failed model", async () => {
+    writeConfig({ sessionFallback: true });
     const { Runtime } = await import("../src/om/runtime.js");
     const runtime = new Runtime();
+    // ensureConfig loads the file above; without it the Runtime keeps its
+    // in-memory DEFAULTS and this test would silently exercise sessionFallback: false.
+    runtime.ensureConfig(testDir);
     runtime.consolidationPhase = "observer";
     const notify = vi.fn();
     const candidate = { provider: "openrouter", id: "big:free" };

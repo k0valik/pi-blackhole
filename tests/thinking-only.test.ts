@@ -9,7 +9,11 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const testDir = join(tmpdir(), `pi-blackhole-thinking-only-${Date.now()}-${Math.random()}`);
+// Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
+// host and the on-disk config resolve to the same place.
+const testDir =
+  process.env.PI_CODING_AGENT_DIR ??
+  join(tmpdir(), `pi-blackhole-thinking-only-${Date.now()}-${Math.random()}`);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,
@@ -114,7 +118,7 @@ describe("thinking-only model entries", () => {
   });
 
   it("thinking-only stage is skipped as candidate and falls back to session model", async () => {
-    writeConfig({ observerModel: { thinking: "medium" } });
+    writeConfig({ observerModel: { thinking: "medium" }, sessionFallback: true });
     const sessionModel = makeModel("session-model", "llama.cpp");
     const registry = makeRegistry([sessionModel]);
     const { Runtime } = await import("../src/om/runtime.js");
@@ -206,6 +210,7 @@ describe("thinking-only model entries", () => {
   it("thinking-only fallback entries are never passed to the registry", async () => {
     writeConfig({
       observerFallbackModels: [{ thinking: "low" }],
+      sessionFallback: true,
     });
     const sessionModel = makeModel("session-model", "llama.cpp");
     const registry = makeRegistry([sessionModel]);
@@ -340,8 +345,8 @@ describe("thinking-only stageThinkingLevel precedence", () => {
   });
 });
 
-describe("thinking-only cooldown inertness", () => {
-  it("partial entries never activate or record cooldowns", async () => {
+describe("cooldown helpers require model identity", () => {
+  it("direct cooldown helpers ignore partial model configs", async () => {
     const { isCooldownActive, recordCooldown, getCooldownEntry } =
       await import("../src/om/cooldown.js");
     const partial = { thinking: "low" } as { provider?: string; id?: string; thinking: "low" };

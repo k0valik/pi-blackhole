@@ -235,8 +235,11 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "boolean",
       label: "Session model fallback",
       description:
-        "off=skip stage when all OM models fail, instead of falling back to the main coding model",
-      value: cfg.sessionFallback ?? true,
+        "on=fall back to the main coding model when all OM models fail (costs main-model tokens and busts its prompt cache); off (default)=skip the stage instead",
+      // DEFAULTS is the single source of truth for this default; the trailing
+      // literal only exists because the optional interface field widens
+      // DEFAULTS.sessionFallback to boolean|undefined for the compiler.
+      value: cfg.sessionFallback ?? DEFAULTS.sessionFallback ?? false,
     },
     {
       key: "observeAfterTokens",

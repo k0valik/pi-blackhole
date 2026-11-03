@@ -14,7 +14,10 @@ import {
   sessionContextWindow,
 } from "../src/om/model-budget.js";
 
-const testDir = join(tmpdir(), `pi-blackhole-model-budget-test-${Date.now()}`);
+// Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
+// host and the on-disk config resolve to the same place.
+const testDir =
+  process.env.PI_CODING_AGENT_DIR ?? join(tmpdir(), `pi-blackhole-model-budget-test-${Date.now()}`);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,
