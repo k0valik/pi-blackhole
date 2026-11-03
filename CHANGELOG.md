@@ -1,15 +1,19 @@
 ## [Unreleased]
 
+---
+
+## [0.5.17] - 2026-11-03
+
 ### Changed
 
 - **`sessionFallback` is opt-in (default `false`).** Exhausted worker candidates no longer fall back to the session model, which spent main-model tokens and invalidated its prompt cache. Set `sessionFallback: true` to keep it; skipped stages still report why.
+- **Production installs build the extension bundle again.** `prepare` became `postinstall` and `tsup`/`typescript` are runtime dependencies, so a `--omit=dev` install (Pi's default for extensions) no longer ends up without `dist/index.js`. Published packages detect their bundled build and skip the rebuild; git installs resolve `tsup` portably instead of relying on `node_modules/.bin`.
 
 ### Fixed
 
 - **Scaffolding can no longer replace an existing config** — it creates the file with `O_EXCL` instead of check-then-write, closing the race that truncated a config to defaults.
 - **Tests can no longer touch the developer's real config.** `tests/setup.ts` pins `PI_CODING_AGENT_DIR` to a per-process temp dir when the runner leaves it unset.
 - **A cooldown-sanitization test asserted against defaults instead of its own config** — `configPath()` resolves through `PI_CODING_AGENT_DIR`, not the mocked `getAgentDir()`, so its `writeConfig` landed where nothing read it.
-
 - **Stage cooldown settings now apply to the session-fallback model**, including thinking-only entries. A `cooldownHours: 0` setting avoids persisted cooldowns and ignores existing ones for that stage; nonzero values control the fallback cooldown duration ([#188](https://github.com/k0valik/pi-blackhole/issues/188)).
 - **Observation progress no longer stalls after an interrupted turn.** An aborted turn leaving an empty assistant message (or a message containing only redacted thinking) could make the observer re-read the same chunk indefinitely; with an unobserved tail, compaction could repeat every turn without shrinking context. Coverage now advances past entries omitted from observer input while still requiring every deliverable entry to be covered ([#190](https://github.com/k0valik/pi-blackhole/issues/190)).
 

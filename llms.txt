@@ -168,7 +168,7 @@ interface OmModelConfig {
 }
 ```
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it only supplies the stage thinking level while the worker tracks the session model via `sessionFallback`. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). With `sessionFallback: true` the session model is the last candidate. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
 
 **Model ID resolution:** `modelRegistry.find(provider, id)` is used to resolve models. This means:
 - Models explicitly in `models.json` work (they're registered)
