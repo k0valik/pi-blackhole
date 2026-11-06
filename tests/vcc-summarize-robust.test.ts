@@ -76,6 +76,18 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(lines).not.toContain("- Goal 2");
     });
 
+    it("does not strip (#N) suffixes from non-goal sections", () => {
+      const previousSummary =
+        "[User Preferences]\n- Track (#1)\n- Track (#2)\n\n---\n\n[user]\ninit";
+      const r = compile({
+        messages: [userMsg("I prefer dark mode")],
+        previousSummary,
+      });
+      const section = r.split("\n\n---\n\n")[0];
+      expect(section).toContain("- Track (#1)");
+      expect(section).toContain("- Track (#2)");
+    });
+
     it("caps Commits at 8 items", () => {
       const commits = Array.from({ length: 10 }, (_, i) => `- abc${i}: commit ${i}`).join("\n");
       const previousSummary = `[Commits]\n${commits}\n\n---\n\n[user]\ninit`;

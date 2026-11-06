@@ -152,7 +152,12 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
   // goal re-asked in the fresh window move to the recent end. Otherwise a
   // repeated goal keeps its old position and the recency cap can drop it even
   // though the user just asked for it again.
-  const keyOf = (line: string) => line.replace(/\s*\(#\d+\)$/, "");
+  // The volatile `(#N)` source index is a goal concept only; other sections
+  // may legitimately contain labels like "Track (#1)" and "Track (#2)".
+  const keyOf =
+    header === "Session Goal"
+      ? (line: string) => line.replace(/\s*\(#\d+\)$/, "")
+      : (line: string) => line;
   const freshKeys = new Set(freshLines.map(keyOf));
   const seen = new Set<string>();
   const combined: string[] = [];
