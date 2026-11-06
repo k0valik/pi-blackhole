@@ -218,7 +218,10 @@ export function probeFromContext(
       return undefined;
     }
   };
-  const manager = ctx?.sessionManager;
+  // The property access itself throws on a stale ctx: pi invalidates a captured
+  // context by making every session-bound accessor throw, and the footer polls
+  // this probe from a timer. Keep the read inside the guard like the accessors.
+  const manager = safe(() => ctx?.sessionManager);
   const entries = safe(() => manager?.getEntries?.() ?? []);
   const entryCustomTypes: string[] = [];
   for (const entry of entries ?? []) {
