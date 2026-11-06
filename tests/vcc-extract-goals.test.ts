@@ -102,8 +102,12 @@ describe("extractGoals", () => {
     // 6 founding lines + marker + 3 pivot lines would be 10; the cap must keep
     // the whole latest scope change, not truncate it off the end.
     expect(goals.length).toBe(8);
-    expect(goals.some((g) => g.startsWith("[Scope change]"))).toBe(true);
-    expect(goals[goals.length - 1]).toContain("update the docs");
+    expect(goals.slice(-4)).toEqual([
+      "[Scope change]",
+      "Actually, instead let's refactor auth",
+      "migrate the database",
+      "update the docs",
+    ]);
   });
 
   it("skips noise short user messages as goals", () => {

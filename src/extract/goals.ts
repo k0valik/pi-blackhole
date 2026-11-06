@@ -32,7 +32,7 @@ const stripLeadingBullet = (line: string): string =>
 const MAX_GOAL_CHARS = 200;
 
 /** Total goal lines kept per summary section (shared with the merge cap). */
-const MAX_GOALS = 8;
+export const MAX_GOALS = 8;
 
 const isSubstantiveGoal = (text: string): boolean => {
   const t = text.trim();
@@ -56,6 +56,7 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
   const goals: string[] = [];
   let latestScopeChange: string[] | null = null;
   let latestScopeIndex: number | undefined;
+  let scopeMarkerIndex = -1;
 
   for (const b of blocks) {
     if (b.kind !== "user") continue;
@@ -84,7 +85,10 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
   }
 
   // Only emit the [Scope change] marker when we actually captured bullets.
+  // Remember where it was added: searching the rendered text later would
+  // misfire if a founding goal itself starts with the marker text.
   if (latestScopeChange && latestScopeChange.length > 0) {
+    scopeMarkerIndex = goals.length;
     goals.push("[Scope change]" + indexSuffix(latestScopeIndex));
     for (const line of latestScopeChange) {
       goals.push(line + indexSuffix(latestScopeIndex));
@@ -95,9 +99,10 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
   // user block can contribute up to 6 lines, so a plain slice(0, MAX_GOALS)
   // would drop the fresh pivot off the end and reintroduce goal drift.
   if (goals.length <= MAX_GOALS) return goals;
-  const scopeStart = goals.findIndex((line) => line.startsWith("[Scope change]"));
-  if (scopeStart < 0) return goals.slice(0, MAX_GOALS);
-  const tail = goals.slice(scopeStart);
-  const head = goals.slice(0, scopeStart);
-  return [...head.slice(0, Math.max(0, MAX_GOALS - tail.length)), ...tail];
+  if (scopeMarkerIndex < 0) return goals.slice(0, MAX_GOALS);
+  const tail = goals.slice(scopeMarkerIndex);
+  const head = goals.slice(0, scopeMarkerIndex);
+  // Keep the latest founding lines, matching the recency rule used by the
+  // compaction merge.
+  return [...head.slice(Math.max(0, head.length - (MAX_GOALS - tail.length))), ...tail];
 };

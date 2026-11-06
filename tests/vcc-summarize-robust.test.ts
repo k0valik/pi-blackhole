@@ -40,6 +40,42 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(lines[lines.length - 1]).toMatch(/\(#0\)$/);
     });
 
+    it("keeps a scope-change marker attached to the goals it labels", () => {
+      const goals = Array.from({ length: 8 }, (_, i) => `- Goal ${i}`).join("\n");
+      const previousSummary = `[Session Goal]\n- [Scope change] (#1)\n${goals}\n\n---\n\n[user]\ninit`;
+      const r = compile({
+        messages: [userMsg("Goal: Final Step")],
+        previousSummary,
+      });
+      const lines = r
+        .split("\n\n---\n\n")[0]
+        .split("\n")
+        .filter((l) => l.startsWith("- "));
+      // 8 goals retained plus the marker that labels them; the marker must not
+      // be cut off while its goals survive.
+      expect(lines).toContain("- [Scope change] (#1)");
+      expect(lines).not.toContain("- Goal 0");
+      expect(lines.length).toBe(9);
+    });
+
+    it("promotes a goal re-asked in the fresh window before applying the cap", () => {
+      const goals = Array.from({ length: 8 }, (_, i) => `- Goal ${i + 1}`).join("\n");
+      const previousSummary = `[Session Goal]\n${goals}\n\n---\n\n[user]\ninit`;
+      const r = compile({
+        messages: [userMsg("Goal 1\nNew Goal")],
+        previousSummary,
+      });
+      const lines = r
+        .split("\n\n---\n\n")[0]
+        .split("\n")
+        .filter((l) => l.startsWith("- "));
+      // Goal 1 was the oldest line; re-asking it moves it to the recent end so
+      // the cap drops Goal 2 instead of the goal the user just repeated.
+      expect(lines).toContain("- Goal 1 (#0)");
+      expect(lines[lines.length - 1]).toBe("- New Goal (#0)");
+      expect(lines).not.toContain("- Goal 2");
+    });
+
     it("caps Commits at 8 items", () => {
       const commits = Array.from({ length: 10 }, (_, i) => `- abc${i}: commit ${i}`).join("\n");
       const previousSummary = `[Commits]\n${commits}\n\n---\n\n[user]\ninit`;

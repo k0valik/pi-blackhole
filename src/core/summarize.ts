@@ -12,6 +12,7 @@ import { normalize } from "./normalize";
 import { filterNoise } from "./filter-noise";
 import { buildSections } from "./build-sections";
 import { formatFileList } from "../extract/files";
+import { MAX_GOALS } from "../extract/goals";
 import { MAX_DECISIONS } from "../extract/user-decisions";
 import { formatSummary, capBrief, RECALL_NOTE, wrapLongLines } from "./format";
 
@@ -147,19 +148,68 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
     l.startsWith("- ") && !l.includes("<skill") && !l.includes("</skill");
   const prevLines = prev.split("\n").filter(isClean);
   const freshLines = fresh.split("\n").filter(isClean);
-  const combined = [...new Set([...prevLines, ...freshLines])];
+  // Dedup by goal text, ignoring the volatile `(#N)` index suffix, and let a
+  // goal re-asked in the fresh window move to the recent end. Otherwise a
+  // repeated goal keeps its old position and the recency cap can drop it even
+  // though the user just asked for it again.
+  const keyOf = (line: string) => line.replace(/\s*\(#\d+\)$/, "");
+  const freshKeys = new Set(freshLines.map(keyOf));
+  const seen = new Set<string>();
+  const combined: string[] = [];
+  for (const line of [...prevLines.filter((line) => !freshKeys.has(keyOf(line))), ...freshLines]) {
+    const key = keyOf(line);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    combined.push(line);
+  }
   const CAP =
     header === "User Decisions"
       ? MAX_DECISIONS
-      : header === "Session Goal" || header === "Commits"
-        ? 8
-        : 15;
+      : header === "Session Goal"
+        ? MAX_GOALS
+        : header === "Commits"
+          ? 8
+          : 15;
   // All sections keep the most recent items: fresh overrides stale. Session
   // Goal used to keep the *first* CAP items so the original first message
   // persisted, but that froze the section permanently once it filled up — a
   // long session kept re-injecting its original goals and never saw later
   // pivots (e.g. a rename or a new phase) after a compaction.
-  const capped = combined.length > CAP ? combined.slice(-CAP) : combined;
+  const isMarker = (line: string) => /^-\s*\[Scope change\]/.test(line);
+  let capped = combined;
+  // Scope-change markers label the goals that follow them; they are not goals
+  // and do not consume a goal slot. Keep CAP goals and pull in the marker that
+  // labels the retained window so a goal never loses its label.
+  const goalCount = combined.filter((line) => !isMarker(line)).length;
+  if (goalCount > CAP) {
+    let kept = 0;
+    let start = 0;
+    for (let i = combined.length - 1; i >= 0; i--) {
+      if (!isMarker(combined[i])) {
+        if (kept === CAP) {
+          start = i + 1;
+          break;
+        }
+        kept++;
+      }
+      start = i;
+    }
+    const window = combined.slice(start);
+    if (isMarker(combined[start])) {
+      capped = window;
+    } else {
+      // The window starts inside a marked block: prepend its label without
+      // dragging back the goals that were just dropped from the same block.
+      let marker: string | undefined;
+      for (let i = start - 1; i >= 0; i--) {
+        if (isMarker(combined[i])) {
+          marker = combined[i];
+          break;
+        }
+      }
+      capped = marker === undefined ? window : [marker, ...window];
+    }
+  }
   if (capped.length === 0) return "";
   return `[${header}]\n${capped.join("\n")}`;
 };
