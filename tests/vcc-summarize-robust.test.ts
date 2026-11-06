@@ -76,6 +76,30 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(lines).not.toContain("- Goal 2");
     });
 
+    it("keeps distinct scope-change markers when their goals survive", () => {
+      const previousSummary = [
+        "[Session Goal]",
+        "- [Scope change] (#1)",
+        "- Goal A1",
+        "- Goal A2",
+        "- [Scope change] (#2)",
+        "- Goal B1",
+        "- Goal B2",
+        "",
+        "---",
+        "",
+        "[user]",
+        "init",
+      ].join("\n");
+      const r = compile({
+        messages: [userMsg("Goal: Final Step")],
+        previousSummary,
+      });
+      const section = r.split("\n\n---\n\n")[0];
+      expect(section).toContain("- [Scope change] (#1)");
+      expect(section).toContain("- [Scope change] (#2)");
+    });
+
     it("does not strip (#N) suffixes from non-goal sections", () => {
       const previousSummary =
         "[User Preferences]\n- Track (#1)\n- Track (#2)\n\n---\n\n[user]\ninit";

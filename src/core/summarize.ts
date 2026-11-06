@@ -154,10 +154,13 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
   // though the user just asked for it again.
   // The volatile `(#N)` source index is a goal concept only; other sections
   // may legitimately contain labels like "Track (#1)" and "Track (#2)".
-  const keyOf =
-    header === "Session Goal"
-      ? (line: string) => line.replace(/\s*\(#\d+\)$/, "")
-      : (line: string) => line;
+  // Scope-change markers key on the full line: each one labels a different
+  // block, so collapsing them by suffix would relabel older goals.
+  const isMarker = (line: string) => /^-\s*\[Scope change\]/.test(line);
+  const keyOf = (line: string) => {
+    if (isMarker(line)) return line;
+    return header === "Session Goal" ? line.replace(/\s*\(#\d+\)$/, "") : line;
+  };
   const freshKeys = new Set(freshLines.map(keyOf));
   const seen = new Set<string>();
   const combined: string[] = [];
@@ -180,7 +183,6 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
   // persisted, but that froze the section permanently once it filled up — a
   // long session kept re-injecting its original goals and never saw later
   // pivots (e.g. a rename or a new phase) after a compaction.
-  const isMarker = (line: string) => /^-\s*\[Scope change\]/.test(line);
   let capped = combined;
   // Scope-change markers label the goals that follow them; they are not goals
   // and do not consume a goal slot. Keep CAP goals and pull in the marker that
