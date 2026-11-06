@@ -2,7 +2,7 @@
 
 ### Fixed
 
-- **Session Goal no longer freezes after eight entries.** The compaction merge kept the first eight goal lines, so once the section filled, every later goal was appended and immediately truncated — long sessions re-injected their original goals forever and ignored later pivots (renames, new phases). Session Goal now keeps the most recent lines like every other section, and the latest scope change survives the goal cap even when the opening message fills it.
+- **Session Goal no longer freezes after eight entries.** The compaction merge kept the first eight goal lines, so once the section filled, every later goal was appended and immediately truncated — long sessions re-injected their original goals forever and ignored later pivots (renames, new phases). Session Goal now keeps the most recent lines like every other section, and the latest scope change survives the goal cap even when the opening message fills it ([#195](https://github.com/k0valik/pi-blackhole/pull/195)).
 
 ---
 
