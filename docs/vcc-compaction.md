@@ -68,7 +68,7 @@ Extracts task goals and scope changes from user message blocks. Defined in [[src
 - **Template signals**: Stops at `For each`, `Do NOT implement`
 - **Scope change**: Emits `[Scope change]` marker when detected
 - **Leading test**: Only checks first 200 chars of user blocks (prevents pasted output false positives)
-- **Limit**: Max 8 goals
+- **Limit**: Max 8 goals, keeping the most recent lines; the latest scope change is never truncated, and a goal re-asked in the fresh window moves to the recent end
 
 ### Files extraction
 
@@ -152,7 +152,7 @@ Formats `SectionData` into a human-readable summary with TUI-safe wrapping. Defi
 
 When compaction runs on an already-compacted session, `compile()` merges the new summary with the previous one:
 
-- Sections merged line-by-line, capped at 8-15 items per section
+- Sections merged line-by-line, capped at 8-15 items per section; the most recent lines win so new goals are never frozen out. Scope-change markers label the goals that follow them and do not consume a goal slot, so a retained goal never loses its marker
 - File merge: Dedup Modified/Created/Read paths
 - Brief merge: Concatenate transcripts
 - Strip `RECALL_NOTE` before merge to avoid duplication
