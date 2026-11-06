@@ -18,6 +18,7 @@ import {
   ROOT_SESSIONS_ENV,
   readRootSessionIds,
   resetSubagentDetectorState,
+  type SubagentContextLike,
 } from "../src/core/subagent-detector.js";
 
 // Config and debug log both resolve through getAgentDir(); point them at a
@@ -174,6 +175,23 @@ describe("Runtime.isMemoryEnabled", () => {
     runtime.isMemoryEnabled(ctx);
 
     expect(getEntries).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not throw when the ctx was invalidated by a session replacement", () => {
+    const runtime = new Runtime();
+    runtime.config.memory = true;
+    runtime.config.subagentMemory = "off";
+    // Pi reports an invalidated session by throwing on every session-bound
+    // accessor; the footer polls this gate once a second through a captured ctx.
+    const stale: SubagentContextLike = {
+      get sessionManager(): never {
+        throw new Error(
+          "This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload().",
+        );
+      },
+    };
+
+    expect(() => runtime.isMemoryEnabled(stale)).not.toThrow();
   });
 });
 

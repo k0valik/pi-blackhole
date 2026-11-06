@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **A footer poll against a replaced session no longer kills Pi.** Pi invalidates a captured extension context after `newSession`/`fork`/`switchSession`/`reload` by making every session-bound accessor throw, including `ctx.sessionManager` itself, and subagent detection read that property outside the guard the rest of the probe uses. The status bar's one-second poll therefore threw from a timer, escaped as an `uncaughtException`, and ended the process; the manager read now falls back to an empty probe, so a stale ctx is a skipped gauge update instead of a dead session ([#193](https://github.com/k0valik/pi-blackhole/issues/193)).
+
 ---
 
 ## [0.5.17] - 2026-11-03
