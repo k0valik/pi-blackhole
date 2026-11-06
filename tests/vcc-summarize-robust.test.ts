@@ -20,9 +20,11 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(r).toContain("file1.ts");
     });
 
-    it("caps Session Goal at 8 items, preserving first goals at top", () => {
-      // 7 prev goals + 1 fresh = 8; slice(0, CAP) keeps original goals first
-      const goals = Array.from({ length: 7 }, (_, i) => `- Goal ${i}`).join("\n");
+    it("rotates Session Goal past the cap so new goals are never frozen out", () => {
+      // Regression: the section used to keep the first 8 lines, so once full
+      // every later goal (a rename, a new phase) was truncated away forever
+      // and the same stale goals were re-injected after every compaction.
+      const goals = Array.from({ length: 8 }, (_, i) => `- Goal ${i}`).join("\n");
       const previousSummary = `[Session Goal]\n${goals}\n\n---\n\n[user]\ninit`;
       const r = compile({
         messages: [userMsg("Goal: Final Step")],
@@ -31,9 +33,9 @@ describe("vcc-summarize robust merging and stripping", () => {
       const headerPart = r.split("\n\n---\n\n")[0];
       const lines = headerPart.split("\n").filter((l) => l.startsWith("- "));
       expect(lines.length).toBe(8);
-      // First item is from previous (preserved)
-      expect(lines[0]).toBe("- Goal 0");
-      // Last item is the fresh one (appended)
+      // Oldest goal is displaced by the fresh one
+      expect(lines).not.toContain("- Goal 0");
+      // Newest goal survives the cap
       expect(lines[lines.length - 1]).toContain("Final Step");
       expect(lines[lines.length - 1]).toMatch(/\(#0\)$/);
     });

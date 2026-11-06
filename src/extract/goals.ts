@@ -31,6 +31,9 @@ const stripLeadingBullet = (line: string): string =>
 
 const MAX_GOAL_CHARS = 200;
 
+/** Total goal lines kept per summary section (shared with the merge cap). */
+const MAX_GOALS = 8;
+
 const isSubstantiveGoal = (text: string): boolean => {
   const t = text.trim();
   if (t.length <= 5) return false;
@@ -88,5 +91,13 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
     }
   }
 
-  return goals.slice(0, 8);
+  // Cap at MAX_GOALS but never truncate the latest scope change: the first
+  // user block can contribute up to 6 lines, so a plain slice(0, MAX_GOALS)
+  // would drop the fresh pivot off the end and reintroduce goal drift.
+  if (goals.length <= MAX_GOALS) return goals;
+  const scopeStart = goals.findIndex((line) => line.startsWith("[Scope change]"));
+  if (scopeStart < 0) return goals.slice(0, MAX_GOALS);
+  const tail = goals.slice(scopeStart);
+  const head = goals.slice(0, scopeStart);
+  return [...head.slice(0, Math.max(0, MAX_GOALS - tail.length)), ...tail];
 };

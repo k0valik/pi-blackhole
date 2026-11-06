@@ -154,14 +154,12 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
       : header === "Session Goal" || header === "Commits"
         ? 8
         : 15;
-  // Session Goal: keep first items so the original first message persists
-  // Other sections: keep last items (fresh overrides stale)
-  const capped =
-    combined.length > CAP
-      ? header === "Session Goal"
-        ? combined.slice(0, CAP)
-        : combined.slice(-CAP)
-      : combined;
+  // All sections keep the most recent items: fresh overrides stale. Session
+  // Goal used to keep the *first* CAP items so the original first message
+  // persisted, but that froze the section permanently once it filled up — a
+  // long session kept re-injecting its original goals and never saw later
+  // pivots (e.g. a rename or a new phase) after a compaction.
+  const capped = combined.length > CAP ? combined.slice(-CAP) : combined;
   if (capped.length === 0) return "";
   return `[${header}]\n${capped.join("\n")}`;
 };
