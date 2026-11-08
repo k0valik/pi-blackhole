@@ -57,16 +57,16 @@
     "typescript": "6.0.3"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@earendil-works/pi-tui": "1.4.0",
+    "@earendil-works/pi-agent-core": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-tui": "1.5.0",
     "lint-staged": "17.6.0",
-    "oxfmt": "^0.75.0",
-    "oxlint": "1.90.0",
+    "oxfmt": "^0.76.0",
+    "oxlint": "1.91.0",
     "simple-git-hooks": "^2.14.0",
-    "typebox": "1.4.3",
-    "vitest": "5.0.5"
+    "typebox": "1.4.4",
+    "vitest": "5.1.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.85.1 <2.0.0",
