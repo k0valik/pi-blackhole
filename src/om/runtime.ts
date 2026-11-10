@@ -305,6 +305,23 @@ export class Runtime {
     reason: "session:main",
   };
 
+  // ── Coalesced consolidation recheck (openspec fix-consolidation-lost-wakeup) ──
+  // One runtime-owned slot remembering that a due lifecycle trigger arrived
+  // while a pipeline was busy, so the trigger is not lost when that pipeline
+  // finishes. The slot is scoped to the session generation the request was
+  // made for; a fresh launch, session change, disposal or shutdown
+  // invalidates it. It grants exactly one re-entry through the launch policy —
+  // not an automatic retry loop.
+  private pendingConsolidationRecheck: {
+    generation: RuntimeGeneration;
+    run: () => void;
+  } | null = null;
+  // Set synchronously at session_shutdown entry, before the dedicated
+  // bounded shutdown observation runs, so a coalesced recheck can never race
+  // it (the shutdown observer does not set the busy flag). Cleared by the
+  // next startSession.
+  private consolidationShutdownSuppressed = false;
+
   guardShutdownContext(isActive: () => boolean): void {
     this.shutdownContextIsActive = isActive;
   }
@@ -332,6 +349,10 @@ export class Runtime {
    * torn-down session stay blocked).
    */
   startSession(sessionIdentity: string | undefined): void {
+    // A new session owns the runtime again: a coalesced recheck from the
+    // previous session is void, and regular scheduling is revived.
+    this.pendingConsolidationRecheck = null;
+    this.consolidationShutdownSuppressed = false;
     if (this.disposed) {
       this.disposed = false;
       this.lifecycleController = new AbortController();
@@ -514,6 +535,7 @@ export class Runtime {
     this.disposed = true;
     this.generation += 1;
     this.lifecycleController.abort();
+    this.pendingConsolidationRecheck = null;
     this.clearCompactionTimer();
     this.compactInFlight = false;
   }
@@ -1266,15 +1288,71 @@ export class Runtime {
   }
 
   launchConsolidationTask(ctx: LaunchCtx, work: () => Promise<void>): Promise<void> {
+    // A fresh launch re-evaluates the branch itself, so it supersedes any
+    // inherited recheck request — and can never recursively consume one.
+    this.pendingConsolidationRecheck = null;
     this.consolidationInFlight = true;
     this.consolidationPhase = undefined;
     const promise = this.launchTrackedTask(ctx, "consolidation", work, () => {
       this.consolidationInFlight = false;
       this.consolidationPhase = undefined;
       if (this.consolidationPromise === promise) this.consolidationPromise = null;
+      // Busy flag, phase and tracked promise are clean: give a coalesced
+      // recheck (a due trigger that arrived while this pipeline was busy)
+      // exactly one re-entry through the launch policy.
+      this.consumePendingConsolidationRecheck();
     });
     this.consolidationPromise = promise;
     return promise;
+  }
+
+  /** Remember a due trigger that arrived while consolidation was busy. The
+   *  request is dropped unless its captured generation is still active; the
+   *  finishing pipeline consumes it after its cleanup and re-runs `run` once.
+   *  A request remembered during shutdown suppression is never stored. */
+  requestConsolidationRecheck(generation: RuntimeGeneration, run: () => void): void {
+    if (this.consolidationShutdownSuppressed) return;
+    if (!this.isGenerationActive(generation)) return;
+    this.pendingConsolidationRecheck = { generation, run };
+  }
+
+  /** Invalidate the remembered recheck (latest-trigger context decides). */
+  cancelPendingConsolidationRecheck(): void {
+    this.pendingConsolidationRecheck = null;
+  }
+
+  /** True between session_shutdown and the next session_start: no regular
+   *  consolidation may launch or be remembered in that window. */
+  isConsolidationShutdownSuppressed(): boolean {
+    return this.consolidationShutdownSuppressed;
+  }
+
+  /** Begin shutdown suppression synchronously (session_shutdown entry): all
+   *  regular coalesced rechecks are cancelled and none may be stored again
+   *  until the next session start. */
+  beginConsolidationShutdownSuppression(): void {
+    this.consolidationShutdownSuppressed = true;
+    this.pendingConsolidationRecheck = null;
+  }
+
+  private consumePendingConsolidationRecheck(): void {
+    const request = this.pendingConsolidationRecheck;
+    this.pendingConsolidationRecheck = null;
+    if (!request) return;
+    if (this.consolidationShutdownSuppressed) return;
+    // Disposal is covered here: isGenerationActive() is false once disposed.
+    if (!this.isGenerationActive(request.generation)) return;
+    try {
+      request.run();
+    } catch (error) {
+      // Keep callback failures visible even if a caller does not report them,
+      // without rejecting the finishing pipeline's tracked promise.
+      debugLog(
+        "consolidation.recheck_callback_error",
+        { errorMessage: String(error) },
+        this.config.debugLog === true,
+      );
+    }
   }
 
   recordConsolidationStageError(ctx: LaunchCtx, phase: ConsolidationPhase, error: unknown): string {

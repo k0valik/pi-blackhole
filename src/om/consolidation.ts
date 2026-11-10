@@ -643,6 +643,52 @@ function currentSessionIdentity(ctx: ConsolidationCtx): string | undefined {
   return ctx.sessionManager.getSessionId?.();
 }
 
+/** Remember a due lifecycle trigger that arrived while a pipeline was busy
+ *  (the coalesced recheck, fix-consolidation-lost-wakeup). The stored context
+ *  is detached from the busy pipeline and the request carries its own
+ *  captured generation, so a session change, disposal or shutdown
+ *  invalidates it. The finishing pipeline consumes it after its cleanup. */
+function rememberCoalescedRecheck(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): void {
+  let sessionId: string;
+  try {
+    sessionId = ctx.sessionManager.getSessionId();
+  } catch (error) {
+    if (isStaleExtensionContextError(error)) return;
+    throw error;
+  }
+  const generation = runtime.captureGeneration(sessionId);
+  if (!runtime.isGenerationActive(generation)) return;
+  const detachedCtx: ConsolidationCtx = {
+    cwd: ctx.cwd,
+    hasUI: ctx.hasUI,
+    ui: ctx.ui,
+    model: ctx.model,
+    modelRegistry: ctx.modelRegistry,
+    sessionManager: ctx.sessionManager,
+  };
+  runtime.requestConsolidationRecheck(generation, () => {
+    try {
+      maybeLaunchConsolidation(pi, runtime, detachedCtx);
+    } catch (error) {
+      // Stale host contexts are the expected end of a superseded session;
+      // anything else is reported like any other background failure.
+      if (isStaleExtensionContextError(error)) return;
+      debugLog(
+        "consolidation.recheck_error",
+        { errorMessage: String(error) },
+        runtime.config.debugLog === true,
+      );
+      if (detachedCtx.hasUI && detachedCtx.ui) {
+        try {
+          detachedCtx.ui.notify(`Observational memory: ${String(error)}`, "warning");
+        } catch {
+          // Stale extension context — harmless.
+        }
+      }
+    }
+  });
+}
+
 export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime): void {
   pi.on("session_start", (event, ctx) => {
     const sessionCtx = ctx as ConsolidationCtx;
@@ -657,6 +703,11 @@ export function registerConsolidationTrigger(pi: ExtensionAPI, runtime: Runtime)
     runtime.noteSessionStart(sessionCtx as unknown as SubagentContextLike, event);
   });
   pi.on("session_shutdown", (event, ctx) => {
+    // Suppression begins synchronously, before the shutdown observer's own
+    // bounded attempt: observeTailOnShutdown runs the observer directly
+    // without the busy flag, so a coalesced recheck released by the dying
+    // pipeline must never race it.
+    runtime.beginConsolidationShutdownSuppression();
     // Start the observer first: it reads the per-session memory decision
     // synchronously. Then drop the ending session's ancestry id so a later
     // main session in this host cannot be mistaken for a child.
@@ -713,8 +764,14 @@ function validateCursors(entries: Entry[], runtime: Runtime): void {
 
 function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: ConsolidationCtx): void {
   runtime.ensureConfig(ctx.cwd, (msg) => ctx.ui?.notify?.(msg, "warning"));
+  // Shutdown owns its own bounded observation attempt (if any): no regular
+  // consolidation may launch or stay remembered in the shutdown window.
+  if (runtime.isConsolidationShutdownSuppressed()) return;
   if (!runtime.isMemoryEnabled(ctx)) {
     if (runtime.config.memory !== false) runtime.noteSubagentMemorySkip(ctx);
+    // The latest trigger context decides: an ineligible context supersedes
+    // and invalidates a remembered request from an earlier one.
+    runtime.cancelPendingConsolidationRecheck();
     return;
   }
 
@@ -722,13 +779,26 @@ function maybeLaunchConsolidation(pi: ExtensionAPI, runtime: Runtime, ctx: Conso
   // compaction); blackhole also steps aside from observational-memory
   // consolidation so it never touches opaque checkpoints.
   // EXPERIMENTAL compat shim — do not extend; see src/core/provider-skip.ts.
-  if (matchesSkippedProvider(runtime.config, ctx.model)) return;
+  if (matchesSkippedProvider(runtime.config, ctx.model)) {
+    runtime.cancelPendingConsolidationRecheck();
+    return;
+  }
 
   // LEGACY: passive check — only applies when new keys are absent (unmigrated config)
   if (runtime.config.compaction === undefined && runtime.config.compactionEngine === undefined) {
-    if (runtime.config.passive === true) return;
+    if (runtime.config.passive === true) {
+      runtime.cancelPendingConsolidationRecheck();
+      return;
+    }
   }
-  if (runtime.consolidationInFlight) return;
+  if (runtime.consolidationInFlight) {
+    // A due trigger arriving while a pipeline is busy must not be lost: the
+    // coalesced recheck is remembered here and the finishing pipeline
+    // consumes it after its cleanup, granting exactly one re-entry through
+    // this same policy (fix-consolidation-lost-wakeup).
+    rememberCoalescedRecheck(pi, runtime, ctx);
+    return;
+  }
   if (runtime.isConsolidationRetryGated()) return;
 
   // Load and validate cursors from pending file (once per session; re-load on fork)
