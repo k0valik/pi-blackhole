@@ -36,6 +36,7 @@ describe("append rebase surgery", () => {
       "- ship the parser fix",
       "- ship the parser fix", // exact duplicate
       ...goalLines, // pushes past the Session Goal cap of 8
+      "- goal line 10", // duplicate that survives inside the recency window
       "",
       "[Commits]",
       "- abc1234 fix parser",
@@ -71,12 +72,13 @@ describe("append rebase surgery", () => {
     });
 
     // Duplicates collapse to one line each.
-    expect(countOccurrences(complete, "ship the parser fix")).toBe(1);
     expect(countOccurrences(complete, "abc1234 fix parser")).toBe(1);
-    // Cap: only the first 8 Session Goal lines survive; later ones dropped.
-    expect(countOccurrences(complete, "goal line 09")).toBe(0);
-    expect(countOccurrences(complete, "goal line 10")).toBe(0);
-    expect(complete).toContain("goal line 01");
+    expect(countOccurrences(complete, "goal line 10")).toBe(1);
+    // Cap: only the 8 most recent Session Goal lines survive; older ones rotate out.
+    expect(countOccurrences(complete, "ship the parser fix")).toBe(0);
+    expect(countOccurrences(complete, "goal line 01")).toBe(0);
+    expect(countOccurrences(complete, "goal line 04")).toBe(1);
+    expect(complete).toContain("Refactor the parser pipeline.");
     // Stale OM block never leaks into the merged summary.
     expect(complete).not.toContain("## Observations");
     expect(complete).not.toContain("stale observation content");

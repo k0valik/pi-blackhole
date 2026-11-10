@@ -86,6 +86,30 @@ describe("extractGoals", () => {
     expect(goals[scopeIdx + 1]).toContain("password reset");
   });
 
+  it("keeps the latest scope change when the first message fills the cap", () => {
+    const blocks: NormalizedBlock[] = [
+      {
+        kind: "user",
+        text: "fix login bug\ncheck auth flow\nupdate tests\nrefactor utils\nclean up logs\nadd metrics",
+      },
+      { kind: "assistant", text: "ok" },
+      {
+        kind: "user",
+        text: "Actually, instead let's refactor auth\nmigrate the database\nupdate the docs",
+      },
+    ];
+    const goals = extractGoals(blocks);
+    // 6 founding lines + marker + 3 pivot lines would be 10; the cap must keep
+    // the whole latest scope change, not truncate it off the end.
+    expect(goals.length).toBe(8);
+    expect(goals.slice(-4)).toEqual([
+      "[Scope change]",
+      "Actually, instead let's refactor auth",
+      "migrate the database",
+      "update the docs",
+    ]);
+  });
+
   it("skips noise short user messages as goals", () => {
     const blocks: NormalizedBlock[] = [
       { kind: "user", text: "ok" },
