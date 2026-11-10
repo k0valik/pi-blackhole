@@ -164,7 +164,11 @@ const mergeHeaderSection = (header: string, prev: string, fresh: string): string
   const freshKeys = new Set(freshLines.map(keyOf));
   const seen = new Set<string>();
   const combined: string[] = [];
-  for (const line of [...prevLines.filter((line) => !freshKeys.has(keyOf(line))), ...freshLines]) {
+  // A marker is a label, not a duplicate goal: when the fresh window re-emits
+  // the same marker, keep the earlier occurrence in place (dedup below drops
+  // the fresh copy) so goals it already labels are not left behind it.
+  const retained = prevLines.filter((line) => isMarker(line) || !freshKeys.has(keyOf(line)));
+  for (const line of [...retained, ...freshLines]) {
     const key = keyOf(line);
     if (seen.has(key)) continue;
     seen.add(key);

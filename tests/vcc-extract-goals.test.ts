@@ -99,9 +99,11 @@ describe("extractGoals", () => {
       },
     ];
     const goals = extractGoals(blocks);
-    // 6 founding lines + marker + 3 pivot lines would be 10; the cap must keep
-    // the whole latest scope change, not truncate it off the end.
-    expect(goals.length).toBe(8);
+    // 6 founding lines + marker + 3 pivot lines would be 10. The marker is a
+    // label, not a goal, so the cap keeps 8 goals (5 founding + 3 pivot) and
+    // the whole latest scope change survives off the end.
+    expect(goals.length).toBe(9);
+    expect(goals[0]).toBe("check auth flow");
     expect(goals.slice(-4)).toEqual([
       "[Scope change]",
       "Actually, instead let's refactor auth",

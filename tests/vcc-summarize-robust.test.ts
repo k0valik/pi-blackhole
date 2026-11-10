@@ -98,6 +98,54 @@ describe("vcc-summarize robust merging and stripping", () => {
       const section = r.split("\n\n---\n\n")[0];
       expect(section).toContain("- [Scope change] (#1)");
       expect(section).toContain("- [Scope change] (#2)");
+
+      // Each marker must stay immediately above the block it labels.
+      const lines = section.split("\n");
+      const marker1 = lines.indexOf("- [Scope change] (#1)");
+      const goalA1 = lines.indexOf("- Goal A1");
+      const goalA2 = lines.indexOf("- Goal A2");
+      const marker2 = lines.indexOf("- [Scope change] (#2)");
+      const goalB1 = lines.indexOf("- Goal B1");
+      const goalB2 = lines.indexOf("- Goal B2");
+      expect(marker1).toBeGreaterThanOrEqual(0);
+      expect(goalA1).toBeGreaterThan(marker1);
+      expect(goalA2).toBeGreaterThan(goalA1);
+      expect(marker2).toBeGreaterThan(goalA2);
+      expect(goalB1).toBeGreaterThan(marker2);
+      expect(goalB2).toBeGreaterThan(goalB1);
+    });
+
+    it("keeps a repeated scope-change marker before the goals it labels", () => {
+      // Re-compacting a window that contains an already-summarized scope
+      // change re-emits the same marker line. The fresh copy must not displace
+      // the earlier marker past goals that the marker still labels.
+      const previousSummary = [
+        "[Session Goal]",
+        "- [Scope change] (#1)",
+        "- Actually, pivot to goal D (#1)",
+        "- Follow-up goal from message two",
+        "",
+        "---",
+        "",
+        "[user]",
+        "init",
+      ].join("\n");
+      const r = compile({
+        messages: [userMsg("founding goal"), userMsg("Actually, pivot to goal D")],
+        previousSummary,
+      });
+      const lines = r
+        .split("\n\n---\n\n")[0]
+        .split("\n")
+        .filter((l) => l.startsWith("- "));
+      const marker = lines.indexOf("- [Scope change] (#1)");
+      const repeatedGoal = lines.indexOf("- Actually, pivot to goal D (#1)");
+      const olderGoal = lines.indexOf("- Follow-up goal from message two");
+      expect(marker).toBeGreaterThanOrEqual(0);
+      expect(repeatedGoal).toBeGreaterThan(marker);
+      expect(olderGoal).toBeGreaterThan(marker);
+      // The duplicate marker still collapses to one line.
+      expect(lines.filter((l) => l === "- [Scope change] (#1)")).toHaveLength(1);
     });
 
     it("does not strip (#N) suffixes from non-goal sections", () => {

@@ -95,14 +95,17 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
     }
   }
 
-  // Cap at MAX_GOALS but never truncate the latest scope change: the first
-  // user block can contribute up to 6 lines, so a plain slice(0, MAX_GOALS)
-  // would drop the fresh pivot off the end and reintroduce goal drift.
-  if (goals.length <= MAX_GOALS) return goals;
+  // Cap at MAX_GOALS goals but never truncate the latest scope change: the
+  // first user block can contribute up to 6 lines, so a plain slice(0, MAX_GOALS)
+  // would drop the fresh pivot off the end and reintroduce goal drift. Markers
+  // label goals and are not goals themselves, so they do not consume a slot.
+  const goalCount = scopeMarkerIndex >= 0 ? goals.length - 1 : goals.length;
+  if (goalCount <= MAX_GOALS) return goals;
   if (scopeMarkerIndex < 0) return goals.slice(0, MAX_GOALS);
   const tail = goals.slice(scopeMarkerIndex);
   const head = goals.slice(0, scopeMarkerIndex);
+  const tailGoalCount = tail.length - 1;
   // Keep the latest founding lines, matching the recency rule used by the
   // compaction merge.
-  return [...head.slice(Math.max(0, head.length - (MAX_GOALS - tail.length))), ...tail];
+  return [...head.slice(Math.max(0, head.length - (MAX_GOALS - tailGoalCount))), ...tail];
 };
