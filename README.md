@@ -46,14 +46,14 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.17](CHANGELOG.md#0517---2026-11-03)**
+> **Latest release: [0.5.18](CHANGELOG.md#0518---2026-11-11)**
 >
+> - **Session Goals now follow the latest work, not the first eight** — compaction keeps the most recent goals and preserves the latest scope change, so long sessions stop re-injecting asks that were already replaced.
+> - **Busy memory pipelines no longer drop deferred consolidation work** — a trigger that arrives mid-pipeline is coalesced and re-evaluated once after cleanup, so unobserved backlog no longer waits for the next user message.
+> - **A stale session context can no longer kill Pi from the footer poll** — after `newSession`/`fork`/`switchSession`/`reload`, the status-bar probe falls back to an empty session instead of throwing from a timer.
 > - **The session model is no longer a silent worker fallback** — `sessionFallback` defaults to `false`, so an exhausted worker stage is skipped instead of spending main-model tokens and busting its prompt cache; stage cooldowns now also cover the fallback model. Set `sessionFallback: true` to opt back in.
 > - **Observation progress no longer stalls after an interrupted turn** — an aborted turn leaving an empty or thinking-only assistant message could make the observer re-read the same chunk, so compaction repeated every turn without shrinking context.
 > - **Scaffolding can no longer truncate an existing config** — the config file is created with `O_EXCL`, closing the check-then-write race that replaced it with defaults.
-> - **Observational memory is off in subagent sessions by default** — detected children run no OM workers or OM injection while compaction is untouched. `subagentMemory: "inherit"` opts a child back in; detection is runner-agnostic, with `PI_BLACKHOLE_SUBAGENT_MARKERS` as the escape hatch for unsupported runners.
-> - **Large-session recall no longer holds hundreds of MiB** — sessions above 64 MiB are rescanned instead of cached, and retained source bytes are capped at 128 MiB with oldest-first eviction.
-> - **Extension loads on omp again** — the reflector schemas no longer read `.properties` back from a callable-typebox base at import time, so `omp plugin install` works with `reflectionSupersedes` both on and off.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for detailed fixes and contribution history.
 
