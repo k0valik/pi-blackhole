@@ -4,8 +4,7 @@
  *
  * Created by pi-vcc-om. Replaces pi-vcc's vcc_recall and OM's standalone recall-observation.
  */
-import { Type } from "typebox";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { Type, type TUnsafe } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadAllMessages } from "../core/load-messages";
 import { clip } from "../core/content";
@@ -37,6 +36,14 @@ import {
 
 const DEFAULT_RECENT = 25;
 const PAGE_SIZE = 5;
+
+// pi-ai's StringEnum returns a pi-schema-branded type that TypeBox's Static
+// cannot read, so tool params lose their literal unions. Keep the same
+// Google-safe `{ type: "string", enum }` wire shape but carry the union type.
+const stringEnumSchema = <T extends readonly string[]>(
+  values: T,
+  options?: { description?: string },
+): TUnsafe<T[number]> => Type.Unsafe<T[number]>({ type: "string", enum: values, ...options });
 
 export const invalidExpandIndices = (requested: number[], available: Set<number>): number[] =>
   requested.filter((i) => !Number.isInteger(i) || !available.has(i));
@@ -444,12 +451,12 @@ export function registerRecallTool(
         }),
       ),
       scope: Type.Optional(
-        StringEnum(["lineage", "all"] as const, {
+        stringEnumSchema(["lineage", "all"] as const, {
           description: "Search scope. lineage = active lineage (default), all = entire session.",
         }),
       ),
       mode: Type.Optional(
-        StringEnum(["hybrid", "file", "touched"] as const, {
+        stringEnumSchema(["hybrid", "file", "touched"] as const, {
           description:
             "What content to search. hybrid (default) = all session content. file = file content only. touched = files-by-path summary with entry indices.",
         }),
