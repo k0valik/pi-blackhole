@@ -50,6 +50,24 @@ const invoke = async (
     .then((r: any) => r.content[0].text as string);
 };
 
+describe("recall tool schema", () => {
+  it("declares scope as a provider-safe string enum", () => {
+    const tool = register();
+    expect(tool.parameters.properties.scope).toMatchObject({
+      type: "string",
+      enum: ["lineage", "all"],
+    });
+  });
+
+  it("declares mode as a provider-safe string enum", () => {
+    const tool = register();
+    expect(tool.parameters.properties.mode).toMatchObject({
+      type: "string",
+      enum: ["hybrid", "file", "touched"],
+    });
+  });
+});
+
 describe("vcc_recall scope", () => {
   it("defaults to active lineage and opts into all-session search explicitly", async () => {
     const { dir, file } = makeSession();

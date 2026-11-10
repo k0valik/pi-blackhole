@@ -1,4 +1,4 @@
-import { createEventBus, type ExtensionAPI, type ExtensionEvent, type ExtensionHandler, type TurnEndEvent, type TurnEndEventResult, type SessionShutdownEvent } from "@earendil-works/pi-coding-agent";
+import { createEventBus, type ExtensionAPI, type ExtensionEvent, type ExtensionHandler, type TurnEndEvent, type TurnEndEventResult, type SessionShutdownEvent, type AgentStartEvent, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
 
 /**
  * Host-interface double for extension wiring tests.
@@ -11,6 +11,8 @@ import { createEventBus, type ExtensionAPI, type ExtensionEvent, type ExtensionH
 export interface ExtensionApiDoubleOptions {
   turnEndHandlers?: ExtensionHandler<TurnEndEvent, TurnEndEventResult>[];
   shutdownHandlers?: ExtensionHandler<SessionShutdownEvent>[];
+  agentStartHandlers?: ExtensionHandler<AgentStartEvent>[];
+  sessionStartHandlers?: ExtensionHandler<SessionStartEvent>[];
   appendEntry?: (customType: string, data: unknown) => unknown;
 }
 
@@ -25,11 +27,15 @@ export function createExtensionApiDouble(options: ExtensionApiDoubleOptions = {}
     on(...[event, handler]:
       | [event: "turn_end", handler: ExtensionHandler<TurnEndEvent, TurnEndEventResult>]
       | [event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>]
-      | [event: Exclude<ExtensionEvent["type"], "turn_end" | "session_shutdown">, handler: (...args: never[]) => unknown]
+      | [event: "agent_start", handler: ExtensionHandler<AgentStartEvent>]
+      | [event: "session_start", handler: ExtensionHandler<SessionStartEvent>]
+      | [event: Exclude<ExtensionEvent["type"], "turn_end" | "session_shutdown" | "agent_start" | "session_start">, handler: (...args: never[]) => unknown]
     ): () => void {
       // Capture only events these fixtures replay.
       if (event === "turn_end") options.turnEndHandlers?.push(handler);
       if (event === "session_shutdown") options.shutdownHandlers?.push(handler);
+      if (event === "agent_start") options.agentStartHandlers?.push(handler);
+      if (event === "session_start") options.sessionStartHandlers?.push(handler);
       // Pi 0.87's `on()` returns an unsubscribe function; the double captures
       // handlers for replay and has nothing to detach.
       return () => {};
