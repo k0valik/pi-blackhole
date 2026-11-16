@@ -1,6 +1,5 @@
 import { isToolSafeCut } from "./tool-safe-cut.js";
 import type { Entry } from "../om/ledger/types.js";
-import { isSourceEntry } from "../om/ledger/progress.js";
 import { estimateEntryTokens } from "../om/tokens.js";
 
 export type PressureTailResult =
@@ -57,14 +56,12 @@ export function selectPressureTail(input: {
     const rawTokens = tailTokens(index);
     if (rawTokens > keepRecentTokens || rawTokens + input.summaryTokens(entry.id) > capacity)
       continue;
-    // Non-message source entries do not pass through VCC's message interface.
-    // Do not silently bridge a custom message or branch summary.
-    if (
-      entries
-        .slice(start, index)
-        .some((source) => isSourceEntry(source) && source.type !== "message")
-    )
-      continue;
+    // Branch summaries are blackhole-authored compaction context that does not
+    // pass through VCC's message interface — do not silently bridge one.
+    // custom_message entries are main-model-facing extension injections; normal
+    // compaction already drops them (they never survive into the summarized
+    // branch), so they no longer block a bridge either.
+    if (entries.slice(start, index).some((source) => source.type === "branch_summary")) continue;
     return {
       ok: true,
       firstKeptEntryId: entry.id,

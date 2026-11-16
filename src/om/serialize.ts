@@ -2,7 +2,12 @@
  * Serialize branch entries and render source-addressed chunks.
  *
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/serialize.ts)
- * Unmodified.
+ * Amended: observer-side serialization (serializeBranchEntries /
+ * serializeSourceAddressedBranchEntries / isDeliveredSourceEntry) no longer
+ * renders `custom_message` entries — extension injections aimed at the main
+ * session model must not enter observer chunks or coverage (see
+ * SOURCE_ENTRY_TYPES in om/ledger/progress.ts). Recall rendering
+ * (renderRecallSourceEntry) still surfaces them.
  */
 import type { Message, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import { projectUserDecision } from "../extract/user-decisions.js";
@@ -139,26 +144,11 @@ export type RenderableEntry = {
   summary?: unknown;
 };
 
-function renderCustomMessage(entry: RenderableEntry, options: { recallFormat: boolean }): string {
-  const time = options.recallFormat
-    ? formatRecallTimestamp(entry.timestamp)
-    : formatTimestamp(entry.timestamp);
-  const text = options.recallFormat
-    ? textAndPlaceholders(entry.content)
-    : typeof entry.content === "string"
-      ? entry.content
-      : Array.isArray(entry.content)
-        ? (entry.content as Array<{ type?: string; text?: string }>)
-            .filter((b) => b?.type === "text" && typeof b.text === "string")
-            .map((b) => b.text as string)
-            .join("\n")
-        : "";
-  if (options.recallFormat) {
-    const origin = entry.customType ? `Custom message (${entry.customType})` : "Custom message";
-    return `[${origin} @ ${time}]: ${text}`;
-  }
-  const tag = entry.customType ? `Custom (${entry.customType})` : "Custom";
-  return `[${tag} @ ${time}]: ${text}`;
+function renderRecallCustomMessage(entry: RenderableEntry): string {
+  const time = formatRecallTimestamp(entry.timestamp);
+  const text = textAndPlaceholders(entry.content);
+  const origin = entry.customType ? `Custom message (${entry.customType})` : "Custom message";
+  return `[${origin} @ ${time}]: ${text}`;
 }
 
 export function serializeBranchEntries(entries: RenderableEntry[]): string {
@@ -169,10 +159,9 @@ export function serializeBranchEntries(entries: RenderableEntry[]): string {
       if (part) blocks.push(part);
       continue;
     }
-    if (entry.type === "custom_message") {
-      blocks.push(renderCustomMessage(entry, { recallFormat: false }));
-      continue;
-    }
+    // custom_message is deliberately not rendered here: observer input excludes
+    // extension injections (see SOURCE_ENTRY_TYPES in om/ledger/progress.ts).
+    // Recall rendering still surfaces them via renderRecallSourceEntry below.
     if (entry.type === "branch_summary" && typeof entry.summary === "string") {
       const time = formatTimestamp(entry.timestamp);
       blocks.push(`[Branch summary @ ${time}]: ${entry.summary}`);
@@ -191,9 +180,7 @@ export type SourceAddressedSerialization = {
 };
 
 function isSourceRenderableEntry(entry: RenderableEntry): boolean {
-  return (
-    entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary"
-  );
+  return entry.type === "message" || entry.type === "branch_summary";
 }
 
 function sourceEntryTimestamp(entry: RenderableEntry): string {
@@ -256,7 +243,7 @@ function renderRecallMessage(entry: RenderableEntry): string | null {
 
 export function renderRecallSourceEntry(entry: RenderableEntry): string | null {
   if (entry.type === "message") return renderRecallMessage(entry);
-  if (entry.type === "custom_message") return renderCustomMessage(entry, { recallFormat: true });
+  if (entry.type === "custom_message") return renderRecallCustomMessage(entry);
   if (entry.type === "branch_summary" && typeof entry.summary === "string") {
     const time = formatRecallTimestamp(entry.timestamp);
     return `[Branch summary @ ${time}]: ${entry.summary}`;
