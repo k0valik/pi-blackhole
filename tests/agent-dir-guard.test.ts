@@ -6,11 +6,12 @@
 
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertSafeTestAgentDir, isSafeTestAgentDir } from "./agent-dir-guard.js";
 
 const REAL_AGENT_DIR = join(homedir(), ".pi", "agent");
+const OUTSIDE_DIR = join(parse(resolve(tmpdir())).root, "pi-blackhole-outside-agent");
 
 const cleanup: string[] = [];
 afterEach(() => {
@@ -24,8 +25,11 @@ function scratch(): string {
 }
 
 describe("isSafeTestAgentDir", () => {
-  it("rejects the user's real agent dir", () => {
-    expect(isSafeTestAgentDir(REAL_AGENT_DIR)).toBe(false);
+  it("rejects paths outside the temp dir", () => {
+    expect(isSafeTestAgentDir(OUTSIDE_DIR)).toBe(false);
+    if (!resolve(REAL_AGENT_DIR).startsWith(resolve(tmpdir()) + sep)) {
+      expect(isSafeTestAgentDir(REAL_AGENT_DIR)).toBe(false);
+    }
   });
 
   it("rejects unset and empty values", () => {
@@ -48,25 +52,31 @@ describe("isSafeTestAgentDir", () => {
     expect(isSafeTestAgentDir(join(tmpdir(), "..", "agent"))).toBe(false);
   });
 
-  it("rejects a symlink in the temp dir that points outside it", () => {
-    const root = scratch();
-    const link = join(root, "agent");
-    // Points at the home dir without writing anything there.
-    symlinkSync(homedir(), link);
-    expect(isSafeTestAgentDir(link)).toBe(false);
+  it("rejects a symlink in the temp dir (and missing children beneath it) that points outside", () => {
+    const outer = scratch();
+    const innerTmp = join(outer, "tmp");
+    const outsideTarget = join(outer, "outside");
+    mkdirSync(innerTmp);
+    mkdirSync(outsideTarget);
+    const link = join(innerTmp, "agent");
+    symlinkSync(outsideTarget, link);
+    expect(isSafeTestAgentDir(link, innerTmp)).toBe(false);
+    expect(isSafeTestAgentDir(join(link, "missing-child"), innerTmp)).toBe(false);
   });
 
   it("honors an explicit temp root", () => {
     const root = scratch();
-    mkdirSync(join(root, "agent"));
-    expect(isSafeTestAgentDir(join(root, "agent"), root)).toBe(true);
-    expect(isSafeTestAgentDir(REAL_AGENT_DIR, root)).toBe(false);
+    const innerTmp = join(root, "tmp");
+    mkdirSync(innerTmp);
+    mkdirSync(join(innerTmp, "agent"));
+    expect(isSafeTestAgentDir(join(innerTmp, "agent"), innerTmp)).toBe(true);
+    expect(isSafeTestAgentDir(join(root, "outside"), innerTmp)).toBe(false);
   });
 });
 
 describe("assertSafeTestAgentDir", () => {
-  it("throws for the real agent dir instead of letting a suite delete it", () => {
-    expect(() => assertSafeTestAgentDir(REAL_AGENT_DIR)).toThrow(/refusing to use test agent dir/);
+  it("throws for an outside dir instead of letting a suite delete it", () => {
+    expect(() => assertSafeTestAgentDir(OUTSIDE_DIR)).toThrow(/refusing to use test agent dir/);
   });
 
   it("returns a safe dir unchanged", () => {

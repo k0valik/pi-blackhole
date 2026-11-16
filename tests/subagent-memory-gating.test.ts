@@ -20,7 +20,7 @@ import {
   resetSubagentDetectorState,
   type SubagentContextLike,
 } from "../src/core/subagent-detector.js";
-import { assertSafeTestAgentDir } from "./agent-dir-guard.js";
+import { assertSafeTestAgentDir, isSafeTestAgentDir } from "./agent-dir-guard.js";
 
 // Config and debug log both resolve through getAgentDir(); point them at a
 // scratch dir so a fresh Runtime reads a real file instead of the user's.
@@ -89,7 +89,9 @@ afterEach(() => {
   delete process.env.PI_BLACKHOLE_MEMORY;
   delete process.env.PI_BLACKHOLE_DEBUG_LOG;
   flushDebugLog();
-  rmSync(scratch.dir, { recursive: true, force: true });
+  if (isSafeTestAgentDir(scratch.dir)) {
+    rmSync(scratch.dir, { recursive: true, force: true });
+  }
   vi.restoreAllMocks();
 });
 
