@@ -75,7 +75,9 @@ if (process.env.PI_CODING_AGENT_DIR !== isolatedAgentDir || !isSafeTestAgentDir(
 // to the real home. Re-pin only while unset, so an explicit per-file value is
 // never clobbered.
 function ensureIsolatedAgentDir(): void {
-  if (process.env.PI_CODING_AGENT_DIR) return;
+  // Trim-check: getAgentDir() trims too, so a whitespace value would
+  // otherwise fall through to the real home fallback.
+  if (process.env.PI_CODING_AGENT_DIR?.trim()) return;
   pinIsolatedAgentDir();
 }
 

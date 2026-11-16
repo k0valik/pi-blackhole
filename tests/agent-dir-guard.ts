@@ -38,14 +38,13 @@ export function isSafeTestAgentDir(dir: string | undefined, tmpRoot = tmpdir()):
   // redirect a recursive delete—even for a not-yet-created child beneath it.
   const candidate = resolvePhysicalPath(dir);
   if (!candidate) return false;
-  // Even under the temp root, a path shaped like a real agent dir (a `.pi`
-  // segment whose child is `agent`) is never acceptable: a runner could point
-  // TMPDIR inside ~/.pi, or a future test could rebuild the real layout under
-  // tmp. The worst-case blast radius must be a `pi-blackhole` subfolder, never
-  // anything that looks like a Pi install.
-  const segments = candidate.split(sep);
-  for (let i = 1; i < segments.length; i++) {
-    if (segments[i] === "agent" && segments[i - 1] === ".pi") return false;
+  // Even under the temp root, anything inside a `.pi` tree is never
+  // acceptable: a runner could point TMPDIR at ~/.pi (or deeper), or a future
+  // test could rebuild the real layout under tmp. The worst-case blast radius
+  // must be a `pi-blackhole` subfolder, never anything that looks like Pi
+  // state.
+  for (const segment of candidate.split(sep)) {
+    if (segment === ".pi") return false;
   }
   for (const root of roots) {
     if (candidate.startsWith(root + sep)) return true;

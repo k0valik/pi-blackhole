@@ -56,6 +56,7 @@ describe("isSafeTestAgentDir", () => {
     const dir = scratch();
     expect(isSafeTestAgentDir(join(dir, ".pi", "agent"))).toBe(false);
     expect(isSafeTestAgentDir(join(dir, ".pi", "agent", "pi-blackhole"))).toBe(false);
+    expect(isSafeTestAgentDir(join(dir, ".pi", "other-pi-state"))).toBe(false);
     expect(isSafeTestAgentDir(join(dir, "agent"))).toBe(true);
     expect(isSafeTestAgentDir(join(dir, "pi-blackhole-test-agent-x"))).toBe(true);
   });
