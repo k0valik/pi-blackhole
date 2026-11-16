@@ -7,6 +7,7 @@ import {
   ROOT_SESSIONS_ENV,
   SUBAGENT_ENV_MARKERS,
 } from "../src/core/subagent-detector.js";
+import { isSafeTestAgentDir } from "./agent-dir-guard.js";
 
 // Tests start as a normal session even when Vitest was launched by a Pi child.
 // Individual tests can still set these markers to exercise subagent detection.
@@ -23,14 +24,20 @@ delete process.env[EXTRA_MARKERS_ENV];
 // scaffoldConfig(), write DEFAULTS over it. A fresh install or test run must
 // never be able to replace an existing user config.
 //
-// Contract, same as pi-base: pin only when the runner did not supply a value.
+// Contract: keep a runner-supplied value only when it is inside the OS temp
+// dir. Pi exports PI_CODING_AGENT_DIR (normally ~/.pi/agent) to every child
+// process, so `pnpm test` started by a Pi agent inherits the user's real agent
+// dir — and several suites recursively delete their agent dir after each test.
+// Any other inherited value is ignored and replaced with an isolated temp dir.
 
 // The runner's value has to survive across test files, but module state does
 // not (vitest re-evaluates this setup file per test file), so keep it on the
 // worker's globalThis instead.
 const runnerState = globalThis as { __piBlackholeRunnerAgentDir?: string };
 if (!("__piBlackholeRunnerAgentDir" in runnerState)) {
-  runnerState.__piBlackholeRunnerAgentDir = process.env.PI_CODING_AGENT_DIR ?? "";
+  const inherited = process.env.PI_CODING_AGENT_DIR;
+  runnerState.__piBlackholeRunnerAgentDir =
+    inherited && isSafeTestAgentDir(inherited) ? inherited : "";
 }
 const runnerAgentDir = runnerState.__piBlackholeRunnerAgentDir || undefined;
 

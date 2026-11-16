@@ -20,6 +20,7 @@ import {
   resetSubagentDetectorState,
   type SubagentContextLike,
 } from "../src/core/subagent-detector.js";
+import { assertSafeTestAgentDir } from "./agent-dir-guard.js";
 
 // Config and debug log both resolve through getAgentDir(); point them at a
 // scratch dir so a fresh Runtime reads a real file instead of the user's.
@@ -76,6 +77,7 @@ beforeEach(() => {
   // host and the on-disk config resolve to the same place.
   scratch.dir =
     process.env.PI_CODING_AGENT_DIR ?? mkdtempSync(join(tmpdir(), "pi-blackhole-gating-"));
+  assertSafeTestAgentDir(scratch.dir);
   delete process.env.PI_BLACKHOLE_DEBUG_LOG;
 });
 
