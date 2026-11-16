@@ -23,7 +23,7 @@ The config file must contain **valid JSON**. A trailing comma, partial write, or
   "compactionEngine": "blackhole", // "blackhole" | "pi-default"
   "tailBehavior": "minimal",   // "pi-default" | "minimal" | "unobserved"
   "contextPressureFallback": "off", // "off" | "vcc"
-  "showPreCompactionMessage": true, // Display-only copy of the newest dropped assistant output (max 16 KiB)
+  "showPreCompactionMessage": true, // Copy the latest assistant output only if dropped (max 16 KiB)
   "midRunCompaction": "off",    // "resume" | "pause" | "off" (default: off)
   "compactionSummaryMode": "default", // "default" | "append" (default: "default")
   "compactAfterTokens": 0,        // Explicit fixed threshold. 0 = not set (a ratio, reserve, or preset curve governs). Never exactly 81000 (legacy residue — dropped)
@@ -184,16 +184,16 @@ Default: `"off"`. Set `"vcc"` to bridge older retained context with a determinis
 
 ### `showPreCompactionMessage`
 
-Default `true`. After a successful Blackhole compaction, append a display-only copy of the **newest assistant output that the cut removed from view** so the terminal keeps showing the answer you were reading.
+Default `true`. After a successful Blackhole compaction, append a display-only copy of the **latest eligible assistant output**, but only if the cut removed it from view, so the terminal keeps showing the answer you were reading.
 
 | Value | Behavior |
 |-------|----------|
-| `true` | Copy up to 16 KiB of the newest dropped assistant text into a plain `blackhole-pre-compaction-output` session entry, rendered as `[Previous output — display only]` below the retained tail and above the compaction card. |
+| `true` | If the latest eligible assistant text was dropped, copy up to 16 KiB into a plain `blackhole-pre-compaction-output` session entry, rendered as `[Previous output — display only]` below the retained tail and above the compaction card. |
 | `false` | No copy; the compaction card appears alone (pre-0.5.x behavior). |
 
 The copy is **cosmetic**: Pi renders the entry but never sends it to the model (`sessionEntryToContextMessages` returns nothing for plain `custom` entries), and Blackhole's own serializers only read `message`, `custom_message`, and `branch_summary` entries. It does not change `firstKeptEntryId`, the summary, or the auto-compaction threshold.
 
-When the newest answer is already retained by the cut (the common `minimal` case, where the last user turn and everything after it stay visible), the newest answer the cut actually dropped is copied instead — retained entries are never duplicated. When everything the cut hid is retained, nothing is copied. Compact-all with no retained tail copies the final answer.
+When the latest eligible answer is already retained by the cut (the common `minimal` case), nothing is copied; older answers are not reinserted after the retained answer. Compact-all with no retained tail copies the latest eligible answer.
 
 Things that stay out of the copy: tool output, thinking blocks, images, and exact card layout. The copy is truncated at 16 KiB with a `[Copy truncated]` marker; each eligible compaction adds one entry to the session file (a bounded disk and redraw cost, not a token cost).
 

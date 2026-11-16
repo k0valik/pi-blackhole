@@ -131,11 +131,11 @@ describe("selectOmittedAssistantText", () => {
     compactionEntry("c1"),
   ];
 
-  it("returns the newest omitted assistant text", () => {
+  it("does not copy an older answer when the newest answer is retained", () => {
     const retained = new Set(["c1", "a2", "u2"]);
     expect(
       selectOmittedAssistantText({ branch, retainedIds: retained, compactionEntryId: "c1" }),
-    ).toEqual({ entryId: "a1", text: "older answer" });
+    ).toBeUndefined();
   });
 
   it("returns the last response when nothing is retained", () => {
@@ -148,7 +148,7 @@ describe("selectOmittedAssistantText", () => {
     ).toEqual({ entryId: "a2", text: "newest answer" });
   });
 
-  it("skips retained entries and keeps looking further back", () => {
+  it("returns nothing when all answers are retained", () => {
     const retained = new Set(["c1", "a2", "u2", "a1", "u1"]);
     expect(
       selectOmittedAssistantText({ branch, retainedIds: retained, compactionEntryId: "c1" }),
@@ -566,10 +566,10 @@ describe("session_compact with native Pi SessionManager", () => {
     ]);
   });
 
-  it("skips the retained assistant tail using real context entries", () => {
+  it("does not append an older answer when the latest answer is retained", () => {
     const sessionManager = SessionManager.inMemory();
     sessionManager.appendMessage({ role: "user", content: "first question", timestamp: 0 });
-    const sourceEntryId = appendNativeAssistant(sessionManager, "omitted answer");
+    appendNativeAssistant(sessionManager, "omitted answer");
     const firstKeptEntryId = sessionManager.appendMessage({
       role: "user",
       content: "second question",
@@ -581,14 +581,7 @@ describe("session_compact with native Pi SessionManager", () => {
 
     harness.invoke();
 
-    expect(nativeOutputCopies(sessionManager)).toEqual([
-      {
-        text: "omitted answer",
-        sourceEntryId,
-        compactionEntryId: compaction.id,
-        truncated: false,
-      },
-    ]);
+    expect(nativeOutputCopies(sessionManager)).toEqual([]);
   });
 
   it("restores pre-compaction output even when later output exists", () => {
@@ -726,7 +719,6 @@ describe("omitted output across repeated compactions", () => {
       content: "third question",
       timestamp: 0,
     });
-    appendNativeAssistant(sessionManager, "retained answer");
     appendNativeToolResult(sessionManager, "call-1");
     const compaction = appendNativeCompaction(sessionManager, firstKeptEntryId);
 
@@ -736,9 +728,9 @@ describe("omitted output across repeated compactions", () => {
     });
   });
 
-  it("skips several retained messages in the tail", () => {
+  it("does not restore an older answer when several answers are retained", () => {
     const sessionManager = SessionManager.inMemory();
-    const sourceEntryId = appendNativeAssistant(sessionManager, "omitted answer");
+    appendNativeAssistant(sessionManager, "omitted answer");
     const firstKeptEntryId = sessionManager.appendMessage({
       role: "user",
       content: "second question",
@@ -750,10 +742,7 @@ describe("omitted output across repeated compactions", () => {
     appendNativeAssistant(sessionManager, "newest retained answer");
     const compaction = appendNativeCompaction(sessionManager, firstKeptEntryId);
 
-    expect(selectFrom(sessionManager, compaction.id)).toEqual({
-      entryId: sourceEntryId,
-      text: "omitted answer",
-    });
+    expect(selectFrom(sessionManager, compaction.id)).toBeUndefined();
   });
 
   it("selects text the previous compaction left visible", () => {
@@ -840,7 +829,6 @@ describe("copy placement in the rebuilt view", () => {
       content: "second question",
       timestamp: 0,
     });
-    const retainedAnswer = appendNativeAssistant(sessionManager, "retained answer");
     const compaction = appendNativeCompaction(sessionManager, firstKeptEntryId);
     makeHarness({ sessionManager, compaction }).invoke();
     const afterCompaction = appendNativeAssistant(sessionManager, "next turn answer");
@@ -855,7 +843,6 @@ describe("copy placement in the rebuilt view", () => {
     expect(context.map((entry) => entry.id)).toEqual([
       compaction.id,
       firstKeptEntryId,
-      retainedAnswer,
       copy.id,
       afterCompaction,
     ]);

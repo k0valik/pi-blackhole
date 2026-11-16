@@ -128,7 +128,7 @@ export const config = new ConfigManager<UnifiedConfig>({
       type: "boolean",
       label: "Show pre-compaction output",
       description:
-        "Display-only copy (max 16 KiB) of the newest assistant output the compaction dropped. Never enters model context or memory.",
+        "Display-only copy (max 16 KiB) of the latest eligible assistant output if compaction dropped it. Never enters model context or memory.",
       value: cfg.showPreCompactionMessage,
       valueDescriptions: {
         on: "Shown — recent output re-rendered below the compaction card",

@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Older answers no longer appear after a retained newer answer.** When compaction kept the latest assistant response, the display-only copy could still restore an older response after it, making two turns appear mixed together. A copy is now added only when the latest eligible response itself was removed from view ([#203](https://github.com/k0valik/pi-blackhole/issues/203)).
+
 ---
 
 ## [0.5.18] - 2026-11-11

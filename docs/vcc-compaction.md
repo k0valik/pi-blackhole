@@ -241,7 +241,7 @@ See [[config#Compaction settings#Tail behavior]] for configuration details.
 
 `tailBehavior` decides what stays in **model context**. It also decides what the terminal can still show, because Pi rebuilds the chat from the same retained entries and appends the compaction card. In `minimal` mode the last user turn and everything after it stay visible, so the answer you were reading usually survives; nothing else does.
 
-`showPreCompactionMessage` (default `true`) fills that gap with a display-only copy: after a successful Blackhole compaction, the `session_compact` handler finds the newest assistant text that the cut dropped and appends one plain `custom` entry of type `blackhole-pre-compaction-output`.
+`showPreCompactionMessage` (default `true`) fills that gap with a display-only copy: after a successful Blackhole compaction, the `session_compact` handler finds the latest eligible assistant text and, if it was dropped, appends one plain `custom` entry of type `blackhole-pre-compaction-output`.
 
 | Aspect | Behavior |
 |--------|----------|
@@ -251,7 +251,7 @@ See [[config#Compaction settings#Tail behavior]] for configuration details.
 | Cut policy | Unchanged — `firstKeptEntryId`, summary, and threshold are untouched |
 | Size | 16 KiB UTF-8 cap (`[Copy truncated]` marker when hit), newest dropped assistant text only |
 | Content | Text only — no tool output, thinking, or images |
-| Duplicates | Retained text is never copied — the newest text the cut actually dropped is used instead; skipped when the same compaction already has a copy |
+| Duplicates | Nothing is copied if the latest eligible answer is retained or the same compaction already has a copy; older answers are not shown after a retained newer answer |
 
 Cost per eligible compaction: one `getBranch()`/`buildContextEntries()` read, a bounded copy, and one small session-file append. No extra model call and no token cost. See [[config#Compaction settings#`showPreCompactionMessage`]] for the setting.
 
