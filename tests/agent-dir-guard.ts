@@ -27,7 +27,8 @@ function resolvePhysicalPath(dir: string): string | undefined {
  * Pi exports PI_CODING_AGENT_DIR (normally ~/.pi/agent) to every child
  * process, so a test run started by a Pi agent inherits the user's real agent
  * dir. Several suites `rmSync(testDir, { recursive: true })` after each test,
- * so a dir is only acceptable when it is strictly inside the OS temp dir.
+ * so a dir is only acceptable when it is strictly inside the OS temp dir and
+ * not shaped like a real agent dir (see below).
  */
 export function isSafeTestAgentDir(dir: string | undefined, tmpRoot = tmpdir()): boolean {
   if (!dir) return false;
@@ -37,6 +38,15 @@ export function isSafeTestAgentDir(dir: string | undefined, tmpRoot = tmpdir()):
   // redirect a recursive delete—even for a not-yet-created child beneath it.
   const candidate = resolvePhysicalPath(dir);
   if (!candidate) return false;
+  // Even under the temp root, a path shaped like a real agent dir (a `.pi`
+  // segment whose child is `agent`) is never acceptable: a runner could point
+  // TMPDIR inside ~/.pi, or a future test could rebuild the real layout under
+  // tmp. The worst-case blast radius must be a `pi-blackhole` subfolder, never
+  // anything that looks like a Pi install.
+  const segments = candidate.split(sep);
+  for (let i = 1; i < segments.length; i++) {
+    if (segments[i] === "agent" && segments[i - 1] === ".pi") return false;
+  }
   for (const root of roots) {
     if (candidate.startsWith(root + sep)) return true;
   }

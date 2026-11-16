@@ -2,7 +2,7 @@
 
 ### Fixed
 
-- **Running the tests from inside Pi no longer deletes `~/.pi/agent`.** Pi passes its agent directory to child processes, and the test setup kept that inherited value, so suites that delete their scratch directory after each test removed the user's real Pi install, sessions, settings, and credentials. The test setup now ignores any inherited agent directory outside the OS temp dir, and every suite that deletes its agent dir refuses to run against one ([#202](https://github.com/k0valik/pi-blackhole/issues/202)).
+- **Running the tests from inside Pi no longer deletes `~/.pi/agent`.** Pi passes its agent directory to child processes, and the test setup kept that inherited value, so suites that delete their scratch directory after each test removed the user's real Pi install, sessions, settings, and credentials. The test setup now always pins `PI_CODING_AGENT_DIR` to a fresh temp dir — the inherited value is never trusted — refuses paths shaped like `.pi/agent` even under the temp dir, and every suite that deletes its agent dir asserts the dir is safe before running ([#202](https://github.com/k0valik/pi-blackhole/issues/202)).
 
 ---
 

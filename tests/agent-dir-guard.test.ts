@@ -52,6 +52,14 @@ describe("isSafeTestAgentDir", () => {
     expect(isSafeTestAgentDir(join(tmpdir(), "..", "agent"))).toBe(false);
   });
 
+  it("rejects real-layout .pi/agent paths even under the temp root", () => {
+    const dir = scratch();
+    expect(isSafeTestAgentDir(join(dir, ".pi", "agent"))).toBe(false);
+    expect(isSafeTestAgentDir(join(dir, ".pi", "agent", "pi-blackhole"))).toBe(false);
+    expect(isSafeTestAgentDir(join(dir, "agent"))).toBe(true);
+    expect(isSafeTestAgentDir(join(dir, "pi-blackhole-test-agent-x"))).toBe(true);
+  });
+
   it("rejects a symlink in the temp dir (and missing children beneath it) that points outside", () => {
     const outer = scratch();
     const innerTmp = join(outer, "tmp");
