@@ -299,6 +299,48 @@ describe("showWorkerNotifications", () => {
   });
 });
 
+describe("showPreCompactionMessage", () => {
+  const envKey = "PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE";
+
+  afterEach(() => {
+    delete process.env[envKey];
+  });
+
+  it("defaults to true when no config file exists", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(true);
+  });
+
+  it("honors an explicit false from the config file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showPreCompactionMessage: false });
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(false);
+  });
+
+  it("honors an explicit false from the project-local config file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const projectDir = join(testDir, "project-show-pre-compaction");
+    writeConfig(
+      { showPreCompactionMessage: false },
+      "project-show-pre-compaction/.pi/pi-blackhole-config.json",
+    );
+    expect(loadUnifiedConfig(projectDir).showPreCompactionMessage).toBe(false);
+  });
+
+  it("ignores a non-boolean file value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showPreCompactionMessage: "no" });
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(true);
+  });
+
+  it("env override wins over the file value", async () => {
+    process.env[envKey] = "true";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showPreCompactionMessage: false });
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(true);
+  });
+});
+
 describe("cacheRetention", () => {
   const envKey = "PI_BLACKHOLE_CACHE_RETENTION";
   const mgrDir = join(testDir, "mgr-cache-retention");

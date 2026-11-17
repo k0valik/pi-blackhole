@@ -654,6 +654,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.reflectionSupersedes = raw.reflectionSupersedes;
   if (typeof raw.observeOnShutdown === "boolean") c.observeOnShutdown = raw.observeOnShutdown;
   if (typeof raw.fullFoldAlways === "boolean") c.fullFoldAlways = raw.fullFoldAlways;
+  if (typeof raw.showPreCompactionMessage === "boolean")
+    c.showPreCompactionMessage = raw.showPreCompactionMessage;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
   if (typeof raw.statusBar === "boolean") c.statusBar = raw.statusBar;
   if (typeof raw.showWorkerNotifications === "boolean")
