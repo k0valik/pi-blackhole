@@ -265,6 +265,9 @@ describe("real provider limit and transient messages", () => {
     ["The server is busy.", "provider_transient"],
     ["HTTP 503 Service Unavailable: retry budget exhausted", "provider_transient"],
     ["HTTP 507 Insufficient Storage", "provider_transient"],
+    ["507 Insufficient Storage", "provider_transient"],
+    ["request failed with status 507", "provider_transient"],
+    ["processed 512 rows", "unknown"],
     ["Flex capacity unavailable.", "provider_transient"],
     ["policy-restricted capacity unavailable", "provider_transient"],
     ["Please retry your request shortly.", "provider_transient"],
@@ -297,6 +300,8 @@ describe("real provider limit and transient messages", () => {
     ],
     ["Your account has been disabled", "provider_configuration"],
     ["Your workspace has been restricted", "provider_configuration"],
+    ["Your account session expired", "unknown"],
+    ["Your account token expired", "unknown"],
   ])("classifies %s as %s", (message, cause) => {
     expect(classifyCooldownCause(new Error(message))).toBe(cause);
   });

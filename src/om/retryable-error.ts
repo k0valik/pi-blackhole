@@ -39,11 +39,15 @@ const RATE_LIMIT_ERROR_SOURCE = [
   "(?:organization|project|api[ _-]?key)[ _-]?(?:usage|spend)[ _-]?limit",
 ].join("|");
 
+/** 5xx status with explicit HTTP/status/error framing (not arbitrary counts). */
+const TRANSIENT_HTTP_STATUS_SOURCE =
+  "(?:^\\s*|\\bHTTP(?:/[\\d.]+)?\\s+|\\bstatus(?:Code|_code)?\\s*:?\\s*|\\berror\\s*[:(]?\\s*|\\bcode\\s*:?\\s*|\\bresponse\\s+(?:status|code)\\s*:?\\s*)5\\d{2}\\b";
+
 /** Network, overload and 5xx failures (short cooldown, retry the same model later). */
 const TRANSIENT_ERROR_SOURCE = [
   "overloaded",
   "provider.?returned.?error",
-  "\\b5\\d{2}\\b",
+  TRANSIENT_HTTP_STATUS_SOURCE,
   "server had an error",
   "at capacity",
   "capacity unavailable",
@@ -122,7 +126,7 @@ const CONTENT_REFUSAL_RE = new RegExp(CONTENT_REFUSAL_SOURCE, "i");
 
 /** Account-wide restrictions need a config/billing fix, not a different prompt. */
 const ACCOUNT_RESTRICTION_RE =
-  /\b(?:account|organization|workspace|subscription)\b[\s\S]{0,80}\b(?:suspended|disabled|deactivated|banned|restricted|terminated|blocked|expired|violat(?:e|es|ed|ing|ion)|breach(?:ed|es)?)\b/i;
+  /\b(?:account|organization|workspace|subscription)\b[\s\S]{0,80}\b(?:suspended|disabled|deactivated|banned|restricted|terminated|blocked|violat(?:e|es|ed|ing|ion)|breach(?:ed|es)?)\b/i;
 
 /**
  * Pi's auto-retry heuristic, used by the compaction trigger to avoid running
