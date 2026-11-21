@@ -26,6 +26,7 @@ import { getModelProvider, matchesSkippedProvider } from "../core/provider-skip.
 import type { PiVccCompactionDetails } from "../details";
 import {
   buildCompactionProjection,
+  priorityOverflowNote,
   renderSummary,
   renderOptionsFromConfig,
 } from "../om/ledger/index.js";
@@ -954,6 +955,17 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       );
       omDetails = projection.details;
       omHasContent = projection.reflections.length > 0 || projection.observations.length > 0;
+      // #208: report priority reflections (e.g. active user restrictions)
+      // that could not fit the bounded pool, instead of silently evicting
+      // them behind newer ordinary reflections.
+      const overflowNote = priorityOverflowNote(projection.priorityOverflow);
+      if (overflowNote) {
+        trace("before_compact.reflection_priority_overflow", {
+          count: projection.priorityOverflow.length,
+          ids: projection.priorityOverflow.map((reflection) => reflection.id),
+        });
+        omContent += `\n\n${overflowNote}`;
+      }
     } else {
       omContent = renderSummary([], []);
     }

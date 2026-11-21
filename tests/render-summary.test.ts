@@ -267,3 +267,176 @@ describe("reflection annotations", () => {
     expect(selectExistingReflections([first, second], 20)).toEqual([first]);
   });
 });
+
+// ── #208: support-relevance tiering in the bounded reflection pool ─────────
+
+function poolLineTokens(
+  mod: typeof import("../src/om/ledger/render-summary.js"),
+  tokens: typeof import("../src/om/tokens.js"),
+  reflections: Reflection[],
+): number {
+  return tokens.estimateStringTokens(reflections.map(mod.reflectionToSummaryLine).join("\n"));
+}
+
+describe("selectReflectionPool — support-relevance tiering", () => {
+  const criticalObs = "dddddddddddd";
+  const highObs = "eeeeeeeeeeee";
+  const medObs = "cccccccccccc";
+
+  /** Ordinary reflection: cites only the medium-relevance observation. */
+  function ord(id: string, content: string): Reflection {
+    return makeReflection(id, { content, supportingObservationIds: [medObs] });
+  }
+  /** Priority reflection: cites a critical- or high-relevance observation. */
+  function prio(id: string, content: string, support: string = criticalObs): Reflection {
+    return makeReflection(id, { content, supportingObservationIds: [support] });
+  }
+
+  it("keeps an old critical-supported reflection when newer ordinary reflections overflow the pool", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const restriction = prio("res000000001", "User restriction: never publish the test draft");
+    const ordinary = ["ord00000000a", "ord00000000b", "ord00000000c", "ord00000000d"].map((id, i) =>
+      ord(id, `ordinary note ${i}`),
+    );
+    const support = new Map([[criticalObs, "critical" as const]]);
+    // Pool fits the restriction twice (so it passes the half-pool reserve)
+    // plus one ordinary line: three of four ordinary lines still fit.
+    const budget = poolLineTokens(mod, tokens, [restriction, restriction, ordinary[0]!]);
+    const result = mod.selectReflectionPool([restriction, ...ordinary], budget, support);
+    expect(result.selected.map((r) => r.id)).toContain("res000000001");
+    expect(result.selected.map((r) => r.id)).not.toContain("ord00000000a");
+    expect(result.selected).toHaveLength(4);
+    expect(result.overflow).toEqual([]);
+  });
+
+  it("bounds the priority allocation to half the pool so ordinary reflections keep room", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    // Pool fits five ordinary lines (36 tokens); the reserve (18) fits two
+    // priority lines, the third would need 22.
+    const ordinary = Array.from({ length: 10 }, (_, i) => ord(`ord00000000${i}`, "ordinary note"));
+    const priority = Array.from({ length: 10 }, (_, i) => prio(`prio0000000${i}`, "priority note"));
+    const budget = poolLineTokens(mod, tokens, ordinary.slice(0, 5));
+    const support = new Map([[criticalObs, "critical" as const]]);
+    const result = mod.selectReflectionPool([...priority, ...ordinary], budget, support);
+    const selectedIds = result.selected.map((r) => r.id);
+    expect(selectedIds.filter((id) => id.startsWith("prio"))).toHaveLength(2);
+    expect(selectedIds.filter((id) => id.startsWith("ord"))).toHaveLength(3);
+    expect(result.overflow).toHaveLength(8);
+  });
+
+  it("spills leftover budget back to priority reflections when ordinary does not fill it", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const ordinary = [ord("ord00000000a", "ordinary note")];
+    const priority = Array.from({ length: 10 }, (_, i) => prio(`prio0000000${i}`, "priority note"));
+    // Pool fits one ordinary plus three priority lines; the reserve fits
+    // only one, so two priority reflections must come from the spill pass.
+    const budget =
+      poolLineTokens(mod, tokens, ordinary) + poolLineTokens(mod, tokens, priority.slice(0, 3));
+    const support = new Map([[criticalObs, "critical" as const]]);
+    const result = mod.selectReflectionPool([...priority, ...ordinary], budget, support);
+    const selectedIds = result.selected.map((r) => r.id);
+    expect(selectedIds.filter((id) => id.startsWith("prio"))).toHaveLength(3);
+    expect(selectedIds).toContain("ord00000000a");
+    expect(result.overflow).toHaveLength(7);
+  });
+
+  it("ranks critical support before high support within the priority allocation", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const criticalRef = prio("cri000000001", "critical-supported note", criticalObs);
+    const highRef = prio("hig000000001", "high-supported note", highObs);
+    const support = new Map([
+      [criticalObs, "critical" as const],
+      [highObs, "high" as const],
+    ]);
+    // Pool fits the critical line plus two ordinary lines; the reserve
+    // (half) fits only the critical line, so the high line must lose.
+    const ordinary = Array.from({ length: 4 }, (_, i) => ord(`ord00000000${i}`, "ordinary note"));
+    const budget = poolLineTokens(mod, tokens, [criticalRef, ordinary[0]!, ordinary[1]!]);
+    const result = mod.selectReflectionPool([criticalRef, highRef, ...ordinary], budget, support);
+    const selectedIds = result.selected.map((r) => r.id);
+    expect(selectedIds).toContain("cri000000001");
+    expect(selectedIds).not.toContain("hig000000001");
+    expect(result.overflow.map((r) => r.id)).toContain("hig000000001");
+  });
+
+  it("keeps multiple same-tier priority reflections and restores source order", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const restriction = prio("res000000001", "User restriction: never publish the test draft");
+    const between = ord("ord00000000a", "ordinary note");
+    const second = prio("res000000002", "User restriction: never publish the test draft either");
+    const support = new Map([[criticalObs, "critical" as const]]);
+    const budget = poolLineTokens(mod, tokens, [restriction, between, second]);
+    const result = mod.selectReflectionPool([restriction, between, second], budget, support);
+    expect(result.selected.map((r) => r.id)).toEqual([
+      "res000000001",
+      "ord00000000a",
+      "res000000002",
+    ]);
+    expect(result.overflow).toEqual([]);
+  });
+
+  it("treats a reflection with no live support as ordinary", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    // The supporting observation is absent from the lookup (superseded,
+    // dropped, or out of boundary). A buggy promotion would place the stale
+    // reflection into the reserve ahead of ordinary reflections; correct
+    // behavior evicts it under the same pressure that evicts old ordinary
+    // reflections, and never reports it as overflow.
+    const stale = prio("sta000000001", "stale restriction note", "fff000000001");
+    const ordinary = Array.from({ length: 4 }, (_, i) => ord(`ord00000000${i}`, "ordinary note"));
+    const budget = poolLineTokens(mod, tokens, [stale, stale, ordinary[0]!]);
+    const result = mod.selectReflectionPool([stale, ...ordinary], budget, new Map());
+    expect(result.selected.map((r) => r.id)).not.toContain("sta000000001");
+    expect(result.overflow).toEqual([]);
+  });
+
+  it("reports never-fitting priority reflections as overflow, keeping records whole", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const fat = prio("fat000000001", `fat priority note ${"x".repeat(400)}`);
+    const ordinary = ord("ord00000000a", "ordinary note");
+    const support = new Map([[criticalObs, "critical" as const]]);
+    // The whole pool is smaller than the fat line alone.
+    const budget = poolLineTokens(mod, tokens, [ordinary]);
+    const result = mod.selectReflectionPool([fat, ordinary], budget, support);
+    expect(result.selected.map((r) => r.id)).toEqual(["ord00000000a"]);
+    expect(result.overflow.map((r) => r.id)).toEqual(["fat000000001"]);
+    expect(result.overflow[0]!.content).toContain("x".repeat(400));
+  });
+
+  it("matches selectPriorReflections when no reflection has live support", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const refs = ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"].map((id, i) =>
+      makeReflection(id, { content: `note ${i}`, tokenCount: 0 }),
+    );
+    const budget = poolLineTokens(mod, tokens, refs.slice(1, 3));
+    const legacy = mod.selectPriorReflections(refs, budget);
+    const tiered = mod.selectReflectionPool(refs, budget, new Map());
+    expect(tiered.selected).toEqual(legacy);
+    expect(tiered.overflow).toEqual([]);
+  });
+});
+
+describe("priorityOverflowNote", () => {
+  it("returns undefined when nothing overflowed", async () => {
+    const { priorityOverflowNote } = await import("../src/om/ledger/render-summary.js");
+    expect(priorityOverflowNote([])).toBeUndefined();
+  });
+
+  it("lists bracketed ids and count when priority reflections did not fit", async () => {
+    const { priorityOverflowNote } = await import("../src/om/ledger/render-summary.js");
+    const overflow = [makeReflection("aaa000000001"), makeReflection("bbb000000002")];
+    const note = priorityOverflowNote(overflow);
+    expect(note).toBeDefined();
+    expect(note).toContain("2");
+    expect(note).toContain("[aaa000000001]");
+    expect(note).toContain("[bbb000000002]");
+  });
+});

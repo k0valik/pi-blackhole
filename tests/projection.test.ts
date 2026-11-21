@@ -739,3 +739,170 @@ describe("bounded compaction snapshots", () => {
     },
   );
 });
+
+// ── #208: priority tiering in the bounded reflection pool ──────────────────
+
+describe("buildCompactionProjection — priority reflection tiering", () => {
+  async function lineTokens(reflections: Reflection[]): Promise<number> {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    return tokens.estimateStringTokens(reflections.map(mod.reflectionToSummaryLine).join("\n"));
+  }
+
+  it("preserves a live user-restriction reflection when ordinary reflections fill the pool (#208 repro)", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const restrictionObs = makeObservation(hexId("obs-restriction"), {
+      relevance: "high" as const,
+    });
+    const restrictionRef = makeReflection(hexId("ref-restriction"), {
+      content: "User decided: do not publish the test draft",
+      supportingObservationIds: [restrictionObs.id],
+    });
+    const ordinaryRefs = Array.from({ length: 18 }, (_, i) =>
+      makeReflection(hexId(`ref-ordinary-${i}`), { content: `ordinary ${i}` }),
+    );
+    const entries: Entry[] = [
+      src("kept-entry"),
+      recordEntry("e1", [restrictionObs], "kept-entry"),
+      reflectEntry("e2", [restrictionRef, ...ordinaryRefs], "kept-entry"),
+    ];
+    // Pool fits the restriction line twice (half-pool reserve) plus three
+    // ordinary lines.
+    const reflectionsPoolMaxTokens =
+      (await lineTokens([restrictionRef, restrictionRef])) +
+      (await lineTokens(ordinaryRefs.slice(0, 3)));
+    const result = buildCompactionProjection(entries, "kept-entry", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens,
+      fullFoldAlways: true,
+    });
+    const ids = result.reflections.map((r) => r.id);
+    expect(ids).toContain(restrictionRef.id);
+    expect(ids).toContain(ordinaryRefs[17]!.id);
+    expect(ids).toContain(ordinaryRefs[15]!.id);
+    expect(ids).not.toContain(ordinaryRefs[0]!.id);
+    expect(result.priorityOverflow).toEqual([]);
+    expect(result.details.reflections).toEqual(result.reflections);
+  });
+
+  it("does not promote a reflection whose supporting observation was superseded", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const staleObs = makeObservation(hexId("obs-stale"), { relevance: "high" as const });
+    const replacementObs = makeObservation(hexId("obs-replacement"), {
+      relevance: "medium" as const,
+      supersedes: [staleObs.id],
+    });
+    const staleRef = makeReflection(hexId("ref-stale"), {
+      content: "User decided: do not publish the test draft",
+      supportingObservationIds: [staleObs.id],
+    });
+    const ordinaryRefs = Array.from({ length: 4 }, (_, i) =>
+      makeReflection(hexId(`ref-live-ordinary-${i}`), { content: `ordinary ${i}` }),
+    );
+    const entries: Entry[] = [
+      src("kept-entry"),
+      recordEntry("e1", [staleObs], "kept-entry"),
+      recordEntry("e2", [replacementObs], "kept-entry"),
+      reflectEntry("e3", [staleRef, ...ordinaryRefs], "kept-entry"),
+    ];
+    // Pool fits the stale line twice plus one ordinary line: a buggy
+    // promotion of the superseded-support reflection would place it in the
+    // reserve ahead of ordinary reflections.
+    const reflectionsPoolMaxTokens = await lineTokens([staleRef, staleRef, ordinaryRefs[0]!]);
+    const result = buildCompactionProjection(entries, "kept-entry", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens,
+      fullFoldAlways: true,
+    });
+    // Precondition: the superseded observation left the projection.
+    expect(result.observations.map((o) => o.id)).not.toContain(staleObs.id);
+    const ids = result.reflections.map((r) => r.id);
+    expect(ids).not.toContain(staleRef.id);
+    expect(ids).toContain(ordinaryRefs[3]!.id);
+    expect(result.priorityOverflow).toEqual([]);
+  });
+
+  it("reports priority reflections that cannot fit the whole pool", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const criticalObs = makeObservation(hexId("obs-critical-fit"), {
+      relevance: "critical" as const,
+    });
+    const fatRef = makeReflection(hexId("ref-fat"), {
+      content: `fat restriction ${"x".repeat(400)}`,
+      supportingObservationIds: [criticalObs.id],
+    });
+    const ordinaryRef = makeReflection(hexId("ref-small-fit"), { content: "ordinary 0" });
+    const entries: Entry[] = [
+      src("kept-entry"),
+      recordEntry("e1", [criticalObs], "kept-entry"),
+      reflectEntry("e2", [fatRef, ordinaryRef], "kept-entry"),
+    ];
+    const result = buildCompactionProjection(entries, "kept-entry", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 50,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections.map((r) => r.id)).toEqual([ordinaryRef.id]);
+    expect(result.priorityOverflow.map((r) => r.id)).toEqual([fatRef.id]);
+    expect(result.details.reflections).toEqual(result.reflections);
+  });
+
+  it("applies the priority tiering on the full-fold path", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const restrictionObs = makeObservation(hexId("obs-fold-restriction"), {
+      relevance: "critical" as const,
+      tokenCount: 100,
+    });
+    const bigObs = makeObservation(hexId("obs-fold-big"), { tokenCount: 25_000 });
+    const restrictionRef = makeReflection(hexId("ref-fold-restriction"), {
+      content: "User decided: do not publish the test draft",
+      supportingObservationIds: [restrictionObs.id],
+    });
+    const ordinaryRefs = Array.from({ length: 4 }, (_, i) =>
+      makeReflection(hexId(`ref-fold-ordinary-${i}`), { content: `ordinary ${i}` }),
+    );
+    const entries: Entry[] = [
+      src("kept-entry"),
+      recordEntry("e1", [restrictionObs, bigObs], "kept-entry"),
+      reflectEntry("e2", [restrictionRef, ...ordinaryRefs], "kept-entry"),
+    ];
+    const reflectionsPoolMaxTokens = await lineTokens([
+      restrictionRef,
+      restrictionRef,
+      ordinaryRefs[0]!,
+    ]);
+    const result = buildCompactionProjection(entries, "kept-entry", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens,
+      fullFoldAlways: true,
+    });
+    expect(result.fullFold).toBe(true);
+    const ids = result.reflections.map((r) => r.id);
+    expect(ids).toContain(restrictionRef.id);
+    expect(ids).not.toContain(ordinaryRefs[0]!.id);
+    expect(result.priorityOverflow).toEqual([]);
+  });
+
+  it("leaves the pool uncapped and overflow empty when reflectionsPoolMaxTokens is 0", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const obs = makeObservation(hexId("obs-uncapped"), { relevance: "critical" as const });
+    const refs = Array.from({ length: 6 }, (_, i) =>
+      makeReflection(hexId(`ref-uncapped-${i}`), {
+        content: `ordinary ${i}`,
+        supportingObservationIds: [obs.id],
+      }),
+    );
+    const entries: Entry[] = [
+      src("kept-entry"),
+      recordEntry("e1", [obs], "kept-entry"),
+      reflectEntry("e2", refs, "kept-entry"),
+    ];
+    const result = buildCompactionProjection(entries, "kept-entry", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens: 0,
+      fullFoldAlways: true,
+    });
+    expect(result.reflections.map((r) => r.id)).toEqual(refs.map((r) => r.id));
+    expect(result.priorityOverflow).toEqual([]);
+  });
+});
