@@ -118,8 +118,21 @@ export function selectPriorReflections(
   maxTokens: number,
   render = reflectionToSummaryLine,
 ): Reflection[] {
-  return selectReflectionPool(reflections, maxTokens, new Map<string, Relevance>(), render)
-    .selected;
+  // Worker prompt paths (observer preamble, consolidation.ts): plain
+  // newest-first, deliberately NOT routed through #208 tiering. The marker
+  // and support relevance shape only the compaction pool
+  // (buildCompactionProjection → selectReflectionPool); this function keeps
+  // its exact legacy contract regardless of record annotations.
+  const selected: Reflection[] = [];
+  let rendered = "";
+  for (let i = reflections.length - 1; i >= 0; i--) {
+    const reflection = reflections[i]!;
+    const next = rendered + (selected.length ? "\n" : "") + render(reflection);
+    if (estimateStringTokens(next) > maxTokens) continue;
+    selected.push(reflection);
+    rendered = next;
+  }
+  return selected.reverse();
 }
 
 /**
@@ -168,15 +181,16 @@ export type ReflectionPoolSelection = {
  * Bounded reflection pool selection (#208).
  *
  * Priority reflections (critical/high marker, else live critical/high
- * pool first — the bounded allocation that leaves room for ordinary memory —
- * then ordinary reflections fill newest-first, and any leftover budget spills
- * back to remaining priority reflections so the pool is never wasted. Whole
- * records only; output is restored to source order; priority reflections that
- * still cannot fit are reported as overflow instead of silently evicted by
- * newer noise.
+ * support) claim at most half the pool first — the bounded allocation that
+ * leaves room for ordinary memory — then ordinary reflections fill
+ * newest-first, and any leftover budget spills back to remaining priority
+ * reflections so the pool is never wasted. Whole records only; output is
+ * restored to source order; priority reflections that still cannot fit are
+ * reported as overflow instead of silently evicted by newer noise.
  *
- * An empty support lookup degrades to the legacy newest-first fill, so worker
- * prompt paths (observer preamble) keep their exact previous behavior.
+ * An empty support lookup with marker-less records degrades to the legacy
+ * newest-first fill; marker-bearing records still tier (selectPriorReflections
+ * is the un-tiered worker-prompt path).
  */
 export function selectReflectionPool(
   reflections: Reflection[],

@@ -424,6 +424,30 @@ describe("selectReflectionPool — support-relevance tiering", () => {
   });
 });
 
+describe("selectPriorReflections — worker prompt paths stay recency-only (#208 scope)", () => {
+  it("ignores the relevance marker: a marked old reflection is evicted by newer ordinary ones", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    // The observer preamble (consolidation.ts) documents "reflections
+    // newest-first" and is out of #208's scope: a marked reflection must
+    // not claim the priority reserve there, only in the compaction pool.
+    const markedOld = makeReflection("mrk000000001", {
+      content: "M",
+      relevance: "critical" as const,
+      supportingObservationIds: ["cccccccccccc"],
+    });
+    const ordinary = Array.from({ length: 4 }, (_, i) =>
+      makeReflection(`ord0000000${i}`, { content: `ordinary note ${"x".repeat(200)}` }),
+    );
+    // Budget fits exactly the four ordinary lines: newest-first fill takes
+    // all of them and the old marked line must lose like any legacy record.
+    const budget = poolLineTokens(mod, tokens, ordinary);
+    const selected = mod.selectPriorReflections([markedOld, ...ordinary], budget);
+    expect(selected.map((r) => r.id)).toEqual(ordinary.map((r) => r.id));
+    expect(selected.map((r) => r.id)).not.toContain("mrk000000001");
+  });
+});
+
 describe("priorityOverflowNote", () => {
   it("returns undefined when nothing overflowed", async () => {
     const { priorityOverflowNote } = await import("../src/om/ledger/render-summary.js");
