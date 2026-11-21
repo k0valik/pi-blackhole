@@ -361,7 +361,7 @@ What blackhole adds and reworks on top:
 - **Memory toggle** (`/blackhole om-off` / `/blackhole om-on`) — disable the memory layer without uninstalling.
 - **Per-session pending state** — isolated per-session JSON files, no cross-session contamination.
 - **Custom provider bridge** — consolidation agents loaded via jiti can still use provider stream functions registered by other extensions.
-- **Retryable error detection with per-model cooldowns** — models that fail get cooled down, fallbacks tried automatically, 30-second retry gate prevents spam.
+- **Per-cause cooldowns** — transient network/overload failures cool for minutes, quota/config failures for the configured hours, and content refusals skip only the current stage; fallbacks are tried automatically and the 30-second retry gate prevents spam.
 - **Improved observer/reflector/dropper prompts** — each heavily customized with detailed extraction rules, relevance guidance, and error handling.
 - **OM-recall coupling** — when expanding session entries via `recall`, related observations and reflections are automatically shown.
 - **Thinking level support** — per-model `thinking` field for reasoning effort control, including `max` where supported by the provider.

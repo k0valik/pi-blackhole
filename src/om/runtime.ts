@@ -12,6 +12,7 @@
 import { type Config, type ConfiguredModel, DEFAULTS, loadConfig } from "./config.js";
 import type { CompactionStats } from "../hooks/before-compact.js";
 import {
+  cooldownDurationMs,
   isCooldownActive,
   recordCooldown,
   expireCooldowns,
@@ -19,12 +20,7 @@ import {
   sanitizeCooldownReason,
   getCooldownEntry,
 } from "./cooldown.js";
-import {
-  isDeterministicError,
-  isRetryableError,
-  isLocalExecutionError,
-  isRequestLocalError,
-} from "./retryable-error.js";
+import { classifyCooldownCause, isDeterministicError } from "./retryable-error.js";
 import { readPendingCursors, writePendingCursors } from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 import type { ModelRegistry, SessionShutdownEvent } from "@earendil-works/pi-coding-agent";
@@ -1110,14 +1106,12 @@ export class Runtime {
   }
 
   /**
-   * Record a retryable error for a model.  The model must be one of the candidates
-   * (not the session model).  If it's the session model we don't cool it down.
+   * Record a failed model attempt for a candidate. The cause picks the policy:
+   * local, request-local and content-refusal failures stay in the current
+   * stage; transient network/overload/5xx failures use the short transient
+   * window; everything else uses `cooldownHours` (unknown included).
    *
-   * When cooldownHours is explicitly 0, the model is tracked in-memory for the
-   * current consolidation stage (no disk writes). Local execution errors/aborts
-   * and request-local size/option errors
-   * are also in-cycle only. Otherwise a persisted cooldown
-   * is recorded.
+   * `cooldownHours: 0` and `cooldownMinutesTransient: 0` are in-cycle only.
    */
   recordRetryableError(
     modelConfig: ConfiguredModel | undefined,
@@ -1128,11 +1122,9 @@ export class Runtime {
     // Thinking-only modifiers carry no identity to cool down; the session
     // model's deterministic errors are handled via recordDeterministicError.
     if (!hasModelIdentity(modelConfig)) return;
-    if (
-      modelConfig.cooldownHours === 0 ||
-      isLocalExecutionError(error) ||
-      isRequestLocalError(error)
-    ) {
+    const cause = classifyCooldownCause(error);
+    const durationMs = cooldownDurationMs(modelConfig, cause);
+    if (durationMs === undefined) {
       // In-memory only: skip this model for the rest of this stage.
       // No disk writes, no persistent cooldown.
       this.failedInCycle.add(modelKey(modelConfig));
@@ -1143,14 +1135,7 @@ export class Runtime {
     // down to a short `HTTP <status>` line, capped at ~200 chars, so the
     // cooldown log never stores a full page and the skip toast stays short.
     // recordCooldown re-sanitizes as defense-in-depth.
-    const brief = sanitizeCooldownReason(rawReason);
-    const causeClass = isDeterministicError(error)
-      ? "provider_configuration"
-      : isRetryableError(error) ||
-          /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND)\b/.test(rawReason)
-        ? "provider_transient"
-        : "unknown";
-    recordCooldown(modelConfig, brief, stage, causeClass);
+    recordCooldown(modelConfig, sanitizeCooldownReason(rawReason), stage, cause);
   }
 
   /**
@@ -1174,7 +1159,8 @@ export class Runtime {
   ): void {
     const model = resolvedModel as { provider?: unknown; id?: unknown } | null | undefined;
     if (typeof model?.provider !== "string" || typeof model?.id !== "string") return;
-    if (isLocalExecutionError(error) || isRequestLocalError(error)) {
+    const cause = classifyCooldownCause(error);
+    if (cause === "local_execution" || cause === "request_local" || cause === "content_refusal") {
       this.skipFailedForCycle({ provider: model.provider, id: model.id });
       return;
     }

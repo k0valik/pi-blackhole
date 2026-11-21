@@ -70,9 +70,13 @@ export interface OmModelConfig {
   /** Model ID. Optional — see `provider`. */
   id?: string;
   thinking?: ModelThinkingLevel;
-  /** Cooldown duration in hours after a retryable error (429/5xx/timeout).
-   *  Defaults to 1 hour when omitted. */
+  /** Cooldown duration in hours after a rate-limit/config/unknown error.
+   *  Defaults to 1 hour when omitted. `0` disables every persisted cooldown. */
   cooldownHours?: number;
+  /** Cooldown duration in minutes after a transient network/overload/5xx
+   *  failure. Defaults to 5 minutes when omitted; `0` keeps transient
+   *  failures in-cycle only. Ignored when `cooldownHours` is `0`. */
+  cooldownMinutesTransient?: number;
   /** Context window override for this model. Inherits from Pi's model registry when unset. */
   contextWindow?: number;
 }
@@ -474,6 +478,8 @@ function parseModel(v: unknown): OmModelConfig | undefined {
     const model: OmModelConfig = { thinking: v.thinking as ModelThinkingLevel };
     const cooldown = nonNegativeInt(v.cooldownHours);
     if (cooldown !== undefined) model.cooldownHours = cooldown;
+    const transient = nonNegativeInt(v.cooldownMinutesTransient);
+    if (transient !== undefined) model.cooldownMinutesTransient = transient;
     const ctxWindow = positiveInt(v.contextWindow);
     if (ctxWindow !== undefined) model.contextWindow = ctxWindow;
     return model;
@@ -483,6 +489,8 @@ function parseModel(v: unknown): OmModelConfig | undefined {
   if (isThinkingLevel(v.thinking)) model.thinking = v.thinking;
   const cooldown = nonNegativeInt(v.cooldownHours);
   if (cooldown !== undefined) model.cooldownHours = cooldown;
+  const transient = nonNegativeInt(v.cooldownMinutesTransient);
+  if (transient !== undefined) model.cooldownMinutesTransient = transient;
   const ctxWindow = positiveInt(v.contextWindow);
   if (ctxWindow !== undefined) model.contextWindow = ctxWindow;
   return model;

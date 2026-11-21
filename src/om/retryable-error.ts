@@ -10,14 +10,235 @@
 
 import { isContextOverflow } from "@earendil-works/pi-ai";
 
-/** Regex matching retryable API error messages. */
-export const RETRYABLE_ERROR_RE =
-  /overloaded|provider.?returned.?error|rate.?limit|too many requests|\b429\b|\b500\b|\b502\b|\b503\b|\b504\b|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
+/** Rate-limit, quota, billing and payment failures (same long cooldown). */
+const RATE_LIMIT_ERROR_SOURCE = [
+  "rate.?limit",
+  "rate increased too quickly",
+  "too[ _-]?many[ _-]?requests",
+  "\\b429\\b",
+  "quota",
+  "insufficient[ _-]?(?:quota|balance|credit|funds)",
+  "credit[ _-]?balance",
+  "credit[ _-]?limit",
+  "out of credits",
+  "spend[ _-]?(?:limit|cap)",
+  "budget",
+  "billing",
+  "payment required",
+  "usage[ _-]?not[ _-]?included",
+  "free[ _-]?usage",
+  "you(?:['’]ve| have)? (?:hit|reached) your (?:[a-z0-9-]+\\s+){0,3}limit",
+  "(?:usage|weekly|daily|monthly|hourly|session|5-hour)[ _-]?limit[ _-]?(?:reached|exceeded|exhausted|hit)",
+  "usage[ _-]?limit(?:error|exception)",
+  "limit reached,? resets",
+  "extra usage is required",
+  "slow[ _-]?down",
+  "throttl(?:e|ed|ing)",
+  "package has expired",
+  "plan does not (?:yet )?include",
+  "(?:organization|project|api[ _-]?key)[ _-]?(?:usage|spend)[ _-]?limit",
+].join("|");
+
+/** Network, overload and 5xx failures (short cooldown, retry the same model later). */
+const TRANSIENT_ERROR_SOURCE = [
+  "overloaded",
+  "provider.?returned.?error",
+  "\\b5(?:00|02|03|04|29)\\b",
+  "server had an error",
+  "at capacity",
+  "capacity unavailable",
+  "server (?:is )?busy",
+  "temporarily limiting",
+  "service.?unavailable",
+  "temporarily unavailable",
+  "\\bapi[ _-]?error\\b",
+  "server.?error",
+  "internal[ _-]?server",
+  "internal.?error",
+  "model[ _-]?stream[ _-]?error",
+  "resource[ _-]?exhausted",
+  "network.?error",
+  "connection.?error",
+  "connection.?refused",
+  "connection.?reset",
+  "connection.?lost",
+  "connection.?closed",
+  "connection[ _-]?limit[ _-]?reached",
+  "websocket.?closed",
+  "websocket.?error",
+  "stream error",
+  "other side closed",
+  "fetch failed",
+  "failed to fetch",
+  "upstream[ _-]?(?:connect|connection|request|response|failure|error)",
+  "reset before headers",
+  "socket hang up",
+  "ended without",
+  "http2 request did not get a response",
+  "request buffer limit",
+  "timed? out",
+  "timeout",
+  "terminated",
+  "retry delay",
+  "try again",
+  "please retry",
+  "retry (?:the |this |your )?request",
+  "try your request again",
+  "\\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE)\\b",
+  "UND_ERR_[A-Z0-9_]+",
+].join("|");
+
+/** Content-policy refusals: request-specific, never model-wide unavailability. */
+const CONTENT_REFUSAL_SOURCE = [
+  "terms (?:of service|of use)",
+  "usage polic(?:y|ies)",
+  "content[ _-]?polic(?:y|ies)",
+  "content[ _-]?(?:filter|filtering|management|moderation|blocked)",
+  "safety (?:system|polic(?:y|ies)|filter|settings)",
+  "moderation",
+  "responsible ai",
+  "responsibleAIPolicyViolation",
+  "prohibited[ _-]?content",
+  "harmful content",
+  "unsafe or sensitive content",
+  "\\bSAFETY\\b",
+  "image[ _-]?safety",
+  "blocklist",
+  "cyber[ _-]?policy|cybersecurity risk",
+  "bio[ _-]?policy",
+  "misalignment polic(?:y|ies)",
+  "datainspectionfailed",
+  "\\brefusal\\b",
+  "refused to respond",
+  "flagged (?:by|as)",
+  "blocked (?:by|due to) .{0,40}(?:safety|content|policy|filter)",
+  "rejected (?:as a result of our|by the) safety system",
+  "violat(?:e|es|ed|ion of) .{0,60}(?:polic(?:y|ies)|terms|usage|guidelines)",
+].join("|");
+
+const RATE_LIMIT_ERROR_RE = new RegExp(RATE_LIMIT_ERROR_SOURCE, "i");
+const TRANSIENT_ERROR_RE = new RegExp(TRANSIENT_ERROR_SOURCE, "i");
+const CONTENT_REFUSAL_RE = new RegExp(CONTENT_REFUSAL_SOURCE, "i");
+
+/**
+ * Pi's auto-retry heuristic, used by the compaction trigger to avoid running
+ * while the host may retry the same assistant turn. Deliberately narrower than
+ * the cooldown classifier: quota/plan-limit failures are still classified for
+ * cooldown purposes, but Pi does not auto-retry them, so they must not suppress
+ * a compaction pass.
+ */
+const AUTO_RETRY_ERROR_SOURCE = [
+  "overloaded",
+  "provider.?returned.?error",
+  "rate.?limit",
+  "too many requests",
+  "\\b429\\b",
+  "\\b500\\b",
+  "\\b502\\b",
+  "\\b503\\b",
+  "\\b504\\b",
+  "service.?unavailable",
+  "server.?error",
+  "internal.?error",
+  "network.?error",
+  "connection.?error",
+  "connection.?refused",
+  "connection.?lost",
+  "websocket.?closed",
+  "websocket.?error",
+  "other side closed",
+  "fetch failed",
+  "upstream.?connect",
+  "reset before headers",
+  "socket hang up",
+  "ended without",
+  "http2 request did not get a response",
+  "timed? out",
+  "timeout",
+  "terminated",
+  "retry delay",
+].join("|");
+
+export const AUTO_RETRY_ERROR_RE = new RegExp(AUTO_RETRY_ERROR_SOURCE, "i");
+
+/** Broad retryable classification used by the cooldown/debug paths. */
+export const RETRYABLE_ERROR_RE = new RegExp(
+  `${RATE_LIMIT_ERROR_SOURCE}|${TRANSIENT_ERROR_SOURCE}`,
+  "i",
+);
+
+/** The error message text without relying on `instanceof Error` (SDK errors may be plain objects). */
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return String(error || "");
+}
+
+/** Provider text without the worker's own `… API error: ` prefix. */
+function providerErrorText(error: unknown): string {
+  return errorText(error).replace(WORKER_FRAMING_RE, "");
+}
+
+/** Transport codes can live on the error or its `cause` (undici fetch failures). */
+function transportCodeText(error: unknown): string {
+  if (error === null || typeof error !== "object") return "";
+  const own = "code" in error ? String((error as { code: unknown }).code ?? "") : "";
+  const cause = "cause" in error ? (error as { cause: unknown }).cause : undefined;
+  const causeCode =
+    cause !== null && typeof cause === "object" && "code" in cause
+      ? String((cause as { code: unknown }).code ?? "")
+      : "";
+  return `${own} ${causeCode}`;
+}
+
+/** Check whether an error is a rate-limit/quota/billing failure. */
+export function isRateLimitError(error: unknown): boolean {
+  return RATE_LIMIT_ERROR_RE.test(providerErrorText(error));
+}
+
+/** Check whether an error is a network/overload/5xx failure. */
+export function isTransientProviderError(error: unknown): boolean {
+  if (TRANSIENT_ERROR_RE.test(providerErrorText(error))) return true;
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR_/i.test(
+    transportCodeText(error),
+  );
+}
+
+/** Check whether provider text is a request-content policy refusal. */
+export function isContentRefusalError(error: unknown): boolean {
+  return CONTENT_REFUSAL_RE.test(providerErrorText(error));
+}
 
 /** Check whether an error string or Error indicates a retryable error. */
 export function isRetryableError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return RETRYABLE_ERROR_RE.test(message);
+  return isRateLimitError(error) || isTransientProviderError(error);
+}
+
+/**
+ * The policy-relevant cause of a worker/model failure. The consolidation stage
+ * uses this instead of inferring the cooldown from the error text at each call
+ * site; local, request-local and content-refusal failures never persist.
+ */
+export type CooldownCause =
+  | "local_execution"
+  | "content_refusal"
+  | "request_local"
+  | "provider_rate_limit"
+  | "provider_configuration"
+  | "provider_transient"
+  | "unknown";
+
+/** Classify an error for cooldown policy. Order matters: see the predicates above. */
+export function classifyCooldownCause(error: unknown): CooldownCause {
+  if (isLocalExecutionError(error)) return "local_execution";
+  if (isContentRefusalError(error)) return "content_refusal";
+  if (isRequestLocalError(error)) return "request_local";
+  if (isRateLimitError(error)) return "provider_rate_limit";
+  if (isDeterministicError(error)) return "provider_configuration";
+  if (isTransientProviderError(error)) return "provider_transient";
+  return "unknown";
 }
 
 /**
@@ -139,6 +360,9 @@ export function getDiscardedCount(error: unknown): number | undefined {
 
 /** Check whether an error is a deterministic client error (see above). */
 export function isDeterministicError(error: unknown): boolean {
+  // A content refusal may carry a 400 status, but retrying the same model can
+  // succeed on different content. It is not a config/header failure.
+  if (isContentRefusalError(error)) return false;
   const message = error instanceof Error ? error.message : String(error || "");
   if (DETERMINISTIC_ERROR_RE.test(message)) return true;
   // The worker's `… API error: ` framing is not provider text. Leaving it in
@@ -165,6 +389,7 @@ export function isCooldownWorthyError(error: unknown): boolean {
   return (
     !isLocalExecutionError(error) &&
     !isRequestLocalError(error) &&
+    !isContentRefusalError(error) &&
     (isRetryableError(error) || isDeterministicError(error))
   );
 }

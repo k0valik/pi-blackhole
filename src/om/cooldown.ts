@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { OmModelConfig } from "../core/unified-config.js";
 import { debugLog } from "./debug-log.js";
+import type { CooldownCause } from "./retryable-error.js";
 
 // ── Persistence ─────────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export interface CooldownEntry {
   until: string; // ISO 8601 timestamp
   reason: string;
   stage: string; // "observer" | "reflector" | "dropper"
+  /** Cause of the window that owns the current (longest) expiry. */
+  cause?: CooldownCause;
 }
 
 type CooldownMap = Record<string, CooldownEntry>;
@@ -124,6 +127,26 @@ export function getCooldownEntry(
   return entry;
 }
 
+/** Default short cooldown for network/overload/5xx failures. */
+export const DEFAULT_TRANSIENT_COOLDOWN_MINUTES = 5;
+
+/**
+ * Duration a cause should persist for this model, or `undefined` when the
+ * failure must stay in-cycle only. `cooldownHours: 0` disables all persisted
+ * cooldowns, including the transient window.
+ */
+export function cooldownDurationMs(model: OmModelConfig, cause: CooldownCause): number | undefined {
+  if (model.cooldownHours === 0) return undefined;
+  if (cause === "provider_transient") {
+    const minutes = model.cooldownMinutesTransient ?? DEFAULT_TRANSIENT_COOLDOWN_MINUTES;
+    return minutes === 0 ? undefined : minutes * 60_000;
+  }
+  if (cause === "local_execution" || cause === "request_local" || cause === "content_refusal") {
+    return undefined;
+  }
+  return (model.cooldownHours ?? 1) * 3_600_000;
+}
+
 /** Maximum persisted cooldown reason length (issue #80: HTML bodies bloated the log). */
 export const COOLDOWN_REASON_MAX = 200;
 
@@ -182,9 +205,15 @@ function httpStatusFrom(text: string): string | undefined {
 }
 
 /**
- * Record a cooldown for a model after a retryable error.
+ * Record a cooldown for a model after a cooldown-worthy error.
  *
- * When cooldownHours is explicitly 0, cooldown is disabled — no-op.
+ * The cause picks the duration: transient failures use
+ * `cooldownMinutesTransient` (five minutes by default), while rate-limit,
+ * configuration and unknown failures use `cooldownHours`. Non-persistent
+ * causes and `cooldownHours: 0` are no-ops.
+ *
+ * An existing longer window is never shortened: a short transient failure
+ * must not undo a rate-limit/configuration cooldown already in force.
  *
  * @param model   The model that failed.
  * @param reason  Human-readable error reason (e.g. "429 Too Many Requests").
@@ -194,28 +223,33 @@ export function recordCooldown(
   model: OmModelConfig,
   reason: string,
   stage: string,
-  causeClass: "provider_configuration" | "provider_transient" | "unknown" = "unknown",
+  cause: CooldownCause = "unknown",
 ): void {
-  // cooldownHours === 0 means cooldown disabled
-  if (model.cooldownHours === 0) return;
   // Thinking-only modifiers carry no identity: nothing to cool down.
   if (typeof model.provider !== "string" || typeof model.id !== "string") return;
+  const durationMs = cooldownDurationMs(model, cause);
+  if (durationMs === undefined) return;
 
-  const hours = model.cooldownHours ?? 1;
-  const until = new Date(Date.now() + hours * 3_600_000).toISOString();
+  const key = modelKey({ provider: model.provider, id: model.id });
+  const untilMs = Date.now() + durationMs;
   const map = readCooldownMap();
+  const existing = map[key];
+  const existingUntil = existing ? new Date(existing.until).getTime() : Number.NaN;
+  if (Number.isFinite(existingUntil) && existingUntil >= untilMs) return;
+
   // Defense-in-depth (issue #80): callers pass a sanitized brief, but never
   // persist a raw HTML page even if one slips through.
-  map[modelKey({ provider: model.provider, id: model.id })] = {
-    until,
+  map[key] = {
+    until: new Date(untilMs).toISOString(),
     reason: sanitizeCooldownReason(reason),
     stage,
+    cause,
   };
   if (writeCooldownMap(map)) {
     debugLog("model.cooldown_write", {
-      model: modelKey({ provider: model.provider, id: model.id }),
+      model: key,
       stage,
-      causeClass,
+      causeClass: cause,
       reason: sanitizeCooldownReason(reason),
     });
   }
