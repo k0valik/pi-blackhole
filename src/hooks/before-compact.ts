@@ -7,7 +7,7 @@
  *   and renderSummary to append observations/reflections to the output.
  * - This is the single joining point between pi-vcc and OM.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 import { writeFileSync } from "fs";
 import {
@@ -31,6 +31,7 @@ import {
 } from "../om/ledger/index.js";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
+import { getCooldownEntry } from "../om/cooldown.js";
 import { effectiveContextWindow } from "../om/model-budget.js";
 import { DEFAULTS, configFileNeedsMigration } from "../core/unified-config.js";
 import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js";
@@ -370,6 +371,57 @@ const REASON_MESSAGES: Record<OwnCutCancelReason, string> = {
     'blackhole: Too few live messages — Pi\'s default logic preserves visible context. Set tailBehavior to "minimal" in config to force compaction with fewer messages.',
 };
 
+/** Issue #207: `provider/id` of the active session model, or null when the
+ *  host exposes no model identity. Pi's native summarizer runs on this model
+ *  whenever our hook yields; virtual models re-resolve at request time, so
+ *  this is the configured model, not the routed result. */
+export function sessionModelIdentity(model: unknown): string | null {
+  const m = model as { provider?: unknown; id?: unknown } | undefined;
+  return typeof m?.provider === "string" && typeof m?.id === "string"
+    ? `${m.provider}/${m.id}`
+    : null;
+}
+
+/**
+ * Issue #207 — call at every yield site: each `return` that hands compaction
+ * back to Pi sends the summary to Pi's own summarizer, which runs on the
+ * ACTIVE SESSION MODEL (pi captures `this.model` before emitting
+ * session_before_compact). That is a separate ownership domain from the OM
+ * worker chain — `sessionFallback` and OM candidate cooldowns never apply to
+ * it. Trace the boundary so the debug log answers "which model is about to
+ * summarize", and warn once per cooldown window when the session model sits
+ * inside one of OUR persisted windows: the one case where the boundary is
+ * actionable (switch via /model, or set compactionEngine "blackhole").
+ */
+function noteYieldToPiSummarizer(omRuntime: Runtime, ctx: ExtensionContext, reason: string): void {
+  const identity = sessionModelIdentity(ctx.model);
+  const model = ctx.model as { provider?: unknown; id?: unknown } | undefined;
+  const entry =
+    identity && typeof model?.provider === "string" && typeof model?.id === "string"
+      ? getCooldownEntry({ provider: model.provider, id: model.id })
+      : undefined;
+  debugLog(
+    "before_compact.yields_to_pi_summarizer",
+    {
+      reason,
+      model: identity,
+      cooldownActive: entry !== undefined,
+      cooldownUntil: entry?.until,
+    },
+    omRuntime.config.debugLog === true,
+  );
+  if (!identity || !entry) return;
+  // One warning per cooldown window (appendFallbackNotified convention): a
+  // fresh window after this one expires can announce again.
+  const noticeKey = `yield-cooldown:${identity}:${entry.until}`;
+  if (omRuntime.yieldCooldownNoticeKey === noticeKey) return;
+  omRuntime.yieldCooldownNoticeKey = noticeKey;
+  ctx.ui?.notify?.(
+    `blackhole: compaction yielded to Pi — Pi's summarizer will use the session model ${identity}, which is in a cooldown window until ${entry.until}. Switch with /model, or set compactionEngine "blackhole" to keep summarization off the session model.`,
+    "warning",
+  );
+}
+
 export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) => {
   pi.on("session_before_compact", (event, ctx) => {
     const { preparation, branchEntries, customInstructions } = event;
@@ -393,6 +445,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         provider: getModelProvider(ctx.model),
         skipForProviders: omRuntime.config.skipForProviders,
       });
+      noteYieldToPiSummarizer(omRuntime, ctx, "provider_skipped");
       return;
     }
 
@@ -404,6 +457,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         omRuntime.config.compaction === "manual" || omRuntime.config.noAutoCompact === true,
       branchLength: branchEntries.length,
       hasPreviousSummary: !!preparation.previousSummary,
+      model: sessionModelIdentity(ctx.model),
     });
 
     // Always handle explicit /blackhole marker.
@@ -413,6 +467,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
     // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
     if (omRuntime.config.compaction === "off" && !isPiVcc) {
       trace("before_compact.return_early", { reason: "compaction_off" });
+      noteYieldToPiSummarizer(omRuntime, ctx, "compaction_off");
       return;
     }
 
@@ -421,12 +476,14 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       trace("before_compact.return_early", {
         reason: "compactionEngine_pi_default",
       });
+      noteYieldToPiSummarizer(omRuntime, ctx, "compactionEngine_pi_default");
       return;
     }
 
     // compaction "manual": /compact falls through to Pi, /blackhole still works
     if (omRuntime.config.compaction === "manual" && !isPiVcc) {
       trace("before_compact.return_early", { reason: "compaction_manual" });
+      noteYieldToPiSummarizer(omRuntime, ctx, "compaction_manual");
       return;
     }
 
@@ -439,6 +496,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         trace("before_compact.return_early", {
           reason: "overrideDefaultCompaction=false and not /blackhole",
         });
+        noteYieldToPiSummarizer(omRuntime, ctx, "overrideDefaultCompaction=false");
         return;
       }
 
@@ -948,6 +1006,7 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       trace("before_compact.native_fallback", {
         reason: "empty_blackhole_summary",
       });
+      noteYieldToPiSummarizer(omRuntime, ctx, "empty_blackhole_summary");
       return;
     }
 

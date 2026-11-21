@@ -255,6 +255,10 @@ export class Runtime {
   lastCompactCancelled = false;
   /** Set after the first append-mode fallback warning; one signal per session. */
   appendFallbackNotified = false;
+  /** Issue #207: notice key of the last yield-to-Pi cooldown warning. One toast
+   *  per cooldown window instead of one per compaction attempt; a fresh window
+   *  (new expiry) announces again. */
+  yieldCooldownNoticeKey: string | undefined = undefined;
   /** In‑memory pipeline cursors — authoritative copy for gating decisions. */
   cursors: PipelineCursors = {};
   /** Session ID for which cursors have been loaded/validated.  Undefined until first load. */
