@@ -963,6 +963,42 @@ describe("opt-in shared pressure fallback", () => {
   });
 });
 
+test("an overflow-note-only projection does not own an empty-summary compaction", () => {
+  // #208 gate semantics: a pointer-only priority notice is not replacement
+  // content. Empty VCC summary + a pool where nothing fit (pool 5, one fat
+  // marker-critical reflection, no observations — overflow non-empty is
+  // pinned by tests/projection.test.ts) must still delegate to Pi's
+  // summarizer, which reads the raw restriction text, instead of replacing
+  // the tail with a recall pointer.
+  const { pi, invoke, omRuntime } = createMockPi({
+    tailBehavior: "minimal",
+    memory: true,
+    reflectionsPoolMaxTokens: 5,
+  });
+  registerBeforeCompactHook(pi, omRuntime);
+  const fatRef = {
+    id: "0b0b0b0b0b0b",
+    content: `fat restriction ${"x".repeat(400)}`,
+    supportingObservationIds: ["cccccccccccc"],
+    relevance: "critical",
+    tokenCount: 10,
+  };
+  const result = invoke(
+    makeEvent([
+      msg("m1", "assistant", ""),
+      msg("m2", "assistant", ""),
+      msg("m3", "assistant", ""),
+      {
+        id: "refs",
+        type: "custom",
+        customType: "om.reflections.recorded",
+        data: { reflections: [fatRef], coversUpToId: "m3" },
+      },
+    ]),
+  );
+  expect(result).toBeUndefined();
+});
+
 test("pressure opt-in does not delegate an empty summary to native compaction", () => {
   const { pi, invoke, omRuntime } = createMockPi(
     { tailBehavior: "minimal", contextPressureFallback: "vcc", memory: false },

@@ -958,6 +958,12 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       // #208: report priority reflections (e.g. active user restrictions)
       // that could not fit the bounded pool, instead of silently evicting
       // them behind newer ordinary reflections.
+      // Deliberately NOT counted into omHasContent below: a pointer-only
+      // note is not replacement content. With an empty VCC summary the
+      // empty-summary gates keep deferring (raw tail stays, restrictions
+      // included) or delegating to Pi's summarizer (which reads the raw
+      // restriction text); owning a compaction that replaces that text with
+      // a recall pointer would be the worse trade.
       const overflowNote = priorityOverflowNote(projection.priorityOverflow);
       if (overflowNote) {
         trace("before_compact.reflection_priority_overflow", {
