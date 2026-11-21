@@ -3,6 +3,7 @@
   "_all_settings_in_one_file": true,
   "_new_keys": "compaction, compactionEngine, compactionSummaryMode, tailBehavior, sessionFallback — new config surface",
   "_renamed": "was example-config-v2.json; old example-config.json → example-config-old.json",
+  "_comment_modelCooldowns": "Each model entry accepts cooldownHours (default 1h; rate-limit/quota/billing, config/auth and unknown failures; 0 disables all persisted cooldowns) and cooldownMinutesTransient (default 5m; network/overload/5xx; 0 = in-cycle only). Content refusals never persist a cooldown.",
 
   "compaction": "auto",
   "compactionEngine": "blackhole",

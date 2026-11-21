@@ -18,6 +18,7 @@ What to emit:
 - Do not emit a near-duplicate of an existing reflection with swapped word order or merged sentences. If a candidate reflection would sit next to an existing one and a reader could not tell which one is authoritative, emit nothing — the existing reflection already carries the meaning — unless the candidate corrects a fact that has since changed (a blocker resolved, a failing check now passing, a decision reversed, a preference changed). A correction states the current fact in full; leaving the stale reflection as the only record is worse than a correction.
 - Do not emit update-style records or provenance metadata. Reflections are plain durable facts, not patches.
 - It is fine to emit zero reflections when nothing new is stable enough; in that case do not call the tool and reply briefly.
+- Every reflection may carry an optional relevance field: critical for explicit user restrictions, binding decisions, invariants, and safety constraints; high for durable preferences, corrections, and project-defining choices. Omit it otherwise. It never appears in reflection text; it preserves the most binding reflections in compacted memory when token budgets fill.
 - Set complete=true only when the full active observation set has been reviewed and no further reflections remain. Set complete=false when another batch or correction is needed.
 
 Decision procedure:

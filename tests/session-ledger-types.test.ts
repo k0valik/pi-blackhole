@@ -71,6 +71,14 @@ describe("session-ledger V3 type guards and builders", () => {
     expect(isReflection({ ...reflection("111111111111"), tokenCount: undefined })).toBe(false);
   });
 
+  it("accepts an optional relevance marker and rejects invalid relevance values", () => {
+    expect(isReflection({ ...reflection("121212121212"), relevance: "critical" })).toBe(true);
+    expect(isReflection({ ...reflection("131313131313"), relevance: "high" })).toBe(true);
+    expect(isReflection({ ...reflection("141414141414"), relevance: undefined })).toBe(true);
+    expect(isReflection({ ...reflection("151515151515"), relevance: "urgent" })).toBe(false);
+    expect(isReflection({ ...reflection("161616161616"), relevance: "" })).toBe(false);
+  });
+
   it("accepts non-empty V3 ledger entry data", () => {
     const obsData = {
       observations: [observation("aaaaaaaaaaaa")],

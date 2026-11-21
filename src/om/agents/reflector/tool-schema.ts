@@ -6,6 +6,7 @@
  */
 import { Type } from "typebox";
 import type { Static, TSchema } from "typebox";
+import { RelevanceSchema } from "../observer/tool-schema.js";
 
 // Compose both schemas from these shared fields. Reading `.properties` back
 // from a built schema throws on hosts that shim typebox (omp).
@@ -14,6 +15,11 @@ const reflectionItemFields = {
   supportingObservationIds: Type.Array(Type.String({ minLength: 1 }), {
     minItems: 1,
   }),
+  // Optional durable-importance marker (#208): a model that omits it keeps
+  // the fallback support-relevance tiering, never loses the batch. The
+  // vocabulary reuses the observer's relevance union so one set of values
+  // governs both records and validation.
+  relevance: Type.Optional(RelevanceSchema),
 };
 
 // Optional on purpose: a model that omits the flag must lose only the

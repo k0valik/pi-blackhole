@@ -142,7 +142,7 @@ Manual mode is the maintainer's daily driver: workers still run, but observation
 
 #### Who owns the compaction?
 
-With the default `compactionEngine: "blackhole"`, blackhole's `session_before_compact` hook owns every compaction Pi initiates — threshold auto-compact, overflow recovery, and `/compact` — replacing Pi's LLM summarizer with the deterministic pipeline. The only exception is defensive: if both the VCC summary and the OM projection come up empty (a pathological all-noise transcript), blackhole declines and Pi's native summarizer runs, so you never get a context-free replacement. With `compactionEngine: "pi-default"`, `compaction: "manual"`, or `compaction: "off"`, Pi handles everything except explicit `/blackhole`. See [`docs/CONFIG.md` → `compactionEngine`](docs/CONFIG.md#compactionengine) for the full interaction matrix.
+With the default `compactionEngine: "blackhole"`, blackhole's `session_before_compact` hook owns every compaction Pi initiates — threshold auto-compact, overflow recovery, and `/compact` — replacing Pi's LLM summarizer with the deterministic pipeline. The only exception is defensive: if both the VCC summary and the OM projection come up empty (a pathological all-noise transcript), blackhole declines and Pi's native summarizer runs, so you never get a context-free replacement. With `compactionEngine: "pi-default"`, `compaction: "manual"`, or `compaction: "off"`, Pi handles everything except explicit `/blackhole` — and its native summarizer then runs on the active session model, never an OM worker model (`sessionFallback` and OM cooldowns do not apply to that call). See [`docs/CONFIG.md` → `compactionEngine`](docs/CONFIG.md#compactionengine) for the full interaction matrix.
 
 ### How does `/blackhole` compare to `/compact`?
 
@@ -361,7 +361,7 @@ What blackhole adds and reworks on top:
 - **Memory toggle** (`/blackhole om-off` / `/blackhole om-on`) — disable the memory layer without uninstalling.
 - **Per-session pending state** — isolated per-session JSON files, no cross-session contamination.
 - **Custom provider bridge** — consolidation agents loaded via jiti can still use provider stream functions registered by other extensions.
-- **Retryable error detection with per-model cooldowns** — models that fail get cooled down, fallbacks tried automatically, 30-second retry gate prevents spam.
+- **Per-cause cooldowns** — transient network/overload failures cool for minutes, quota/config failures for the configured hours, and content refusals skip only the current stage; fallbacks are tried automatically and the 30-second retry gate prevents spam.
 - **Improved observer/reflector/dropper prompts** — each heavily customized with detailed extraction rules, relevance guidance, and error handling.
 - **OM-recall coupling** — when expanding session entries via `recall`, related observations and reflections are automatically shown.
 - **Thinking level support** — per-model `thinking` field for reasoning effort control, including `max` where supported by the provider.

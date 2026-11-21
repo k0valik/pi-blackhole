@@ -8,7 +8,7 @@ import {
   makeReflectionRenderer,
   renderOptionsFromConfig,
   selectPriorObservations,
-  selectPriorReflections,
+  selectReflectionPool,
 } from "./render-summary.js";
 import {
   OM_FOLDED,
@@ -22,6 +22,7 @@ import {
   type MemoryDetails,
   type Observation,
   type Reflection,
+  type Relevance,
 } from "./types.js";
 
 export type Projection = {
@@ -46,6 +47,8 @@ export type CompactionProjectionConfig = {
 export type CompactionProjection = Projection & {
   fullFold: boolean;
   details: MemoryDetails;
+  /** Priority reflections that could not fit the bounded pool (#208). */
+  priorityOverflow: Reflection[];
 };
 
 type ProjectionBoundary = { kind: "entry"; entryId: string } | { kind: "tip" } | { kind: "none" };
@@ -362,6 +365,14 @@ export function buildCompactionProjection(
     ? fullProjection(entries, firstKeptEntryId, retireSupersededReflections)
     : normalProjection;
 
+  // Support-relevance lookup for priority tiering (#208): built from the
+  // folded active observations — supersession and drops are already applied
+  // by the fold — and before render caps, so tiering never depends on what
+  // the observation cap happens to keep.
+  const supportRelevance = new Map<string, Relevance>();
+  for (const observation of projection.observations)
+    supportRelevance.set(observation.id, observation.relevance);
+
   // Output limits are independent of stored-token full-fold maintenance.
   // Source records stay in the branch; raw/view callers can omit finite caps.
   if (config.observationsPoolMaxTokens > 0 && Number.isFinite(config.observationsPoolMaxTokens)) {
@@ -374,19 +385,23 @@ export function buildCompactionProjection(
     };
   }
 
+  let priorityOverflow: Reflection[] = [];
   if (
     config.reflectionsPoolMaxTokens !== undefined &&
     config.reflectionsPoolMaxTokens > 0 &&
     Number.isFinite(config.reflectionsPoolMaxTokens)
   ) {
+    const pool = selectReflectionPool(
+      projection.reflections,
+      config.reflectionsPoolMaxTokens,
+      supportRelevance,
+      makeReflectionRenderer(renderOptionsFromConfig(config)),
+    );
     projection = {
       ...projection,
-      reflections: selectPriorReflections(
-        projection.reflections,
-        config.reflectionsPoolMaxTokens,
-        makeReflectionRenderer(renderOptionsFromConfig(config)),
-      ),
+      reflections: pool.selected,
     };
+    priorityOverflow = pool.overflow;
   }
 
   const details: MemoryDetails = {
@@ -402,6 +417,7 @@ export function buildCompactionProjection(
     observations: projection.observations,
     reflections: projection.reflections,
     details,
+    priorityOverflow,
   };
 }
 

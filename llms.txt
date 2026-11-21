@@ -106,7 +106,7 @@ When a worker runs, the runtime builds a candidate model list in this order:
 
 Each candidate is resolved via `modelRegistry.find(provider, id)`. If Pi doesn't know the provider/model combination, it's skipped. The runtime tries up to 10 candidates per stage before giving up (enforced by `MAX_STAGE_ATTEMPTS = 10` in `consolidation.ts`).
 
-**Cooldown-aware skipping:** Before calling a candidate, the runtime checks `isCooldownActive()` (`cooldown.ts`). If the model is in cooldown, it's transparently skipped. Cooldowns are persisted to `pi-blackhole-cooldown.json` and survive Pi restarts.
+**Cooldown-aware skipping:** Before calling a candidate, the runtime checks `isCooldownActive()` (`cooldown.ts`). If the model is in cooldown, it's transparently skipped. Cooldowns are persisted to `pi-blackhole-cooldown.json` and survive Pi restarts. The duration is cause-specific: transient network/overload/5xx failures use the short `cooldownMinutesTransient` window (5 minutes by default), while rate-limit/quota/billing, configuration/auth and unclassified failures use `cooldownHours`. Content refusals, local errors and request-local incompatibilities skip only the current stage.
 
 **Context window pre-check:** Before launching the agent loop for a worker, the runtime checks `effectiveContextWindow()` (`model-budget.ts`). If the estimated input (chunk tokens + 8k reserve) exceeds the model's context window, that model is skipped and a retryable error is recorded. Resolution order: (1) `OmModelConfig.contextWindow` override, (2) `model.contextWindow` from Pi's registry, (3) fallback of 128k.
 
@@ -163,12 +163,13 @@ interface OmModelConfig {
   provider?: string;       // required with id — omit both for a thinking-only modifier
   id?: string;             // required with provider — omit both for a thinking-only modifier
   thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  cooldownHours?: number;  // default 1h, 0 = in-memory only (no disk persistence); stage setting also applies when that stage falls back to the session model
+  cooldownHours?: number;  // default 1h for rate-limit/config/unknown, 0 = disable all persisted cooldowns; stage setting also applies when that stage falls back to the session model
+  cooldownMinutesTransient?: number; // default 5m for network/overload/5xx on configured candidates, 0 = in-cycle only; ignored when cooldownHours is 0; not used by the session fallback
   contextWindow?: number;  // override Pi's registry value; requires provider+id
 }
 ```
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). With `sessionFallback: true` the session model is the last candidate. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). `cooldownMinutesTransient` applies only to entries with `provider`+`id`; a transient failure on the session fallback stays in-cycle and writes no cooldown. With `sessionFallback: true` the session model is the last candidate. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
 
 **Model ID resolution:** `modelRegistry.find(provider, id)` is used to resolve models. This means:
 - Models explicitly in `models.json` work (they're registered)
@@ -233,6 +234,8 @@ The interaction matrix:
 | manual | (any) | skipped | Pi handles | blackhole handles |
 | off | (any) | skipped | Pi handles | blackhole handles |
 
+**On any yield** (pi-default engine, manual/off, or the defensive empty-summary decline), Pi's own summarizer runs the summary on the **active session model** — never an OM worker model; `sessionFallback` and OM cooldown policy do not apply to it. With `compactionEngine: "blackhole"` no model is called for the summary (deterministic VCC extraction + ledger projection). Yields trace `before_compact.yields_to_pi_summarizer` {reason, model} and warn once per cooldown window when the session model is in one of blackhole's own cooldown windows. If the session model must not summarize: `/model`, or engine "blackhole".
+
 `tailBehavior` controls how much stays visible after compaction. Only applies when `compactionEngine: "blackhole"`:
 - `"minimal"` (default) — keep the last user turn, or use Pi's later safe split-turn boundary for an oversized current turn. Everything before the chosen boundary is compiled.
 - `"pi-default"` — gentle: use Pi's `firstKeptEntryId`, respects Pi's `keepRecentTokens` (~20k tokens kept visible).
@@ -284,7 +287,7 @@ Based on interview answers, build the config object. Write it to:
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
   "subagentMemory": "off",        // "off" = no OM in detected subagents; "inherit" = follow memory
-  "sessionFallback": false,       // true = opt in to the session model as last-resort fallback (costs main-model tokens, busts its prompt cache)
+  "sessionFallback": false,       // true = session model as last-resort OM fallback (OM workers only; never affects Pi's summarizer on a yield)
   "reflectionTimestamps": true,  // Show reflection evidence time
   "reflectionSupersedes": false, // Replacement notes; replaced reflections leave compaction output
   "observeOnShutdown": false,    // One bounded observer attempt before session exit
@@ -296,9 +299,9 @@ Based on interview answers, build the config object. Write it to:
   "model": { "provider": "...", "id": "..." },
 
   // ── Per-worker primary models ──
-  "observerModel":  { "provider": "...", "id": "...", "thinking": "low", "cooldownHours": 1 },
-  "reflectorModel": { "provider": "...", "id": "...", "thinking": "low", "cooldownHours": 1 },
-  "dropperModel":   { "provider": "...", "id": "...", "thinking": "off", "cooldownHours": 1 },
+  "observerModel":  { "provider": "...", "id": "...", "thinking": "low", "cooldownHours": 1, "cooldownMinutesTransient": 5 },
+  "reflectorModel": { "provider": "...", "id": "...", "thinking": "low", "cooldownHours": 1, "cooldownMinutesTransient": 5 },
+  "dropperModel":   { "provider": "...", "id": "...", "thinking": "off", "cooldownHours": 1, "cooldownMinutesTransient": 5 },
 
   // ── Per-worker fallback chains (different providers to avoid correlated failures) ──
   "observerFallbackModels":  [ ... ],
@@ -312,9 +315,9 @@ Based on interview answers, build the config object. Write it to:
   "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
   "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
   "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
-  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
+  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output; priority tier (relevance marker or live critical/high support) fills up to half first, rest newest first (0 = uncapped)
   "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
-  "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647); configured candidates: cooldown + fallback; session fallback: once per stage, no cooldown
+  "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647); configured candidates: transient cooldown + fallback; session fallback: once per stage, no cooldown
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap
   "dropperInputMaxTokens": 80000,      // dropper prompt token cap
   "dropperPressureThreshold": 0.70,    // pool reaches 70% of observationsPoolMaxTokens → dropper fires without new data (1 disables)
@@ -332,7 +335,8 @@ Each model entry supports these fields:
   "provider": "openrouter",   // required — must be known to Pi (explicit in models.json or built-in)
   "id": "qwen/qwen3-next-80b-a3b-instruct:free",  // required — model ID as the provider knows it
   "thinking": "low",          // optional — "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
-  "cooldownHours": 6,         // optional — hours to skip after retryable error (default 1, 0 = in-memory only, no disk writes)
+  "cooldownHours": 6,         // optional — hours to skip after rate-limit/config/unknown error (default 1, 0 = disable all persisted cooldowns)
+  "cooldownMinutesTransient": 5, // optional — minutes to skip after network/overload/5xx (default 5, 0 = in-cycle only)
   "contextWindow": 128000     // optional — override Pi's model registry value; used by context window pre-check
 }
 ```
@@ -341,6 +345,8 @@ Each model entry supports these fields:
 - The model is skipped for the rest of the current pipeline stage
 - It's available again on the next pipeline run (no persisted cooldown)
 - Useful for testing or when you don't want cooldown state to persist across restarts
+
+**`cooldownMinutesTransient: 0`** disables only the persisted transient window; rate-limit/configuration/unknown failures still use `cooldownHours`. Content refusals never persist a cooldown, regardless of either setting.
 
 ### Context size presets (for fixed numeric thresholds only)
 
@@ -484,7 +490,7 @@ This is handled by `loadUnifiedConfig()` in `src/core/unified-config.ts:90-118`.
 
 ### Cooldowns persist across restarts
 
-`~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` — if the user switches models, stale cooldowns for old models are harmless but can be cleaned up. Cooldown entries have `until` (ISO timestamp), `reason`, and `stage` fields. Expired entries are lazily cleaned on read.
+`~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` — if the user switches models, stale cooldowns for old models are harmless but can be cleaned up. Cooldown entries have `until` (ISO timestamp), `reason`, `stage`, and an optional `cause` field. Expired entries are lazily cleaned on read; a new shorter cooldown never shortens an active longer one.
 
 ### Models must be known to Pi
 

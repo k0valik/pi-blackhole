@@ -138,20 +138,26 @@ describe("local failure cooldown isolation", () => {
     expect(await makeModelResolver(f.runtime, f.ctx, f.generation)("dropper")).toBeDefined();
   });
   test.each([
-    new Error("HTTP 401 Unauthorized"),
-    new Error("HTTP 404 model not found"),
-    new Error("HTTP 503 Service Unavailable"),
-    new Error("ECONNRESET"),
-    new TypeError("fetch failed"),
-    new Error("request timeout"),
-    new Error("Reflector API error: Cannot read properties of undefined (reading 'status')"),
-    new Error("Dropper API error: timeout is not defined"),
-    new TypeError("terminated"),
-    Object.assign(new TypeError("body read failed"), { cause: { code: "UND_ERR_BODY_TIMEOUT" } }),
-  ])("provider failures still cool: %s", (error) => {
+    [new Error("HTTP 401 Unauthorized"), "2026-10-16T01:00:00.000Z"],
+    [new Error("HTTP 404 model not found"), "2026-10-16T01:00:00.000Z"],
+    [new Error("HTTP 503 Service Unavailable"), "2026-10-16T00:05:00.000Z"],
+    [new Error("ECONNRESET"), "2026-10-16T00:05:00.000Z"],
+    [new TypeError("fetch failed"), "2026-10-16T00:05:00.000Z"],
+    [new Error("request timeout"), "2026-10-16T00:05:00.000Z"],
+    [
+      new Error("Reflector API error: Cannot read properties of undefined (reading 'status')"),
+      "2026-10-16T01:00:00.000Z",
+    ],
+    [new Error("Dropper API error: timeout is not defined"), "2026-10-16T00:05:00.000Z"],
+    [new TypeError("terminated"), "2026-10-16T00:05:00.000Z"],
+    [
+      Object.assign(new TypeError("body read failed"), { cause: { code: "UND_ERR_BODY_TIMEOUT" } }),
+      "2026-10-16T00:05:00.000Z",
+    ],
+  ])("provider failures still cool with the cause-specific duration: %s", (error, until) => {
     const f = fixture();
     f.runtime.recordRetryableError(identity, error, "observer");
-    expect(cooldowns()[key]?.until).toBe("2026-10-16T01:00:00.000Z");
+    expect(cooldowns()[key]?.until).toBe(until);
   });
   test("stale generations never reach the cooldown writer", async () => {
     const f = fixture();

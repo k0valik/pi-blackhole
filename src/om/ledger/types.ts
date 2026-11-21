@@ -44,6 +44,10 @@ export type Observation = {
 export type Reflection = {
   timestamp?: string;
   supersedes?: string[];
+  /** Optional durable-importance marker (#208): preserved in a full bounded
+   *  pool ahead of ordinary reflections. Authoritative over support-derived
+   *  tiering when present; never rendered in output text. */
+  relevance?: Relevance;
   id: string;
   content: string;
   supportingObservationIds: string[];
@@ -152,7 +156,11 @@ export function isReflection(value: unknown): value is Reflection {
     isNonEmptyString(value.content) &&
     !/\r|\n/.test(value.content) &&
     isNonEmptyStringArray(value.supportingObservationIds) &&
-    isTokenCount(value.tokenCount)
+    isTokenCount(value.tokenCount) &&
+    // Optional marker: absent on legacy records; a present value must be a
+    // valid relevance, so a bogus string cannot masquerade as a priority
+    // signal — the agent drops the invalid marker, validation drops the record.
+    (value.relevance === undefined || isRelevance(value.relevance))
   );
 }
 

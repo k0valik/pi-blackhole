@@ -32,6 +32,7 @@ describe("cooldown write diagnostics", () => {
   test.each([
     ["HTTP 401 Unauthorized", "provider_configuration"],
     ["HTTP 404 model not found", "provider_configuration"],
+    ["429 Too Many Requests", "provider_rate_limit"],
     ["HTTP 503 Service Unavailable", "provider_transient"],
     ["ECONNRESET", "provider_transient"],
     ["unclassified failure", "unknown"],

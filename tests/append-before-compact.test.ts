@@ -757,10 +757,15 @@ describe("bounded memory and useful rebase provider simulation", () => {
       sourceEntryIds: ["source"],
       tokenCount: 100,
     }));
+    // Cite a support id outside the recorded observations on purpose: every
+    // fixture observation is high-relevance, so a live citation would make
+    // all 20 fat reflections priority (#208 tiering), overflow the
+    // 8000-token pool, and append the priority notice to the trailing suffix
+    // this test pins. Ordinary citations keep it about append/rebase plumbing.
     const reflections = Array.from({ length: 20 }, (_, i) => ({
       id: (i + 1000).toString(16).padStart(12, "0"),
       content: `REF ${i} ` + "y".repeat(3000),
-      supportingObservationIds: [observations[0].id],
+      supportingObservationIds: ["cccccccccccc"],
       tokenCount: 10,
     }));
     let branch: any[] = withParents([
@@ -1119,5 +1124,58 @@ describe("annotated compaction cap", () => {
       ]),
     );
     expect(result.compaction.details["om.folded"].reflections).toHaveLength(1);
+  });
+});
+
+describe("priority overflow note (#208)", () => {
+  it("reports a priority reflection that cannot fit the pool in the compaction output", () => {
+    const { invoke } = createHarness({
+      memory: true,
+      reflectionsPoolMaxTokens: 11,
+    });
+    const obsHigh = {
+      id: "0a0a0a0a0a0a",
+      content: "User decided: do not publish the test draft",
+      timestamp: "2026-11-01",
+      relevance: "high",
+      sourceEntryIds: ["m1"],
+      tokenCount: 10,
+    };
+    const fatRef = {
+      id: "0b0b0b0b0b0b",
+      content: `fat restriction ${"x".repeat(400)}`,
+      supportingObservationIds: [obsHigh.id],
+      tokenCount: 10,
+    };
+    const smallRef = {
+      id: "0c0c0c0c0c0c",
+      content: "C",
+      supportingObservationIds: ["cccccccccccc"],
+      tokenCount: 1,
+    };
+    const result = invoke(
+      event([
+        msg("m1", "user", "source"),
+        {
+          type: "custom",
+          id: "obs",
+          customType: "om.observations.recorded",
+          data: { observations: [obsHigh], coversUpToId: "m1" },
+        },
+        {
+          type: "custom",
+          id: "refs",
+          customType: "om.reflections.recorded",
+          data: { reflections: [fatRef, smallRef], coversUpToId: "m1" },
+        },
+        msg("m2", "assistant", "done"),
+        msg("m3", "user", "keep"),
+        msg("m4", "assistant", "tail"),
+      ]),
+    );
+    const memory = result.compaction.details["om.folded"];
+    expect(memory.reflections.map((r: any) => r.id)).toEqual([smallRef.id]);
+    expect(result.compaction.summary).toContain("Priority memory notice");
+    expect(result.compaction.summary).toContain(`[${fatRef.id}]`);
   });
 });

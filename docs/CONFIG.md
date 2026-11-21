@@ -130,6 +130,8 @@ Replaces the old `overrideDefaultCompaction`.
 | manual | (any) | skipped | Pi handles ✓ | blackhole handles |
 | off | (any) | skipped | Pi handles ✓ | blackhole handles |
 
+**Which model summarizes on a yield?** Whenever blackhole steps aside — the `pi-default` engine row above, `manual`/`off` `/compact`, or the defensive empty-summary decline — Pi's own summarizer runs on the **active session model** (the model selected in the session, resolved at request time when it is virtual/routed). No observational-memory worker model is ever used for that summary, and `sessionFallback` plus OM cooldown policy do not apply to it: the OM worker chain and Pi's summarizer are separate ownership domains. With `compactionEngine: "blackhole"` no model is called for the summary at all — it is deterministic VCC extraction plus the ledger projection. Each yield emits a `before_compact.yields_to_pi_summarizer` debug trace with the reason and session-model identity, and blackhole warns once per cooldown window when a yield heads into a session model inside one of its own persisted cooldown windows. If your session model is unavailable or must not be used for summarization, switch it (`/model`) or set `compactionEngine: "blackhole"`. A pi-side setting that pins a dedicated summarizer model does not exist today (a `compaction.model` proposal was declined upstream; a configurable compaction model/thinking level is under discussion in [earendil-works/pi#7553](https://github.com/earendil-works/pi/issues/7553) / [#11255](https://github.com/earendil-works/pi/pull/11255)), and blackhole deliberately does not substitute OM worker models into that call.
+
 ### `tailBehavior`
 
 Controls how much of the recent transcript stays *visible* after compaction. Only applies when `compactionEngine: "blackhole"`.
@@ -425,6 +427,8 @@ Precedence: `memory: false` still disables OM everywhere. Under `"off"`, a detec
 
 Defaults to `false`: when all OM model candidates are exhausted, the stage is **skipped** instead of falling back to the main coding (session) model. Set to `true` to opt in to the session model as a last resort — useful when you would rather a worker run on the main model than not run at all, but note that worker runs on the session model add cost and bust its prompt cache.
 
+`sessionFallback` governs OM worker stages only. It does **not** change which model summarizes when blackhole yields compaction to Pi (`compactionEngine: "pi-default"` or `compaction: "manual"`/`"off"`): that summary always runs on the active session model. See [`compactionEngine`](#compactionengine) for the full boundary.
+
 | Type | Default |
 |------|---------|
 | boolean | `false` |
@@ -482,7 +486,7 @@ Stored observation-token pressure threshold for full-fold maintenance, plus a ha
 
 ### `reflectionsPoolMaxTokens`
 
-Hard cap on estimated rendered reflection lines in compaction output. Selects newest whole records that fit, then restores source order. IDs and newline separators count. Non-negative finite integer; `0` disables the cap. Invalid file values use the default. This does not limit worker prompts or raw/view lookups, and omitted source records remain available through `recall`.
+Hard cap on estimated rendered reflection lines in compaction output. Selection is tiered before recency: reflections carrying a critical/high `relevance` marker, else a live critical/high supporting observation, form a priority tier that claims at most half the pool first (critical before high, newest-first within a tier); ordinary reflections fill the rest newest-first, and any leftover budget spills back to priority so the pool is never wasted. Whole records only, output restored to source order. Live support means present in the same projection — superseded, dropped or out-of-boundary support never promotes a reflection. Priority reflections that still cannot fit the whole pool are reported in a `before_compact.reflection_priority_overflow` debug event and a one-line notice in the compaction output instead of being silently evicted. IDs and newline separators count. Non-negative finite integer; `0` disables the cap. Invalid file values use the default. This does not limit worker prompts or raw/view lookups (observer and reflector preambles keep plain newest-first selection), and omitted source records remain available through `recall`.
 
 | Type | Default |
 |------|---------|
@@ -592,7 +596,7 @@ Accepted via plain config or `PI_BLACKHOLE_PROVIDER_IDLE_TIMEOUT_MS`. Negative v
 
 ### `workerAttemptTimeoutMs`
 
-Hard elapsed deadline for one worker/model attempt. It covers the complete observer, reflector, or dropper agent loop for the selected model: response headers, streamed bodies and heartbeats, tool turns, and final confirmation. When the deadline expires, Blackhole aborts that attempt. If the model is a configured candidate, Blackhole records its cooldown and immediately resolves the next fallback, which gets a fresh deadline. The final session-model fallback behaves differently: it is attempted once per stage, and a timeout there records no cooldown and ends the stage's model search instead of retrying the same session model up to ten times.
+Hard elapsed deadline for one worker/model attempt. It covers the complete observer, reflector, or dropper agent loop for the selected model: response headers, streamed bodies and heartbeats, tool turns, and final confirmation. When the deadline expires, Blackhole aborts that attempt. A timeout is a transient failure, so a configured candidate gets the short `cooldownMinutesTransient` window and the next fallback is resolved immediately with a fresh deadline. The final session-model fallback behaves differently: it is attempted once per stage, and a timeout there records no cooldown and ends the stage's model search instead of retrying the same session model up to ten times.
 
 - **unset** or **`0`** — disabled.
 - **`> 0`** — abort one model attempt after this many milliseconds.
@@ -633,10 +637,11 @@ Each model config supports the following fields:
 | `provider` | string | Provider name (required with `id`; omit both for a thinking-only modifier). |
 | `id` | string | Model ID (required with `provider`; omit both for a thinking-only modifier). |
 | `thinking` | enum | Thinking level: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`. Defaults to `"low"` when unset. May be set alone, without `provider`/`id`, as a pure thinking-level modifier for the session-fallback model. |
-| `cooldownHours` | number | Cooldown duration in hours after a cooldown-worthy error — transient (429/5xx/timeout) or deterministic 4xx (missing provider-required headers, bad credentials, unknown model). Defaults to `1` when omitted. Set to `0` to disable persistent cooldown. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries. |
+| `cooldownHours` | number | Cooldown duration in hours after a rate-limit/quota/billing, configuration/auth, or unclassified error. Defaults to `1` when omitted. Set to `0` to disable every persisted cooldown. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries. |
+| `cooldownMinutesTransient` | number | Cooldown duration in minutes after a transient network/overload/5xx failure (WebSocket, `ECONNRESET`, timeout, `overloaded_error`, 502/503/504, and similar) on a configured candidate model. Defaults to `5` when omitted. Set to `0` to keep transient failures in-cycle only. Ignored when `cooldownHours` is `0`, and not applied to the session fallback. |
 | `contextWindow` | number | Override for the model's context window. Inherits from Pi's model registry when unset. Requires `provider`+`id`; inert on thinking-only modifiers. |
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). With `sessionFallback: true` the session model is the last candidate. Thinking-only entries in `*FallbackModels` arrays are likewise skipped as candidates. An entry with exactly one of `provider`/`id` is rejected entirely (so a forgotten `id` cannot silently become a modifier).
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). `cooldownMinutesTransient` applies only to entries with `provider`+`id`; a transient failure on the session fallback stays in-cycle and writes no cooldown. With `sessionFallback: true` the session model is the last candidate. Thinking-only entries in `*FallbackModels` arrays are likewise skipped as candidates. An entry with exactly one of `provider`/`id` is rejected entirely (so a forgotten `id` cannot silently become a modifier).
 
 **Example:**
 
@@ -647,6 +652,7 @@ A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tri
     "id": "claude-sonnet-4-20250514",
     "thinking": "low",
     "cooldownHours": 2,
+    "cooldownMinutesTransient": 5,
     "contextWindow": 200000
   },
   "observerFallbackModels": [

@@ -272,17 +272,21 @@ Models with active cooldowns are transparently skipped. Up to 10 model resolutio
 
 `sessionFallback: false` (default) skips the stage when all OM candidates are exhausted, so background workers never spend the session model's tokens or bust its prompt cache. Set `true` to opt back in to the session model as a last resort — useful when you would rather a worker run on the main model than not run at all.
 
+This setting governs OM worker stages only: when blackhole yields compaction to Pi (`compactionEngine: "pi-default"`, or `compaction: "manual"`/`"off"`), Pi's own summarizer runs on the active session model regardless of `sessionFallback`.
+
 ## Cooldown system
 
 A provider rejection specific to the current request (payload/context too large or an invalid thinking level) skips that identity for the current stage without persisting a cooldown. This applies to configured candidates and the session fallback, including failures after useful work has closed. Classification uses SDK fields or status-framed, specific rejection text; generic 400/422 errors, required provider headers, 401 authentication, provider 404 and transient failures keep their existing behavior.
 
-Models that fail with retryable errors are cooled down and skipped in subsequent attempts. Defined in [[src/om/cooldown.ts]].
+A content-policy refusal (terms of service, usage policy, content filter, safety/moderation system) is request-content-specific: the next chunk may be fine. It also skips the identity for the current stage only and never writes a cooldown. A refusal is classified before deterministic 4xx detection, so a `400 Bad Request` refusal cannot be mistaken for a configuration error.
 
-Local import/programming errors and aborted requests do not show that a provider is unavailable. They skip the failed identity only for the current stage, even if the runtime generation is still active; the next stage or cycle may use it again. Stale-generation guards still discard late errors before any cooldown decision. Network failures (including fetch transport errors), authentication failures and provider model-not-found errors retain their existing cooldown behavior.
+Models that fail with a persistent cause are cooled down and skipped in subsequent attempts. The classifier in [[src/om/retryable-error.ts]] picks the policy: rate-limit/quota/billing, configuration/auth and unclassified failures use `cooldownHours`; transient network/overload/5xx failures use `cooldownMinutesTransient` (five minutes by default). Defined in [[src/om/cooldown.ts]].
+
+Local import/programming errors and aborted requests do not show that a provider is unavailable. They skip the failed identity only for the current stage, even if the runtime generation is still active; the next stage or cycle may use it again. Stale-generation guards still discard late errors before any cooldown decision. Network failures (including fetch transport errors) use the short transient window; authentication failures and provider model-not-found errors use `cooldownHours`.
 
 ### Persistence
 
-With `debugLog` enabled, each successful cooldown write emits one `model.cooldown_write` event at the persistence owner. It contains the normalized model identity, stage, cause class (`provider_configuration`, `provider_transient`, or `unknown`) and a short sanitized reason, not an HTML/JSON response body. The class describes the current error classification; it does not change cooldown eligibility or retry policy. Failed writes and in-memory-only skips emit no write event.
+With `debugLog` enabled, each successful cooldown write emits one `model.cooldown_write` event at the persistence owner. It contains the normalized model identity, stage, cause class (`provider_rate_limit`, `provider_configuration`, `provider_transient`, or `unknown`) and a short sanitized reason, not an HTML/JSON response body. The class is the policy that selected the duration; local, request-local and content-refusal failures never write. Failed writes and in-memory-only skips emit no write event.
 
 Cooldowns persist to `~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` with ISO 8601 timestamps. Each entry records:
 
@@ -290,16 +294,19 @@ Cooldowns persist to `~/.pi/agent/pi-blackhole/pi-blackhole-cooldown.json` with 
 - `until` — expiry timestamp
 - `reason` — error message
 - `stage` — which stage failed
+- `cause` — the classified cause that owns the current expiry (optional on entries written by older versions)
 
 Cooldowns survive Pi restarts. `expireCooldowns()` runs lazily on config load. `isCooldownActive()` reads from disk each call.
 
-### Cooldown hours
+### Cooldown policy
 
-`cooldownHours` per stage model config (default: 1 hour). Set `0` to disable cooldown — the model is tracked in-memory for the current stage only (no disk writes), using `failedInCycle` set. When a stage falls back to the session model, its setting also controls that model's cooldown, including on thinking-only entries.
+`cooldownHours` per stage model config (default: 1 hour) covers rate-limit/quota/billing, configuration/auth and unclassified failures. `cooldownMinutesTransient` (default: 5 minutes) covers network, overload and 5xx failures on configured candidate models; set it to `0` to keep those in-cycle only. Set `cooldownHours` to `0` to disable every persisted cooldown — the model is tracked in-memory for the current stage only (no disk writes), using the `failedInCycle` set. When a stage falls back to the session model, `cooldownHours` also controls that model's configuration/auth cooldown, including on thinking-only entries. Transient failures on the session fallback stay in-cycle only and never write a cooldown.
 
-### Retryable error detection
+A new write never shortens an existing longer window: a five-minute transient failure cannot undo an active rate-limit/configuration cooldown. The entry keeps the reason, stage and cause of the cause that owns the longest expiry.
 
-A single regex in [[src/om/retryable-error.ts]] matches: HTTP 429, 5xx, rate limits, timeouts, network failures, connection errors, WebSocket closures. Also re-exports Pi's `isContextOverflow` for authoritative overflow detection.
+### Failure classification
+
+[[src/om/retryable-error.ts]] classifies the failure before selecting a duration: local execution, content refusal, request-local, rate-limit/quota/billing, configuration/auth, transient, or unknown. Transient matching covers HTTP 5xx/529, overload, timeouts, WebSocket closures, fetch/undici transport errors, connection resets, provider capacity/busy messages and retry-advice wording. Rate-limit matching also covers the plan/subscription wording used by Claude Code (`You've hit your weekly limit`, `5-hour limit reached`), ChatGPT/Codex (`You've hit your usage limit`, `usage_not_included`, spend limits) and OpenCode/OpenAI provider codes (`insufficient_quota`, `credit_balance_exhausted`, `free usage exceeded`, `slow_down`). Content-policy matching includes the structured codes used by those providers (`content_filter`, `ResponsibleAIPolicyViolation`, `content_policy_violation`, `cyber_policy`, `bio_policy`, `refusal`, `DataInspectionFailed`, `blocklist`, `image_safety`). The same module re-exports Pi's `isContextOverflow` for authoritative overflow detection.
 
 ## Compaction trigger
 
@@ -393,7 +400,7 @@ When no observations or reflections exist, only a short recall-guidance footer i
 If any stage fails (model error, rate limit, timeout), remaining stages are skipped and the full pipeline retries on the next trigger event.
 
 - **30-second retry gate**: After any stage fails completely, `markConsolidationError()` sets a timestamp. `isConsolidationRetryGated()` returns true for 30 seconds.
-- **Per-model cooldown**: Failed models are cooled down and skipped in subsequent attempts.
+- **Per-model, per-cause cooldown**: Failed models are cooled down and skipped in subsequent attempts; transient windows are short and content refusals stay in-cycle.
 - **Stale context handling**: `agent_end` handlers catch "extension ctx is stale" errors gracefully.
 
 ## Observation supersession
@@ -426,6 +433,32 @@ and `/blackhole-memory` views; the ledger, worker input, dropper coverage, expor
 recall keep it. Export and recall omit the suffix.
 Nothing edits an earlier record or append segment. Toggling changes display at the
 next compaction only. Both keys off preserve legacy rendering, prompt and tool schema.
+
+## Reflection relevance marker and bounded pool priority
+
+`record_reflections` accepts an optional `relevance` field reusing the observer's
+four-value vocabulary (`low`/`medium`/`high`/`critical`). The reflector is taught to
+set `critical` for explicit user restrictions, binding decisions, invariants and
+safety constraints, and `high` for durable preferences, corrections and
+project-defining choices. The field is never rendered in output text; it exists so the
+bounded compaction pool can keep the most binding reflections when it fills.
+
+Selection precedence: the marker is authoritative when present — `critical`/`high`
+join the priority tier, `low`/`medium` deliberately downgrade to ordinary. Marker-less
+records fall back to the relevance of their live supporting observations (confirmed
+ask-user decisions are rated at least `high` by the observer). Priority reflections
+claim at most half of `reflectionsPoolMaxTokens` first, ordinary reflections fill the
+rest newest-first, leftover budget spills back to priority, and priority reflections
+that still cannot fit are reported (debug event plus a one-line compaction-output
+notice pointing at their recall ids) instead of silently evicted. Live support means
+present in the same projection: a reflection whose supporting observation was
+superseded or dropper-pruned is not promoted by the fallback — which is exactly the
+case the marker covers. Cancellation remains normal supersession.
+
+Invalid marker values are dropped at record time (the batch survives without the
+annotation), and `isReflection` rejects stored records whose `relevance` is not a
+valid value. Legacy records without the field load unchanged and keep the
+support-based fallback. It needs no config key.
 No additional model calls are introduced. Rendered lines count against existing caps.
 
 The observer's normal threshold still defines session-tail coverage: messages below

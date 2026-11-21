@@ -26,6 +26,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { OBSERVER_SYSTEM } from "../src/om/agents/observer/prompts.js";
+import { RelevanceSchema } from "../src/om/agents/observer/tool-schema.js";
 import { estimateStringTokens } from "../src/om/tokens.js";
 import { WORKER_FRAMING_TOKENS } from "../src/om/prompt-budget.js";
 
@@ -34,8 +35,12 @@ type PromptBudgetModule = typeof import("../src/om/prompt-budget.js");
 /** Re-import prompt-budget with the observer schema replaced, forcing the
  * import-time static measurement to run against `schema`. */
 async function loadBudgetWithObserverSchema(schema: unknown): Promise<PromptBudgetModule> {
+  // RelevanceSchema passes through: the reflector tool schema imports it
+  // (#208 marker) and runs at import time alongside the mocked observer
+  // schema, so the factory must keep providing the real union.
   vi.doMock("../src/om/agents/observer/tool-schema.js", () => ({
     RecordObservationsSchema: schema,
+    RelevanceSchema,
   }));
   vi.resetModules();
   return await import("../src/om/prompt-budget.js");
