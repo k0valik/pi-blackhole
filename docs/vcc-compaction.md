@@ -249,7 +249,7 @@ See [[config#Compaction settings#Tail behavior]] for configuration details.
 | Model context | Never included — `sessionEntryToContextMessages` returns nothing for plain custom entries |
 | Blackhole memory | Never included — OM serializers read only `message` and `branch_summary` (`custom_message` is excluded from observer input) |
 | Cut policy | Unchanged — `firstKeptEntryId`, summary, and threshold are untouched |
-| Size | 16 KiB UTF-8 cap (`[Copy truncated]` marker when hit), newest dropped assistant text only |
+| Size | 16 KiB UTF-8 cap (`[Copy truncated]` marker when hit), latest eligible assistant text, copied only when dropped |
 | Content | Text only — no tool output, thinking, or images |
 | Duplicates | Nothing is copied if the latest eligible answer is retained or the same compaction already has a copy; older answers are not shown after a retained newer answer |
 

@@ -198,7 +198,7 @@ When the latest eligible answer is already retained by the cut (the common `mini
 Things that stay out of the copy: tool output, thinking blocks, images, and exact card layout. The copy is truncated at 16 KiB with a `[Copy truncated]` marker; each eligible compaction adds one entry to the session file (a bounded disk and redraw cost, not a token cost).
 
 ```jsonc
-// Default: keep the newest dropped answer visible
+// Default: copy the latest answer only when the cut dropped it
 { "showPreCompactionMessage": true }
 
 // Plain compaction card only
