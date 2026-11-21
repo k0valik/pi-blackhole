@@ -315,7 +315,7 @@ Based on interview answers, build the config object. Write it to:
   "observerPreambleMaxTokens": 0,      // 0 = auto (30% of chunk). Caps prior-observation preamble in manual mode only.
   "observationsPoolMaxTokens": 20000,  // max active observation pool before dropper prunes
   "observationsPoolTargetTokens": 10000, // optional — dropper target after pruning; defaults to half of pool max
-  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output, newest first (0 = uncapped)
+  "reflectionsPoolMaxTokens": 8000,   // max rendered reflection tokens in compaction output; priority tier (relevance marker or live critical/high support) fills up to half first, rest newest first (0 = uncapped)
   "providerIdleTimeoutMs": 0,          // body-idle timeout between provider response chunks (0/unset = disabled/inherit)
   "workerAttemptTimeoutMs": 0,         // hard deadline per model attempt (0/unset = disabled, max 2147483647); configured candidates: transient cooldown + fallback; session fallback: once per stage, no cooldown
   "reflectorInputMaxTokens": 80000,    // reflector prompt token cap

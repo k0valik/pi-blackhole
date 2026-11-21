@@ -486,7 +486,7 @@ Stored observation-token pressure threshold for full-fold maintenance, plus a ha
 
 ### `reflectionsPoolMaxTokens`
 
-Hard cap on estimated rendered reflection lines in compaction output. Selects newest whole records that fit, then restores source order. IDs and newline separators count. Non-negative finite integer; `0` disables the cap. Invalid file values use the default. This does not limit worker prompts or raw/view lookups, and omitted source records remain available through `recall`.
+Hard cap on estimated rendered reflection lines in compaction output. Selection is tiered before recency: reflections carrying a critical/high `relevance` marker, else a live critical/high supporting observation, form a priority tier that claims at most half the pool first (critical before high, newest-first within a tier); ordinary reflections fill the rest newest-first, and any leftover budget spills back to priority so the pool is never wasted. Whole records only, output restored to source order. Live support means present in the same projection — superseded, dropped or out-of-boundary support never promotes a reflection. Priority reflections that still cannot fit the whole pool are reported in a `before_compact.reflection_priority_overflow` debug event and a one-line notice in the compaction output instead of being silently evicted. IDs and newline separators count. Non-negative finite integer; `0` disables the cap. Invalid file values use the default. This does not limit worker prompts or raw/view lookups (observer and reflector preambles keep plain newest-first selection), and omitted source records remain available through `recall`.
 
 | Type | Default |
 |------|---------|

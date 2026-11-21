@@ -433,6 +433,32 @@ and `/blackhole-memory` views; the ledger, worker input, dropper coverage, expor
 recall keep it. Export and recall omit the suffix.
 Nothing edits an earlier record or append segment. Toggling changes display at the
 next compaction only. Both keys off preserve legacy rendering, prompt and tool schema.
+
+## Reflection relevance marker and bounded pool priority
+
+`record_reflections` accepts an optional `relevance` field reusing the observer's
+four-value vocabulary (`low`/`medium`/`high`/`critical`). The reflector is taught to
+set `critical` for explicit user restrictions, binding decisions, invariants and
+safety constraints, and `high` for durable preferences, corrections and
+project-defining choices. The field is never rendered in output text; it exists so the
+bounded compaction pool can keep the most binding reflections when it fills.
+
+Selection precedence: the marker is authoritative when present — `critical`/`high`
+join the priority tier, `low`/`medium` deliberately downgrade to ordinary. Marker-less
+records fall back to the relevance of their live supporting observations (confirmed
+ask-user decisions are rated at least `high` by the observer). Priority reflections
+claim at most half of `reflectionsPoolMaxTokens` first, ordinary reflections fill the
+rest newest-first, leftover budget spills back to priority, and priority reflections
+that still cannot fit are reported (debug event plus a one-line compaction-output
+notice pointing at their recall ids) instead of silently evicted. Live support means
+present in the same projection: a reflection whose supporting observation was
+superseded or dropper-pruned is not promoted by the fallback — which is exactly the
+case the marker covers. Cancellation remains normal supersession.
+
+Invalid marker values are dropped at record time (the batch survives without the
+annotation), and `isReflection` rejects stored records whose `relevance` is not a
+valid value. Legacy records without the field load unchanged and keep the
+support-based fallback. It needs no config key.
 No additional model calls are introduced. Rendered lines count against existing caps.
 
 The observer's normal threshold still defines session-tail coverage: messages below
