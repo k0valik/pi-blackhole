@@ -137,10 +137,11 @@ export interface UnifiedConfig {
   /** Opt-in policy-independent VCC bridge when the preferred context cannot fit. */
   contextPressureFallback: "off" | "vcc";
 
-  /** Show a display-only copy of the newest assistant output that the
-   *  compaction dropped from view (`blackhole-pre-compaction-output` custom
-   *  entry). Cosmetic: the copy never enters provider context or Blackhole
-   *  memory, and the compaction cut policy is unchanged. Capped at 16 KiB. */
+  /** Show a display-only copy of the latest eligible assistant output, only
+   *  when the compaction dropped it from view (`blackhole-pre-compaction-output`
+   *  custom entry). Cosmetic: the copy never enters provider context or
+   *  Blackhole memory, and the compaction cut policy is unchanged. Capped at
+   *  16 KiB. */
   showPreCompactionMessage: boolean;
 
   /** Maximum historical tool-output text tokens retained in provider context.

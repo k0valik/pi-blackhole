@@ -146,7 +146,7 @@
     "  compactionSummaryMode (default|append) — replace one summary or freeze auto-compaction segments",
     "  tailBehavior (pi-default|minimal|unobserved) — how much stays visible",
     "  midRunCompaction (resume|pause|off) — threshold check during tool loops",
-    "  showPreCompactionMessage (true|false) — display-only copy of the newest dropped answer, rendered under the compaction card and never sent to the model",
+    "  showPreCompactionMessage (true|false) — display-only copy of the latest assistant answer, only if compaction dropped it; rendered under the compaction card and never sent to the model",
     "  compactAfterTokens (0=not set) — explicit fixed threshold; any value other than 81000 wins over the preset curve, while 0 leaves the curve governing",
     "  compactAfterRatio (0-1, 0=not set) — opt-in window-derived threshold floor(contextWindow x ratio), re-derived on every check so /model changes take effect",
     "  compactReserveTokens (0=not set) — opt-in constant-headroom threshold; compacts when only this many tokens of window remain",

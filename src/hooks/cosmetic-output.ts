@@ -104,10 +104,9 @@ export function truncateToBytes(
 /**
  * Newest assistant text omitted by this compaction.
  *
- * Walks the session path backwards from the compaction entry and skips every
- * entry that survives into context (`buildContextEntries()` = compaction plus
- * retained tail). The first assistant message with ordinary text that is not
- * retained is the copy candidate; `undefined` means nothing worth copying.
+ * Walks the session path backwards from the compaction entry to find the
+ * latest eligible assistant text. If it survives into context, do not copy an
+ * older answer after it; otherwise return it as the display-copy candidate.
  */
 export function selectOmittedAssistantText(opts: {
   /** Session path, oldest first (host `getBranch()`). */
@@ -125,13 +124,15 @@ export function selectOmittedAssistantText(opts: {
   const first = Math.max(0, start - maxScan);
   for (let i = start - 1; i >= first; i--) {
     const entry = branch[i];
-    if (!entry?.id || retainedIds.has(entry.id)) continue;
+    if (!entry?.id) continue;
     if (entry.type !== "message") continue;
     const message = entry.message;
     if (!isObject(message) || message.role !== "assistant") continue;
     if (message.stopReason === "aborted") continue;
     const text = assistantText(message);
-    if (text) return { entryId: entry.id, text };
+    if (!text) continue;
+    if (retainedIds.has(entry.id)) return undefined;
+    return { entryId: entry.id, text };
   }
   return undefined;
 }
