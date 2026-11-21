@@ -234,7 +234,7 @@ The interaction matrix:
 | manual | (any) | skipped | Pi handles | blackhole handles |
 | off | (any) | skipped | Pi handles | blackhole handles |
 
-**On any yield** (pi-default engine, manual/off, the provider-skip shim, or the defensive empty-summary decline), Pi's own summarizer runs the summary on the **active session model** — never an OM worker model; `sessionFallback` and OM cooldown policy do not apply to it. With `compactionEngine: "blackhole"` no model is called for the summary (deterministic VCC extraction + ledger projection). Yields trace `before_compact.yields_to_pi_summarizer` {reason, model} and warn once per cooldown window when the session model is in one of blackhole's own cooldown windows. If the session model must not summarize: `/model`, or engine "blackhole".
+**On any yield** (pi-default engine, manual/off, or the defensive empty-summary decline), Pi's own summarizer runs the summary on the **active session model** — never an OM worker model; `sessionFallback` and OM cooldown policy do not apply to it. With `compactionEngine: "blackhole"` no model is called for the summary (deterministic VCC extraction + ledger projection). Yields trace `before_compact.yields_to_pi_summarizer` {reason, model} and warn once per cooldown window when the session model is in one of blackhole's own cooldown windows. If the session model must not summarize: `/model`, or engine "blackhole".
 
 `tailBehavior` controls how much stays visible after compaction. Only applies when `compactionEngine: "blackhole"`:
 - `"minimal"` (default) — keep the last user turn, or use Pi's later safe split-turn boundary for an oversized current turn. Everything before the chosen boundary is compiled.
