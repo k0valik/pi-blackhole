@@ -186,6 +186,8 @@ The `buildOwnCut()` function determines which messages to compile:
 
 When blackhole is active (`compactionEngine: "blackhole"`), the hook owns the summary for every Pi-initiated compaction — threshold auto-compact, overflow recovery, and manual `/compact` — and returns `{ compaction: { ... } }` to take ownership. In `manual`/`off` modes and for `compactionEngine: "pi-default"` it returns `undefined` so Pi handles the compaction natively (only `/blackhole` forces VCC).
 
+On every yield, Pi's own summarizer runs on the **active session model** — pi captures `this.model` before emitting `session_before_compact` (virtual models re-resolve at request time), so an OM worker model is never used and `sessionFallback` plus OM cooldown policy do not apply to that call. Each yield site emits a `before_compact.yields_to_pi_summarizer` trace with the reason and session-model identity, and blackhole warns once per cooldown window when the session model sits inside one of its own persisted windows.
+
 Defensive delegation: `compile()` returns `""` when everything before the cut is noise-filtered and no previous summary exists. If the VCC summary is empty **and** the OM projection produced no reflections/observations, the hook returns `undefined` (emitting a `before_compact.native_fallback` trace) so Pi's native summarizer writes the summary instead of blackhole replacing the context with a footer-only block. `ExtensionHandler` permits `void`, and Pi only acts on `result?.compaction`, so the bare return is a safe fall-through.
 
 ### Cancellation flag

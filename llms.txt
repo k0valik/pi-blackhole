@@ -234,6 +234,8 @@ The interaction matrix:
 | manual | (any) | skipped | Pi handles | blackhole handles |
 | off | (any) | skipped | Pi handles | blackhole handles |
 
+**On any yield** (pi-default engine, manual/off, the provider-skip shim, or the defensive empty-summary decline), Pi's own summarizer runs the summary on the **active session model** — never an OM worker model; `sessionFallback` and OM cooldown policy do not apply to it. With `compactionEngine: "blackhole"` no model is called for the summary (deterministic VCC extraction + ledger projection). Yields trace `before_compact.yields_to_pi_summarizer` {reason, model} and warn once per cooldown window when the session model is in one of blackhole's own cooldown windows. If the session model must not summarize: `/model`, or engine "blackhole".
+
 `tailBehavior` controls how much stays visible after compaction. Only applies when `compactionEngine: "blackhole"`:
 - `"minimal"` (default) — keep the last user turn, or use Pi's later safe split-turn boundary for an oversized current turn. Everything before the chosen boundary is compiled.
 - `"pi-default"` — gentle: use Pi's `firstKeptEntryId`, respects Pi's `keepRecentTokens` (~20k tokens kept visible).
@@ -285,7 +287,7 @@ Based on interview answers, build the config object. Write it to:
   // ── Memory ──
   "memory": true,                 // false = no workers, no memory injection
   "subagentMemory": "off",        // "off" = no OM in detected subagents; "inherit" = follow memory
-  "sessionFallback": false,       // true = opt in to the session model as last-resort fallback (costs main-model tokens, busts its prompt cache)
+  "sessionFallback": false,       // true = session model as last-resort OM fallback (OM workers only; never affects Pi's summarizer on a yield)
   "reflectionTimestamps": true,  // Show reflection evidence time
   "reflectionSupersedes": false, // Replacement notes; replaced reflections leave compaction output
   "observeOnShutdown": false,    // One bounded observer attempt before session exit

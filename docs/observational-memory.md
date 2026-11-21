@@ -272,6 +272,8 @@ Models with active cooldowns are transparently skipped. Up to 10 model resolutio
 
 `sessionFallback: false` (default) skips the stage when all OM candidates are exhausted, so background workers never spend the session model's tokens or bust its prompt cache. Set `true` to opt back in to the session model as a last resort — useful when you would rather a worker run on the main model than not run at all.
 
+This setting governs OM worker stages only: when blackhole yields compaction to Pi (`compactionEngine: "pi-default"`, or `compaction: "manual"`/`"off"`), Pi's own summarizer runs on the active session model regardless of `sessionFallback`.
+
 ## Cooldown system
 
 A provider rejection specific to the current request (payload/context too large or an invalid thinking level) skips that identity for the current stage without persisting a cooldown. This applies to configured candidates and the session fallback, including failures after useful work has closed. Classification uses SDK fields or status-framed, specific rejection text; generic 400/422 errors, required provider headers, 401 authentication, provider 404 and transient failures keep their existing behavior.

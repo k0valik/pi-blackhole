@@ -130,6 +130,8 @@ Replaces the old `overrideDefaultCompaction`.
 | manual | (any) | skipped | Pi handles ✓ | blackhole handles |
 | off | (any) | skipped | Pi handles ✓ | blackhole handles |
 
+**Which model summarizes on a yield?** Whenever blackhole steps aside — the `pi-default` engine row above, `manual`/`off` `/compact`, the experimental provider-skip shim, or the defensive empty-summary decline — Pi's own summarizer runs on the **active session model** (the model selected in the session, resolved at request time when it is virtual/routed). No observational-memory worker model is ever used for that summary, and `sessionFallback` plus OM cooldown policy do not apply to it: the OM worker chain and Pi's summarizer are separate ownership domains. With `compactionEngine: "blackhole"` no model is called for the summary at all — it is deterministic VCC extraction plus the ledger projection. Each yield emits a `before_compact.yields_to_pi_summarizer` debug trace with the reason and session-model identity, and blackhole warns once per cooldown window when a yield heads into a session model inside one of its own persisted cooldown windows. If your session model is unavailable or must not be used for summarization, switch it (`/model`) or set `compactionEngine: "blackhole"`. A pi-side setting that pins a dedicated summarizer model does not exist today (a `compaction.model` proposal was declined upstream; a configurable compaction model/thinking level is under discussion in [earendil-works/pi#7553](https://github.com/earendil-works/pi/issues/7553) / [#11255](https://github.com/earendil-works/pi/pull/11255)), and blackhole deliberately does not substitute OM worker models into that call.
+
 ### `tailBehavior`
 
 Controls how much of the recent transcript stays *visible* after compaction. Only applies when `compactionEngine: "blackhole"`.
@@ -424,6 +426,8 @@ Precedence: `memory: false` still disables OM everywhere. Under `"off"`, a detec
 ### `sessionFallback`
 
 Defaults to `false`: when all OM model candidates are exhausted, the stage is **skipped** instead of falling back to the main coding (session) model. Set to `true` to opt in to the session model as a last resort — useful when you would rather a worker run on the main model than not run at all, but note that worker runs on the session model add cost and bust its prompt cache.
+
+`sessionFallback` governs OM worker stages only. It does **not** change which model summarizes when blackhole yields compaction to Pi (`compactionEngine: "pi-default"` or `compaction: "manual"`/`"off"`): that summary always runs on the active session model. See [`compactionEngine`](#compactionengine) for the full boundary.
 
 | Type | Default |
 |------|---------|
