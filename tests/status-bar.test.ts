@@ -25,7 +25,10 @@ import {
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
 function msg(id: string, tokens: number) {
-  return { type: "custom_message", id, content: "x".repeat(tokens * 4) };
+  // Branch summaries keep the compaction-gauge token math (ceil(chars/4)) while
+  // staying observer source entries; custom_message no longer counts (excluded
+  // from observer accounting).
+  return { type: "branch_summary", id, summary: "x".repeat(tokens * 4) };
 }
 
 function observation(id: string, tokenCount: number) {

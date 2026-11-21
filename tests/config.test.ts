@@ -299,6 +299,81 @@ describe("showWorkerNotifications", () => {
   });
 });
 
+describe("showPreCompactionMessage", () => {
+  const envKey = "PI_BLACKHOLE_SHOW_PRE_COMPACTION_MESSAGE";
+
+  afterEach(() => {
+    delete process.env[envKey];
+  });
+
+  it("defaults to true when no config file exists", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(true);
+  });
+
+  it("honors an explicit false from the config file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showPreCompactionMessage: false });
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(false);
+  });
+
+  it("honors an explicit false from the project-local config file", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const projectDir = join(testDir, "project-show-pre-compaction");
+    writeConfig(
+      { showPreCompactionMessage: false },
+      "project-show-pre-compaction/.pi/pi-blackhole-config.json",
+    );
+    expect(loadUnifiedConfig(projectDir).showPreCompactionMessage).toBe(false);
+  });
+
+  it("ignores a non-boolean file value", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showPreCompactionMessage: "no" });
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(true);
+  });
+
+  it("env override wins over the file value", async () => {
+    process.env[envKey] = "true";
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ showPreCompactionMessage: false });
+    expect(loadUnifiedConfig(testDir).showPreCompactionMessage).toBe(true);
+  });
+});
+
+describe("boolean config file parsing", () => {
+  // Legacy passive env vars mute `memory` regardless of the file.
+  const PASSIVE_ENV = [
+    "PI_BLACKHOLE_PASSIVE",
+    "PI_VCC_OM_PASSIVE",
+    "PI_OBSERVATIONAL_MEMORY_PASSIVE",
+  ] as const;
+
+  it("parses every boolean DEFAULTS key from the config file", async () => {
+    const { DEFAULTS, loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    const { DECLARATIVE_ENV_OVERRIDES } = await import("../src/core/config-env.js");
+
+    const notParsed: string[] = [];
+    for (const [key, defaultValue] of Object.entries(DEFAULTS)) {
+      if (typeof defaultValue !== "boolean") continue;
+      // Env overrides win over the file by design. Skip such keys instead of
+      // touching process.env: this suite never mutates the inherited
+      // environment (an earlier suite that did deleted ~/.pi/agent — #202).
+      const override = DECLARATIVE_ENV_OVERRIDES[key];
+      const envVar = typeof override === "string" ? override : override?.var;
+      if (envVar !== undefined && process.env[envVar] !== undefined) continue;
+      if (key === "memory" && PASSIVE_ENV.some((name) => process.env[name] !== undefined)) continue;
+      writeConfig({ [key]: !defaultValue });
+      const loaded = loadUnifiedConfig(testDir) as unknown as Record<string, unknown>;
+      if (loaded[key] !== !defaultValue) notParsed.push(key);
+    }
+
+    // A boolean declared in DEFAULTS but absent from parseConfig keeps its
+    // default here, so this list is exactly the set the file cannot configure.
+    expect(notParsed).toEqual([]);
+  });
+});
+
 describe("cacheRetention", () => {
   const envKey = "PI_BLACKHOLE_CACHE_RETENTION";
   const mgrDir = join(testDir, "mgr-cache-retention");
@@ -579,6 +654,54 @@ describe("Config with model IDs containing slashes and colons", () => {
     });
     const config = loadUnifiedConfig(testDir);
     expect(config.observerModel!.cooldownHours).toBe(0);
+  });
+
+  it("parses cooldownMinutesTransient on model config", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({
+      observerModel: {
+        provider: "openrouter",
+        id: "google/gemma-4-26b-a4b-it:free",
+        cooldownMinutesTransient: 15,
+      },
+    });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.observerModel!.cooldownMinutesTransient).toBe(15);
+  });
+
+  it("parses cooldownMinutesTransient: 0 as valid (in-cycle only)", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({
+      observerModel: {
+        provider: "openrouter",
+        id: "some-model:free",
+        cooldownMinutesTransient: 0,
+      },
+    });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.observerModel!.cooldownMinutesTransient).toBe(0);
+  });
+
+  it("parses cooldownMinutesTransient on a thinking-only modifier", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    writeConfig({ observerModel: { thinking: "low", cooldownMinutesTransient: 2 } });
+    const config = loadUnifiedConfig(testDir);
+    expect(config.observerModel!.cooldownMinutesTransient).toBe(2);
+  });
+
+  it("rejects invalid cooldownMinutesTransient values", async () => {
+    const { loadUnifiedConfig } = await import("../src/core/unified-config.js");
+    for (const value of [-1, 1.5, "5"]) {
+      writeConfig({
+        observerModel: {
+          provider: "openrouter",
+          id: "some-model:free",
+          cooldownMinutesTransient: value,
+        },
+      });
+      const config = loadUnifiedConfig(testDir);
+      expect(config.observerModel!.cooldownMinutesTransient).toBeUndefined();
+    }
   });
 
   it("parses fallback model arrays", async () => {

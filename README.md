@@ -46,14 +46,14 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 
 ## ✨ What's new
 
-> **Latest release: [0.5.18](CHANGELOG.md#0518---2026-11-11)**
+> **Latest release: [0.5.19](CHANGELOG.md#0519---2026-11-21)**
 >
+> - **Active user restrictions survive a full reflection pool** — reflections can carry a `relevance` marker, priority records claim up to half the bounded pool before ordinary recency fill, and anything still left out surfaces as a one-line notice pointing at its recall ids — default-on, no new config key.
+> - **Compaction yields now say which model will summarize** — every hand-off to Pi's summarizer traces the reason and session-model identity, and blackhole warns once per cooldown window when that model is inside one of its own persisted windows.
+> - **Transient worker failures recover in minutes, not hours** — `cooldownMinutesTransient` (default: 5) shortens network, overload and 5xx cooldowns, and a content-policy refusal skips the current chunk without benching the model.
+> - **Running the test suite inside Pi can no longer delete `~/.pi/agent`** — test setup always pins `PI_CODING_AGENT_DIR` to a fresh temp dir and guards every deletion path.
 > - **Session Goals now follow the latest work, not the first eight** — compaction keeps the most recent goals and preserves the latest scope change, so long sessions stop re-injecting asks that were already replaced.
 > - **Busy memory pipelines no longer drop deferred consolidation work** — a trigger that arrives mid-pipeline is coalesced and re-evaluated once after cleanup, so unobserved backlog no longer waits for the next user message.
-> - **A stale session context can no longer kill Pi from the footer poll** — after `newSession`/`fork`/`switchSession`/`reload`, the status-bar probe falls back to an empty session instead of throwing from a timer.
-> - **The session model is no longer a silent worker fallback** — `sessionFallback` defaults to `false`, so an exhausted worker stage is skipped instead of spending main-model tokens and busting its prompt cache; stage cooldowns now also cover the fallback model. Set `sessionFallback: true` to opt back in.
-> - **Observation progress no longer stalls after an interrupted turn** — an aborted turn leaving an empty or thinking-only assistant message could make the observer re-read the same chunk, so compaction repeated every turn without shrinking context.
-> - **Scaffolding can no longer truncate an existing config** — the config file is created with `O_EXCL`, closing the check-then-write race that replaced it with defaults.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for detailed fixes and contribution history.
 
@@ -142,7 +142,7 @@ Manual mode is the maintainer's daily driver: workers still run, but observation
 
 #### Who owns the compaction?
 
-With the default `compactionEngine: "blackhole"`, blackhole's `session_before_compact` hook owns every compaction Pi initiates — threshold auto-compact, overflow recovery, and `/compact` — replacing Pi's LLM summarizer with the deterministic pipeline. The only exception is defensive: if both the VCC summary and the OM projection come up empty (a pathological all-noise transcript), blackhole declines and Pi's native summarizer runs, so you never get a context-free replacement. With `compactionEngine: "pi-default"`, `compaction: "manual"`, or `compaction: "off"`, Pi handles everything except explicit `/blackhole`. See [`docs/CONFIG.md` → `compactionEngine`](docs/CONFIG.md#compactionengine) for the full interaction matrix.
+With the default `compactionEngine: "blackhole"`, blackhole's `session_before_compact` hook owns every compaction Pi initiates — threshold auto-compact, overflow recovery, and `/compact` — replacing Pi's LLM summarizer with the deterministic pipeline. The only exception is defensive: if both the VCC summary and the OM projection come up empty (a pathological all-noise transcript), blackhole declines and Pi's native summarizer runs, so you never get a context-free replacement. With `compactionEngine: "pi-default"`, `compaction: "manual"`, or `compaction: "off"`, Pi handles everything except explicit `/blackhole` — and its native summarizer then runs on the active session model, never an OM worker model (`sessionFallback` and OM cooldowns do not apply to that call). See [`docs/CONFIG.md` → `compactionEngine`](docs/CONFIG.md#compactionengine) for the full interaction matrix.
 
 ### How does `/blackhole` compare to `/compact`?
 
@@ -361,7 +361,7 @@ What blackhole adds and reworks on top:
 - **Memory toggle** (`/blackhole om-off` / `/blackhole om-on`) — disable the memory layer without uninstalling.
 - **Per-session pending state** — isolated per-session JSON files, no cross-session contamination.
 - **Custom provider bridge** — consolidation agents loaded via jiti can still use provider stream functions registered by other extensions.
-- **Retryable error detection with per-model cooldowns** — models that fail get cooled down, fallbacks tried automatically, 30-second retry gate prevents spam.
+- **Per-cause cooldowns** — transient network/overload failures cool for minutes, quota/config failures for the configured hours, and content refusals skip only the current stage; fallbacks are tried automatically and the 30-second retry gate prevents spam.
 - **Improved observer/reflector/dropper prompts** — each heavily customized with detailed extraction rules, relevance guidance, and error handling.
 - **OM-recall coupling** — when expanding session entries via `recall`, related observations and reflections are automatically shown.
 - **Thinking level support** — per-model `thinking` field for reasoning effort control, including `max` where supported by the provider.

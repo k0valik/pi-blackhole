@@ -36,6 +36,7 @@ import { estimateStringTokens } from "../../tokens.js";
 import {
   observationToSummaryLine,
   reflectionToSummaryLine,
+  isRelevance,
   isReflectionTimestamp,
   isMemoryId,
   type Observation,
@@ -215,9 +216,13 @@ export async function runReflector(args: RunReflectorArgs): Promise<ReflectorRes
             } else if (!supersedes.includes(target)) supersedes.push(target);
           }
         }
+        // #208 marker: invalid values are dropped, not batch-fatal — same
+        // optional-field philosophy as supersedes/timestamp annotations.
+        const relevance = isRelevance(proposal.relevance) ? proposal.relevance : undefined;
         accumulated.set(id, {
           ...(timestamp ? { timestamp } : {}),
           ...(supersedes.length ? { supersedes } : {}),
+          ...(relevance ? { relevance } : {}),
           id,
           content,
           supportingObservationIds,

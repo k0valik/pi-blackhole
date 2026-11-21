@@ -39,6 +39,27 @@ function readCooldownFile(): Record<string, unknown> {
   return JSON.parse(readFileSync(p, "utf-8"));
 }
 
+type CooldownRecord = {
+  until: string;
+  reason: string;
+  stage: string;
+  cause?: string;
+};
+
+function cooldownRecords(): Record<string, CooldownRecord> {
+  return readCooldownFile() as Record<string, CooldownRecord>;
+}
+
+function withFakeNow<T>(fn: () => T): T {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-21T00:00:00.000Z"));
+  try {
+    return fn();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 function makeModel(id: string, provider = "openrouter", overrides: Record<string, unknown> = {}) {
   return {
     id,
@@ -966,6 +987,131 @@ describe("Runtime — recordRetryableError", () => {
 
     // NOT in in-memory set
     expect(runtime.failedInCycle.has("openrouter/persist:free")).toBe(false);
+  });
+});
+
+describe("Runtime — per-cause cooldown policy", () => {
+  it("persists transient failures for five minutes by default", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    withFakeNow(() =>
+      runtime.recordRetryableError(
+        { provider: "openrouter", id: "transient:free" },
+        new Error("Observer API error: WebSocket error"),
+        "observer",
+      ),
+    );
+
+    expect(cooldownRecords()["openrouter/transient:free"]).toEqual({
+      until: "2026-11-21T00:05:00.000Z",
+      reason: "Observer API error: WebSocket error",
+      stage: "observer",
+      cause: "provider_transient",
+    });
+    expect(runtime.failedInCycle.has("openrouter/transient:free")).toBe(false);
+  });
+
+  it("honors a per-model transient duration", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    withFakeNow(() =>
+      runtime.recordRetryableError(
+        { provider: "openrouter", id: "slow-transient:free", cooldownMinutesTransient: 12 },
+        new Error("HTTP 503 Service Unavailable"),
+        "observer",
+      ),
+    );
+
+    expect(cooldownRecords()["openrouter/slow-transient:free"]?.until).toBe(
+      "2026-11-21T00:12:00.000Z",
+    );
+  });
+
+  it("keeps transient duration 0 in failedInCycle without a disk write", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    runtime.recordRetryableError(
+      { provider: "openrouter", id: "cycle-only:free", cooldownMinutesTransient: 0 },
+      new Error("HTTP 503 Service Unavailable"),
+      "observer",
+    );
+
+    expect(readCooldownFile()).toEqual({});
+    expect(runtime.failedInCycle.has("openrouter/cycle-only:free")).toBe(true);
+  });
+
+  it("keeps content refusals in failedInCycle without a disk write", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    runtime.recordRetryableError(
+      { provider: "anthropic", id: "sonnet" },
+      new Error("Observer API error: 400 Bad Request: request violates our usage policy"),
+      "observer",
+    );
+
+    expect(readCooldownFile()).toEqual({});
+    expect(runtime.failedInCycle.has("anthropic/sonnet")).toBe(true);
+  });
+
+  it("keeps rate-limit, configuration and unknown failures on cooldownHours", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    const cases = [
+      ["rate-limit:free", new Error("429 Too Many Requests"), "provider_rate_limit"],
+      ["config:free", new Error("HTTP 401 Unauthorized"), "provider_configuration"],
+      ["unknown:free", new Error("all good"), "unknown"],
+    ] as const;
+    withFakeNow(() => {
+      for (const [id, error] of cases) {
+        runtime.recordRetryableError(
+          { provider: "openrouter", id, cooldownHours: 2 },
+          error,
+          "observer",
+        );
+      }
+    });
+
+    for (const [id, , cause] of cases) {
+      expect(cooldownRecords()[`openrouter/${id}`]).toMatchObject({
+        until: "2026-11-21T02:00:00.000Z",
+        cause,
+      });
+    }
+  });
+
+  it("does not shorten an existing longer cooldown", async () => {
+    const { Runtime } = await import("../src/om/runtime.js");
+    const runtime = new Runtime();
+    runtime.ensureConfig(testDir);
+
+    withFakeNow(() => {
+      runtime.recordRetryableError(
+        { provider: "openrouter", id: "mixed:free", cooldownHours: 2 },
+        new Error("429 Too Many Requests"),
+        "observer",
+      );
+      runtime.recordRetryableError(
+        { provider: "openrouter", id: "mixed:free" },
+        new Error("HTTP 503 Service Unavailable"),
+        "observer",
+      );
+    });
+
+    expect(cooldownRecords()["openrouter/mixed:free"]).toMatchObject({
+      until: "2026-11-21T02:00:00.000Z",
+      reason: "429 Too Many Requests",
+      cause: "provider_rate_limit",
+    });
   });
 });
 

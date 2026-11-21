@@ -7,7 +7,7 @@
 import { Type } from "typebox";
 import type { Static } from "typebox";
 
-const RelevanceSchema = Type.Union([
+export const RelevanceSchema = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),

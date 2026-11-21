@@ -331,6 +331,49 @@ describe("V3 reflector agent", () => {
     ]);
   });
 
+  it("records the relevance marker on accepted proposals", async () => {
+    const content = "User decided: do not publish the test draft.";
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", {
+        reflections: [
+          {
+            content,
+            supportingObservationIds: ["aaaaaaaaaaaa"],
+            relevance: "critical",
+          },
+        ],
+        complete: true,
+      });
+    });
+
+    const result = await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(result.reflections).toHaveLength(1);
+    expect(result.reflections[0]!.relevance).toBe("critical");
+  });
+
+  it("keeps a reflection whose relevance marker is invalid, without the marker", async () => {
+    const content = "User prefers source-backed memory.";
+    const loop = fakeAgentLoop(async (_prompts, context) => {
+      await context.tools[0].execute("tool-1", {
+        reflections: [
+          {
+            content,
+            supportingObservationIds: ["aaaaaaaaaaaa"],
+            relevance: "urgent",
+          },
+        ],
+        complete: true,
+      });
+    });
+
+    const result = await runReflector({ ...baseArgs, agentLoop: loop });
+
+    expect(result.reflections).toHaveLength(1);
+    expect(result.reflections[0]!.id).toBe(hashId(content));
+    expect(result.reflections[0]!.relevance).toBeUndefined();
+  });
+
   it("rejects invented support ids and multiline content", async () => {
     let toolResult: CapturedToolResult | undefined;
     const loop = fakeAgentLoop(async (_prompts, context) => {

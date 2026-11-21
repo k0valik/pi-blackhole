@@ -31,10 +31,10 @@ import {
 } from "../src/om/pending.js";
 import { registerMemoryCommand } from "../src/commands/memory.js";
 import {
+  branchSummary,
   observation,
   observationsDroppedEntry,
   observationsRecordedEntry,
-  textCustomMessage,
   type TestEntry,
 } from "./fixtures/session.js";
 
@@ -55,7 +55,7 @@ function asEntries(entries: TestEntry[]): Entry[] {
 /** Branch with two live observations (700 + 700 = 1,400 tokens). */
 function observationBranch(): TestEntry[] {
   return [
-    textCustomMessage("raw-1", "x".repeat(400)),
+    branchSummary("raw-1", "x".repeat(400)),
     observationsRecordedEntry("om-obs-1", {
       observations: [
         observation("aaaaaaaaaaaa", { tokenCount: 700 }),
@@ -295,7 +295,7 @@ describe("observationPoolTokens", () => {
   });
 
   it("measures only the branch when pending is omitted", () => {
-    const entries = asEntries([textCustomMessage("raw-1", "x".repeat(400))]);
+    const entries = asEntries([branchSummary("raw-1", "x".repeat(400))]);
     expect(observationPoolTokens(entries)).toEqual({ tokens: 0, count: 0 });
   });
 
@@ -419,7 +419,7 @@ describe("trigger / display pool agreement", () => {
   });
 
   it("manual mode: the trigger and the memory pool line both include pending batches", async () => {
-    const entries = asEntries([textCustomMessage("raw-1", "x".repeat(400))]);
+    const entries = asEntries([branchSummary("raw-1", "x".repeat(400))]);
     savePendingObservation(SESSION, {
       coversUpToId: "raw-1",
       data: {

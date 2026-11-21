@@ -17,6 +17,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "../om/runtime.js";
 import { debugLog } from "../om/debug-log.js";
+import { sessionModelIdentity } from "./before-compact.js";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -140,7 +141,12 @@ function handleCompactFailed(event: any, ctx: any, runtime: Runtime): void {
   // Noise filter: with compactionEngine "pi-default" the failure belongs to
   // pi's engine (unless the content or the trigger was ours) — light trace only.
   if (runtime.config.compactionEngine === "pi-default" && !attributedFromExtension) {
-    trace("compact_failed.skipped_pi_default", { reason });
+    // The failing summary came from Pi's own summarizer on the active session
+    // model — record which model that was (issue #207).
+    trace("compact_failed.skipped_pi_default", {
+      reason,
+      model: sessionModelIdentity(ctx?.model),
+    });
     return;
   }
 

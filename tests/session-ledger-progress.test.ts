@@ -39,7 +39,10 @@ import {
 
 describe("session-ledger V3 progress helpers", () => {
   it("detects only raw/source entries as source entries", () => {
-    expect(isSourceEntry(textCustomMessage("raw-1", "abcd"))).toBe(true);
+    // custom_message is excluded from observer source membership: extension
+    // injections are main-model-facing and must not enter observer accounting.
+    expect(isSourceEntry(textCustomMessage("raw-1", "abcd"))).toBe(false);
+    expect(isSourceEntry(rawMessage("raw-1", "abcd"))).toBe(true);
     expect(isSourceEntry(branchSummary("sum-1", "abcd"))).toBe(true);
     expect(
       isSourceEntry(
@@ -53,19 +56,19 @@ describe("session-ledger V3 progress helpers", () => {
   });
 
   it("builds a branch id to index map", () => {
-    const entries = [textCustomMessage("raw-1", "abcd"), textCustomMessage("raw-2", "efgh")];
+    const entries = [branchSummary("raw-1", "abcd"), branchSummary("raw-2", "efgh")];
     expect(entryIndexById(entries).get("raw-1")).toBe(0);
     expect(entryIndexById(entries).get("raw-2")).toBe(1);
   });
 
   it("counts raw tokens after a branch index and ignores memory/compaction entries", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
+      branchSummary("raw-1", "aaaa"),
       observationsRecordedEntry("om-1", {
         observations: [observation("aaaaaaaaaaaa")],
         coversUpToId: "raw-1",
       }),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-2", "bbbbbbbb"),
       compactionEntry("cmp-1", { firstKeptEntryId: "raw-2" }),
       branchSummary("sum-1", "cccccccccccc"),
     ];
@@ -77,22 +80,22 @@ describe("session-ledger V3 progress helpers", () => {
 
   it("uses independent coverage clocks for observations, reflections, and drops", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
+      branchSummary("raw-1", "aaaa"),
       observationsRecordedEntry("om-aaaaaaaaaaaa", {
         observations: [observation("aaaaaaaaaaaa")],
         coversUpToId: "raw-1",
       }),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-2", "bbbbbbbb"),
       reflectionsRecordedEntry("om-eeeeeeeeeeee", {
         reflections: [reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"])],
         coversUpToId: "raw-2",
       }),
-      textCustomMessage("raw-3", "cccccccccccc"),
+      branchSummary("raw-3", "cccccccccccc"),
       observationsDroppedEntry("om-drop-1", {
         observationIds: ["aaaaaaaaaaaa"],
         coversUpToId: "om-eeeeeeeeeeee",
       }),
-      textCustomMessage("raw-4", "dddddddddddddddd"),
+      branchSummary("raw-4", "dddddddddddddddd"),
     ];
 
     expect(rawTokensSinceObservationCoverage(entries)).toBe(9); // raw-2 + raw-3 + raw-4
@@ -102,7 +105,7 @@ describe("session-ledger V3 progress helpers", () => {
 
   it("lets coversUpToId point to a memory ledger entry", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
+      branchSummary("raw-1", "aaaa"),
       reflectionsRecordedEntry("om-eeeeeeeeeeee", {
         reflections: [reflection("eeeeeeeeeeee", ["aaaaaaaaaaaa"])],
         coversUpToId: "raw-1",
@@ -111,7 +114,7 @@ describe("session-ledger V3 progress helpers", () => {
         observationIds: ["aaaaaaaaaaaa"],
         coversUpToId: "om-eeeeeeeeeeee",
       }),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-2", "bbbbbbbb"),
     ];
 
     expect(latestCoverageIndex(entries, V3_OBSERVATIONS_DROPPED)).toBe(1);
@@ -120,8 +123,8 @@ describe("session-ledger V3 progress helpers", () => {
 
   it("chooses the max covered branch position, not merely latest ledger entry order", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-1", "aaaa"),
+      branchSummary("raw-2", "bbbbbbbb"),
       observationsRecordedEntry("om-aaaaaaaaaaaa", {
         observations: [observation("aaaaaaaaaaaa")],
         coversUpToId: "raw-2",
@@ -130,7 +133,7 @@ describe("session-ledger V3 progress helpers", () => {
         observations: [observation("bbbbbbbbbbbb")],
         coversUpToId: "raw-1",
       }),
-      textCustomMessage("raw-3", "cccccccccccc"),
+      branchSummary("raw-3", "cccccccccccc"),
     ];
 
     expect(latestCoverageIndex(entries, V3_OBSERVATIONS_RECORDED)).toBe(1);
@@ -146,12 +149,12 @@ describe("session-ledger V3 progress helpers", () => {
       data: { observations: [observation("bbbbbbbbbbbb")] },
     };
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
+      branchSummary("raw-1", "aaaa"),
       observationsRecordedEntry("om-aaaaaaaaaaaa", {
         observations: [observation("aaaaaaaaaaaa")],
         coversUpToId: "raw-1",
       }),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-2", "bbbbbbbb"),
       unanchoredMarker,
     ];
 
@@ -167,9 +170,9 @@ describe("session-ledger V3 progress helpers", () => {
 
   it("returns latest inner coverage marker and earlier marker by branch index", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
-      textCustomMessage("raw-2", "bbbbbbbb"),
-      textCustomMessage("raw-3", "cccccccccccc"),
+      branchSummary("raw-1", "aaaa"),
+      branchSummary("raw-2", "bbbbbbbb"),
+      branchSummary("raw-3", "cccccccccccc"),
       observationsRecordedEntry("om-obs", {
         observations: [observation("aaaaaaaaaaaa")],
         coversUpToId: "raw-3",
@@ -190,13 +193,13 @@ describe("session-ledger V3 progress helpers", () => {
 
   it("ignores invalid coverage markers and old V2 markers without throwing", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
+      branchSummary("raw-1", "aaaa"),
       oldV2ObservationEntry("v2-obs"),
       observationsRecordedEntry("om-obs-invalid", {
         observations: [observation("aaaaaaaaaaaa")],
         coversUpToId: "missing",
       }),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-2", "bbbbbbbb"),
     ];
 
     expect(() => rawTokensSinceObservationCoverage(entries)).not.toThrow();
@@ -206,10 +209,10 @@ describe("session-ledger V3 progress helpers", () => {
 
   it("counts raw tokens since the latest Pi compaction without throwing on old memory details", () => {
     const entries = [
-      textCustomMessage("raw-1", "aaaa"),
+      branchSummary("raw-1", "aaaa"),
       compactionEntry("cmp-1", { firstKeptEntryId: "raw-1" }),
       oldV2ObservationEntry("v2-obs"),
-      textCustomMessage("raw-2", "bbbbbbbb"),
+      branchSummary("raw-2", "bbbbbbbb"),
     ];
 
     expect(rawTokensSinceLastCompaction(entries)).toBe(3); // raw-1 + raw-2 from live tail starting at firstKeptEntryId
@@ -327,8 +330,8 @@ describe("usage-aware progress helpers (plan-01 port)", () => {
     it("falls back to the chars/4 estimate when no valid usage exists", () => {
       const entries = [
         compactionEntry("cmp-1", { firstKeptEntryId: "raw-1" }),
-        textCustomMessage("raw-1", "abcd"),
-        textCustomMessage("raw-2", "efgh"),
+        branchSummary("raw-1", "abcd"),
+        branchSummary("raw-2", "efgh"),
       ];
       expect(rawTokensSinceLastCompaction(entries)).toBe(rawTokensAfterIndex(entries, 0));
     });

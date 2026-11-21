@@ -233,23 +233,32 @@ describe("request-local cooldown isolation", () => {
     expect(f.runtime.failedInCycle.has(key)).toBe(false);
   });
   test.each([
-    "HTTP 401 Unauthorized",
-    "HTTP 404 model not found",
-    "HTTP 503 Service Unavailable",
-    "ECONNRESET",
-    '400: {"type":"MissingSessionID","message":"Request is missing x-opencode-session"}',
-    "HTTP 400 Bad Request",
-    "400 status code (no body)",
-    "503 Service Unavailable: upstream status 400: prompt is too long",
-    "HTTP 503 Service Unavailable: upstream status 400: prompt is too long",
-    "HTTP 422 invalid provider configuration",
-    "HTTP 401 Unauthorized: payload too large",
-    "HTTP 503 invalid thinking level",
-    "HTTP 400 Bad Request: context service unavailable",
-  ])("does not blindly suppress status codes or keywords: %s", (message) => {
+    ["HTTP 401 Unauthorized", "2026-10-16T01:00:00.000Z"],
+    ["HTTP 404 model not found", "2026-10-16T01:00:00.000Z"],
+    ["HTTP 503 Service Unavailable", "2026-10-16T00:05:00.000Z"],
+    ["ECONNRESET", "2026-10-16T00:05:00.000Z"],
+    [
+      '400: {"type":"MissingSessionID","message":"Request is missing x-opencode-session"}',
+      "2026-10-16T01:00:00.000Z",
+    ],
+    ["HTTP 400 Bad Request", "2026-10-16T01:00:00.000Z"],
+    ["400 status code (no body)", "2026-10-16T01:00:00.000Z"],
+    [
+      "503 Service Unavailable: upstream status 400: prompt is too long",
+      "2026-10-16T01:00:00.000Z",
+    ],
+    [
+      "HTTP 503 Service Unavailable: upstream status 400: prompt is too long",
+      "2026-10-16T01:00:00.000Z",
+    ],
+    ["HTTP 422 invalid provider configuration", "2026-10-16T01:00:00.000Z"],
+    ["HTTP 401 Unauthorized: payload too large", "2026-10-16T01:00:00.000Z"],
+    ["HTTP 503 invalid thinking level", "2026-10-16T00:05:00.000Z"],
+    ["HTTP 400 Bad Request: context service unavailable", "2026-10-16T01:00:00.000Z"],
+  ])("does not blindly suppress status codes or keywords: %s", (message, until) => {
     const f = fixture();
     f.runtime.recordRetryableError(identity, new Error(message), "observer");
-    expect(cooldowns()[key]?.until).toBe("2026-10-16T01:00:00.000Z");
+    expect(cooldowns()[key]?.until).toBe(until);
   });
   test("a useful close is kept without a misleading cooldown notice", async () => {
     const f = fixture();
@@ -261,6 +270,79 @@ describe("request-local cooldown isolation", () => {
     });
     await runConsolidationPipeline(createExtensionApiDouble(), f.runtime, ctx, f.generation);
     expect(workers.observer).toHaveBeenCalledOnce();
+    expect(f.runtime.getCursor("observer")?.state).toBe("recorded");
+    expect(cooldowns()).toEqual({});
+    expect(notify.mock.calls.some(([message]) => message.includes("model cooled down"))).toBe(
+      false,
+    );
+  });
+});
+
+describe("content-refusal cooldown isolation", () => {
+  const refusal =
+    'Observer API error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Your request was rejected as a result of our safety system. Your request may contain material that violates our Terms of Service."}}';
+
+  test("tries the next fallback without persisting a cooldown", async () => {
+    const f = fixture();
+    const fallback = { provider: "probe", id: "fallback" };
+    Object.assign(f.runtime.config, {
+      observerModel: identity,
+      observerFallbackModels: [fallback],
+      model: undefined,
+    });
+    f.ctx.modelRegistry.find = (provider: string, id: string) => ({
+      provider,
+      id,
+      contextWindow: 1_000_000,
+      maxTokens: 16_384,
+    });
+    workers.observer.mockRejectedValueOnce(new Error(refusal)).mockResolvedValueOnce({
+      observations: [],
+      emptyReason: { kind: "no_new_content" },
+      coverageComplete: true,
+    });
+
+    await f.run();
+
+    expect(workers.observer).toHaveBeenCalledTimes(2);
+    expect(workers.observer.mock.calls.map(([args]) => args.model.id)).toEqual([
+      "compactor",
+      "fallback",
+    ]);
+    expect(cooldowns()).toEqual({});
+  });
+
+  test("skips the session fallback for the rest of the stage", async () => {
+    const f = fixture();
+    Object.assign(f.runtime.config, {
+      model: undefined,
+      observerModel: undefined,
+      observerFallbackModels: [],
+      sessionFallback: true,
+    });
+    Object.assign(f.ctx, {
+      model: { ...identity, contextWindow: 1_000_000, maxTokens: 16_384 },
+    });
+    workers.observer.mockRejectedValue(new Error(refusal));
+
+    await f.run();
+
+    expect(workers.observer).toHaveBeenCalledOnce();
+    expect(cooldowns()).toEqual({});
+    expect(f.runtime.failedInCycle.has(key)).toBe(true);
+  });
+
+  test("keeps a useful close without a cooldown after a refusal", async () => {
+    const f = fixture();
+    const notify = vi.fn();
+    const ctx = { ...f.ctx, hasUI: true, ui: { notify } };
+    workers.observer.mockResolvedValue({
+      observations: [observation("cccccccccccc", { sourceEntryIds: ["source"] })],
+      errorAfterClose: refusal,
+    });
+
+    await runConsolidationPipeline(createExtensionApiDouble(), f.runtime, ctx, f.generation);
+
     expect(f.runtime.getCursor("observer")?.state).toBe("recorded");
     expect(cooldowns()).toEqual({});
     expect(notify.mock.calls.some(([message]) => message.includes("model cooled down"))).toBe(

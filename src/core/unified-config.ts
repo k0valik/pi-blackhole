@@ -70,9 +70,13 @@ export interface OmModelConfig {
   /** Model ID. Optional — see `provider`. */
   id?: string;
   thinking?: ModelThinkingLevel;
-  /** Cooldown duration in hours after a retryable error (429/5xx/timeout).
-   *  Defaults to 1 hour when omitted. */
+  /** Cooldown duration in hours after a rate-limit/config/unknown error.
+   *  Defaults to 1 hour when omitted. `0` disables every persisted cooldown. */
   cooldownHours?: number;
+  /** Cooldown duration in minutes after a transient network/overload/5xx
+   *  failure. Defaults to 5 minutes when omitted; `0` keeps transient
+   *  failures in-cycle only. Ignored when `cooldownHours` is `0`. */
+  cooldownMinutesTransient?: number;
   /** Context window override for this model. Inherits from Pi's model registry when unset. */
   contextWindow?: number;
 }
@@ -137,10 +141,11 @@ export interface UnifiedConfig {
   /** Opt-in policy-independent VCC bridge when the preferred context cannot fit. */
   contextPressureFallback: "off" | "vcc";
 
-  /** Show a display-only copy of the newest assistant output that the
-   *  compaction dropped from view (`blackhole-pre-compaction-output` custom
-   *  entry). Cosmetic: the copy never enters provider context or Blackhole
-   *  memory, and the compaction cut policy is unchanged. Capped at 16 KiB. */
+  /** Show a display-only copy of the latest eligible assistant output, only
+   *  when the compaction dropped it from view (`blackhole-pre-compaction-output`
+   *  custom entry). Cosmetic: the copy never enters provider context or
+   *  Blackhole memory, and the compaction cut policy is unchanged. Capped at
+   *  16 KiB. */
   showPreCompactionMessage: boolean;
 
   /** Maximum historical tool-output text tokens retained in provider context.
@@ -473,6 +478,8 @@ function parseModel(v: unknown): OmModelConfig | undefined {
     const model: OmModelConfig = { thinking: v.thinking as ModelThinkingLevel };
     const cooldown = nonNegativeInt(v.cooldownHours);
     if (cooldown !== undefined) model.cooldownHours = cooldown;
+    const transient = nonNegativeInt(v.cooldownMinutesTransient);
+    if (transient !== undefined) model.cooldownMinutesTransient = transient;
     const ctxWindow = positiveInt(v.contextWindow);
     if (ctxWindow !== undefined) model.contextWindow = ctxWindow;
     return model;
@@ -482,6 +489,8 @@ function parseModel(v: unknown): OmModelConfig | undefined {
   if (isThinkingLevel(v.thinking)) model.thinking = v.thinking;
   const cooldown = nonNegativeInt(v.cooldownHours);
   if (cooldown !== undefined) model.cooldownHours = cooldown;
+  const transient = nonNegativeInt(v.cooldownMinutesTransient);
+  if (transient !== undefined) model.cooldownMinutesTransient = transient;
   const ctxWindow = positiveInt(v.contextWindow);
   if (ctxWindow !== undefined) model.contextWindow = ctxWindow;
   return model;
@@ -654,6 +663,8 @@ function parseConfig(raw: Record<string, unknown>): Partial<UnifiedConfig> {
     c.reflectionSupersedes = raw.reflectionSupersedes;
   if (typeof raw.observeOnShutdown === "boolean") c.observeOnShutdown = raw.observeOnShutdown;
   if (typeof raw.fullFoldAlways === "boolean") c.fullFoldAlways = raw.fullFoldAlways;
+  if (typeof raw.showPreCompactionMessage === "boolean")
+    c.showPreCompactionMessage = raw.showPreCompactionMessage;
   if (typeof raw.debugLog === "boolean") c.debugLog = raw.debugLog;
   if (typeof raw.statusBar === "boolean") c.statusBar = raw.statusBar;
   if (typeof raw.showWorkerNotifications === "boolean")

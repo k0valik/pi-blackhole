@@ -3,7 +3,7 @@ import { rawTokensSinceLastCompaction, type Entry } from "./ledger/index.js";
 import { autoCompactThreshold } from "./model-budget.js";
 import type { Runtime } from "./runtime.js";
 import { debugLog } from "./debug-log.js";
-import { RETRYABLE_ERROR_RE } from "./retryable-error.js";
+import { AUTO_RETRY_ERROR_RE } from "./retryable-error.js";
 import {
   compactInlineAtTurnBoundary,
   InlineCompactionUnavailableError,
@@ -446,7 +446,7 @@ function handleAgentEnd(event: any, ctx: any, runtime: Runtime): void {
     lastAssistant &&
     lastAssistant.stopReason === "error" &&
     lastAssistant.errorMessage &&
-    RETRYABLE_ERROR_RE.test(lastAssistant.errorMessage)
+    AUTO_RETRY_ERROR_RE.test(lastAssistant.errorMessage)
   ) {
     return;
   }

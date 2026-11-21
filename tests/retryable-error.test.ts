@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AUTO_RETRY_ERROR_RE,
+  classifyCooldownCause,
   getDiscardedCount,
+  isContentRefusalError,
   isCooldownWorthyError,
   isDeterministicError,
   isRetryableError,
@@ -124,6 +127,207 @@ describe("deterministic client errors", () => {
   it("accepts string (non-Error) inputs", () => {
     expect(isDeterministicError("MissingSessionID")).toBe(true);
     expect(isCooldownWorthyError("HTTP 403 Forbidden")).toBe(true);
+  });
+});
+
+describe("content refusals", () => {
+  const refusals = [
+    new Error(
+      'Reflector API error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Your request was rejected as a result of our safety system. Your request may contain material that violates our Terms of Service."}}',
+    ),
+    new Error("Observer API error: 400 This content was flagged by our moderation system."),
+    new Error(
+      "Observer API error: 400 The response was filtered due to the prompt triggering Azure OpenAI's content management policy.",
+    ),
+    new Error(
+      'Observer API error: 400 got status: INVALID_ARGUMENT. {"error":{"code":400,"message":"The response was blocked due to safety settings","status":"INVALID_ARGUMENT"}}',
+    ),
+    new Error("Dropper API error: 400 content_filter"),
+    new Error("Observer API error: 400 prohibited content detected"),
+  ];
+
+  it("recognizes provider content-policy failures", () => {
+    for (const error of refusals) expect(isContentRefusalError(error)).toBe(true);
+  });
+
+  it("does not treat a 400 refusal as a deterministic configuration error", () => {
+    const error = new Error(
+      "Observer API error: 400 Bad Request: request violates our usage policy",
+    );
+    expect(isDeterministicError(error)).toBe(false);
+    expect(isCooldownWorthyError(error)).toBe(false);
+    expect(classifyCooldownCause(error)).toBe("content_refusal");
+  });
+});
+
+describe("cooldown cause classification", () => {
+  it.each([
+    [new Error("Observer API error: WebSocket error"), "provider_transient"],
+    [new Error("overloaded_error"), "provider_transient"],
+    [new Error("HTTP 503 Service Unavailable"), "provider_transient"],
+    [new Error("HTTP 529 Overloaded"), "provider_transient"],
+    [new Error("try again later"), "provider_transient"],
+    [new Error("ECONNRESET"), "provider_transient"],
+    [new Error("socket hang up"), "provider_transient"],
+    [new TypeError("fetch failed"), "provider_transient"],
+    [new TypeError("terminated"), "provider_transient"],
+    [
+      Object.assign(new TypeError("body read failed"), { cause: { code: "UND_ERR_BODY_TIMEOUT" } }),
+      "provider_transient",
+    ],
+    [new Error("429 Too Many Requests"), "provider_rate_limit"],
+    [new Error("rate limit exceeded"), "provider_rate_limit"],
+    [new Error("insufficient_quota"), "provider_rate_limit"],
+    [new Error("Your credit balance is too low"), "provider_rate_limit"],
+    [new Error("billing hard limit reached"), "provider_rate_limit"],
+    [new Error("HTTP 401 Unauthorized"), "provider_configuration"],
+    [new Error("HTTP 404 model not found"), "provider_configuration"],
+    [new Error("MissingSessionID"), "provider_configuration"],
+    [new Error("HTTP 400 Bad Request: maximum context length is 8192 tokens"), "request_local"],
+    [new Error("HTTP 400 Bad Request: invalid thinking level"), "request_local"],
+    [
+      new Error("Observer API error: 400 Bad Request: request violates our usage policy"),
+      "content_refusal",
+    ],
+    [new Error("all good"), "unknown"],
+  ])("classifies %s as %s", (error, cause) => {
+    expect(classifyCooldownCause(error)).toBe(cause);
+  });
+
+  it("keeps local execution errors local even when they mention a provider status", () => {
+    expect(
+      classifyCooldownCause(new TypeError("Cannot read properties of undefined: HTTP 503")),
+    ).toBe("local_execution");
+    expect(classifyCooldownCause(new DOMException("The operation was aborted", "AbortError"))).toBe(
+      "local_execution",
+    );
+  });
+
+  it("checks content refusal before deterministic framing and rate-limit status", () => {
+    expect(
+      classifyCooldownCause(
+        new Error("HTTP 403 quota exceeded: request violates our usage policy"),
+      ),
+    ).toBe("content_refusal");
+  });
+});
+
+describe("real provider limit and transient messages", () => {
+  it.each([
+    // Claude Code / Anthropic subscription and API limits
+    ["You've hit your weekly limit · resets Mon", "provider_rate_limit"],
+    ["You've hit your 5-hour limit · resets at 3pm", "provider_rate_limit"],
+    ["5-hour limit reached · resets at 3pm", "provider_rate_limit"],
+    ["limit reached, resets at 3pm", "provider_rate_limit"],
+    ["Request rejected (429)", "provider_rate_limit"],
+    ["Your credit balance is too low to access the Anthropic API", "provider_rate_limit"],
+    ["Extra usage is required for long context requests", "provider_rate_limit"],
+    ["Server is temporarily limiting requests (not your usage limit)", "provider_transient"],
+    // OpenAI API / Codex / ChatGPT plan limits
+    ["You've hit your usage limit. Try again at Apr 30th, 2026 11:21 AM.", "provider_rate_limit"],
+    ["You've reached your usage limit", "provider_rate_limit"],
+    ["You have reached your limit", "provider_rate_limit"],
+    [
+      "You exceeded your current quota, please check your plan and billing details.",
+      "provider_rate_limit",
+    ],
+    ["Quota exceeded. Check your plan and billing details.", "provider_rate_limit"],
+    ["usage_not_included", "provider_rate_limit"],
+    ["organization_usage_limit_exceeded", "provider_rate_limit"],
+    ["project_spend_limit_exceeded", "provider_rate_limit"],
+    ["credit_balance_exhausted", "provider_rate_limit"],
+    ["spend limit exceeded", "provider_rate_limit"],
+    ["session budget exceeded", "provider_rate_limit"],
+    ["rate_limit_exceeded", "provider_rate_limit"],
+    ["slow_down", "provider_rate_limit"],
+    ["too_many_requests", "provider_rate_limit"],
+    ["The server had an error while processing your request", "provider_transient"],
+    ["Model temporarily overloaded", "provider_transient"],
+    ["server_is_overloaded", "provider_transient"],
+    ["resource_exhausted", "provider_transient"],
+    ["internal_server_exception", "provider_transient"],
+    ["model_stream_error_exception", "provider_transient"],
+    ["serviceunavailableexception", "provider_transient"],
+    ["api_error", "provider_transient"],
+    ["websocket_connection_limit_reached", "provider_transient"],
+    // OpenCode provider classification fallbacks
+    ["Free usage exceeded", "provider_rate_limit"],
+    ["gousagelimiterror", "provider_rate_limit"],
+    ["budgetlimiterror", "provider_rate_limit"],
+    ["creditlimitexceeded", "provider_rate_limit"],
+    ["Request rate increased too quickly", "provider_rate_limit"],
+    ["Too many requests, please slow down", "provider_rate_limit"],
+    [
+      "The model is currently at capacity due to high demand. Please try again in a few minutes",
+      "provider_transient",
+    ],
+    ["The service is temporarily at capacity.", "provider_transient"],
+    ["The server is busy.", "provider_transient"],
+    ["HTTP 503 Service Unavailable: retry budget exhausted", "provider_transient"],
+    ["HTTP 507 Insufficient Storage", "provider_transient"],
+    ["507 Insufficient Storage", "provider_transient"],
+    ["request failed with status 507", "provider_transient"],
+    ["processed 512 rows", "unknown"],
+    ["Flex capacity unavailable.", "provider_transient"],
+    ["policy-restricted capacity unavailable", "provider_transient"],
+    ["Please retry your request shortly.", "provider_transient"],
+    ["Try your request again.", "provider_transient"],
+    ["Upstream connection failed", "provider_transient"],
+    ["Exceeded request buffer limit while retrying upstream", "provider_transient"],
+    // Content-policy rejections from the same ecosystems
+    [
+      "Invalid prompt: your prompt was flagged as potentially violating our usage policy.",
+      "content_refusal",
+    ],
+    ["Output blocked by content filtering policy", "content_refusal"],
+    ["Request rejected in accordance with our terms of use and policies.", "content_refusal"],
+    ["This content was flagged for possible cybersecurity risk.", "content_refusal"],
+    ["content_policy_violation", "content_refusal"],
+    ["cyber_policy", "content_refusal"],
+    ["bio_policy", "content_refusal"],
+    ["misalignment policy violation", "content_refusal"],
+    ["datainspectionfailed", "content_refusal"],
+    ["blocklist", "content_refusal"],
+    ["image_safety", "content_refusal"],
+    ["content_blocked", "content_refusal"],
+    ["prohibited_content", "content_refusal"],
+    ["Claude refused to respond", "content_refusal"],
+    ["The response was blocked due to safety settings", "content_refusal"],
+    // Account-wide restrictions are not request-content refusals.
+    [
+      "HTTP 403 Your account has been suspended for violating our terms of service",
+      "provider_configuration",
+    ],
+    ["Your account has been disabled", "provider_configuration"],
+    ["Your workspace has been restricted", "provider_configuration"],
+    ["Your account session expired", "unknown"],
+    ["Your account token expired", "unknown"],
+  ])("classifies %s as %s", (message, cause) => {
+    expect(classifyCooldownCause(new Error(message))).toBe(cause);
+  });
+
+  it.each([
+    [Object.assign(new Error("Request failed"), { status: 503 }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { statusCode: 507 }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { status: 408 }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { status: "503" }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { status: 400 }), "unknown"],
+  ])("reads numeric status fields: %s", (error, cause) => {
+    expect(classifyCooldownCause(error)).toBe(cause);
+  });
+});
+
+describe("compaction-trigger auto-retry heuristic", () => {
+  it("keeps the legacy transient and rate-limit signals", () => {
+    expect(AUTO_RETRY_ERROR_RE.test("HTTP 503 Service Unavailable")).toBe(true);
+    expect(AUTO_RETRY_ERROR_RE.test("429 Too Many Requests")).toBe(true);
+    expect(AUTO_RETRY_ERROR_RE.test("connection refused")).toBe(true);
+  });
+
+  it("does not suppress compaction for quota or plan-limit failures", () => {
+    expect(AUTO_RETRY_ERROR_RE.test("You've hit your usage limit")).toBe(false);
+    expect(AUTO_RETRY_ERROR_RE.test("insufficient_quota")).toBe(false);
+    expect(AUTO_RETRY_ERROR_RE.test("billing hard limit reached")).toBe(false);
   });
 });
 

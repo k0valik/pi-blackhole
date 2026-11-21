@@ -4,7 +4,7 @@
  * Upstream: https://github.com/elpapi42/pi-observational-memory (src/session-ledger/render-summary.ts)
  * Modified: separator-aware whole-record caps and configurable reflection annotations.
  */
-import type { Observation, Reflection } from "./types.js";
+import type { Observation, Reflection, Relevance } from "./types.js";
 import { MEMORY_ID_PATTERN } from "./types.js";
 import { estimateStringTokens } from "../tokens.js";
 
@@ -118,6 +118,11 @@ export function selectPriorReflections(
   maxTokens: number,
   render = reflectionToSummaryLine,
 ): Reflection[] {
+  // Worker prompt paths (observer preamble, consolidation.ts): plain
+  // newest-first, deliberately NOT routed through #208 tiering. The marker
+  // and support relevance shape only the compaction pool
+  // (buildCompactionProjection → selectReflectionPool); this function keeps
+  // its exact legacy contract regardless of record annotations.
   const selected: Reflection[] = [];
   let rendered = "";
   for (let i = reflections.length - 1; i >= 0; i--) {
@@ -128,6 +133,122 @@ export function selectPriorReflections(
     rendered = next;
   }
   return selected.reverse();
+}
+
+/**
+ * Marker tier (#208): the reflection's own optional relevance, authoritative
+ * when present. critical (2) beats high (1); low/medium deliberately downgrade
+ * to ordinary (0) — a model that marked a reflection unimportant is not
+ * overridden by its support observations.
+ */
+function markerTier(reflection: Reflection): 0 | 1 | 2 | undefined {
+  if (reflection.relevance === undefined) return undefined;
+  if (reflection.relevance === "critical") return 2;
+  if (reflection.relevance === "high") return 1;
+  return 0;
+}
+
+/**
+ * Fallback tier from live support (#208): live critical support (2) beats live
+ * high support (1); everything else is ordinary (0). Support must be live in
+ * the same projection — an observation that was superseded, dropped, or lies
+ * outside the boundary never promotes a reflection, so tiering cannot
+ * resurrect stale facts.
+ */
+function supportTier(
+  reflection: Reflection,
+  supportRelevance: ReadonlyMap<string, Relevance>,
+): 0 | 1 | 2 {
+  let tier: 0 | 1 | 2 = 0;
+  for (const id of reflection.supportingObservationIds) {
+    const relevance = supportRelevance.get(id);
+    if (relevance === "critical") return 2;
+    if (relevance === "high") tier = 1;
+  }
+  return tier;
+}
+
+/** Fraction of the pool priority reflections may claim before ordinary fill. */
+const PRIORITY_RESERVE_FRACTION = 0.5;
+
+export type ReflectionPoolSelection = {
+  selected: Reflection[];
+  /** Priority reflections that never fit the whole pool, records whole. */
+  overflow: Reflection[];
+};
+
+/**
+ * Bounded reflection pool selection (#208).
+ *
+ * Priority reflections (critical/high marker, else live critical/high
+ * support) claim at most half the pool first — the bounded allocation that
+ * leaves room for ordinary memory — then ordinary reflections fill
+ * newest-first, and any leftover budget spills back to remaining priority
+ * reflections so the pool is never wasted. Whole records only; output is
+ * restored to source order; priority reflections that still cannot fit are
+ * reported as overflow instead of silently evicted by newer noise.
+ *
+ * An empty support lookup with marker-less records degrades to the legacy
+ * newest-first fill; marker-bearing records still tier (selectPriorReflections
+ * is the un-tiered worker-prompt path).
+ */
+export function selectReflectionPool(
+  reflections: Reflection[],
+  maxTokens: number,
+  supportRelevance: ReadonlyMap<string, Relevance>,
+  render = reflectionToSummaryLine,
+): ReflectionPoolSelection {
+  const items = reflections.map((r, i) => ({
+    r,
+    i,
+    // Marker first, live support as the fallback for marker-less records.
+    tier: markerTier(r) ?? supportTier(r, supportRelevance),
+  }));
+  // Newest-first within each group; critical before high across tiers.
+  const priority = items
+    .filter((item) => item.tier > 0)
+    .sort((a, b) => b.tier - a.tier || b.i - a.i);
+  const ordinary = items.filter((item) => item.tier === 0).sort((a, b) => b.i - a.i);
+  const selected: typeof items = [];
+  const selectedIds = new Set<string>();
+  let rendered = "";
+  const tryAdd = (item: (typeof items)[number], budget: number): void => {
+    const next = rendered + (selected.length ? "\n" : "") + render(item.r);
+    if (estimateStringTokens(next) > budget) return;
+    selected.push(item);
+    selectedIds.add(item.r.id);
+    rendered = next;
+  };
+  // Pass 1: bounded priority allocation (the fixed reserve).
+  const reserve = Math.floor(maxTokens * PRIORITY_RESERVE_FRACTION);
+  for (const item of priority) tryAdd(item, reserve);
+  // Pass 2: ordinary fill of the full budget, newest-first.
+  for (const item of ordinary) tryAdd(item, maxTokens);
+  // Pass 3: spill leftover budget back to priority.
+  for (const item of priority) if (!selectedIds.has(item.r.id)) tryAdd(item, maxTokens);
+  const bySource = (a: (typeof items)[number], b: (typeof items)[number]): number => a.i - b.i;
+  return {
+    selected: selected.sort(bySource).map((item) => item.r),
+    overflow: priority
+      .filter((item) => !selectedIds.has(item.r.id))
+      .sort(bySource)
+      .map((item) => item.r),
+  };
+}
+
+/**
+ * One-line compaction-output notice when priority reflections could not fit
+ * the pool (#208 reporting). Footer-style: not counted against pool budgets.
+ */
+export function priorityOverflowNote(overflow: Reflection[]): string | undefined {
+  if (overflow.length === 0) return undefined;
+  const ids = overflow.map((r) => `[${r.id}]`).join(", ");
+  const plural = overflow.length === 1 ? "" : "s";
+  return (
+    `Priority memory notice: ${overflow.length} priority reflection${plural} (${ids}) ` +
+    "did not fit the reflection pool budget. " +
+    "Use recall with an id if a needed user restriction is missing above."
+  );
 }
 
 export function renderSummary(
