@@ -130,7 +130,9 @@ export function selectOmittedAssistantText(opts: {
     if (!isObject(message) || message.role !== "assistant") continue;
     if (message.stopReason === "aborted") continue;
     const text = assistantText(message);
-    if (text) return retainedIds.has(entry.id) ? undefined : { entryId: entry.id, text };
+    if (!text) continue;
+    if (retainedIds.has(entry.id)) return undefined;
+    return { entryId: entry.id, text };
   }
   return undefined;
 }

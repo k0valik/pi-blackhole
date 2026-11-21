@@ -170,6 +170,22 @@ describe("selectOmittedAssistantText", () => {
     ).toEqual({ entryId: "a1", text: "complete output" });
   });
 
+  it("does not fall back when the latest eligible answer is retained behind an aborted tail", () => {
+    const withAbortedTail: Entry[] = [
+      assistantMessage("a1", [textBlock("omitted answer")]),
+      assistantMessage("a2", [textBlock("retained answer")]),
+      assistantMessage("a3", [textBlock("partial output")], "aborted"),
+      compactionEntry("c1"),
+    ];
+    expect(
+      selectOmittedAssistantText({
+        branch: withAbortedTail,
+        retainedIds: new Set(["c1", "a2", "a3"]),
+        compactionEntryId: "c1",
+      }),
+    ).toBeUndefined();
+  });
+
   it("skips non-assistant and text-less entries", () => {
     const mixed: Entry[] = [
       assistantMessage("a1", [textBlock("real output")]),
