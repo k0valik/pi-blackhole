@@ -37,12 +37,25 @@ import { buildRetainedToolOutputProjection } from "../core/tool-output-budget.js
 import { buildGlobalIndexById, loadGlobalIndexById } from "../core/global-indices.js";
 import { loadGitFileTags } from "../extract/git-status.js";
 import { collectFilesTouched } from "../extract/file-touch.js";
-
-import { isSourceEntry } from "../om/ledger/progress.js";
 import { isToolSafeCut } from "../core/tool-safe-cut.js";
 import { observedPrefixIndex } from "../core/observation-boundary.js";
 import { selectPressureTail } from "../core/context-pressure.js";
 import { estimateEntryTokens, estimateStringTokens } from "../om/tokens.js";
+
+/**
+ * Entries that belong to the provider-visible conversation tail. Distinct from
+ * the observer's `isSourceEntry` (om/ledger/progress.ts), which excludes
+ * `custom_message` from observer input: extension injections are aimed at the
+ * main session model, so the unobserved-tail anchor must keep marking them —
+ * otherwise a still-pending injection between the OM boundary and the cut
+ * would be evicted from context at the next compaction (see
+ * tests/unobserved-live-window.test.ts).
+ */
+function isProviderConversationEntry(entry: { type: string }): boolean {
+  return (
+    entry.type === "message" || entry.type === "custom_message" || entry.type === "branch_summary"
+  );
+}
 
 /** Count the actual host wrapper, not only the summary's text. */
 const summaryContextTokens = (summary: string): number =>
@@ -200,7 +213,7 @@ export function buildOwnCut(
             index >= liveStart &&
             index > boundary &&
             index < branchEntries.indexOf(messages[cut]) &&
-            isSourceEntry(entry),
+            isProviderConversationEntry(entry),
         )?.id ?? messages[cut].id,
       compactAll: false,
     };

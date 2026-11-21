@@ -24,7 +24,7 @@ import {
   installHostInlineCompactionAdapter,
   installInlineCompactionAdapter,
 } from "../src/om/inline-compaction.js";
-import { compactionEntry, textCustomMessage, type TestEntry } from "./fixtures/session.js";
+import { branchSummary, compactionEntry, type TestEntry } from "./fixtures/session.js";
 
 /** Flush microtasks AND fire pending fake timers (setTimeout callbacks).
  * With vi.useFakeTimers(), setTimeout callbacks don't fire automatically.
@@ -181,8 +181,8 @@ function fakeCtx(branches: TestEntry[][], overrides: Record<string, unknown> = {
   };
 }
 
-const dueBranch = [textCustomMessage("raw-1", "aaaaaaaaaaaa")]; // 3 tokens
-const belowBranch = [textCustomMessage("raw-1", "aaaa")]; // 1 token
+const dueBranch = [branchSummary("raw-1", "aaaaaaaaaaaa")]; // 3 tokens
+const belowBranch = [branchSummary("raw-1", "aaaa")]; // 1 token
 
 describe("V3 compaction trigger (blackhole)", () => {
   beforeEach(() => {
@@ -564,10 +564,10 @@ describe("V3 compaction trigger (blackhole)", () => {
   it("counts raw tokens since the latest Pi compaction using V3 progress helpers", async () => {
     const { handler } = captureHandler({ compactAfterTokens: 3 });
     const branch = [
-      textCustomMessage("raw-1", "aaaaaaaaaaaa"),
+      branchSummary("raw-1", "aaaaaaaaaaaa"),
       compactionEntry("cmp-1", { firstKeptEntryId: "raw-2" }),
-      textCustomMessage("raw-2", "aaaa"),
-      textCustomMessage("raw-3", "bbbbbbbb"),
+      branchSummary("raw-2", "aaaa"),
+      branchSummary("raw-3", "bbbbbbbb"),
     ];
     const ctx = fakeCtx([branch]);
 
@@ -955,7 +955,7 @@ describe("mid-run compaction trigger (turn_end)", () => {
         summary: "summary",
         firstKeptEntryId: "raw-9",
       }),
-      textCustomMessage("raw-10", "aaaa"), // 1 token
+      branchSummary("raw-10", "aaaa"), // 1 token
     ];
     const ctx = fakeCtx([postCompactionBranch]);
 
@@ -1465,7 +1465,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
 
   it("compacts above a window-derived ratio threshold (0.5 × 100 = 50)", async () => {
     const { handler, runtime } = captureHandler({ compactAfterRatio: 0.5 });
-    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]); // 75 tokens ≥ 50
+    const ctx = windowedCtx(100, [branchSummary("raw-1", "a".repeat(300))]); // 75 tokens ≥ 50
 
     handler(agentEnd(), ctx);
     expect(runtime.compactInFlight).toBe(true);
@@ -1476,7 +1476,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
 
   it("fires exactly at the derived threshold (tokens == threshold)", async () => {
     const { handler } = captureHandler({ compactAfterRatio: 0.5 });
-    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(200))]); // 50 tokens == 50
+    const ctx = windowedCtx(100, [branchSummary("raw-1", "a".repeat(200))]); // 50 tokens == 50
 
     handler(agentEnd(), ctx);
     await flushAll();
@@ -1486,7 +1486,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
 
   it("does not compact below the derived threshold", async () => {
     const { handler, runtime } = captureHandler({ compactAfterRatio: 0.5 });
-    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(196))]); // 49 tokens < 50
+    const ctx = windowedCtx(100, [branchSummary("raw-1", "a".repeat(196))]); // 49 tokens < 50
 
     handler(agentEnd(), ctx);
     await flushAll();
@@ -1497,7 +1497,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
 
   it("compacts above a reserve-derived threshold (100 − 60 = 40)", async () => {
     const { handler } = captureHandler({ compactReserveTokens: 60 });
-    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(200))]); // 50 tokens ≥ 40
+    const ctx = windowedCtx(100, [branchSummary("raw-1", "a".repeat(200))]); // 50 tokens ≥ 40
 
     handler(agentEnd(), ctx);
     await flushAll();
@@ -1510,13 +1510,13 @@ describe("Context-window-derived threshold (issue #60)", () => {
     // 100-window model compacts at 50; a 1M-window model's derived threshold
     // (500k) is far above the same 75-token branch, so it must NOT compact.
     const small = captureHandler({ compactAfterRatio: 0.5 });
-    const smallCtx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]);
+    const smallCtx = windowedCtx(100, [branchSummary("raw-1", "a".repeat(300))]);
     small.handler(agentEnd(), smallCtx);
     await flushAll();
     expect(smallCtx.compact).toHaveBeenCalledTimes(1);
 
     const big = captureHandler({ compactAfterRatio: 0.5 });
-    const bigCtx = windowedCtx(1_000_000, [textCustomMessage("raw-1", "a".repeat(300))]);
+    const bigCtx = windowedCtx(1_000_000, [branchSummary("raw-1", "a".repeat(300))]);
     big.handler(agentEnd(), bigCtx);
     await flushAll();
     expect(bigCtx.compact).not.toHaveBeenCalled();
@@ -1538,7 +1538,7 @@ describe("Context-window-derived threshold (issue #60)", () => {
     // wins over any window-derived surface at the resolution level, so a
     // 75-token branch must NOT auto-compact on a tiny-window model.
     const { handler, runtime } = captureHandler({ compactAfterTokens: 81_000 });
-    const ctx = windowedCtx(100, [textCustomMessage("raw-1", "a".repeat(300))]);
+    const ctx = windowedCtx(100, [branchSummary("raw-1", "a".repeat(300))]);
     handler(agentEnd(), ctx);
     await flushAll();
     expect(runtime.compactInFlight).toBe(false);

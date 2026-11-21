@@ -109,7 +109,10 @@ test("invalid retained anchor defers", () => {
     }),
   ).toEqual({ ok: false, reason: "invalid_anchor" });
 });
-test("non-message sources cannot silently disappear into a message-only VCC bridge", () => {
+test("custom_message injections no longer block a VCC bridge (only branch summaries do)", () => {
+  // custom_message entries are main-model-facing extension injections; they
+  // never survive a normal compaction either, so a pressure bridge may drop
+  // them. Blackhole-authored branch summaries still block.
   expect(
     selectPressureTail({
       entries: [
@@ -123,7 +126,7 @@ test("non-message sources cannot silently disappear into a message-only VCC brid
       keepRecentTokens: 100,
       summaryTokens: () => 10,
     }),
-  ).toEqual({ ok: false, reason: "no_safe_fit" });
+  ).toEqual({ ok: true, firstKeptEntryId: "m3", bridgedIds: ["m1", "m2"] });
 });
 test("compact-all preferred cut fits only when its summary fits", () => {
   expect(

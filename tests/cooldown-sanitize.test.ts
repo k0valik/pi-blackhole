@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { assertSafeTestAgentDir } from "./agent-dir-guard.js";
 
 // Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
 // host and the on-disk config resolve to the same place. configPath() resolves
@@ -17,6 +18,7 @@ import { tmpdir } from "node:os";
 // (the file lands where nothing reads it and DEFAULTS apply instead).
 const testDir =
   process.env.PI_CODING_AGENT_DIR ?? join(tmpdir(), `pi-blackhole-cooldown-sanitize-${Date.now()}`);
+assertSafeTestAgentDir(testDir);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,

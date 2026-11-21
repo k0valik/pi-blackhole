@@ -1,8 +1,13 @@
 ## [Unreleased]
 
+### Changed
+
+- **Observer no longer observes `custom_message` entries.** Extensions inject recalled memories, subagent rosters, reminders, and one-shot results as `custom_message` entries aimed at the main session model; the observer re-extracted that content into new observations (in a 55-session sample, 16 of 987 observations cited only injected memory) and spent worker tokens on text that is not conversation. `custom_message` is removed from the observer's source-entry definition, so the exclusion applies before all accounting: observer chunks contain only `message` and `branch_summary` entries, trigger thresholds measure the already-cut data, coverage anchors only on delivered conversation, and injected content can no longer feed memory extensions' own recall output back into new observations. Untouched on purpose: recall history search still surfaces raw custom messages, the compaction tail anchor still keeps pending injections in the live window, and provider-context token pricing still counts them (the pressure tail walks real context). Two consequence flips, both consistent with existing behavior: a pressure bridge may now drop custom messages in the bridged range (normal compaction already dropped them unconditionally — only blackhole-authored `branch_summary` entries still block a bridge), and sessions whose pre-upgrade coverage markers anchor at a custom message re-observe that prefix once (markers fail source validation; new markers anchor at messages).
+
 ### Fixed
 
 - **Older answers no longer appear after a retained newer answer.** When compaction kept the latest assistant response, the display-only copy could still restore an older response after it, making two turns appear mixed together. A copy is now added only when the latest eligible response itself was removed from view ([#203](https://github.com/k0valik/pi-blackhole/issues/203)).
+- **Running the tests from inside Pi no longer deletes `~/.pi/agent`.** Pi passes its agent directory to child processes, and the test setup kept that inherited value, so suites that delete their scratch directory after each test removed the user's real Pi install, sessions, settings, and credentials. The test setup now always pins `PI_CODING_AGENT_DIR` to a fresh temp dir — the inherited value is never trusted — refuses paths shaped like `.pi/agent` even under the temp dir, and every suite that deletes its agent dir asserts the dir is safe before running ([#202](https://github.com/k0valik/pi-blackhole/issues/202)).
 
 ---
 

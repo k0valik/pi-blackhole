@@ -7,11 +7,16 @@ import { branchSummary, customMessage, rawMessage } from "./fixtures/session.js"
 
 describe("isDeliveredSourceEntry", () => {
   test("rejects a renderable source without an id", () => {
-    expect(isDeliveredSourceEntry({ type: "custom_message", content: "no address" })).toBe(false);
+    expect(
+      isDeliveredSourceEntry({
+        type: "message",
+        message: { role: "user", content: [{ type: "text", text: "no address" }] },
+      } as never),
+    ).toBe(false);
   });
 
   test("rejects an empty id", () => {
-    expect(isDeliveredSourceEntry(customMessage("", "no address"))).toBe(false);
+    expect(isDeliveredSourceEntry(rawMessage("", "no address"))).toBe(false);
   });
 
   test("rejects a non-source entry", () => {
@@ -45,8 +50,8 @@ describe("isDeliveredSourceEntry", () => {
     expect(isDeliveredSourceEntry(rawMessage("message", "visible text"))).toBe(true);
   });
 
-  test("accepts a delivered custom message", () => {
-    expect(isDeliveredSourceEntry(customMessage("custom", "visible text"))).toBe(true);
+  test("rejects a delivered custom message (observer input excludes injections)", () => {
+    expect(isDeliveredSourceEntry(customMessage("custom", "visible text"))).toBe(false);
   });
 
   test("accepts a delivered branch summary", () => {
@@ -55,11 +60,12 @@ describe("isDeliveredSourceEntry", () => {
 });
 
 describe("serializeSourceAddressedBranchEntries", () => {
-  test("preserves exact text and source metadata while omitting undelivered entries", () => {
+  test("preserves exact text and source metadata while omitting undelivered and excluded entries", () => {
     expect(
       serializeSourceAddressedBranchEntries([
         { type: "custom_message", content: "no id" },
         { type: "custom", id: "ledger" },
+        customMessage("custom", "injected text", { timestamp: "invalid" }),
         rawMessage("empty", "", { message: { role: "assistant", content: [] } }),
         rawMessage("redacted", "", {
           message: {
@@ -70,19 +76,16 @@ describe("serializeSourceAddressedBranchEntries", () => {
           },
         }),
         rawMessage("message", "visible text"),
-        customMessage("custom", "custom text", { timestamp: "invalid" }),
         branchSummary("summary", "branch text", { timestamp: "invalid" }),
       ]),
     ).toEqual({
       text: [
         "[Source entry id: message]\n[User @ ????-??-?? ??:??]: visible text",
-        "[Source entry id: custom]\n[Custom @ ????-??-?? ??:??]: custom text",
         "[Source entry id: summary]\n[Branch summary @ ????-??-?? ??:??]: branch text",
       ].join("\n\n"),
-      sourceEntryIds: ["message", "custom", "summary"],
+      sourceEntryIds: ["message", "summary"],
       sourceEntryTimestamps: {
         message: "????-??-?? ??:??",
-        custom: "????-??-?? ??:??",
         summary: "????-??-?? ??:??",
       },
     });

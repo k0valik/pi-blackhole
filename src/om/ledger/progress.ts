@@ -19,7 +19,24 @@ import {
   type V3MemoryCustomType,
 } from "./types.js";
 
-const SOURCE_ENTRY_TYPES = new Set(["message", "custom_message", "branch_summary"]);
+/**
+ * Observer source entries: the branch conversation the observer projects.
+ *
+ * `custom_message` is deliberately excluded. Extension injections (recalled
+ * memories, rosters, reminders, one-shot results) are aimed at the main session
+ * model, not at summarization — observing them re-extracts already-stored
+ * content into new observations (a feedback loop for memory extensions) and
+ * spends observer tokens on text that is not conversation. The cut lives here,
+ * at the source definition, so every consumer (trigger accounting, observer
+ * chunk selection, coverage validation, gauges) sees it for free and token
+ * estimation runs on the already-cut data.
+ *
+ * Distinct surfaces that deliberately still include `custom_message`:
+ * - recall history rendering (om/ledger/recall.ts SOURCE_TYPES)
+ * - the compaction tail anchor in hooks/before-compact.ts (provider-conversation
+ *   semantic — still-pending injections stay in the live window)
+ */
+const SOURCE_ENTRY_TYPES = new Set(["message", "branch_summary"]);
 
 export function isSourceEntry(entry: Entry): boolean {
   return SOURCE_ENTRY_TYPES.has(entry.type);

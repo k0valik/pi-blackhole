@@ -25,6 +25,7 @@ pnpm check         # typecheck + lint
 - **`tests/` is NOT in tsconfig.json** — running tsc over tests surfaces ~150 pre-existing type errors tracked as a separate cleanup. Do not "fix" test type errors; oxlint covers unused vars there.
 - `src/pi-base/**/*.test.ts` is excluded from tsconfig and type-aware lint by design.
 - Tests are pure unit tests with fake agent loops — no LLM/network. `tests/vcc-support/real-sessions.ts` optionally samples `~/.pi/agent/sessions`, but nothing requires real data.
+- **Agent-dir isolation is unconditional**: `tests/setup.ts` always pins `PI_CODING_AGENT_DIR` to a fresh temp dir and never honors an inherited value (Pi exports the real `~/.pi/agent` to child processes — #202). Suites that delete their agent dir go through `tests/agent-dir-guard.ts`, which refuses anything not strictly under `os.tmpdir()` or shaped like `.pi/agent`. Tests must never read, write, or delete the real `~/.pi/agent`.
 
 ## Architecture
 

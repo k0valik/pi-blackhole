@@ -191,7 +191,7 @@ Default `true`. After a successful Blackhole compaction, append a display-only c
 | `true` | If the latest eligible assistant text was dropped, copy up to 16 KiB into a plain `blackhole-pre-compaction-output` session entry, rendered as `[Previous output — display only]` below the retained tail and above the compaction card. |
 | `false` | No copy; the compaction card appears alone (pre-0.5.x behavior). |
 
-The copy is **cosmetic**: Pi renders the entry but never sends it to the model (`sessionEntryToContextMessages` returns nothing for plain `custom` entries), and Blackhole's own serializers only read `message`, `custom_message`, and `branch_summary` entries. It does not change `firstKeptEntryId`, the summary, or the auto-compaction threshold.
+The copy is **cosmetic**: Pi renders the entry but never sends it to the model (`sessionEntryToContextMessages` returns nothing for plain `custom` entries), and Blackhole's own serializers only read `message` and `branch_summary` entries. It does not change `firstKeptEntryId`, the summary, or the auto-compaction threshold.
 
 When the latest eligible answer is already retained by the cut (the common `minimal` case), nothing is copied; older answers are not reinserted after the retained answer. Compact-all with no retained tail copies the latest eligible answer.
 

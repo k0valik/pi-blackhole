@@ -11,11 +11,13 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { assertSafeTestAgentDir } from "./agent-dir-guard.js";
 
 // Honor the vitest agent-dir isolation pin (tests/setup.ts) so the mocked
 // host and the on-disk config resolve to the same place.
 const testDir =
   process.env.PI_CODING_AGENT_DIR ?? join(tmpdir(), `pi-blackhole-observer-guard-${Date.now()}`);
+assertSafeTestAgentDir(testDir);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,
