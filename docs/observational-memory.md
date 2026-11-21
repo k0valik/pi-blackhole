@@ -298,7 +298,7 @@ Cooldowns survive Pi restarts. `expireCooldowns()` runs lazily on config load. `
 
 ### Cooldown policy
 
-`cooldownHours` per stage model config (default: 1 hour) covers rate-limit/quota/billing, configuration/auth and unclassified failures. `cooldownMinutesTransient` (default: 5 minutes) covers network, overload and 5xx failures; set it to `0` to keep those in-cycle only. Set `cooldownHours` to `0` to disable every persisted cooldown — the model is tracked in-memory for the current stage only (no disk writes), using the `failedInCycle` set. When a stage falls back to the session model, its settings also control that model's cooldown, including on thinking-only entries.
+`cooldownHours` per stage model config (default: 1 hour) covers rate-limit/quota/billing, configuration/auth and unclassified failures. `cooldownMinutesTransient` (default: 5 minutes) covers network, overload and 5xx failures on configured candidate models; set it to `0` to keep those in-cycle only. Set `cooldownHours` to `0` to disable every persisted cooldown — the model is tracked in-memory for the current stage only (no disk writes), using the `failedInCycle` set. When a stage falls back to the session model, `cooldownHours` also controls that model's configuration/auth cooldown, including on thinking-only entries. Transient failures on the session fallback stay in-cycle only and never write a cooldown.
 
 A new write never shortens an existing longer window: a five-minute transient failure cannot undo an active rate-limit/configuration cooldown. The entry keeps the reason, stage and cause of the cause that owns the longest expiry.
 

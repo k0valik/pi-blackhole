@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { assertSafeTestAgentDir } from "./agent-dir-guard.js";
 
 const testDir = join(tmpdir(), `pi-blackhole-cooldown-policy-${Date.now()}`);
+assertSafeTestAgentDir(testDir);
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => testDir,
@@ -36,6 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  assertSafeTestAgentDir(testDir);
   rmSync(testDir, { recursive: true, force: true });
 });
 

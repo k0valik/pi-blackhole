@@ -263,6 +263,8 @@ describe("real provider limit and transient messages", () => {
     ],
     ["The service is temporarily at capacity.", "provider_transient"],
     ["The server is busy.", "provider_transient"],
+    ["HTTP 503 Service Unavailable: retry budget exhausted", "provider_transient"],
+    ["HTTP 507 Insufficient Storage", "provider_transient"],
     ["Flex capacity unavailable.", "provider_transient"],
     ["policy-restricted capacity unavailable", "provider_transient"],
     ["Please retry your request shortly.", "provider_transient"],
@@ -288,8 +290,25 @@ describe("real provider limit and transient messages", () => {
     ["prohibited_content", "content_refusal"],
     ["Claude refused to respond", "content_refusal"],
     ["The response was blocked due to safety settings", "content_refusal"],
+    // Account-wide restrictions are not request-content refusals.
+    [
+      "HTTP 403 Your account has been suspended for violating our terms of service",
+      "provider_configuration",
+    ],
+    ["Your account has been disabled", "provider_configuration"],
+    ["Your workspace has been restricted", "provider_configuration"],
   ])("classifies %s as %s", (message, cause) => {
     expect(classifyCooldownCause(new Error(message))).toBe(cause);
+  });
+
+  it.each([
+    [Object.assign(new Error("Request failed"), { status: 503 }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { statusCode: 507 }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { status: 408 }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { status: "503" }), "provider_transient"],
+    [Object.assign(new Error("Request failed"), { status: 400 }), "unknown"],
+  ])("reads numeric status fields: %s", (error, cause) => {
+    expect(classifyCooldownCause(error)).toBe(cause);
   });
 });
 

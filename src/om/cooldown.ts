@@ -249,6 +249,7 @@ export function recordCooldown(
     debugLog("model.cooldown_write", {
       model: key,
       stage,
+      // Keep the historical field name: existing debug-log consumers query it.
       causeClass: cause,
       reason: sanitizeCooldownReason(reason),
     });

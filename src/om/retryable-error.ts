@@ -22,7 +22,7 @@ const RATE_LIMIT_ERROR_SOURCE = [
   "credit[ _-]?limit",
   "out of credits",
   "spend[ _-]?(?:limit|cap)",
-  "budget",
+  "budget[ _-]?(?:limit|exceeded)",
   "billing",
   "payment required",
   "usage[ _-]?not[ _-]?included",
@@ -43,7 +43,7 @@ const RATE_LIMIT_ERROR_SOURCE = [
 const TRANSIENT_ERROR_SOURCE = [
   "overloaded",
   "provider.?returned.?error",
-  "\\b5(?:00|02|03|04|29)\\b",
+  "\\b5\\d{2}\\b",
   "server had an error",
   "at capacity",
   "capacity unavailable",
@@ -120,6 +120,10 @@ const RATE_LIMIT_ERROR_RE = new RegExp(RATE_LIMIT_ERROR_SOURCE, "i");
 const TRANSIENT_ERROR_RE = new RegExp(TRANSIENT_ERROR_SOURCE, "i");
 const CONTENT_REFUSAL_RE = new RegExp(CONTENT_REFUSAL_SOURCE, "i");
 
+/** Account-wide restrictions need a config/billing fix, not a different prompt. */
+const ACCOUNT_RESTRICTION_RE =
+  /\b(?:account|organization|workspace|subscription)\b[\s\S]{0,80}\b(?:suspended|disabled|deactivated|banned|restricted|terminated|blocked|expired|violat(?:e|es|ed|ing|ion)|breach(?:ed|es)?)\b/i;
+
 /**
  * Pi's auto-retry heuristic, used by the compaction trigger to avoid running
  * while the host may retry the same assistant turn. Deliberately narrower than
@@ -193,6 +197,25 @@ function transportCodeText(error: unknown): string {
   return `${own} ${causeCode}`;
 }
 
+/** Numeric HTTP status carried by SDK errors (`status` or `statusCode`). */
+function numericStatus(error: unknown): number | undefined {
+  if (error === null || typeof error !== "object") return undefined;
+  const raw =
+    "status" in error
+      ? (error as { status: unknown }).status
+      : "statusCode" in error
+        ? (error as { statusCode: unknown }).statusCode
+        : undefined;
+  if (typeof raw === "number" && Number.isInteger(raw)) return raw;
+  if (typeof raw === "string" && /^\d{3}$/.test(raw)) return Number(raw);
+  return undefined;
+}
+
+/** Check whether an error is an account-wide restriction. */
+export function isAccountRestrictionError(error: unknown): boolean {
+  return ACCOUNT_RESTRICTION_RE.test(providerErrorText(error));
+}
+
 /** Check whether an error is a rate-limit/quota/billing failure. */
 export function isRateLimitError(error: unknown): boolean {
   return RATE_LIMIT_ERROR_RE.test(providerErrorText(error));
@@ -200,6 +223,8 @@ export function isRateLimitError(error: unknown): boolean {
 
 /** Check whether an error is a network/overload/5xx failure. */
 export function isTransientProviderError(error: unknown): boolean {
+  const status = numericStatus(error);
+  if (status !== undefined && (status === 408 || (status >= 500 && status <= 599))) return true;
   if (TRANSIENT_ERROR_RE.test(providerErrorText(error))) return true;
   return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR_/i.test(
     transportCodeText(error),
@@ -208,6 +233,7 @@ export function isTransientProviderError(error: unknown): boolean {
 
 /** Check whether provider text is a request-content policy refusal. */
 export function isContentRefusalError(error: unknown): boolean {
+  if (isAccountRestrictionError(error)) return false;
   return CONTENT_REFUSAL_RE.test(providerErrorText(error));
 }
 
@@ -233,6 +259,7 @@ export type CooldownCause =
 /** Classify an error for cooldown policy. Order matters: see the predicates above. */
 export function classifyCooldownCause(error: unknown): CooldownCause {
   if (isLocalExecutionError(error)) return "local_execution";
+  if (isAccountRestrictionError(error)) return "provider_configuration";
   if (isContentRefusalError(error)) return "content_refusal";
   if (isRequestLocalError(error)) return "request_local";
   if (isRateLimitError(error)) return "provider_rate_limit";
@@ -360,6 +387,8 @@ export function getDiscardedCount(error: unknown): number | undefined {
 
 /** Check whether an error is a deterministic client error (see above). */
 export function isDeterministicError(error: unknown): boolean {
+  // Account-wide restrictions cannot be fixed by changing the request content.
+  if (isAccountRestrictionError(error)) return true;
   // A content refusal may carry a 400 status, but retrying the same model can
   // succeed on different content. It is not a config/header failure.
   if (isContentRefusalError(error)) return false;

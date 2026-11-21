@@ -164,12 +164,12 @@ interface OmModelConfig {
   id?: string;             // required with provider — omit both for a thinking-only modifier
   thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   cooldownHours?: number;  // default 1h for rate-limit/config/unknown, 0 = disable all persisted cooldowns; stage setting also applies when that stage falls back to the session model
-  cooldownMinutesTransient?: number; // default 5m for network/overload/5xx, 0 = in-cycle only; ignored when cooldownHours is 0
+  cooldownMinutesTransient?: number; // default 5m for network/overload/5xx on configured candidates, 0 = in-cycle only; ignored when cooldownHours is 0; not used by the session fallback
   contextWindow?: number;  // override Pi's registry value; requires provider+id
 }
 ```
 
-A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` / `cooldownMinutesTransient` setting while the worker tracks the session model via `sessionFallback` (default `false`). With `sessionFallback: true` the session model is the last candidate. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
+A thinking-only entry (`{ "thinking": "low" }`, no `provider`/`id`) is never tried as a model candidate — it supplies the stage thinking level and any `cooldownHours` setting while the worker tracks the session model via `sessionFallback` (default `false`). `cooldownMinutesTransient` applies only to entries with `provider`+`id`; a transient failure on the session fallback stays in-cycle and writes no cooldown. With `sessionFallback: true` the session model is the last candidate. An entry with exactly one of `provider`/`id` is rejected, even with valid `thinking`.
 
 **Model ID resolution:** `modelRegistry.find(provider, id)` is used to resolve models. This means:
 - Models explicitly in `models.json` work (they're registered)
