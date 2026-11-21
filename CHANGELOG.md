@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+---
+
+## [0.5.19] - 2026-11-21
+
 ### Added
 
 - **Active user restrictions survive a full reflection pool.** The bounded compaction pool used to evict reflections purely by recency, so newer ordinary reflections displaced old still-active user restrictions the moment `reflectionsPoolMaxTokens` filled. Selection is now tiered: `record_reflections` accepts an optional `relevance` marker (the observer's four-value vocabulary — `critical` for explicit user restrictions, binding decisions, invariants and safety constraints, `high` for durable preferences and corrections), and marker-less records fall back to the relevance of their live supporting observations, where confirmed ask-user decisions are already rated at least `high`. The priority tier claims at most half the pool first (critical before high, newest-first within a tier), ordinary reflections fill the rest newest-first, leftover budget spills back to priority, and priority reflections that still cannot fit are reported in a `before_compact.reflection_priority_overflow` debug event plus a one-line compaction-output notice pointing at their recall ids — never silently dropped. The marker is authoritative when present (`low`/`medium` deliberately downgrade), never renders in output text, invalid values are dropped without failing the batch, `isReflection` rejects stored records with a bogus marker, and superseded or dropper-pruned support never promotes a reflection — cancellation stays normal supersession. No new config key: the reserve is a fixed half-pool fraction and the tiering is default-on, a pure reorder within the existing cap; observer and reflector prompt preambles keep plain newest-first selection ([#208](https://github.com/k0valik/pi-blackhole/issues/208)).
