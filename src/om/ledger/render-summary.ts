@@ -123,11 +123,24 @@ export function selectPriorReflections(
 }
 
 /**
- * Priority tier of a reflection for bounded pool selection (#208): live
- * critical support (2) beats live high support (1); everything else is
- * ordinary (0). Support must be live in the same projection — an observation
- * that was superseded, dropped, or lies outside the boundary never promotes a
- * reflection, so tiering cannot resurrect stale facts.
+ * Marker tier (#208): the reflection's own optional relevance, authoritative
+ * when present. critical (2) beats high (1); low/medium deliberately downgrade
+ * to ordinary (0) — a model that marked a reflection unimportant is not
+ * overridden by its support observations.
+ */
+function markerTier(reflection: Reflection): 0 | 1 | 2 | undefined {
+  if (reflection.relevance === undefined) return undefined;
+  if (reflection.relevance === "critical") return 2;
+  if (reflection.relevance === "high") return 1;
+  return 0;
+}
+
+/**
+ * Fallback tier from live support (#208): live critical support (2) beats live
+ * high support (1); everything else is ordinary (0). Support must be live in
+ * the same projection — an observation that was superseded, dropped, or lies
+ * outside the boundary never promotes a reflection, so tiering cannot
+ * resurrect stale facts.
  */
 function supportTier(
   reflection: Reflection,
@@ -154,7 +167,7 @@ export type ReflectionPoolSelection = {
 /**
  * Bounded reflection pool selection (#208).
  *
- * Priority reflections (live critical/high support) claim at most half the
+ * Priority reflections (critical/high marker, else live critical/high
  * pool first — the bounded allocation that leaves room for ordinary memory —
  * then ordinary reflections fill newest-first, and any leftover budget spills
  * back to remaining priority reflections so the pool is never wasted. Whole
@@ -171,7 +184,12 @@ export function selectReflectionPool(
   supportRelevance: ReadonlyMap<string, Relevance>,
   render = reflectionToSummaryLine,
 ): ReflectionPoolSelection {
-  const items = reflections.map((r, i) => ({ r, i, tier: supportTier(r, supportRelevance) }));
+  const items = reflections.map((r, i) => ({
+    r,
+    i,
+    // Marker first, live support as the fallback for marker-less records.
+    tier: markerTier(r) ?? supportTier(r, supportRelevance),
+  }));
   // Newest-first within each group; critical before high across tiers.
   const priority = items
     .filter((item) => item.tier > 0)

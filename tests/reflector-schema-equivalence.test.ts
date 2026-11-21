@@ -16,6 +16,7 @@ import {
   RecordReflectionsSchema,
   RecordReflectionsWithSupersedesSchema,
 } from "../src/om/agents/reflector/tool-schema.js";
+import { RelevanceSchema } from "../src/om/agents/observer/tool-schema.js";
 
 const COMPLETE_DESCRIPTION =
   "Whether this batch completes reflection review. Set false when more reflections or corrections remain.";
@@ -25,6 +26,8 @@ const oldBaseSchema = Type.Object({
     Type.Object({
       content: Type.String({ minLength: 1 }),
       supportingObservationIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      // Optional relevance marker (#208): mirrors the live schema field.
+      relevance: Type.Optional(RelevanceSchema),
     }),
     { minItems: 1 },
   ),

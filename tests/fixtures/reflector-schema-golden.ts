@@ -6,6 +6,7 @@
  */
 import { Type } from "typebox";
 import type { Static } from "typebox";
+import { RelevanceSchema } from "../../src/om/agents/observer/tool-schema.js";
 
 export const RecordReflectionsSchema = Type.Object({
   reflections: Type.Array(
@@ -14,6 +15,8 @@ export const RecordReflectionsSchema = Type.Object({
       supportingObservationIds: Type.Array(Type.String({ minLength: 1 }), {
         minItems: 1,
       }),
+      // Optional relevance marker (#208): mirrors the live schema field.
+      relevance: Type.Optional(RelevanceSchema),
     }),
     { minItems: 1 },
   ),

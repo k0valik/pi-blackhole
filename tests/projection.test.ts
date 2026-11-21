@@ -883,6 +883,44 @@ describe("buildCompactionProjection — priority reflection tiering", () => {
     expect(result.priorityOverflow).toEqual([]);
   });
 
+  it("preserves a marker-critical reflection whose support was superseded", async () => {
+    const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
+    const staleObs = makeObservation(hexId("obs-marker-stale"), { relevance: "high" as const });
+    const replacementObs = makeObservation(hexId("obs-marker-live"), {
+      relevance: "medium" as const,
+      supersedes: [staleObs.id],
+    });
+    const markedRef = makeReflection(hexId("ref-marker-restriction"), {
+      content: "User decided: do not publish the test draft",
+      relevance: "critical" as const,
+      supportingObservationIds: [staleObs.id],
+    });
+    // Enough ordinary reflections to fill the pool: without the marker the
+    // oldest reflection is the first casualty of the newest-first fill.
+    const ordinaryRefs = Array.from({ length: 18 }, (_, i) =>
+      makeReflection(hexId(`ref-marker-ordinary-${i}`), { content: `ordinary ${i}` }),
+    );
+    const entries: Entry[] = [
+      src("kept-entry"),
+      recordEntry("e1", [staleObs], "kept-entry"),
+      recordEntry("e2", [replacementObs], "kept-entry"),
+      reflectEntry("e3", [markedRef, ...ordinaryRefs], "kept-entry"),
+    ];
+    const reflectionsPoolMaxTokens = await lineTokens([markedRef, markedRef, ordinaryRefs[0]!]);
+    const result = buildCompactionProjection(entries, "kept-entry", {
+      observationsPoolMaxTokens: 20_000,
+      reflectionsPoolMaxTokens,
+      fullFoldAlways: true,
+    });
+    // Precondition: the superseded support left the projection; only the
+    // marker keeps this restriction alive (#208 dropper interaction).
+    expect(result.observations.map((o) => o.id)).not.toContain(staleObs.id);
+    const ids = result.reflections.map((r) => r.id);
+    expect(ids).toContain(markedRef.id);
+    expect(ids).not.toContain(ordinaryRefs[0]!.id);
+    expect(result.priorityOverflow).toEqual([]);
+  });
+
   it("leaves the pool uncapped and overflow empty when reflectionsPoolMaxTokens is 0", async () => {
     const { buildCompactionProjection } = await import("../src/om/ledger/projection.js");
     const obs = makeObservation(hexId("obs-uncapped"), { relevance: "critical" as const });

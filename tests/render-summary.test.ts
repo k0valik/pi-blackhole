@@ -440,3 +440,72 @@ describe("priorityOverflowNote", () => {
     expect(note).toContain("[bbb000000002]");
   });
 });
+
+describe("selectReflectionPool — reflection relevance marker (#208)", () => {
+  const medObs = "cccccccccccc";
+
+  function ord(id: string, content: string): Reflection {
+    return makeReflection(id, { content, supportingObservationIds: [medObs] });
+  }
+
+  it("promotes a marker-critical reflection whose supporting observation is no longer live", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    // The dropper prunes observations whose meaning a reflection preserves, so
+    // the marker must stand on its own once support has left the active pool.
+    const marked = makeReflection("mrk000000001", {
+      content: "User restriction: never publish the test draft",
+      relevance: "critical" as const,
+      supportingObservationIds: ["fff000000001"],
+    });
+    const ordinary = Array.from({ length: 4 }, (_, i) => ord(`ord00000000${i}`, "ordinary note"));
+    const budget = poolLineTokens(mod, tokens, [marked, marked, ordinary[0]!]);
+    const result = mod.selectReflectionPool([marked, ...ordinary], budget, new Map());
+    expect(result.selected.map((r) => r.id)).toContain("mrk000000001");
+    expect(result.selected.map((r) => r.id)).not.toContain("ord00000000a");
+    expect(result.selected).toHaveLength(4);
+    expect(result.overflow).toEqual([]);
+  });
+
+  it("treats a marker-downgraded reflection as ordinary even with live critical support", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    // The marker is authoritative: a model that downgraded the reflection
+    // must not be overridden by the supporting observation's relevance.
+    const downgraded = makeReflection("dwn000000001", {
+      content: "marker-downgraded note",
+      relevance: "low" as const,
+      supportingObservationIds: ["dddddddddddd"],
+    });
+    const ordinary = Array.from({ length: 4 }, (_, i) => ord(`ord00000000${i}`, "ordinary note"));
+    const support = new Map([["dddddddddddd", "critical" as const]]);
+    const budget = poolLineTokens(mod, tokens, [downgraded, downgraded, ordinary[0]!]);
+    const result = mod.selectReflectionPool([downgraded, ...ordinary], budget, support);
+    expect(result.selected.map((r) => r.id)).not.toContain("dwn000000001");
+    expect(result.overflow).toEqual([]);
+  });
+
+  it("ranks marker-critical above marker-high", async () => {
+    const mod = await import("../src/om/ledger/render-summary.js");
+    const tokens = await import("../src/om/tokens.js");
+    const criticalRef = makeReflection("cri000000001", {
+      content: "critical-marked note",
+      relevance: "critical" as const,
+      supportingObservationIds: ["cccccccccccc"],
+    });
+    const highRef = makeReflection("hig000000001", {
+      content: "high-marked note",
+      relevance: "high" as const,
+      supportingObservationIds: ["cccccccccccc"],
+    });
+    const ordinary = Array.from({ length: 4 }, (_, i) => ord(`ord00000000${i}`, "ordinary note"));
+    // Pool fits the critical line plus two ordinary lines; the reserve
+    // (half) fits only the critical line, so the high line must lose.
+    const budget = poolLineTokens(mod, tokens, [criticalRef, ordinary[0]!, ordinary[1]!]);
+    const result = mod.selectReflectionPool([criticalRef, highRef, ...ordinary], budget, new Map());
+    const selectedIds = result.selected.map((r) => r.id);
+    expect(selectedIds).toContain("cri000000001");
+    expect(selectedIds).not.toContain("hig000000001");
+    expect(result.overflow.map((r) => r.id)).toContain("hig000000001");
+  });
+});
