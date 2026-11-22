@@ -61,12 +61,12 @@
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@earendil-works/pi-tui": "1.5.2",
-    "lint-staged": "17.6.0",
-    "oxfmt": "^0.78.0",
-    "oxlint": "1.93.0",
+    "lint-staged": "17.6.1",
+    "oxfmt": "^0.79.0",
+    "oxlint": "1.94.0",
     "simple-git-hooks": "^2.14.0",
     "typebox": "1.4.7",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.85.1 <2.0.0",
