@@ -172,6 +172,11 @@ export function buildOwnCut(
   piFirstKeptEntryId?: string,
   /** "pi-default" = use Pi's cut, "minimal" = keep only last user message (current). */
   tailBehavior?: "pi-default" | "minimal" | "unobserved",
+  options?: {
+    /** Overflow recovery may cut inside the active turn at a tool-safe
+     *  assistant boundary when no user-turn boundary advanced the window. */
+    allowIntraTurnCut?: boolean;
+  },
 ): OwnCutResult {
   // Find the last compaction entry and its firstKeptEntryId
   let lastCompactionIdx = -1;
@@ -196,6 +201,7 @@ export function buildOwnCut(
     if (messages.length === 0) return { ok: false, reason: "no_live_messages" };
     const boundary = observedPrefixIndex(branchEntries);
     let cut = messages.findIndex((entry) => branchEntries.indexOf(entry) > boundary);
+    const firstUnobservedCut = cut < 0 ? messages.length - 1 : cut;
     if (cut < 0) cut = messages.length - 1;
     // A whole user turn is the conservative validity boundary. In particular,
     // an observed tool call must not be separated from its pending result.
@@ -205,6 +211,16 @@ export function buildOwnCut(
         !isToolSafeCut(branchEntries, branchEntries.indexOf(messages[cut])))
     )
       cut--;
+    // No user-turn boundary inside the retained window (e.g. one long active
+    // turn). On overflow recovery, fall back to the first unobserved tool-safe
+    // cut so the observed prefix can be summarized instead of deferring every
+    // attempt (#215). Tool-safety alone is the hard constraint: never orphan a
+    // retained tool result, never split a call/result pair.
+    if (options?.allowIntraTurnCut && cut === 0 && firstUnobservedCut > 0) {
+      let alt = firstUnobservedCut;
+      while (alt > 0 && !isToolSafeCut(branchEntries, branchEntries.indexOf(messages[alt]))) alt--;
+      if (alt > 0 && messages[alt].message.role !== "toolResult") cut = alt;
+    }
     return {
       ok: true,
       messages: messages.slice(0, cut).map((entry) => entry.message),
@@ -525,10 +541,12 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
       piFirstKeptEntryId: preparation.firstKeptEntryId,
     });
 
+    const allowIntraTurnCut = event.reason === "overflow";
     let ownCut = buildOwnCut(
       branchEntries as any[],
       preparation.firstKeptEntryId,
       effectiveTailBehavior,
+      { allowIntraTurnCut },
     );
     if (!ownCut.ok) {
       const lastComp = [...branchEntries].reverse().find((e: any) => e.type === "compaction");
@@ -674,6 +692,19 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         },
       });
       if (!pressure.ok) {
+        // On overflow, cancelling here leaves the same oversized context for the
+        // retry. Delegate to Pi, which can split the turn at assistant cut points
+        // and reads raw messages (#215).
+        if (event.reason === "overflow") {
+          trace("before_compact.yield_to_pi_overflow", { reason: `pressure_${pressure.reason}` });
+          noteYieldToPiSummarizer(omRuntime, ctx, `pressure_${pressure.reason}_overflow`);
+          ctx.ui?.notify?.(
+            "blackhole: no safe fitting raw tail; yielding this compaction to Pi's summarizer to recover.",
+            "warning",
+          );
+          omRuntime.lastCompactCancelled = false;
+          return;
+        }
         trace("before_compact.cancel", { reason: pressure.reason });
         ctx.ui?.notify?.(
           "blackhole: context pressure fallback deferred; no safe fitting raw tail or capacity is unknown.",
@@ -693,6 +724,35 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
           compactAll: false,
         };
       }
+    }
+
+    // A cut that selects nothing cannot move firstKept: the same summary and
+    // the same raw tail would be written again. On overflow, no amount of
+    // re-summarizing helps — yield to Pi, which can split the turn and reads
+    // the raw messages. Otherwise keep the active window intact and wait for
+    // an observed/turn boundary instead of writing a no-op compaction (#215).
+    if (
+      effectiveTailBehavior === "unobserved" &&
+      !ownCut.compactAll &&
+      ownCut.selectedIds.length === 0
+    ) {
+      if (allowIntraTurnCut) {
+        trace("before_compact.yield_to_pi_overflow", { reason: "no_unobserved_progress" });
+        noteYieldToPiSummarizer(omRuntime, ctx, "unobserved_no_progress_overflow");
+        ctx.ui?.notify?.(
+          "blackhole: no observed cut can free space inside the active turn; yielding this compaction to Pi's summarizer to recover.",
+          "warning",
+        );
+        omRuntime.lastCompactCancelled = false;
+        return;
+      }
+      trace("before_compact.cancel", { reason: "no_unobserved_progress" });
+      ctx.ui?.notify?.(
+        "blackhole: unobserved tail preserved; no newly observed content can be summarized yet, keeping the active window intact.",
+        "warning",
+      );
+      omRuntime.lastCompactCancelled = true;
+      return { cancel: true };
     }
 
     trace("before_compact.proceeding", {
@@ -1001,6 +1061,27 @@ export const registerBeforeCompactHook = (pi: ExtensionAPI, omRuntime: Runtime) 
         estimated > window - reserve ||
         (summary.trim().length === 0 && !omHasContent)
       ) {
+        // An overflow request cannot be recovered by preserving the tail: the
+        // next request would fail again with the same context. Hand the
+        // compaction to Pi's native summarizer, which can split the active
+        // turn at assistant cut points and reads the raw (even unobserved)
+        // messages. Cancelling here leaves the session permanently over the
+        // window (#215).
+        if (event.reason === "overflow") {
+          trace("before_compact.yield_to_pi_overflow", {
+            reason: "unobserved_context_unavailable",
+            estimated,
+            window,
+            reserve,
+          });
+          noteYieldToPiSummarizer(omRuntime, ctx, "unobserved_context_unavailable_overflow");
+          ctx.ui?.notify?.(
+            "blackhole: active context exceeds the window; yielding this compaction to Pi's summarizer to recover.",
+            "warning",
+          );
+          omRuntime.lastCompactCancelled = false;
+          return;
+        }
         trace("before_compact.cancel", { reason: "unobserved_context_unavailable", estimated });
         ctx.ui?.notify?.(
           "blackhole: unobserved tail preserved; compaction deferred (no useful summary or insufficient known context capacity).",

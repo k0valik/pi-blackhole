@@ -157,7 +157,7 @@ With the default `compactionEngine: "blackhole"`, blackhole's `session_before_co
 
 `tailBehavior: "unobserved"` retains original messages after trustworthy completed OM observation coverage, backing up to a complete user turn to avoid splitting tool interactions. Missing, invalid or disconnected coverage retains extra original history. Compaction and VCC never advance OM coverage. Pending observer input remains the original branch, including across restart and repeated compactions; no blocking observer flush is added.
 
-The default remains `"minimal"`; `"pi-default"` is unchanged. This mode does not truncate retained tool outputs. If the raw tail plus summary cannot fit the model context minus Pi's `reserveTokens`, capacity is unknown, or no useful summary exists, Blackhole explicitly defers compaction rather than dropping the tail or invoking native summarization. Token estimates are not a provider acceptance guarantee.
+The default remains `"minimal"`; `"pi-default"` is unchanged. This mode does not truncate retained tool outputs. If the raw tail plus summary cannot fit the model context minus Pi's `reserveTokens`, capacity is unknown, or no useful summary exists, Blackhole defers compaction rather than dropping the tail or invoking native summarization — except during context-overflow recovery, where it uses a tool-safe intra-turn cut and, if needed, yields to Pi's native summarizer so the same oversized request is not retried unchanged. Token estimates are not a provider acceptance guarantee.
 
 ### Reusable VCC pressure fallback (opt-in)
 

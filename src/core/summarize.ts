@@ -135,13 +135,17 @@ const briefOf = (text: string): string => {
 const mergeHeaderSection = (header: string, prev: string, fresh: string): string => {
   // Outstanding Context is volatile -- always use fresh only
   if (header === "Outstanding Context") return fresh;
-  if (!prev) return fresh;
-  if (!fresh) return prev;
 
-  // Files And Changes: merge by category (Modified/Created/Read), dedup paths
+  // Files And Changes: merge by category (Modified/Created/Read), dedup paths.
+  // Called with FULL summaries, so the generic empty-fresh guard must not run:
+  // returning the whole `prev` summary here duplicates every other section and
+  // the brief (issue #215). mergeFileLines("", "") is "" and treats one-sided
+  // input as the merge result.
   if (header === "Files And Changes") {
     return mergeFileLines(extractSection(prev, header), extractSection(fresh, header));
   }
+  if (!prev) return fresh;
+  if (!fresh) return prev;
 
   // Session Goal, User Preferences: line-level dedup, cap
   const isClean = (l: string) =>
@@ -504,6 +508,12 @@ export const extractRecallNote = (text: string): string =>
 export const stripRecallNotes = (text: string): string => {
   const paragraphs = text.split(/\n\n+/);
   const kept = paragraphs.filter((p) => !p.includes(RECALL_NOTE_MARKER));
+  // compile() appends the recall note after a structural separator. Removing
+  // only the note paragraph leaves that separator behind, and every later
+  // merge treats it as brief content — so repeated compactions accumulate
+  // dangling "---" paragraphs (#215). Drop the separators that trailed the
+  // note (also heals summaries written by older versions).
+  while (kept.length > 0 && kept[kept.length - 1].trim() === "---") kept.pop();
   return kept.join("\n\n");
 };
 

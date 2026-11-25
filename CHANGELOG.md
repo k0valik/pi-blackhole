@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Unobserved compaction is idempotent and recovers from an oversized active turn.** When every message was observed but the active turn had no user-message boundary to advance `firstKeptEntryId`, empty-fresh compactions merged the full previous summary through the `[Files And Changes]` path, duplicating every section and the brief on each attempt (1→2→4… `[Session Goal]` blocks) until the summary alone exceeded the window. The merge now treats one-sided input as the merge result and drops the structural separator that trailed the recall note, so repeated empty compactions are a fixed point. A no-progress unobserved cut now cancels instead of writing a no-op entry; on `reason: "overflow"` it instead cuts inside the active turn at the first tool-safe boundary (never splitting a tool call from its result), and if even that cannot fit — or the VCC pressure fallback finds no safe fit — it yields to Pi's native summarizer rather than cancelling into the same oversized retry. No config surface changed; non-overflow unobserved compactions keep the whole-user-turn boundary and the deferral policy, and append mode remains compatible ([#215](https://github.com/k0valik/pi-blackhole/issues/215)).
+
 ---
 
 ## [0.5.19] - 2026-11-21
