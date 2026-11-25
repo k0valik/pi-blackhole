@@ -335,7 +335,11 @@ describe("vcc-summarize robust merging and stripping", () => {
       const r = compile({ messages: [userMsg("next")], previousSummary: prev });
       expect(r).not.toContain("## Reflections");
       const parts = r.split("\n\n---\n\n");
-      expect(parts.length).toBeLessThanOrEqual(2);
+      // Header block + fresh transcript + recall note. Before #216 the
+      // headerless fresh transcript was dropped, hiding this third part.
+      expect(parts).toHaveLength(3);
+      expect(parts[1]).toContain("next");
+      expect(r).not.toContain("---\n\n---");
     });
 
     it("strips OM content when only Reflections exist", () => {
@@ -424,6 +428,25 @@ describe("vcc-summarize robust merging and stripping", () => {
       expect(r).toContain("- Goal");
       expect(r).toContain("substantial");
     });
+
+    it("does not promote a header-shaped line inside a headerless transcript", () => {
+      const prev = [
+        "[user]",
+        "quoted summary:",
+        "[Session Goal]",
+        "- embedded goal that is transcript content",
+        "",
+        "[assistant]",
+        "noted",
+      ].join("\n");
+      const r = compile({
+        messages: [userMsg("continue the work")],
+        previousSummary: prev,
+      });
+      const headerPart = r.split("\n\n---\n\n")[0];
+      expect(headerPart).not.toContain("embedded goal");
+      expect(r).toContain("embedded goal");
+    });
   });
 
   describe("Files And Changes merge vs wrapped / hand-written previous summaries (#105)", () => {
@@ -447,11 +470,15 @@ describe("vcc-summarize robust merging and stripping", () => {
         cwd: "/repo",
       });
       // paths render cwd-relative, one per line under a counted header
-      expect(r).toContain("Modified (2):");
-      expect(r).toContain("src/real.ts");
-      expect(r).toContain("src/other.ts");
-      expect(r).not.toContain("/repo/");
-      expect(r).not.toContain("hand-written prose");
+      const filesSection = r.split("\n\n---\n\n")[0];
+      expect(filesSection).toContain("Modified (2):");
+      expect(filesSection).toContain("src/real.ts");
+      expect(filesSection).toContain("src/other.ts");
+      expect(filesSection).not.toContain("/repo/");
+      expect(filesSection).not.toContain("hand-written prose");
+      // The headerless pi-native summary is previous context, so it survives
+      // as transcript instead of being silently dropped (#216).
+      expect(r).toContain("hand-written prose");
     });
 
     it("keeps every fresh file when the fresh Files section wraps across lines", () => {

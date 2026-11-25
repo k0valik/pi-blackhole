@@ -49,6 +49,10 @@ const HEADER_NAMES = [
 
 const SEPARATOR = "\n\n---\n\n";
 
+/** True when the summary starts with a VCC header block. */
+const startsWithHeader = (text: string): boolean =>
+  HEADER_NAMES.some((header) => text.trimStart().startsWith(`[${header}]`));
+
 /**
  * Join wrapped continuation lines back into their bullet item.
  *
@@ -126,6 +130,11 @@ export const extractSection = (text: string, header: string): string => {
 
 /** Extract the brief transcript part (everything after ---) */
 const briefOf = (text: string): string => {
+  // A headerless summary is transcript-only: formatSummary() only inserts the
+  // separator when there is a header block before the brief. Treating the
+  // absent separator as "no brief" dropped the whole transcript on the next
+  // merge (issue #216).
+  if (!startsWithHeader(text)) return text.trim();
   const idx = text.indexOf(SEPARATOR);
   if (idx < 0) return "";
   return text.slice(idx + SEPARATOR.length).trim();
@@ -410,16 +419,23 @@ const mergeBriefTranscript = (prev: string, fresh: string): string => {
 };
 
 const mergePrevious = (prev: string, fresh: string): string => {
+  // Header-shaped lines inside a headerless transcript are content, not
+  // sections. Only scan sources that actually start with a VCC header block;
+  // otherwise a quoted "[Session Goal]" line in the transcript would be
+  // promoted into the merged header and duplicated.
+  const prevSource = startsWithHeader(prev) ? prev : "";
+  const freshSource = startsWithHeader(fresh) ? fresh : "";
+
   // Merge header sections
   const headers = HEADER_NAMES.map((header) => {
     // Files And Changes must NOT use sectionOf — it rejoins continuation lines
     // and destroys the multi-line list format needed for correct merge parsing.
     // Pass full summaries; mergeFileLines extracts the section itself.
     if (header === "Files And Changes") {
-      return mergeHeaderSection(header, prev, fresh);
+      return mergeHeaderSection(header, prevSource, freshSource);
     }
-    const freshSec = sectionOf(fresh, header);
-    const prevSec = sectionOf(prev, header);
+    const freshSec = sectionOf(freshSource, header);
+    const prevSec = sectionOf(prevSource, header);
     return mergeHeaderSection(header, prevSec, freshSec);
   }).filter(Boolean);
 

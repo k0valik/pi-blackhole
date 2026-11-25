@@ -47,6 +47,74 @@ describe("compile", () => {
     expect(r).toContain("Next step");
   });
 
+  describe("headerless summaries (#216)", () => {
+    // >200 chars on one line: extractGoals drops it, so the fresh compile has
+    // no [Session Goal] (or any other) header and is transcript-only.
+    const longPreamble =
+      "Delegation stance: implement. Build everything yourself; read-only helpers are fine. ".repeat(
+        8,
+      );
+
+    it("keeps a headerless previous transcript on the next compile", () => {
+      const first = compile({
+        messages: [userMsg(longPreamble), assistantText("Looking at the retry code now.")],
+      });
+      expect(first).not.toContain("[Session Goal]");
+      expect(first).toContain("[user]");
+
+      const second = compile({
+        messages: [
+          userMsg("Also add a regression test."),
+          assistantText("Added the regression test."),
+        ],
+        previousSummary: first,
+      });
+      expect(second).toContain("Delegation stance");
+      expect(second).toContain("Looking at the retry code now.");
+      expect(second).toContain("Also add a regression test.");
+      expect(second).toContain("Added the regression test.");
+    });
+
+    it("keeps a headerless fresh transcript when the previous summary has goals", () => {
+      const previousSummary =
+        "[Session Goal]\n- Fix the billing webhook retry bug\n\n---\n\n[user]\nFix the billing webhook retry bug";
+      const merged = compile({
+        messages: [userMsg(longPreamble), assistantText("Background reading done.")],
+        previousSummary,
+      });
+      expect(merged).toContain("Fix the billing webhook retry bug");
+      expect(merged).toContain("Delegation stance");
+      expect(merged).toContain("Background reading done.");
+    });
+
+    it("keeps headerless transcripts across repeated merges without duplicating them", () => {
+      const first = compile({
+        messages: [userMsg(longPreamble), assistantText("First reply.")],
+      });
+      const second = compile({
+        messages: [userMsg("Second short message."), assistantText("Second reply.")],
+        previousSummary: first,
+      });
+      const third = compile({
+        messages: [userMsg("Third short message."), assistantText("Third reply.")],
+        previousSummary: second,
+      });
+
+      for (const text of [
+        "Delegation stance",
+        "First reply.",
+        "Second short message.",
+        "Second reply.",
+        "Third short message.",
+        "Third reply.",
+      ]) {
+        expect(third, text).toContain(text);
+      }
+      expect(third.match(/First reply\./g)).toHaveLength(1);
+      expect(third.match(/Second reply\./g)).toHaveLength(1);
+    });
+  });
+
   it("outstanding context is volatile (fresh only)", () => {
     const previousSummary = "[Outstanding Context]\n- old blocker\n\n---\n\n[user]\nhi";
     const r = compile({
