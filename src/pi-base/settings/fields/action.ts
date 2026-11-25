@@ -3,7 +3,7 @@
  * caller-supplied `onActivate(ctx)` and never changes a value.
  */
 
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey } from "../../../ui/keys.js";
 import type { ActionField, FieldRenderer } from "../types";
 
 export const actionRenderer: FieldRenderer<ActionField, void> = {

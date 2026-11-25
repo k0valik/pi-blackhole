@@ -11,12 +11,8 @@
  *    are untouched. The copy only fills screen space the rebuild dropped.
  *  - Bounded: a fixed cap keeps the added disk/redraw cost per compaction small.
  */
-import { Container, Markdown, Text, stripTerminalSequences } from "@earendil-works/pi-tui";
-import {
-  getMarkdownTheme,
-  type ExtensionAPI,
-  type SessionEntry,
-} from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences, wrapTextWithAnsi } from "../ui/ansi-text.js";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { debugLog } from "../om/debug-log.js";
 import type { Runtime } from "../om/runtime.js";
 
@@ -184,15 +180,19 @@ export function registerPreCompactionOutput(pi: ExtensionAPI, runtime: Runtime):
     (entry, _options, theme) => {
       if (!isPreCompactionOutputData(entry?.data)) return undefined;
       const data = entry.data;
-      const container = new Container();
-      container.addChild(new Text(theme.fg("dim", "[Previous output — display only]"), 0, 0));
-      // Copied text is data, never terminal control: strip escape sequences
-      // before the Markdown component can pass them to the terminal.
-      container.addChild(new Markdown(stripTerminalSequences(data.text), 0, 0, getMarkdownTheme()));
-      if (data.truncated) {
-        container.addChild(new Text(theme.fg("dim", "[Copy truncated]"), 0, 0));
-      }
-      return container;
+      const render = (width: number): string[] => {
+        const contentWidth = Math.max(1, width - 2);
+        const lines = [`  ${theme.fg("dim", "[Previous output — display only]")}`];
+        for (const line of stripTerminalSequences(data.text).split(/\r?\n/)) {
+          if (line.length === 0) lines.push("");
+          else lines.push(...wrapTextWithAnsi(line, contentWidth).map((wrapped) => `  ${wrapped}`));
+        }
+        if (data.truncated) {
+          lines.push(`  ${theme.fg("dim", "[Copy truncated]")}`);
+        }
+        return lines;
+      };
+      return { render, invalidate: () => {} };
     },
   );
 

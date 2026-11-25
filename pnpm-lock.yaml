@@ -195,6 +195,9 @@ importers:
 
   .:
     dependencies:
+      get-east-asian-width:
+        specifier: 1.6.0
+        version: 1.6.0
       tsup:
         specifier: ^9.0.0
         version: 9.0.0(jiti@2.7.0)(postcss@8.5.28)(typescript@6.0.3)(yaml@2.9.1)
@@ -211,9 +214,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(ws@8.21.3)
-      '@earendil-works/pi-tui':
-        specifier: 1.5.2
-        version: 1.5.2
       lint-staged:
         specifier: 17.6.0
         version: 17.6.0

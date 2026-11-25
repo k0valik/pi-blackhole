@@ -1,10 +1,10 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { UiTerminal } from "../../ui/rows.js";
 import { createSettingsModalBody } from "./body.ts";
 import type { Field } from "./types.ts";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "../../ui/ansi-text.js";
 
 beforeAll(() => {
   initTheme();
@@ -28,11 +28,11 @@ function fakeTheme(): Theme {
   } as unknown as Theme;
 }
 
-function fakeTui(): TUI {
+function fakeTui(): UiTerminal {
   return {
     terminal: { rows: 40, columns: 100 },
     requestRender: () => {},
-  } as unknown as TUI;
+  };
 }
 
 function fakeCtx(): ExtensionContext {

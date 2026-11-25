@@ -6,14 +6,11 @@
  * don't have to mash Enter to scroll through 20+ entries.
  */
 
-import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import {
-  matchesKey,
-  SelectList,
-  truncateToWidth,
-  type Component,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
+import { matchesKey } from "../../../ui/keys.js";
+import { truncateToWidth } from "../../../ui/ansi-text.js";
+import { SelectList, type SelectItem } from "../../../ui/select-list.js";
+import { selectListTheme } from "../../../ui/select-theme.js";
+import type { UiComponent } from "../../../ui/rows.js";
 import { formatHintLine } from "../frame";
 import { deleteWordBackward } from "../inline-edit";
 import type { EnumField, FieldRenderContext, FieldRenderer, SubmenuFactory } from "../types";
@@ -61,14 +58,14 @@ function makeEnumSubmenu(
     const list = new SelectList(
       items,
       Math.min(items.length, MAX_VISIBLE_ROWS),
-      getSelectListTheme(),
+      selectListTheme(ctx.theme),
     );
     const idx = field.options.indexOf(current);
     list.setSelectedIndex(idx >= 0 ? idx : 0);
     list.onSelect = (item) => done(item.value);
     list.onCancel = () => done();
 
-    const component: Component = {
+    const component: UiComponent = {
       render(width: number): string[] {
         const lines = [...list.render(width)];
         lines.push("");
@@ -154,7 +151,7 @@ function makeSearchableEnumSubmenu(
       if (selected >= items.length) selected = Math.max(0, items.length - 1);
     }
 
-    const component: Component = {
+    const component: UiComponent = {
       render(width: number): string[] {
         const lines: string[] = [];
         const items = filteredItems();

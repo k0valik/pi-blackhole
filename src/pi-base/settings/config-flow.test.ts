@@ -16,7 +16,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { Mock } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Component, TUI, KeybindingsManager } from "@earendil-works/pi-tui";
+import type { RawUiHost, UiComponent } from "../../ui/rows.js";
 import type {
   ExtensionContext,
   ExtensionUIContext,
@@ -80,8 +80,8 @@ const DEFAULTS: TestConfig = { enabled: true, threshold: 5 };
 
 // ── Stubs ──────────────────────────────────────────────────────────────
 
-function fakeTui(): TUI {
-  return { terminal: { rows: 40, columns: 80 }, requestRender: vi.fn() } as unknown as TUI;
+function fakeTui(): RawUiHost {
+  return { size: () => ({ rows: 40, columns: 80 }), requestRender: vi.fn() };
 }
 
 function fakeTheme(): Theme {
@@ -170,13 +170,13 @@ function writeProject(data: Record<string, unknown>) {
 async function selectFirst(ctx: FakeContext): Promise<void> {
   const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
   const factory = customMock.mock.calls[0]?.[0] as (
-    tui: TUI,
+    host: RawUiHost,
     theme: Theme,
-    kb: KeybindingsManager,
+    kb: unknown,
     done: (r: unknown) => void,
   ) => Component;
 
-  const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+  const sel = factory(fakeTui(), fakeTheme(), null, (r) => {
     ctx.ui.done(r);
   });
   sel.handleInput?.("\x1b[B"); // down → skip Display All, reach Global
@@ -189,15 +189,15 @@ async function selectFirst(ctx: FakeContext): Promise<void> {
  * After selectFirst resolves, retrieve the edit body from the second
  * ctx.ui.custom call (openEditMode).
  */
-function getEditBody(ctx: FakeContext, callIndex = 1): Component {
+function getEditBody(ctx: FakeContext, callIndex = 1): UiComponent {
   const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
   const editFactory = customMock.mock.calls[callIndex]?.[0] as (
-    tui: TUI,
+    host: RawUiHost,
     theme: Theme,
-    kb: KeybindingsManager,
+    kb: unknown,
     done: (r: unknown) => void,
   ) => Component;
-  return editFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+  return editFactory(fakeTui(), fakeTheme(), null, (r) => {
     ctx.ui.done(r);
   });
 }
@@ -206,7 +206,7 @@ function getEditBody(ctx: FakeContext, callIndex = 1): Component {
  * After a body action mounts a confirm, retrieve it from the captured refs.
  * Returns the last confirm instance.
  */
-function getLastConfirm(): Component {
+function getLastConfirm(): UiComponent {
   const refs = mockCreateConfirm.confirmRefs;
   expect(refs.length).toBeGreaterThan(0);
   const last = refs[refs.length - 1]!;
@@ -227,15 +227,15 @@ function getLastConfirm(): Component {
  * After selecting display-all from the selector, retrieve the display-all
  * body from the next ctx.ui.custom call.
  */
-function getDisplayAllBody(ctx: FakeContext): Component {
+function getDisplayAllBody(ctx: FakeContext): UiComponent {
   const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
   const daFactory = customMock.mock.calls[1]?.[0] as (
-    tui: TUI,
+    host: RawUiHost,
     theme: Theme,
-    kb: KeybindingsManager,
+    kb: unknown,
     done: (r: unknown) => void,
   ) => Component;
-  return daFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+  return daFactory(fakeTui(), fakeTheme(), null, (r) => {
     ctx.ui.done(r);
   });
 }
@@ -267,7 +267,7 @@ function availableCount(
  * Display All is now the first entry (index 0), already selected by default.
  */
 function navigateToDisplayAll(
-  _sel: Component,
+  _sel: UiComponent,
   _sessionInitialized: boolean,
   _scopes?: { global?: boolean; project?: boolean; session?: boolean },
 ): void {
@@ -289,12 +289,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const factory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -320,12 +320,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const factory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       sel.handleInput?.("\x1b");
@@ -342,12 +342,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const factory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -536,12 +536,12 @@ describe("ConfigFlow smoke tests", () => {
       // Select project (display-all=0, global=1, project=2, session=3)
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       sel.handleInput?.("\x1b[B"); // down → global
@@ -578,12 +578,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       sel.handleInput?.("\x1b[B"); // down → global
@@ -813,12 +813,12 @@ describe("ConfigFlow smoke tests", () => {
       // Select session (0=display-all, 1=global, 2=project, 3=session)
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const factory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       for (let i = 0; i < 3; i++) sel.handleInput?.("\x1b[B"); // down thrice → session
@@ -852,12 +852,12 @@ describe("ConfigFlow smoke tests", () => {
       // Select display-all
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, true);
@@ -883,12 +883,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -912,12 +912,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, true);
@@ -948,12 +948,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -979,12 +979,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1014,12 +1014,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1046,12 +1046,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1068,25 +1068,25 @@ describe("ConfigFlow smoke tests", () => {
       // Re-opened selector is the 3rd custom call
       expect(customMock.mock.calls.length).toBeGreaterThanOrEqual(3);
       const sel2Factory = customMock.mock.calls[2]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      let sel2: Component | undefined;
+      let sel2: UiComponent | undefined;
       if (!sel2Factory) {
         // Fallback: find the last factory call
         const lastIdx = customMock.mock.calls.length - 1;
         const fallback = customMock.mock.calls[lastIdx]?.[0] as (
           ...args: unknown[]
         ) => Component | undefined;
-        const test = fallback?.(fakeTui(), fakeTheme(), null! as KeybindingsManager, () => {});
+        const test = fallback?.(fakeTui(), fakeTheme(), null, () => {});
         if (test?.render) {
           const sel2Out = test.render(80).join("\n");
           expect(sel2Out).toContain("Configure Global settings");
         }
       } else {
-        sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+        sel2 = sel2Factory(fakeTui(), fakeTheme(), null, (r) => {
           ctx.ui.done(r);
         });
         const sel2Out = sel2.render(80).join("\n");
@@ -1108,12 +1108,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1135,12 +1135,12 @@ describe("ConfigFlow smoke tests", () => {
       // The selector is the last custom call (after any cleanup factory)
       const lastCall = customMock.mock.calls[customMock.mock.calls.length - 1]!;
       const sel2Factory = lastCall[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       const sel2Out = sel2.render(80).join("\n");
@@ -1160,12 +1160,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1182,12 +1182,12 @@ describe("ConfigFlow smoke tests", () => {
       // Re-opened selector (call 3)
       expect(customMock).toHaveBeenCalledTimes(3);
       const sel2Factory = customMock.mock.calls[2]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1210,12 +1210,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1231,12 +1231,12 @@ describe("ConfigFlow smoke tests", () => {
 
       // Re-opened selector (call 3)
       const sel2Factory = customMock.mock.calls[2]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel2 = sel2Factory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1248,12 +1248,12 @@ describe("ConfigFlow smoke tests", () => {
       // Edit mode opens as 4th call
       expect(customMock).toHaveBeenCalledTimes(4);
       const editFactory = customMock.mock.calls[3]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const editBody = editFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const editBody = editFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       expect(editBody.render(80).join("\n")).toContain("FlowTest — Project Local");
@@ -1270,12 +1270,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, true);
@@ -1308,12 +1308,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1345,12 +1345,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1377,12 +1377,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1414,12 +1414,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1461,12 +1461,12 @@ describe("ConfigFlow smoke tests", () => {
       const promise2 = mgr.openSettings(ctx, tempDir, vi.fn(), tempDir);
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[customMock.mock.calls.length - 1]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       sel.handleInput?.("\x1b[B"); // down → global
@@ -1496,12 +1496,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1537,12 +1537,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
 
@@ -1595,12 +1595,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1629,12 +1629,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1663,12 +1663,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1695,12 +1695,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1730,12 +1730,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1761,12 +1761,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1793,12 +1793,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1824,12 +1824,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);
@@ -1856,12 +1856,12 @@ describe("ConfigFlow smoke tests", () => {
 
       const customMock = ctx.ui.custom as ReturnType<typeof vi.fn>;
       const selFactory = customMock.mock.calls[0]?.[0] as (
-        tui: TUI,
+        host: RawUiHost,
         theme: Theme,
-        kb: KeybindingsManager,
+        kb: unknown,
         done: (r: unknown) => void,
       ) => Component;
-      const sel = selFactory(fakeTui(), fakeTheme(), null! as KeybindingsManager, (r) => {
+      const sel = selFactory(fakeTui(), fakeTheme(), null, (r) => {
         ctx.ui.done(r);
       });
       navigateToDisplayAll(sel, false);

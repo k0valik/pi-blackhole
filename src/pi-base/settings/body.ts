@@ -17,14 +17,10 @@
  */
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import {
-  matchesKey,
-  truncateToWidth,
-  visibleWidth,
-  type Component,
-  type TUI,
-  fuzzyMatch,
-} from "@earendil-works/pi-tui";
+import { matchesKey } from "../../ui/keys.js";
+import { truncateToWidth, visibleWidth } from "../../ui/ansi-text.js";
+import { fuzzyMatch } from "../../ui/fuzzy.js";
+import type { UiComponent, UiTerminal } from "../../ui/rows.js";
 import { validateFieldValue } from "./validate-field.ts";
 import type {
   Field,
@@ -84,7 +80,7 @@ export interface InternalRow {
 export interface BodyState {
   options: SettingsModalOptions<Field>;
   args: {
-    tui: TUI;
+    tui: UiTerminal;
     theme: Theme;
     ctx: ExtensionContext;
     close: () => void;
@@ -104,8 +100,8 @@ export interface BodyState {
   tabActionFocus: number;
   pathNote: string;
   pathNoteRef: { current: string };
-  overlay: { component: Component; title?: string } | undefined;
-  confirm: Component | undefined;
+  overlay: { component: UiComponent; title?: string } | undefined;
+  confirm: UiComponent | undefined;
 }
 
 /**
@@ -116,7 +112,7 @@ export interface BodyState {
 export function createSettingsModalBody<F extends Field>(
   options: SettingsModalOptions<F>,
   args: {
-    tui: TUI;
+    tui: UiTerminal;
     theme: Theme;
     ctx: ExtensionContext;
     /** Called when the user closes (Esc / ctrl+c / outer dismissal). */
@@ -153,8 +149,8 @@ export function createSettingsModalBody<F extends Field>(
     }
   }
 
-  let overlay: { component: Component; title?: string } | undefined;
-  let confirm: Component | undefined;
+  let overlay: { component: UiComponent; title?: string } | undefined;
+  let confirm: UiComponent | undefined;
 
   const fieldRenderContext: FieldRenderContext & {
     editStates: Map<string, InlineEditState>;
@@ -191,7 +187,7 @@ export function createSettingsModalBody<F extends Field>(
 
   updateVisibleIndices(state, buildVisibilityContext);
 
-  function mountOverlay(c: Component, title?: string): void {
+  function mountOverlay(c: UiComponent, title?: string): void {
     state.overlay = { component: c, title };
     state.args.tui.requestRender();
   }

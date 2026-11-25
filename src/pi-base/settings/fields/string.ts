@@ -20,14 +20,11 @@
  * row keyed by `field.key`) so renderers stay stateless.
  */
 
-import {
-  matchesKey,
-  truncateToWidth,
-  type Component,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
-import { SelectList } from "@earendil-works/pi-tui";
-import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
+import { matchesKey } from "../../../ui/keys.js";
+import { truncateToWidth } from "../../../ui/ansi-text.js";
+import { SelectList, type SelectItem } from "../../../ui/select-list.js";
+import { selectListTheme } from "../../../ui/select-theme.js";
+import type { UiComponent } from "../../../ui/rows.js";
 import { handleInlineEditInput, renderInlineEditValue, type InlineEditState } from "../inline-edit";
 import { formatHintLine } from "../frame";
 import type {
@@ -264,13 +261,13 @@ function makeNumberValuesSubmenu(
         label: `${idx + 1}. ${v}${activeSuffix}`,
       };
     });
-    const list = new SelectList(items, Math.min(items.length, 12), getSelectListTheme());
+    const list = new SelectList(items, Math.min(items.length, 12), selectListTheme(ctx.theme));
     const idx = items.findIndex((i) => Number(i.value) === current);
     list.setSelectedIndex(idx >= 0 ? idx : 0);
     list.onSelect = (item) => done(Number(item.value));
     list.onCancel = () => done();
 
-    const component: Component = {
+    const component: UiComponent = {
       render(width: number): string[] {
         const lines = [...list.render(width)];
         lines.push("");

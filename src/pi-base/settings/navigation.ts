@@ -1,6 +1,6 @@
 import type { BodyState, InternalRow } from "./body.ts";
 import type { Field, VisibilityContext } from "./types.ts";
-import { fuzzyMatch } from "@earendil-works/pi-tui";
+import { fuzzyMatch } from "../../ui/fuzzy.js";
 
 export function totalVisibleItems(state: BodyState): number {
   return state.cachedVisibleIndices.length;

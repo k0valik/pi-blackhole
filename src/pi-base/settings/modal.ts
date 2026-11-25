@@ -4,16 +4,10 @@
  * `ctx.ui.custom`.
  */
 
-import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, KeybindingsManager, OverlayOptions, TUI } from "@earendil-works/pi-tui";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { asUiTerminal, type RawUiHost, type UiComponent } from "../../ui/rows.js";
 import { createSettingsModalBody } from "./body";
 import type { Field, SettingsModalFactory, SettingsModalOptions } from "./types";
-
-const DEFAULT_OVERLAY: OverlayOptions = {
-  anchor: "center",
-  width: "92%",
-  maxHeight: "95%",
-};
 
 // Singleton guard: track one open modal per ExtensionContext.
 // WeakMap so entries are GC'd when the context is no longer referenced.
@@ -33,11 +27,11 @@ export function createSettingsModal<F extends Field>(
   options: SettingsModalOptions<F>,
 ): SettingsModalFactory<void> {
   return (
-    tui: TUI,
-    theme: Theme,
-    _keybindings: KeybindingsManager,
+    host: RawUiHost,
+    theme: Parameters<typeof createSettingsModalBody>[1]["theme"],
+    _keybindings: unknown,
     done: (result: void) => void,
-  ): Component => {
+  ): UiComponent => {
     const close = (): void => {
       try {
         options.onClose?.();
@@ -61,17 +55,18 @@ export function createSettingsModal<F extends Field>(
     }
     openModals.set(ctx, close);
 
-    return createSettingsModalBody<F>(options, { tui, theme, ctx, close });
+    return createSettingsModalBody<F>(options, {
+      tui: asUiTerminal(host),
+      theme,
+      ctx,
+      close,
+    });
   };
 }
 
 /**
- * Convenience: open a settings modal as a centered overlay and resolve
- * when the user closes it. This is the **happy-path** entry point most
- * callers want.
- *
- * Defaults: anchor center, width 92%, maxHeight 95%. Override via
- * `options.overlayOptions`.
+ * Convenience: open a settings modal as an overlay and resolve when the
+ * user closes it. This is the **happy-path** entry point most callers want.
  *
  * @deprecated Config flows must use ConfigManager.openSettings(). This entry
  * point remains for config-agnostic overlays (lists, pickers, custom UI).
@@ -91,9 +86,5 @@ export async function openSettingsModal<F extends Field>(
   ctx: ExtensionContext,
   options: SettingsModalOptions<F>,
 ): Promise<void> {
-  const overlayOptions = options.overlayOptions ?? DEFAULT_OVERLAY;
-  await ctx.ui.custom<void>(createSettingsModal(ctx, options), {
-    overlay: true,
-    overlayOptions,
-  });
+  await ctx.ui.custom<void>(createSettingsModal(ctx, options), { overlay: true });
 }

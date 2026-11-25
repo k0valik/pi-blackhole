@@ -1,5 +1,5 @@
-import type { Component, TUI } from "@earendil-works/pi-tui";
-import { matchesKey } from "@earendil-works/pi-tui";
+import type { UiComponent, UiTerminal } from "../../ui/rows.js";
+import { matchesKey } from "../../ui/keys.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { formatHintLine, wrapLine, type KeyHint } from "./frame.ts";
 
@@ -12,7 +12,7 @@ export interface ConfirmOptions {
 }
 
 export interface ConfirmArgs {
-  tui: TUI;
+  tui: UiTerminal;
   theme: Theme;
 }
 
@@ -20,7 +20,7 @@ export function createConfirm(
   options: ConfirmOptions,
   done: (confirmed: boolean) => void,
   args: ConfirmArgs,
-): Component {
+): UiComponent {
   const confirmLabel = options.confirmLabel ?? "Confirm";
   const cancelLabel = options.cancelLabel ?? "Cancel";
   const isDanger = options.danger ?? false;

@@ -9,10 +9,10 @@
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Component, TUI } from "@earendil-works/pi-tui";
-import { matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { matchesKey } from "../ui/keys.js";
+import { asUiTerminal, type UiComponent, type UiTerminal } from "../ui/rows.js";
 import {
   frame,
   frameContentWidth,
@@ -307,14 +307,14 @@ export function renderChangelogEntries(
 const PREFERRED_INNER_ROWS = 45;
 
 export interface ChangelogViewerArgs {
-  tui: TUI;
+  tui: UiTerminal;
   theme: Theme;
   done: (result: void) => void;
   packageRoot?: string;
   maxEntries?: number;
 }
 
-export function createChangelogViewer(args: ChangelogViewerArgs): Component {
+export function createChangelogViewer(args: ChangelogViewerArgs): UiComponent {
   const { tui, theme, done, packageRoot, maxEntries } = args;
 
   const version = getPackageVersion(packageRoot);
@@ -425,12 +425,12 @@ export function createChangelogViewer(args: ChangelogViewerArgs): Component {
 }
 
 function createLazyChangelogViewer(params: {
-  tui: TUI;
+  tui: UiTerminal;
   theme: Theme;
   done: (r: void) => void;
   title: string;
   entries: ChangelogEntry[];
-}): Component {
+}): UiComponent {
   const { tui, theme, done, title, entries } = params;
   let scroll = 0;
   const PAGE = 5;
@@ -494,10 +494,12 @@ function createLazyChangelogViewer(params: {
 /** Open the changelog as an overlay via ctx.ui.custom. */
 export async function openChangelogView(ctx: ExtensionContext): Promise<void> {
   await ctx.ui.custom<void>(
-    (tui, theme, _kb, done) => createChangelogViewer({ tui, theme, done: () => done(undefined) }),
-    {
-      overlay: true,
-      overlayOptions: { anchor: "center", width: "92%", maxHeight: "95%" },
-    },
+    (host, theme, _kb, done) =>
+      createChangelogViewer({
+        tui: asUiTerminal(host),
+        theme,
+        done: () => done(undefined),
+      }),
+    { overlay: true },
   );
 }

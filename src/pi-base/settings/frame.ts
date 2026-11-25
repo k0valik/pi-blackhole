@@ -23,12 +23,12 @@
  *     the popup.
  *
  * All helpers are width-aware: every output line is right-truncated to
- * `width` columns using pi-tui's `truncateToWidth` so they never escape
+ * `width` columns using the local `truncateToWidth` so they never escape
  * the overlay rectangle.
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../ui/ansi-text.js";
 
 /** Default horizontal padding inside the frame, in columns. */
 export const DEFAULT_PADDING_X = 1;
@@ -72,7 +72,7 @@ export function pad(text: string, width: number): string {
 
 /**
  * Wrap `line` to fit `width` columns. Hard newlines split the line first;
- * each segment is then word-wrapped (ANSI-aware via pi-tui's helper) and
+ * each segment is then word-wrapped (ANSI-aware via the local helper) and
  * finally truncated as a defence-in-depth against pathological cases.
  */
 export function wrapLine(line: string, width: number): string[] {

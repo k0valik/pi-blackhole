@@ -14,7 +14,7 @@
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { Component, KeybindingsManager, OverlayOptions, TUI } from "@earendil-works/pi-tui";
+import type { RawUiHost, UiComponent, UiTerminal } from "../../ui/rows.js";
 
 // ─────────────────────────────────────────────────────────────────────
 // Visibility context for visibleWhen
@@ -273,7 +273,7 @@ export interface CustomField<T = unknown> extends FieldBase {
    * Optional submenu mounted on Enter. The factory receives a `done`
    * callback that commits (`done(value)`) or cancels (`done()`).
    */
-  openSubmenu?: (args: CustomFieldSubmenuArgs<T>) => Component;
+  openSubmenu?: (args: CustomFieldSubmenuArgs<T>) => UiComponent;
   /**
    * Override the auto-generated footer hints for this row. The default
    * heuristic in `customRenderer.hints` shows `enter open` when an
@@ -295,7 +295,7 @@ export interface CustomFieldRenderArgs<T> {
 export interface CustomFieldSubmenuArgs<T> {
   value: T;
   theme: Theme;
-  tui: TUI;
+  tui: UiTerminal;
   done: (newValue?: T) => void;
 }
 
@@ -320,7 +320,7 @@ export type Field =
 
 export interface FieldRenderContext {
   theme: Theme;
-  tui: TUI;
+  tui: UiTerminal;
   ctx: ExtensionContext;
   requestRender: () => void;
 }
@@ -370,7 +370,7 @@ export interface FieldRenderer<F extends Field = Field, V = unknown> {
  * supplies the `done` callback when mounting; calling `done(value)`
  * commits and unmounts, calling `done()` cancels and unmounts.
  */
-export type SubmenuFactory<V> = (done: (value?: V) => void) => Component;
+export type SubmenuFactory<V> = (done: (value?: V) => void) => UiComponent;
 
 export interface FieldKeyResult<V> {
   consumed?: boolean;
@@ -415,8 +415,6 @@ export interface SettingsModalOptions<F extends Field = Field> {
   searchPlaceholder?: string;
   /** Theme overrides (mostly used for callers with fixed-palette aesthetics). */
   theme?: SettingsTheme;
-  /** Override the overlay positioning (defaults: anchor center, 92% × 85%). */
-  overlayOptions?: OverlayOptions | (() => OverlayOptions);
   /**
    * Called whenever a field's value changes. The modal calls this
    * synchronously after updating its own row state, so any throw here
@@ -514,18 +512,18 @@ export type ValueOfField<F extends Field, K extends string> =
 
 /** Component factory shape required by `ctx.ui.custom`. */
 export type SettingsModalFactory<T = void> = (
-  tui: TUI,
+  host: RawUiHost,
   theme: Theme,
-  keybindings: KeybindingsManager,
+  keybindings: unknown,
   done: (result: T) => void,
-) => Component;
+) => UiComponent;
 
 /**
  * Return type of `createSettingsModalBody`.
  */
-export interface SettingsModalBodyComponent extends Component {
+export interface SettingsModalBodyComponent extends UiComponent {
   /** Mount a submenu/confirm overlay inside the frame. */
-  mountOverlay(c: Component, title?: string): void;
+  mountOverlay(component: UiComponent, title?: string): void;
   /** Dismiss any mounted overlay. */
   dismissOverlay(): void;
   /** Current active tab id, if tabs are configured. */

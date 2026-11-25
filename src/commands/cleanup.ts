@@ -14,9 +14,10 @@
  * Non-TUI fallback (RPC / JSON / print modes): lists orphaned files as text
  * notification. Use TUI mode to actually delete.
  */
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
-import { visibleWidth } from "../om/key-matcher.js";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "../ui/ansi-text.js";
+import { decodeKittyPrintable, matchesKey } from "../ui/keys.js";
+import type { UiComponent } from "../ui/rows.js";
 import {
   analyzeOrphaned,
   deletePendingFiles,
@@ -66,16 +67,9 @@ function buildTopBorder(
  */
 function createCleanupPicker(
   orphaned: PendingFile[],
-  theme: {
-    fg: (s: string, t: string) => string;
-    bg: (s: string, t: string) => string;
-  },
+  theme: Pick<Theme, "fg" | "bg">,
   done: (result: "deleteAll" | "cancel") => void,
-): {
-  render(width: number): string[];
-  handleInput(data: string): void;
-  invalidate(): void;
-} {
+): UiComponent {
   let selectedIndex = 0;
   let scrollOffset = 0;
   let confirmDeleteAll = false;
@@ -291,7 +285,7 @@ export async function handleCleanup(ctx: ExtensionContext): Promise<void> {
   const items = [...orphaned];
   const result = await ctx.ui.custom<"deleteAll" | "cancel" | null>(
     (_tui, theme, _kb, done) => {
-      return createCleanupPicker(items, theme as any, done);
+      return createCleanupPicker(items, theme, done);
     },
     { overlay: true },
   );

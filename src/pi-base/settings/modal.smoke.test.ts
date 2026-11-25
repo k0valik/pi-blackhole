@@ -15,11 +15,11 @@
 import { describe, expect, it, vi, beforeAll } from "vitest";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { UiTerminal } from "../../ui/rows.js";
 
-// SelectList renders via getSelectListTheme(), which requires the host
-// theme to be initialized. We call this once globally so submenu render
-// paths don't blow up in isolation.
+// Field renderers and submenus read colours from the host theme singleton,
+// which requires the host theme to be initialized. We call this once globally
+// so submenu render paths don't blow up in isolation.
 beforeAll(() => {
   initTheme();
 });
@@ -51,13 +51,13 @@ function fakeTheme(): Theme {
   } as unknown as Theme;
 }
 
-function fakeTui(): TUI {
+function fakeTui(): UiTerminal {
   // The modal touches `tui.terminal.rows` and `tui.requestRender()`.
   // Anything else trips the test on purpose.
   return {
     terminal: { rows: 40, columns: 100 },
     requestRender: vi.fn(),
-  } as unknown as TUI;
+  };
 }
 
 function fakeCtx(): ExtensionContext {

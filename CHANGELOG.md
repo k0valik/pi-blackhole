@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Changed
+
+- **The extension no longer imports `@earendil-works/pi-tui`, so it installs on OMP again.** OMP's plugin validator rejects any bundle that carries a legacy `pi-tui` import specifier — that host module was replaced by the reactive `@oh-my-pi/pi-tui`, and `omp plugin install pi-blackhole` failed with `extension validation failed` before the extension was ever loaded. Every UI primitive the package used to borrow is now local in `src/ui/`: ANSI width math (`ansi-text.ts`, backed by the new `get-east-asian-width` runtime dependency), the key parser and Kitty CSI-u decoding (`keys.ts`), the fuzzy matcher (`fuzzy.ts`), `SelectList` (`select-list.ts`), a multiline `Editor` (`editor.ts`), the select-list theme (`select-theme.ts`) and a host adapter (`host.ts`) that reads terminal size through whatever the host exposes. `pi-tui` was dropped from `devDependencies` and `peerDependencies` (it was never a runtime dependency). The key parser and fuzzy matcher were verified behavior-identical against the previous implementation across the full comparison sets, and the ANSI width helpers are covered by direct unit tests; components keep returning `{ render(width): string[], handleInput?, invalidate() }` rows objects, which both Pi and OMP accept.
+- **Settings overlays are no longer anchored-sized.** `ctx.ui.custom` calls drop the `overlayOptions` (anchor/width/maxHeight) the legacy host accepted; OMP's custom-UI contract only supports `overlay`/`fullscreen`, so the modal, scope selector and edit view now render at the host's default overlay geometry.
+- **The pre-compaction output transcript entry renders as plain rows.** It previously mounted a `pi-tui` component tree (`Container`/`Text`/`Markdown`); the copy is unchanged — display-only, terminal sequences stripped before storage, 16 KiB cap — but it now renders through the host's rows contract, so the entry is visible on OMP too.
+
+### Added
+
+- **`src/ui/` is covered by its own unit tests** (`tests/ui-ansi-text.test.ts`, `tests/ui-keys.test.ts`, `tests/ui-fuzzy.test.ts`, `tests/ui-select-list.test.ts`, `tests/ui-editor.test.ts`), including the multiline editor's mid-line insert, word/range navigation, wrapping and cursor-clamping behavior.
+- **A manifest guard keeps the forbidden import out.** `tests/package-manifest.test.ts` fails if `pi-tui` reappears in any dependency section or if any file under `src/` or `index.ts` references the specifier.
+
 ---
 
 ## [0.5.19] - 2026-11-21

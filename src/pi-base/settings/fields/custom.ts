@@ -10,7 +10,7 @@
  * Anything more exotic than the built-in `model` widget belongs here.
  */
 
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey } from "../../../ui/keys.js";
 import type { CustomField, FieldRenderer, SubmenuFactory } from "../types";
 
 export const customRenderer: FieldRenderer<CustomField, unknown> = {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { UiTerminal } from "../../ui/rows.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -34,11 +34,11 @@ function fakeTheme(): Theme {
   } as unknown as Theme;
 }
 
-function fakeTui(): TUI {
+function fakeTui(): UiTerminal {
   return {
     terminal: { rows: 40, columns: 100 },
     requestRender: vi.fn(),
-  } as unknown as TUI;
+  };
 }
 
 function fakeCtx(): ExtensionContext {

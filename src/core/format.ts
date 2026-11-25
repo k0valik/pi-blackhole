@@ -1,5 +1,5 @@
 import type { SectionData } from "../sections";
-import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { wrapTextWithAnsi } from "../ui/ansi-text.js";
 
 const section = (title: string, items: string[]): string => {
   if (items.length === 0) return "";

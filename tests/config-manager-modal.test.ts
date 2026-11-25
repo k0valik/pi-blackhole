@@ -538,7 +538,7 @@ it("reflection row is keyboard-editable and readable at narrow/normal/wide width
   const { openBlackholeSettings } = await import("../src/pi-base/blackhole-settings.js");
   const { createSettingsModalBody } = await import("../src/pi-base/settings/body.js");
   const { initTheme } = await import("@earendil-works/pi-coding-agent");
-  const { visibleWidth } = await import("@earendil-works/pi-tui");
+  const { visibleWidth } = await import("../src/ui/ansi-text.js");
   initTheme("dark", false);
   capturedParams.length = 0;
   const ctx = {

@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -55,5 +56,55 @@ describe("package manifest — host-provided packages", () => {
 
   it("keeps typebox available to the local build, typecheck and tests", () => {
     expect(manifest.devDependencies?.typebox).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+});
+
+/**
+ * OMP refuses to load an extension bundle that contains any import specifier for
+ * the legacy `pi-tui` package (its validator matches the scoped module path and
+ * its subpaths), because that host module no longer exists there. The UI
+ * primitives this package used to take from it now live in `src/ui/`, so nothing
+ * may import them again.
+ */
+const FORBIDDEN_SPECIFIER_RE = /["'](?:@[\w.-]+\/)?pi-tui(?:\/[^"']*)?["']/;
+
+function sourceFiles(): string[] {
+  const out: string[] = [];
+  const walk = (dir: URL): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === "dist") continue;
+      const url = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
+      if (entry.isDirectory()) walk(url);
+      else if (entry.name.endsWith(".ts")) out.push(fileURLToPath(url));
+    }
+  };
+  walk(new URL("../src/", import.meta.url));
+  out.push(fileURLToPath(new URL("../index.ts", import.meta.url)));
+  return out;
+}
+
+describe("package manifest — pi-tui is not a host dependency", () => {
+  it("declares no pi-tui dependency in any section", () => {
+    const sections = [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies",
+    ];
+    const declared = sections.filter((section) =>
+      Object.keys((manifest[section] ?? {}) as Record<string, string>).some((name) =>
+        name.endsWith("/pi-tui"),
+      ),
+    );
+
+    expect(declared).toEqual([]);
+  });
+
+  it("imports pi-tui from no source file", () => {
+    const offenders = sourceFiles()
+      .filter((file) => FORBIDDEN_SPECIFIER_RE.test(readFileSync(file, "utf-8")))
+      .map((file) => file.split("/pi-blackhole/")[1] ?? file);
+
+    expect(offenders).toEqual([]);
   });
 });

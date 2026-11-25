@@ -1,5 +1,5 @@
-import type { Component, TUI } from "@earendil-works/pi-tui";
-import { matchesKey } from "@earendil-works/pi-tui";
+import type { UiComponent, UiTerminal } from "../../ui/rows.js";
+import { matchesKey } from "../../ui/keys.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { divider, formatHintLine, frame, frameContentWidth, type KeyHint } from "./frame.ts";
 
@@ -16,7 +16,7 @@ export interface ScopeSelectorArgs {
   title: string;
   subtitle?: string;
   entries: ScopeSelectorEntry[];
-  tui: TUI;
+  tui: UiTerminal;
   theme: Theme;
   done: (r: ScopeSelectorResult) => void;
   frame?: boolean;
@@ -25,7 +25,7 @@ export interface ScopeSelectorArgs {
 /** Horizontal chrome consumed by the unframed selector layout (left + right gutters). */
 const UNFRAMED_CHROME_COLUMNS = 2;
 
-export function createScopeSelector(args: ScopeSelectorArgs): Component {
+export function createScopeSelector(args: ScopeSelectorArgs): UiComponent {
   const availableEntries = args.entries.filter((e) => e.available);
   // selectedIndex tracks position within the *available* subset.
   let selectedAvailableIndex = 0;

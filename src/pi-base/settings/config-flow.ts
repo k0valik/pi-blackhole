@@ -9,7 +9,7 @@
  */
 
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, OverlayOptions, TUI } from "@earendil-works/pi-tui";
+import { asUiTerminal, type RawUiHost, type UiComponent, type UiTerminal } from "../../ui/rows.js";
 import { createConfirm } from "./confirm.ts";
 import { createScopeSelector, type ScopeSelectorResult } from "./scope-selector.ts";
 import { createSettingsModalBody } from "./body.ts";
@@ -201,28 +201,23 @@ function openSelector(
   return new Promise<ScopeSelectorResult>((resolve) => {
     // Wrap in a factory matching ctx.ui.custom<T>'s expected signature.
     const factory = (
-      tui: TUI,
+      host: RawUiHost,
       theme: Theme,
       _keybindings: unknown,
       done: (result: void) => void,
-    ): Component => {
-      const component = createScopeSelector({
+    ): UiComponent =>
+      createScopeSelector({
         title: params.label,
         subtitle: `Configure settings for ${params.label}`,
         entries,
-        tui,
+        tui: asUiTerminal(host),
         theme,
         done(result: ScopeSelectorResult) {
           done(undefined); // signal overlay teardown to pi
           resolve(result);
         },
       });
-      return component;
-    };
-    void ctx.ui.custom<void>(factory, {
-      overlay: true,
-      overlayOptions: modalOverlay(),
-    });
+    void ctx.ui.custom<void>(factory, { overlay: true });
   });
 }
 
@@ -230,9 +225,13 @@ function openSelector(
 
 interface EditHandlers {
   onChange: (key: string, value: unknown) => void;
-  onSave: (tui: TUI, theme: Theme, done: (result: void) => void) => Promise<void> | void;
-  onRequestExit: (tui: TUI, theme: Theme, done: (result: void) => void) => Promise<void> | void;
-  onAction: (id: string, tui: TUI, theme: Theme, done: (result: void) => void) => void;
+  onSave: (tui: UiTerminal, theme: Theme, done: (result: void) => void) => Promise<void> | void;
+  onRequestExit: (
+    tui: UiTerminal,
+    theme: Theme,
+    done: (result: void) => void,
+  ) => Promise<void> | void;
+  onAction: (id: string, tui: UiTerminal, theme: Theme, done: (result: void) => void) => void;
 }
 
 async function openEditMode(params: ConfigFlowParams, scope: string): Promise<void> {
@@ -282,7 +281,11 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
   // Per-flow body ref so nested async confirm handlers can mount overlays.
   let activeEditBody: SettingsModalBodyComponent | undefined;
 
-  async function saveEdit(tui: TUI, theme: Theme, done: (result: void) => void): Promise<void> {
+  async function saveEdit(
+    tui: UiTerminal,
+    theme: Theme,
+    done: (result: void) => void,
+  ): Promise<void> {
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
@@ -320,7 +323,11 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     }
   }
 
-  async function discardEdit(tui: TUI, theme: Theme, done: (result: void) => void): Promise<void> {
+  async function discardEdit(
+    tui: UiTerminal,
+    theme: Theme,
+    done: (result: void) => void,
+  ): Promise<void> {
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
         {
@@ -341,7 +348,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     }
   }
 
-  async function resetEdit(tui: TUI, theme: Theme): Promise<void> {
+  async function resetEdit(tui: UiTerminal, theme: Theme): Promise<void> {
     const scopeLabel = EDIT_MODE_TITLES[scope] ?? scope;
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
@@ -373,7 +380,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     }
   }
 
-  async function deleteEdit(tui: TUI, theme: Theme): Promise<void> {
+  async function deleteEdit(tui: UiTerminal, theme: Theme): Promise<void> {
     const scopeLabel = EDIT_MODE_TITLES[scope] ?? scope;
     const confirmed = await new Promise<boolean>((resolve) => {
       const c = createConfirm(
@@ -417,7 +424,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
     onRequestExit(tui, theme, done) {
       return discardEdit(tui, theme, done);
     },
-    onAction(id: string, tui: TUI, theme: Theme, done: (result: void) => void) {
+    onAction(id: string, tui: UiTerminal, theme: Theme, done: (result: void) => void) {
       switch (id) {
         case "save":
           void saveEdit(tui, theme, done).catch((err) =>
@@ -446,7 +453,8 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
   // Use a factory wrapper so tui/theme are available to nested confirm
   // handlers and the body's close callback.
   await params.ctx.ui.custom<void>(
-    (tui, theme, _keybindings, done) => {
+    (host, theme, _keybindings, done) => {
+      const tui = asUiTerminal(host);
       const body = createSettingsModalBody(
         {
           title: `${params.label} — ${scopeLabel}`,
@@ -484,7 +492,7 @@ async function openEditMode(params: ConfigFlowParams, scope: string): Promise<vo
       activeEditBody = body;
       return body;
     },
-    { overlay: true, overlayOptions: modalOverlay() },
+    { overlay: true },
   );
 }
 
@@ -550,7 +558,8 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
   // Use a factory wrapper so tui/theme flow through to the body's close
   // callback and nested edit-mode open calls.
   await params.ctx.ui.custom<void>(
-    (tui, theme, _keybindings, done) => {
+    (host, theme, _keybindings, done) => {
+      const tui = asUiTerminal(host);
       // Mutable path note so onActiveTabChange can update it after mount.
       const pathNoteRef: { current: string } = { current: tabPathNotes[currentTabId] };
       const body = createSettingsModalBody(
@@ -618,10 +627,7 @@ async function openDisplayAll(params: ConfigFlowParams): Promise<void> {
 
       return body;
     },
-    {
-      overlay: true,
-      overlayOptions: modalOverlay(),
-    },
+    { overlay: true },
   );
 }
 
@@ -656,10 +662,4 @@ function displayValueNote(
   // tab shows — crediting it as the source would read as "the displayed value
   // came from X", the opposite of the precedence that actually applies.
   return layerValueNote(winner, tabId);
-}
-
-// ── Overlay defaults ───────────────────────────────────────────────────
-
-function modalOverlay(): OverlayOptions {
-  return { anchor: "center", width: "92%", maxHeight: "95%" };
 }

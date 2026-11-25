@@ -1,12 +1,7 @@
 /**
  * Terminal utilities shared by blackhole overlay components.
  *
- * Re-exports visibleWidth from pi-tui.
- *
- * Previously had a local CJK-width implementation extracted from pi-tui
- * to avoid import resolution issues in the overlay TUI context.
- * If this re-export causes runtime resolution failures, restore the
- * local copy (see git history for the original implementation).
+ * Re-exports the host-independent ANSI text utilities.
  */
 
-export { visibleWidth } from "@earendil-works/pi-tui";
+export { visibleWidth } from "../ui/ansi-text.js";

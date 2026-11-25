@@ -37,6 +37,7 @@ pnpm check         # typecheck + lint
 - `src/hooks/` — `before-compact.ts` (`session_before_compact`), `compact-failed.ts` (`session_compact_failed` pi >=0.84.3), `compaction-context.ts` (`context` append-mode projection).
 - `src/commands/` — `pi-vcc.ts` (`/blackhole`), `memory.ts` (`/blackhole-memory`), `vcc-recall.ts` (`/blackhole-recall`), `blackhole-export.ts` (`/blackhole-export`), `cleanup.ts`.
 - `src/tools/recall.ts` — session-history search/expand/drill-down.
+- `src/ui/` — host-neutral UI primitives the settings modal and overlays render through: `ansi-text.ts` (width/wrap/truncate), `keys.ts` (`matchesKey` + Kitty CSI-u), `fuzzy.ts`, `select-list.ts`, `editor.ts`, `select-theme.ts`, `host.ts` (`asUiTerminal`), `rows.ts` (`UiComponent` = `{ render(width): string[], handleInput?, invalidate() }`). **Never import `@earendil-works/pi-tui` or `@mariozechner/pi-tui`** — OMP's plugin validator rejects any bundle containing that specifier, and `tests/package-manifest.test.ts` fails the build if it reappears in `src/**` or `index.ts`.
 - `src/pi-base/` — **vendored copy** (config manager + settings modal). Treat as upstream code: surgical rewiring and minimal fixes only if it causes runtime failures.
 - `docs/` — committed product docs: `architecture.md`, `observational-memory.md`, `recall.md`, `vcc-compaction.md`, `APPEND_COMPACTION.md`.
 - `work_docs/` — separate planning docs.

@@ -1,8 +1,8 @@
 import { describe, test, expect } from "vitest";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { matchesKey } from "../src/ui/keys.js";
 import { visibleWidth } from "../src/om/key-matcher.js";
 
-describe("matchesKey (pi-tui)", () => {
+describe("matchesKey (local ui/keys)", () => {
   // ── Legacy terminal sequences ──
 
   test("escape (legacy)", () => {

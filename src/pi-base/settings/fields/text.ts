@@ -8,10 +8,10 @@
  *   the Editor directly.
  */
 
-import { Editor, type Component, matchesKey } from "@earendil-works/pi-tui";
-import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
-import type { EditorTheme } from "@earendil-works/pi-tui";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { Editor, type EditorTheme } from "../../../ui/editor.js";
+import { matchesKey } from "../../../ui/keys.js";
+import { truncateToWidth } from "../../../ui/ansi-text.js";
+import type { UiComponent } from "../../../ui/rows.js";
 import type {
   FieldRenderer,
   SubmenuFactory,
@@ -60,7 +60,6 @@ function makeTextSubmenu(current: string, ctx: FieldRenderContext): SubmenuFacto
       ctx.tui,
       {
         borderColor: (s: string) => ctx.theme.fg("muted", s),
-        selectList: getSelectListTheme(),
       } as EditorTheme,
       {
         paddingX: 0,
@@ -71,7 +70,7 @@ function makeTextSubmenu(current: string, ctx: FieldRenderContext): SubmenuFacto
     editor.disableSubmit = true;
     editor.onChange = () => ctx.tui.requestRender();
 
-    const component: Component = {
+    const component: UiComponent = {
       render(width: number): string[] {
         const lines = editor.render(width);
         lines.push("");

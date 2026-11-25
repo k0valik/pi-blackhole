@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { UiTerminal } from "../ui/rows.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   getOwnPackageRoot,
@@ -15,11 +15,11 @@ import {
   createChangelogViewer,
 } from "./changelog.ts";
 
-function fakeTui(rows = 24): TUI {
+function fakeTui(rows = 24): UiTerminal {
   return {
     terminal: { rows, columns: 80 },
     requestRender: vi.fn(),
-  } as unknown as TUI;
+  };
 }
 
 function fakeTheme(): Theme {
