@@ -48,16 +48,31 @@ describe("compile", () => {
   });
 
   describe("headerless summaries (#216)", () => {
-    // >200 chars on one line: extractGoals drops it, so the fresh compile has
-    // no [Session Goal] (or any other) header and is transcript-only.
+    // A URL is kept in the brief but rejected by the goal extractor
+    // (NON_GOAL_RE), so the summary is genuinely headerless.
+    const longHeaderlessText = "https://example.com/" + "a".repeat(1200);
+    // >200 chars on one line, prose-like: the long-line fallback turns this
+    // into a clipped [Session Goal] anchor.
     const longPreamble =
       "Delegation stance: implement. Build everything yourself; read-only helpers are fine. ".repeat(
         8,
       );
 
+    it("turns a single long prose first message into a clipped goal", () => {
+      const r = compile({
+        messages: [userMsg(longPreamble), assistantText("Looking at the retry code now.")],
+      });
+      const headerPart = r.split("\n\n---\n\n")[0];
+      expect(headerPart).toContain("[Session Goal]");
+      expect(headerPart).toMatch(/- Delegation stance: implement\./);
+      expect(headerPart).toContain("…");
+      expect(headerPart).toContain("(#0)");
+      expect(r).toContain("Looking at the retry code now.");
+    });
+
     it("keeps a headerless previous transcript on the next compile", () => {
       const first = compile({
-        messages: [userMsg(longPreamble), assistantText("Looking at the retry code now.")],
+        messages: [userMsg(longHeaderlessText), assistantText("Looking at the retry code now.")],
       });
       expect(first).not.toContain("[Session Goal]");
       expect(first).toContain("[user]");
@@ -69,7 +84,7 @@ describe("compile", () => {
         ],
         previousSummary: first,
       });
-      expect(second).toContain("Delegation stance");
+      expect(second).toContain("https://example.com/");
       expect(second).toContain("Looking at the retry code now.");
       expect(second).toContain("Also add a regression test.");
       expect(second).toContain("Added the regression test.");
@@ -79,17 +94,17 @@ describe("compile", () => {
       const previousSummary =
         "[Session Goal]\n- Fix the billing webhook retry bug\n\n---\n\n[user]\nFix the billing webhook retry bug";
       const merged = compile({
-        messages: [userMsg(longPreamble), assistantText("Background reading done.")],
+        messages: [userMsg(longHeaderlessText), assistantText("Background reading done.")],
         previousSummary,
       });
       expect(merged).toContain("Fix the billing webhook retry bug");
-      expect(merged).toContain("Delegation stance");
+      expect(merged).toContain("https://example.com/");
       expect(merged).toContain("Background reading done.");
     });
 
     it("keeps headerless transcripts across repeated merges without duplicating them", () => {
       const first = compile({
-        messages: [userMsg(longPreamble), assistantText("First reply.")],
+        messages: [userMsg(longHeaderlessText), assistantText("First reply.")],
       });
       const second = compile({
         messages: [userMsg("Second short message."), assistantText("Second reply.")],
@@ -101,7 +116,7 @@ describe("compile", () => {
       });
 
       for (const text of [
-        "Delegation stance",
+        "https://example.com/",
         "First reply.",
         "Second short message.",
         "Second reply.",

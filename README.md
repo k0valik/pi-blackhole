@@ -52,7 +52,7 @@ Then `/reload` or restart Pi. The config file at `~/.pi/agent/pi-blackhole/pi-bl
 > - **Compaction yields now say which model will summarize** — every hand-off to Pi's summarizer traces the reason and session-model identity, and blackhole warns once per cooldown window when that model is inside one of its own persisted windows.
 > - **Transient worker failures recover in minutes, not hours** — `cooldownMinutesTransient` (default: 5) shortens network, overload and 5xx cooldowns, and a content-policy refusal skips the current chunk without benching the model.
 > - **Running the test suite inside Pi can no longer delete `~/.pi/agent`** — test setup always pins `PI_CODING_AGENT_DIR` to a fresh temp dir and guards every deletion path.
-> - **Session Goals now follow the latest work, not the first eight** — compaction keeps the most recent goals and preserves the latest scope change, so long sessions stop re-injecting asks that were already replaced.
+> - **Session Goals now follow the latest work, not just the opening goals** — compaction keeps the most recent goals and preserves the latest scope change, so long sessions stop re-injecting asks that were already replaced.
 > - **Busy memory pipelines no longer drop deferred consolidation work** — a trigger that arrives mid-pipeline is coalesced and re-evaluated once after cleanup, so unobserved backlog no longer waits for the next user message.
 >
 > See [`CHANGELOG.md`](CHANGELOG.md) for detailed fixes and contribution history.

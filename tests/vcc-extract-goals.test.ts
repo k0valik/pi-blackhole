@@ -86,7 +86,7 @@ describe("extractGoals", () => {
     expect(goals[scopeIdx + 1]).toContain("password reset");
   });
 
-  it("keeps the latest scope change when the first message fills the cap", () => {
+  it("keeps the latest scope change when the first message contributes its maximum lines", () => {
     const blocks: NormalizedBlock[] = [
       {
         kind: "user",
@@ -99,17 +99,61 @@ describe("extractGoals", () => {
       },
     ];
     const goals = extractGoals(blocks);
-    // 6 founding lines + marker + 3 pivot lines would be 10. The marker is a
-    // label, not a goal, so the cap keeps 8 goals (5 founding + 3 pivot) and
-    // the whole latest scope change survives off the end.
-    expect(goals.length).toBe(9);
-    expect(goals[0]).toBe("check auth flow");
+    // The first block contributes at most 6 founding lines; with the 10-goal
+    // cap this fits, so the latest scope change is kept in full.
+    expect(goals.length).toBe(10);
+    expect(goals[0]).toBe("fix login bug");
     expect(goals.slice(-4)).toEqual([
       "[Scope change]",
       "Actually, instead let's refactor auth",
       "migrate the database",
       "update the docs",
     ]);
+  });
+  describe("long-first-message fallback", () => {
+    const longProse =
+      "Delegation stance: implement. Build everything yourself; read-only helpers are fine. "
+        .repeat(8)
+        .trim();
+
+    it("keeps a clipped goal from a single long prose line", () => {
+      const blocks: NormalizedBlock[] = [{ kind: "user", text: longProse, sourceIndex: 7 }];
+      const goals = extractGoals(blocks);
+      expect(goals).toHaveLength(1);
+      expect(goals[0]).toMatch(/^Delegation stance: implement\./);
+      expect(goals[0]).toMatch(/… \(#7\)$/);
+      expect(goals[0].length).toBeLessThanOrEqual(208);
+    });
+
+    it("does not add the fallback when the block has a short goal", () => {
+      const blocks: NormalizedBlock[] = [{ kind: "user", text: `${longProse}\nFix login bug` }];
+      expect(extractGoals(blocks)).toEqual(["Fix login bug"]);
+    });
+
+    it("rejects long code, path and unbroken data lines", () => {
+      const code = "const x = " + "a".repeat(1200) + ";";
+      const path = "https://example.com/" + "a".repeat(1200);
+      const blob = "A".repeat(1200);
+      for (const text of [code, path, blob]) {
+        expect(extractGoals([{ kind: "user", text }])).toEqual([]);
+      }
+    });
+
+    it("handles a long CJK-only line", () => {
+      const text = "需求：实现完整的登录流程。".repeat(30);
+      const goals = extractGoals([{ kind: "user", text }]);
+      expect(goals).toHaveLength(1);
+      expect(goals[0]).toMatch(/…$/);
+    });
+
+    it("does not add a fallback after a goal already exists", () => {
+      const blocks: NormalizedBlock[] = [
+        { kind: "user", text: "Fix login bug" },
+        { kind: "assistant", text: "ok" },
+        { kind: "user", text: longProse },
+      ];
+      expect(extractGoals(blocks)).toEqual(["Fix login bug"]);
+    });
   });
 
   it("skips noise short user messages as goals", () => {

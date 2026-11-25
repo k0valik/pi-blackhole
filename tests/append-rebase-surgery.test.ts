@@ -35,7 +35,7 @@ describe("append rebase surgery", () => {
       "[Session Goal]",
       "- ship the parser fix",
       "- ship the parser fix", // exact duplicate
-      ...goalLines, // pushes past the Session Goal cap of 8
+      ...goalLines, // pushes past the Session Goal cap of 10
       "- goal line 10", // duplicate that survives inside the recency window
       "",
       "[Commits]",

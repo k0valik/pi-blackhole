@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { compile } from "../src/core/summarize.js";
 import { formatFileList } from "../src/extract/files.js";
+import { MAX_GOALS } from "../src/extract/goals.js";
 import { userMsg } from "./vcc-fixtures.js";
 
 describe("vcc-summarize robust merging and stripping", () => {
@@ -24,7 +25,7 @@ describe("vcc-summarize robust merging and stripping", () => {
       // Regression: the section used to keep the first 8 lines, so once full
       // every later goal (a rename, a new phase) was truncated away forever
       // and the same stale goals were re-injected after every compaction.
-      const goals = Array.from({ length: 8 }, (_, i) => `- Goal ${i}`).join("\n");
+      const goals = Array.from({ length: MAX_GOALS }, (_, i) => `- Goal ${i}`).join("\n");
       const previousSummary = `[Session Goal]\n${goals}\n\n---\n\n[user]\ninit`;
       const r = compile({
         messages: [userMsg("Goal: Final Step")],
@@ -32,7 +33,7 @@ describe("vcc-summarize robust merging and stripping", () => {
       });
       const headerPart = r.split("\n\n---\n\n")[0];
       const lines = headerPart.split("\n").filter((l) => l.startsWith("- "));
-      expect(lines.length).toBe(8);
+      expect(lines.length).toBe(MAX_GOALS);
       // Oldest goal is displaced by the fresh one
       expect(lines).not.toContain("- Goal 0");
       // Newest goal survives the cap
@@ -41,7 +42,7 @@ describe("vcc-summarize robust merging and stripping", () => {
     });
 
     it("keeps a scope-change marker attached to the goals it labels", () => {
-      const goals = Array.from({ length: 8 }, (_, i) => `- Goal ${i}`).join("\n");
+      const goals = Array.from({ length: MAX_GOALS }, (_, i) => `- Goal ${i}`).join("\n");
       const previousSummary = `[Session Goal]\n- [Scope change] (#1)\n${goals}\n\n---\n\n[user]\ninit`;
       const r = compile({
         messages: [userMsg("Goal: Final Step")],
@@ -51,15 +52,15 @@ describe("vcc-summarize robust merging and stripping", () => {
         .split("\n\n---\n\n")[0]
         .split("\n")
         .filter((l) => l.startsWith("- "));
-      // 8 goals retained plus the marker that labels them; the marker must not
-      // be cut off while its goals survive.
+      // MAX_GOALS goals retained plus the marker that labels them; the marker
+      // must not be cut off while its goals survive.
       expect(lines).toContain("- [Scope change] (#1)");
       expect(lines).not.toContain("- Goal 0");
-      expect(lines.length).toBe(9);
+      expect(lines.length).toBe(MAX_GOALS + 1);
     });
 
     it("promotes a goal re-asked in the fresh window before applying the cap", () => {
-      const goals = Array.from({ length: 8 }, (_, i) => `- Goal ${i + 1}`).join("\n");
+      const goals = Array.from({ length: MAX_GOALS }, (_, i) => `- Goal ${i + 1}`).join("\n");
       const previousSummary = `[Session Goal]\n${goals}\n\n---\n\n[user]\ninit`;
       const r = compile({
         messages: [userMsg("Goal 1\nNew Goal")],

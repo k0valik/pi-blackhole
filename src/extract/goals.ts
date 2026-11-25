@@ -1,6 +1,7 @@
 import type { NormalizedBlock } from "../types";
 import { nonEmptyLines, clip } from "../core/content";
 import { collapseSkillLines } from "../core/skill-collapse";
+import { estimateWordCount } from "../core/segment.js";
 
 const SCOPE_CHANGE_RE =
   /\b(instead|actually|change of plan|forget that|new task|switch to|now I want|pivot|let'?s do|stop .* and)\b/i;
@@ -32,7 +33,10 @@ const stripLeadingBullet = (line: string): string =>
 const MAX_GOAL_CHARS = 200;
 
 /** Total goal lines kept per summary section (shared with the merge cap). */
-export const MAX_GOALS = 8;
+export const MAX_GOALS = 10;
+
+/** Minimum word count for a long prose line to become a fallback goal. */
+const LONG_GOAL_MIN_WORDS = 20;
 
 const isSubstantiveGoal = (text: string): boolean => {
   const t = text.trim();
@@ -41,6 +45,25 @@ const isSubstantiveGoal = (text: string): boolean => {
   if (NOISE_SHORT_RE.test(t)) return false;
   if (NON_GOAL_RE.test(t)) return false;
   return true;
+};
+
+/**
+ * A single long prose line can be the only instruction in the window (an
+ * injected preamble or a one-paragraph brief). Goals reject >200-char lines to
+ * avoid pasted dumps, but dropping the only user line leaves the summary
+ * headerless. Keep a clipped prefix as a durable anchor; the caller appends the
+ * `(#N)` ref so the full entry stays recoverable via recall.
+ */
+const longLineGoal = (line: string): string | null => {
+  const text = stripLeadingBullet(line).trim();
+  if (text.length <= MAX_GOAL_CHARS) return null;
+  if (NON_GOAL_RE.test(text)) return null;
+  if (estimateWordCount(text) < LONG_GOAL_MIN_WORDS) return null;
+  // Prose is mostly letters/numbers/whitespace. Reject symbol-heavy data
+  // (minified JSON, encoded blobs) that happens to contain a few spaces.
+  const proseChars = text.match(/[\p{L}\p{N}\s]/gu)?.length ?? 0;
+  if (proseChars / text.length < 0.7) return null;
+  return clip(text, MAX_GOAL_CHARS - 1).trimEnd() + "…";
 };
 
 const FIRST_MSG_CLIP = 200;
@@ -62,10 +85,26 @@ export const extractGoals = (blocks: NormalizedBlock[]): string[] => {
     if (b.kind !== "user") continue;
     const rawLines = nonEmptyLines(b.text);
     const truncated = truncateAtTemplate(rawLines);
-    const lines = collapseSkillLines(truncated.filter(isSubstantiveGoal))
+    const collapsed = collapseSkillLines(truncated);
+    const lines = collapsed
+      .filter(isSubstantiveGoal)
       .map(stripLeadingBullet)
       .filter((l) => l.length > 5);
-    if (lines.length === 0) continue;
+    if (lines.length === 0) {
+      // No short goal line. A long prose-only message still deserves an anchor,
+      // but only while there is no founding goal yet — a long line alongside a
+      // real short goal must not consume a second slot.
+      if (goals.length === 0) {
+        for (const line of collapsed) {
+          const fallback = longLineGoal(line);
+          if (fallback) {
+            goals.push(fallback + indexSuffix(b.sourceIndex));
+            break;
+          }
+        }
+      }
+      continue;
+    }
 
     if (goals.length === 0) {
       goals.push(
