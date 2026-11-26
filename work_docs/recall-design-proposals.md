@@ -130,6 +130,9 @@ Examples:
 
 // Open a memory record and search inside its source range
 {"refs": ["m12"], "query": "draft-max"}
+
+// Open #195 and search inside that entry
+{"refs": ["#195"], "query": "both cloned learned"}
 ```
 
 Tool description (short form):
@@ -215,6 +218,7 @@ Proposed:
 - `refs: ["#134-147"]` returns the contiguous transcript slice, oldest first, with the same per-entry rendering/budget as `expand`. Include a header that states the range and any truncation/continuation.
 - `context: k` on a single `#N` returns `#N-k .. #N+k`, clipped at the beginning/end. The model can use `context: 1` for a tool pair.
 - `refs` + `query`: restrict the search to the referenced slice. If multiple refs, search the union of their slices. This is the explicit form of `#195 <terms>`.
+- **Pagination is scope-relative.** If `refs` are present, `page` pages the referenced slice/search, not the global result set. A page footer must not invite the model to leave the referenced scope. If a scoped search has no matches, return a clear “no matches within #195” and optionally suggest a global search, rather than silently searching globally. The observed #195 sequence is exactly this trap: page 1 hit #195 by content, page 2 was a global result starting at #238.
 - Range rendering must respect `scope: "lineage"`; `#N` is file-order and can include abandoned branches. A range in `scope: "lineage"` should skip entries outside the active lineage, or clearly state that it is file-order. This needs a decision; the current `#N` expand path already has lineage filtering in some cases.
 - Budget: reuse `capRecallBlocks`; ranges can be large. Page them or return the first N entries with a continuation.
 - Suffixes: keep `#N:text` and `#N:path` for single entries. Do not invent `#N-M:text` in v1; the model can open the range, then drill the exact entry.
@@ -281,7 +285,8 @@ Ordered for low risk and fast feedback:
 - **Reflections.** Range, no range, or anchor to the newest supporting observation? Their spans are large; a range may mislead.
 - **Unanchored observations.** No `#N` source; alias only. Confirm that is acceptable.
 - **Strict vs forgiving parser.** Does accepting `#N <terms>` undermine the “query is search-only” clarity? Recommendation: forgiving, documented as grammar.
-- **`refs` + `query` semantics.** Search within the referenced slice, or open refs and separately search globally? The observed intent is “within/around”; that should be the default.
+- **`refs` + `query` semantics.** Search within the referenced slice, or open refs and separately search globally? The observed intent is “within/around”; that should be the default. What happens when a scoped search has no matches: empty scoped result, or an explicit global fallback?
+- **Scoped pagination.** When a ref is present, does `page` stay inside the referenced range? What does the page footer say? The current global footer is misleading.
 - **`fields` vs `mode`.** Keep `touched`? Move to a separate view? Rename to `source`?
 - **Range and scope.** `#N` is file-order; `scope:"lineage"` may skip entries. How should a range render hidden-branch entries? State file-order explicitly or filter.
 - **Fork/branch drift.** `#N` ranges in old summaries can point at different content after a fork or branch navigation. The alias/hex remains exact. Should ranges be regenerated on resume, or treated as best-effort hints?

@@ -151,6 +151,18 @@ The strongest tool-surface signal is the mixed query shape:
 
 All 28 `#N <terms>` calls are in one long `pi-websearch` session. The model writes something like `#195 <terms...>`; the tool runs a BM25 search for the literal string and does **not** open entry #195. The model is already asking for “open this entry and search around/within it.” The tool cannot express that request. That is a semantic mismatch, not just mental load.
 
+### What the 28 mixed calls actually did
+
+The query shape is ambiguous by itself: “open #195 and search inside it” and “find the entry that looks like #195 plus these terms” produce the same string. The sequence in that session suggests the first reading, or at least a request the tool cannot satisfy:
+
+1. `#195 both cloned learned reading constraints AGENTS commit` → page 1/5; #195 is the first hit because the terms match its content, truncated with “27 lines below.”
+2. `#195 what learned reading them ...` → page 1/4; #195 is first again.
+3. A page-2 call still prefixed with `#195 ...` → page 2/3; the first hit is #238, not #195. Pagination is over the global match set, not over #195.
+
+So the model gets the entry on page 1 by content matching, then the page footer invites it to continue; page 2 leaves the entry. If the intent was “more of #195,” the tool silently did something else. The entry was never expanded as `#195:text` or opened as a pure `#195` ref.
+
+This is the concrete case for `refs` + `query`: open the reference, search within it, and paginate within that scope; if there is no match, say so instead of falling back to a global search.
+
 Other schema friction observed:
 
 | Unexpected value                        | Calls |
